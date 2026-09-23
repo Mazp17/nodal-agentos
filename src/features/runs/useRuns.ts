@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getRunDetail, listIssueRuns, listRuns } from "./api";
+import { issueRunKey, viewOfIssueRun, viewOfSession, type RunView } from "./status";
 import type { IssueRun, RunDetail, RunSummary } from "./types";
 
 const POLL_MS = 3000;
@@ -18,6 +19,10 @@ export interface RunsState {
   /** Runs recientes que no corresponden a ninguna issue. */
   otherRuns: RunSummary[];
   details: Details;
+  /** Todo el historial de runs de issues (más recientes primero) más los runs sueltos. */
+  views: RunView[];
+  /** Vista del run vigente por issue. */
+  currentView: Map<string, RunView>;
   error: string | null;
   refresh: () => Promise<void>;
 }
@@ -56,9 +61,9 @@ export function useRuns(enabled: boolean): RunsState {
     const [r, ir] = await Promise.allSettled([listRuns(), listIssueRuns()]);
     const errors: string[] = [];
     if (r.status === "fulfilled") setRuns(r.value);
-    else errors.push(`No se pudieron listar los runs: ${String(r.reason)}`);
+    else errors.push(`Couldn't list runs: ${String(r.reason)}`);
     if (ir.status === "fulfilled") setIssueRuns(ir.value);
-    else errors.push(`No se pudieron listar los runs de issues: ${String(ir.reason)}`);
+    else errors.push(`Couldn't list issue runs: ${String(ir.reason)}`);
     setError(errors.length ? errors.join("\n") : null);
     if (r.status === "rejected") return;
 
@@ -129,5 +134,26 @@ export function useRuns(enabled: boolean): RunsState {
   const byIssue = useMemo(() => new Map(current.map((ir) => [ir.issueId, ir])), [current]);
   const otherRuns = useMemo(() => otherRunsOf(runs, issueRuns), [runs, issueRuns]);
 
-  return { runs, current, byIssue, otherRuns, details, error, refresh };
+  const { views, currentView } = useMemo(() => {
+    // Posición en la cola: el más viejo sale primero.
+    const queued = issueRuns.filter((x) => x.status === "queued").sort((a, b) => a.queuedAt - b.queuedAt);
+    const viewOf = (ir: IssueRun) => {
+      const run = findRun(runs, ir);
+      const pos = queued.indexOf(ir);
+      return viewOfIssueRun(ir, run, run ? details[run.sessionId] : undefined, pos >= 0 ? pos + 1 : null);
+    };
+    const views = [
+      ...[...issueRuns].sort((a, b) => b.queuedAt - a.queuedAt).map(viewOf),
+      ...otherRuns.map((r) => viewOfSession(r, details[r.sessionId])),
+    ];
+    const byKey = new Map(views.map((v) => [v.key, v]));
+    const currentView = new Map<string, RunView>();
+    for (const ir of current) {
+      const v = byKey.get(issueRunKey(ir));
+      if (v) currentView.set(ir.issueId, v);
+    }
+    return { views, currentView };
+  }, [issueRuns, runs, details, otherRuns, current]);
+
+  return { runs, current, byIssue, otherRuns, details, views, currentView, error, refresh };
 }
