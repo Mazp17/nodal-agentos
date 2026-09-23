@@ -68,7 +68,7 @@ pub enum RelationKind {
 #[serde(rename_all = "camelCase")]
 pub struct Relation {
     pub kind: RelationKind,
-    /// Sólo relevante para `duplicate`: true = la otra issue es duplicado de ésta.
+    /// Sólo `duplicate` puede tenerlo en true: la otra issue es duplicado de ésta.
     pub inverse: bool,
     pub issue: IssueRef,
 }
@@ -100,7 +100,8 @@ pub struct IssueDetail {
     pub due_date: Option<String>,
     pub created_at: String,
     pub creator: Option<UserRef>,
-    /// Los más recientes, en orden cronológico ascendente.
+    /// Primera página (`COMMENTS_FIRST`) en el orden por defecto de Linear, reordenada
+    /// cronológicamente ascendente. Que sea la página más reciente no está verificado.
     pub comments: Vec<Comment>,
     pub comments_truncated: bool,
 }
@@ -204,8 +205,9 @@ impl IssueDetailData {
             .filter_map(|(t, inv, issue)| {
                 let kind = relation_kind(&t, inv)?;
                 // "related" puede venir de ambos lados; una sola fila por (tipo, issue).
-                seen.insert((kind, inv && kind == RelationKind::Duplicate, issue.id.clone()))
-                    .then_some(Relation { kind, inverse: inv, issue })
+                let inverse = inv && kind == RelationKind::Duplicate;
+                seen.insert((kind, inverse, issue.id.clone()))
+                    .then_some(Relation { kind, inverse, issue })
             })
             .collect();
 
@@ -367,7 +369,7 @@ mod tests {
                 (RelationKind::Blocks, false, "OPS-1"),
                 (RelationKind::Related, false, "OPS-2"),
                 (RelationKind::Duplicate, false, "ACME-1"),
-                (RelationKind::BlockedBy, true, "CORE-7"),
+                (RelationKind::BlockedBy, false, "CORE-7"),
             ]
         );
     }

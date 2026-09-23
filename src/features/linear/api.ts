@@ -55,7 +55,7 @@ export interface IssueDetail {
   dueDate: string | null;
   createdAt: string;
   creator: UserRef | null;
-  /** Los más recientes, en orden cronológico ascendente. */
+  /** Hasta 20 (página por defecto de Linear), en orden cronológico ascendente. */
   comments: { id: string; body: string; author: string | null; createdAt: string }[];
   commentsTruncated: boolean;
 }

@@ -368,7 +368,7 @@ function Comments({ detail, url }: { detail: IssueDetail; url: string }) {
       </h3>
       {detail.commentsTruncated && (
         <span className="ip-empty">
-          Showing the latest {detail.comments.length}.{" "}
+          Showing {detail.comments.length} comments.{" "}
           <a
             href={url}
             onClick={(e) => {

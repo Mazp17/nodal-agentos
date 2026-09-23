@@ -60,9 +60,6 @@ function Desk() {
   // Detalle de Linear cacheado mientras el panel sigue abierto (navegar entre
   // sub-issues no vuelve a pedirlo); se descarta al cerrarlo.
   const [detailCache] = useState(() => new IssueDetailCache());
-  useEffect(() => {
-    if (!panelIssue) detailCache.clear();
-  }, [panelIssue, detailCache]);
   const [paletteOpen, setPaletteOpen] = useState(false);
 
   const [teams, setTeams] = useState<Team[]>([]);
@@ -235,6 +232,11 @@ function Desk() {
   // ---- Board: filtros y selección ----
   const allIssues = useMemo(() => board?.issues ?? [], [board]);
   const issueById = useMemo(() => new Map(allIssues.map((i) => [i.id, i])), [allIssues]);
+  // El panel también se cierra si la issue sale del board tras un refresh.
+  const panelOpen = panelIssue !== null && issueById.has(panelIssue);
+  useEffect(() => {
+    if (!panelOpen) detailCache.clear();
+  }, [panelOpen, detailCache]);
   const repoOf = useCallback((i: Issue) => resolveRepo(config, i.team.id, i.project?.id), [config]);
   const q = query.trim().toLowerCase();
   const visible = useMemo(

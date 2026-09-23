@@ -24,8 +24,8 @@
 .md li > p { margin: 0; }
 .md li:has(> input[type="checkbox"]) { list-style: none; margin-left: calc(-1 * var(--sp-7)); }
 .md input[type="checkbox"] { margin: 0 var(--sp-2) 0 0; vertical-align: -1px; }
-.md a { color: var(--accent); text-decoration: none; }
-.md a:hover { text-decoration: underline; }
+.md .md-link { color: var(--accent); text-decoration: none; cursor: pointer; }
+.md .md-link:hover, .md .md-link:focus-visible { text-decoration: underline; }
 .md code {
   font-family: var(--font-mono);
   font-size: 0.9em;

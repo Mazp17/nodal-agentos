@@ -1,4 +1,4 @@
-import { memo } from "react";
+import { memo, type KeyboardEvent, type ReactNode } from "react";
 import Markdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { openUrl } from "@tauri-apps/plugin-opener";
@@ -8,52 +8,50 @@ import "./markdown.css";
  * Markdown de terceros (Linear) renderizado de forma segura:
  * - Sin rehype-raw y con `skipHtml`: el HTML crudo se descarta, nunca llega al DOM.
  * - `urlTransform` por defecto de react-markdown: neutraliza `javascript:`, `data:`, etc.
- * - Los links nunca navegan el webview: se abren en el navegador del sistema con
- *   plugin-opener, y sólo si son http(s) o mailto.
+ * - Los links no llevan `href` real: así ni el menú contextual nativo de WebKit
+ *   ("Open Link"), ni arrastrar, ni el click medio pueden navegar el webview. Se abren
+ *   en el navegador del sistema con plugin-opener, y sólo si son http(s) o mailto;
+ *   el resto (relativos, anclas, footnotes) se muestra como texto.
  * - Las imágenes no se cargan (la CSP las bloquearía y además filtrarían la IP a
  *   hosts de terceros): se muestran como link externo.
  */
 
 const EXTERNAL = /^(https?:|mailto:)/i;
 
-function openExternal(href: string | undefined) {
-  if (href && EXTERNAL.test(href)) {
-    openUrl(href).catch((err) => console.error("openUrl", err));
-  }
-}
-
-const components: Components = {
-  a: ({ href, children }) => (
+function ExternalLink({ url, className, children }: { url: string | undefined; className?: string; children: ReactNode }) {
+  if (!url || !EXTERNAL.test(url)) return <span className={className}>{children}</span>;
+  const open = () => {
+    openUrl(url).catch((err) => console.error("openUrl", err));
+  };
+  return (
     <a
-      href={href}
-      title={href}
-      onClick={(e) => {
-        e.preventDefault();
-        openExternal(href);
+      role="link"
+      tabIndex={0}
+      title={url}
+      className={`md-link ${className ?? ""}`}
+      draggable={false}
+      onClick={open}
+      onKeyDown={(e: KeyboardEvent) => {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          open();
+        }
       }}
-      onAuxClick={(e) => e.preventDefault()}
     >
       {children}
     </a>
-  ),
+  );
+}
+
+const components: Components = {
+  a: ({ href, children }) => <ExternalLink url={href}>{children}</ExternalLink>,
   img: ({ src, alt }) => {
-    const url = typeof src === "string" ? src : undefined;
     const label = alt ? `Image: ${alt}` : "Image";
-    return url && EXTERNAL.test(url) ? (
-      <a
-        href={url}
-        title={url}
-        className="md-img-link"
-        onClick={(e) => {
-          e.preventDefault();
-          openExternal(url);
-        }}
-        onAuxClick={(e) => e.preventDefault()}
-      >
-        {label} ↗
-      </a>
-    ) : (
-      <span className="md-img-link">{label}</span>
+    const url = typeof src === "string" ? src : undefined;
+    return (
+      <ExternalLink url={url} className="md-img-link">
+        {url && EXTERNAL.test(url) ? `${label} ↗` : label}
+      </ExternalLink>
     );
   },
 };
