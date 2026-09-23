@@ -746,7 +746,13 @@ pub fn parse_result(result: Option<&Value>) -> Option<RunResult> {
     if let Some(obj) = v.as_object() {
         out.issue = str_field(obj, "issue");
         // Solo URLs web: el frontend la abre con el opener del sistema.
-        out.pr = str_field(obj, "pr").filter(|u| u.starts_with("https://") || u.starts_with("http://"));
+        // Sin recortar: una URL cortada abriría un link roto.
+        out.pr = obj
+            .get("pr")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|u| (u.starts_with("https://") || u.starts_with("http://")) && u.len() <= RESULT_ITEM_MAX)
+            .map(String::from);
         out.branch = str_field(obj, "branch");
         out.workdir = str_field(obj, "workdir");
         out.where_ = str_field(obj, "where");

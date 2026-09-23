@@ -7,7 +7,10 @@ import type { AgentInfo, AgentState, Transcript, TranscriptItem } from "./types"
 
 const POLL_MS = 3000;
 const DEFAULT_LIMIT = 200;
-const FULL_LIMIT = 2000;
+const FULL_LIMIT = 1000;
+/** Archivos grandes: re-leerlos cada 3 s cuesta; se espacia el polling. */
+const BIG_FILE = 4 * 1024 * 1024;
+const POLL_BIG_MS = 10_000;
 
 export const AGENT_STATUS: Record<AgentState, { label: string; tone: string }> = {
   done: { label: "Done", tone: "ok" },
@@ -30,15 +33,17 @@ function useTranscript(sessionId: string | null, cwd: string, wfId: string | nul
     if (!sessionId || !wfId || !agentId) return;
     let cancelled = false;
     let timer: ReturnType<typeof setTimeout>;
+    let lastBytes = 0;
     const load = async () => {
       try {
         const t = await getAgentTranscript(sessionId, cwd, wfId, agentId, limit);
+        lastBytes = t?.bytes ?? 0;
         if (!cancelled) setState({ key, load: { status: "ok", transcript: t } });
       } catch (e) {
         // Un fallo en un poll no borra lo que ya se mostraba.
         if (!cancelled) setState((prev) => (prev?.key === key && prev.load.status === "ok" ? prev : { key, load: { status: "error", error: String(e) } }));
       }
-      if (!cancelled && live) timer = setTimeout(load, POLL_MS);
+      if (!cancelled && live) timer = setTimeout(load, lastBytes > BIG_FILE ? POLL_BIG_MS : POLL_MS);
     };
     void load();
     return () => {
@@ -142,7 +147,8 @@ export function AgentTranscript({
     .filter(Boolean)
     .join(" · ");
   const output =
-    t?.finalOutput ??
+    // Mientras corre, el "último texto" es charla intermedia, no la salida final.
+    (agent.state === "running" ? null : t?.finalOutput) ??
     agent.resultPreview ??
     (agent.state === "running"
       ? view.waitingFor === "permission prompt"

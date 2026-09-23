@@ -132,7 +132,9 @@ pub fn is_active(r: &IssueRun, live: Option<&[RunSummary]>, now: i64) -> bool {
 /// Slots ocupados: toda sesión en background `working` (sea nuestra o no), más los
 /// nuestros que se están lanzando o que se lanzaron hace poco y aún no figuran.
 pub fn occupied_slots(runs: &[IssueRun], live: &[RunSummary], now: i64) -> usize {
-    let working = live.iter().filter(|s| s.is_in_progress()).count();
+    // `blocked` (esperando permiso/input) no ocupa slot: no consume y, si nadie responde,
+    // frenaría la cola entera. Sí cuenta en `is_active` (no se relanza la issue).
+    let working = live.iter().filter(|s| s.state.as_deref() == Some("working")).count();
     let pending = runs
         .iter()
         .filter(|r| match r.status {
@@ -284,12 +286,12 @@ mod tests {
     }
 
     #[test]
-    fn blocked_sessions_stay_active_and_hold_a_slot() {
-        // `state: "blocked"` = esperando un permiso o input: sigue viva.
+    fn blocked_sessions_stay_active_but_free_their_slot() {
+        // `state: "blocked"` = esperando un permiso o input: sigue viva, pero no frena la cola.
         let lv = vec![live("aaaa", "blocked"), live("bbbb", "failed")];
         assert!(is_active(&launched("a", "aaaa", 1), Some(&lv), NOW));
         assert!(!is_active(&launched("b", "bbbb", 1), Some(&lv), NOW));
-        assert_eq!(occupied_slots(&[], &lv, NOW), 1);
+        assert_eq!(occupied_slots(&[], &lv, NOW), 0);
     }
 
     fn temp_file(name: &str) -> std::path::PathBuf {

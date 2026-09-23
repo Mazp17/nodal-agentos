@@ -119,12 +119,16 @@ pub async fn launch_with(cwd: String, prompt: String, opts: &LaunchOptions) -> R
 pub async fn launch_run(app: AppHandle, cwd: String, prompt: String) -> Result<RunRef, String> {
     let path = config::config_path(&app)?;
     let key = cwd.clone();
-    let opts = tauri::async_runtime::spawn_blocking(move || -> Result<LaunchOptions, String> {
-        let cfg = config::load_from(&path)?;
-        Ok(config::find_by_path(&cfg, &key).map(|m| m.launch_options()).unwrap_or_default())
+    // Una config ilegible no bloquea el lanzamiento manual: se lanza sin flags.
+    let opts = tauri::async_runtime::spawn_blocking(move || match config::load_from(&path) {
+        Ok(cfg) => config::find_by_path(&cfg, &key).map(|m| m.launch_options()).unwrap_or_default(),
+        Err(e) => {
+            eprintln!("launch_run: {e}; launching without repo options");
+            LaunchOptions::default()
+        }
     })
     .await
-    .map_err(|e| format!("Internal error: {e}"))??;
+    .map_err(|e| format!("Internal error: {e}"))?;
     launch_with(cwd, prompt, &opts).await
 }
 

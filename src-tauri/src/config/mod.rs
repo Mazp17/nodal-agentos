@@ -476,11 +476,18 @@ mod tests {
 
     #[test]
     fn git_root_of_subfolder() {
-        let here = env!("CARGO_MANIFEST_DIR");
-        let root = tauri::async_runtime::block_on(resolve_git_root(format!("{here}/src"))).unwrap();
-        // El crate vive dentro del repo (o de un worktree suyo): la raíz es un ancestro.
-        let root = root.expect("src-tauri/src está dentro de un repo git");
-        assert!(here.starts_with(&root), "{root} vs {here}");
+        // Repo temporal propio (no depende de que el crate esté en un checkout git).
+        let repo = temp_dir("git-root").canonicalize().unwrap();
+        let ok = std::process::Command::new("git").arg("init").arg("-q").arg(&repo).status();
+        if !ok.is_ok_and(|s| s.success()) {
+            eprintln!("git no disponible: se saltea");
+            return;
+        }
+        std::fs::create_dir_all(repo.join("a/b")).unwrap();
+        let sub = repo.join("a/b").to_string_lossy().into_owned();
+        let root = tauri::async_runtime::block_on(resolve_git_root(sub)).unwrap();
+        assert_eq!(root.as_deref(), Some(repo.to_string_lossy().as_ref()));
+        std::fs::remove_dir_all(repo).unwrap();
         let tmp = temp_dir("not-git");
         assert_eq!(tauri::async_runtime::block_on(resolve_git_root(tmp.to_string_lossy().into_owned())).unwrap(), None);
         assert!(tauri::async_runtime::block_on(resolve_git_root("relativa".into())).is_err());

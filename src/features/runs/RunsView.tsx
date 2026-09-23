@@ -51,7 +51,8 @@ export function RunsView({ runs, issues, config, actions, tab, onTab, onOpenRun 
   const counts = Object.fromEntries(TABS.map((t) => [t.id, runs.views.filter((v) => t.kinds.includes(v.kind)).length]));
   const kinds = TABS.find((t) => t.id === tab)!.kinds;
   const rows = runs.views.filter((v) => kinds.includes(v.kind));
-  const active = runs.views.filter((v) => v.kind === "running" || v.kind === "starting");
+  // Los bloqueados esperando al usuario no ocupan slot (igual que en issue_runs/store.rs).
+  const active = runs.views.filter((v) => (v.kind === "running" && !v.waitingFor) || v.kind === "starting");
   const queue = runs.views
     .filter((v) => v.kind === "queued")
     .sort((a, b) => (a.ir?.queuedAt ?? 0) - (b.ir?.queuedAt ?? 0));

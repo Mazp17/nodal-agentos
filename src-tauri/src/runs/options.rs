@@ -13,10 +13,10 @@ pub const MODEL_ALIASES: [&str; 4] = ["fable", "opus", "sonnet", "haiku"];
 
 /// Alias conocido, o nombre completo `claude-...` (con sufijo `[1m]` opcional).
 pub fn is_valid_model(m: &str) -> bool {
-    if MODEL_ALIASES.contains(&m) {
+    let base = m.strip_suffix("[1m]").unwrap_or(m);
+    if MODEL_ALIASES.contains(&base) {
         return true;
     }
-    let base = m.strip_suffix("[1m]").unwrap_or(m);
     base.len() <= 64
         && base.len() > "claude-".len()
         && base.starts_with("claude-")
@@ -93,7 +93,7 @@ mod tests {
 
     #[test]
     fn models() {
-        for ok in ["opus", "sonnet", "fable", "haiku", "claude-sonnet-5", "claude-opus-4-1", "claude-sonnet-4.5", "claude-opus-5[1m]"] {
+        for ok in ["opus", "opus[1m]", "sonnet", "fable", "haiku", "claude-sonnet-5", "claude-opus-4-1", "claude-sonnet-4.5", "claude-opus-5[1m]"] {
             assert!(is_valid_model(ok), "{ok}");
         }
         for bad in ["", "gpt-4", "claude-", "--model", "claude-x; rm -rf ~", "Claude-Sonnet", "claude-a b"] {
