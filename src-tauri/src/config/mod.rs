@@ -120,7 +120,7 @@ pub fn validate(config: AppConfig) -> Result<AppConfig, String> {
     }
 }
 
-fn config_path(app: &AppHandle) -> Result<PathBuf, String> {
+pub(crate) fn config_path(app: &AppHandle) -> Result<PathBuf, String> {
     app.path()
         .app_config_dir()
         .map(|d| d.join(FILE_NAME))

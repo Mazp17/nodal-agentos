@@ -1,4 +1,5 @@
 mod config;
+mod issue_runs;
 mod linear;
 mod runs;
 
@@ -22,6 +23,10 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .manage(linear::LinearState::new())
+        .setup(|app| {
+            issue_runs::init(app.handle())?;
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             claude_version,
             runs::launch_run,
@@ -36,6 +41,12 @@ pub fn run() {
             config::get_config,
             config::save_config,
             config::resolve_repo,
+            issue_runs::list_workflows,
+            issue_runs::launch_issue_run,
+            issue_runs::list_issue_runs,
+            issue_runs::cancel_queued,
+            issue_runs::attach_run,
+            issue_runs::stop_run,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

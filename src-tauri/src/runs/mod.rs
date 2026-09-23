@@ -2,7 +2,7 @@
 //! (`claude agents`) y seguir el workflow que corren leyendo sus archivos de sesión.
 
 pub mod claude_bin;
-mod claude_fs;
+pub(crate) mod claude_fs;
 pub mod types;
 
 use std::path::Path;

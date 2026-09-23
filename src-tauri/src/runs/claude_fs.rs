@@ -543,7 +543,7 @@ pub fn parse_script_phases(src: &str) -> Vec<PhaseInfo> {
 }
 
 /// Índice del cierre que balancea, saltando literales de string.
-fn find_closing(s: &str, open: char, close: char) -> Option<usize> {
+pub(crate) fn find_closing(s: &str, open: char, close: char) -> Option<usize> {
     let mut depth = 0usize;
     let mut quote: Option<char> = None;
     let mut escaped = false;
@@ -587,7 +587,7 @@ fn split_top_level_objects(s: &str) -> Vec<&str> {
 }
 
 /// Valor de `key: '...'` (comillas simples, dobles o backticks).
-fn js_string_prop(obj: &str, key: &str) -> Option<String> {
+pub(crate) fn js_string_prop(obj: &str, key: &str) -> Option<String> {
     let mut search = obj;
     loop {
         let pos = search.find(key)?;

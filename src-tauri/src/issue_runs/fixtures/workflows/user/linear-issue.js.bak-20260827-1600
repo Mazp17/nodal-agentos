@@ -1,0 +1,12 @@
+export const meta = {
+  name: 'linear-issue',
+  description:
+    'Lleva una issue de Linear (con o sin sub-issues) hasta un PR o hasta Blocked, sincronizando el estado en Linear con la realidad del run',
+  whenToUse:
+    'Para resolver una issue de Linear de punta a punta. args: "ACME-8" o {issue, worktreeBase, baseRef, resumeBranch, extraWork}. Descubre sub-issues, respeta las relaciones blocking, verifica con la suite del repo, pasa por un code-reviewer sin permiso de escritura y termina siempre en PR+In Review o en Blocked con comentario. Cada run trabaja en su propio worktree y nunca hace checkout en el árbol compartido, así que se pueden disparar varios a la vez sobre el mismo repo. Con resumeBranch retoma una rama ya trabajada y va directo al gate. Nunca mergea.',
+  phases: [
+    { title: 'Leer', detail: 'issue, sub-issues, relaciones blocking y estados reales del team' },
+    { title: 'Preparar', detail: 'descubrir los comandos de verificación y crear la rama de integración' },
+    { title: 'Implementar', detail: 'un agente por sub-issue, por niveles del grafo de blocking' },
+    { title: 'Integrar', detail: 'llevar cada rama hija a la rama de integración' },
+    { title: 'Verificar', detail: 'la suite completa sobre el resultado integrado' },
