@@ -1,3 +1,6 @@
+mod config;
+mod linear;
+
 use std::process::Command;
 
 /// Versión del CLI de `claude`: prueba mínima de que el core puede invocarlo.
@@ -19,7 +22,19 @@ async fn claude_version() -> Result<String, String> {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
-        .invoke_handler(tauri::generate_handler![claude_version])
+        .manage(linear::LinearState::new())
+        .invoke_handler(tauri::generate_handler![
+            claude_version,
+            linear::linear_key_status,
+            linear::linear_set_api_key,
+            linear::linear_clear_api_key,
+            linear::linear_viewer,
+            linear::linear_teams,
+            linear::linear_board,
+            config::get_config,
+            config::save_config,
+            config::resolve_repo,
+        ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
