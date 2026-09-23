@@ -20,14 +20,15 @@ export type ColumnId =
   | "completed"
   | "canceled";
 
-export const COLUMNS: { id: ColumnId; label: string; hideWhenEmpty?: boolean }[] = [
-  { id: "triage", label: "Triage", hideWhenEmpty: true },
-  { id: "backlog", label: "Backlog" },
-  { id: "unstarted", label: "Por hacer" },
-  { id: "started", label: "En curso" },
-  { id: "review", label: "En review" },
-  { id: "completed", label: "Hecho" },
-  { id: "canceled", label: "Cancelado" },
+/** `tone` pinta el anillo de la columna (clase `col-<tone>` en board.css). */
+export const COLUMNS: { id: ColumnId; label: string; tone: string; hideWhenEmpty?: boolean }[] = [
+  { id: "triage", label: "Triage", tone: "amber", hideWhenEmpty: true },
+  { id: "backlog", label: "Backlog", tone: "gray" },
+  { id: "unstarted", label: "Todo", tone: "light" },
+  { id: "started", label: "In Progress", tone: "accent" },
+  { id: "review", label: "In Review", tone: "amber" },
+  { id: "completed", label: "Done", tone: "green" },
+  { id: "canceled", label: "Canceled", tone: "dim" },
 ];
 
 export function columnOf(issue: Issue): ColumnId {
@@ -53,9 +54,9 @@ export function groupByColumn(issues: Issue[]): Map<ColumnId, Issue[]> {
 }
 
 export const PRIORITY_LABELS: Record<number, string> = {
-  0: "Sin prioridad",
-  1: "Urgente",
-  2: "Alta",
-  3: "Media",
-  4: "Baja",
+  0: "No priority",
+  1: "Urgent",
+  2: "High",
+  3: "Medium",
+  4: "Low",
 };

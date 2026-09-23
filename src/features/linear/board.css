@@ -1,0 +1,174 @@
+/* Board: columnas, cards, skeleton y barra de selección. */
+
+.board {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: var(--sp-6) var(--sp-6) 80px;
+  display: flex;
+  gap: var(--sp-4);
+  align-items: flex-start;
+}
+
+.column {
+  width: var(--w-column);
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+.column-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-0) var(--sp-1) var(--sp-2);
+  font-size: var(--fs-base);
+  font-weight: var(--fw-semibold);
+}
+.column-count { font-size: var(--fs-md); font-weight: var(--fw-regular); color: var(--text-faint); }
+.column-ring { width: 8px; height: 8px; border-radius: 50%; border: 2px solid currentColor; }
+.col-gray { color: var(--gray); }
+.col-light { color: var(--text-4); }
+.col-accent { color: var(--accent); }
+.col-amber { color: var(--amber); }
+.col-green { color: var(--green); }
+.col-dim { color: var(--text-disabled); }
+.column-empty {
+  height: 64px;
+  display: grid;
+  place-items: center;
+  border: 1px dashed var(--border-2);
+  border-radius: var(--r-card);
+  font-size: var(--fs-sm);
+  color: var(--text-dim);
+}
+
+/* ---- Card ---- */
+.card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  padding: 9px var(--sp-4);
+  border-radius: var(--r-card);
+  background: var(--surface-card);
+  border: 1px solid var(--border);
+  transition: background var(--dur-fast);
+}
+.card:hover { background: var(--surface-card-hover); }
+.card-selected, .card-selected:hover { background: var(--surface-selected); border-color: var(--accent-tint-70); }
+
+.card-top { display: flex; align-items: center; gap: 7px; }
+.card-check {
+  width: 14px;
+  height: 14px;
+  flex: none;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  border-radius: var(--r-sm);
+  border: 1px solid var(--border-strong);
+  background: transparent;
+  color: var(--on-accent);
+  font-size: 9px;
+  font-weight: var(--fw-bold);
+  /* Área de toque ampliada sin cambiar el tamaño visible (WCAG 2.5.8). */
+  position: relative;
+}
+.card-check::after { content: ""; position: absolute; inset: -5px; }
+.card-check[aria-checked="true"] { background: var(--accent); border-color: var(--accent); }
+.card-id { font-family: var(--font-mono); font-size: var(--fs-xs); color: var(--text-muted); }
+
+.prio { display: inline-flex; align-items: flex-end; gap: 1.5px; height: 10px; margin-left: var(--sp-0); }
+.prio i { width: 3px; border-radius: 1px; background: var(--fill-7); }
+.prio i.on { background: var(--text-3); }
+.prio i.urgent { background: var(--red); }
+
+.avatar {
+  margin-left: auto;
+  flex: none;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  /* Matiz por persona (--hue, inline); luminancia y croma fijos del diseño. */
+  background: oklch(0.5 0.08 var(--hue, 250));
+  color: var(--text-2);
+  font-weight: var(--fw-semibold);
+}
+.avatar-sm { width: 18px; height: 18px; font-size: 8.5px; }
+.avatar-md { width: 24px; height: 24px; font-size: 10px; margin-left: 0; }
+.avatar-empty { background: transparent; border: 1px dashed var(--border-strong); }
+
+.card-title {
+  padding: 0;
+  border: 0;
+  background: none;
+  text-align: left;
+  font-size: var(--fs-base);
+  line-height: 1.35;
+  color: var(--text);
+  text-wrap: pretty;
+  border-radius: var(--r-xs);
+}
+.card-meta { display: flex; align-items: center; gap: 5px; font-size: var(--fs-xs); color: var(--text-faint); min-width: 0; }
+.state-dot { width: 6px; height: 6px; flex: none; border-radius: 50%; background: currentColor; }
+
+.segs { display: grid; gap: var(--sp-0); }
+.segs span { height: 3px; border-radius: 1px; background: var(--fill-6); }
+.segs span.on { background: var(--tone); }
+.segs span.current { opacity: 0.55; }
+
+.card-actions { display: flex; align-items: center; gap: var(--sp-2); min-height: var(--h-sm); }
+.card-actions-end { margin-left: auto; display: flex; align-items: center; gap: var(--sp-1); min-width: 0; }
+.card-workflow {
+  height: var(--h-sm);
+  max-width: 124px;
+  min-width: 0;
+  padding: 0 var(--sp-1);
+  border-radius: var(--r-md);
+  border: 1px solid var(--border-2);
+  background: var(--fill-inset);
+  color: var(--text-4);
+  font-size: var(--fs-xs);
+}
+.btn-run { border-color: transparent; background: var(--accent-tint-16); color: var(--accent); }
+.btn-run:hover:not(:disabled) { background: var(--accent-tint-16); filter: brightness(1.25); }
+.card-norepo { color: var(--text-disabled); border-color: transparent; background: var(--fill-4); }
+
+/* ---- Skeleton ---- */
+.skel-head { height: 14px; width: 90px; border-radius: var(--r-sm); background: var(--fill-4); margin: var(--sp-1) var(--sp-1) var(--sp-3); }
+.skel-card {
+  border-radius: var(--r-card);
+  background: var(--surface-card);
+  border: 1px solid var(--border-faint);
+  padding: var(--sp-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  animation: var(--pulse-skeleton);
+}
+.skel-card i { height: 9px; border-radius: var(--r-xs); background: var(--fill-soft); }
+.skel-card i.faint { background: var(--fill-3); }
+
+/* ---- Barra de selección ---- */
+.selbar {
+  position: absolute;
+  /* Centrado sin transform: la animación `rise` usa transform. */
+  left: 0;
+  right: 0;
+  margin-inline: auto;
+  width: fit-content;
+  bottom: var(--sp-8);
+  z-index: 15;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-4);
+  padding: var(--sp-2) var(--sp-2) var(--sp-2) var(--sp-6);
+  border-radius: var(--r-2xl);
+  background: var(--surface-float);
+  border: 1px solid var(--border-4);
+  box-shadow: var(--shadow-float);
+  animation: rise var(--dur-base) ease-out;
+  white-space: nowrap;
+}
+.selbar-label { font-size: var(--fs-base); color: var(--text-3); }
+.selbar-note { font-size: var(--fs-sm); color: var(--text-faint); }
