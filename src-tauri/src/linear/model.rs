@@ -260,7 +260,7 @@ fn classify(errors: &[GqlError]) -> LinearError {
         .and_then(|x| x.user_presentable_message.clone())
         .unwrap_or_else(|| first.message.clone());
     if first.extensions.as_ref().and_then(|x| x.code.as_deref()) == Some("FORBIDDEN") {
-        return LinearError::Api(format!("la API key no tiene permiso para esto ({msg})"));
+        return LinearError::Api(format!("the API key lacks permission for this ({msg})"));
     }
     LinearError::Api(msg)
 }
@@ -276,8 +276,8 @@ pub fn interpret_response<T: DeserializeOwned>(status: u16, body: &str) -> Resul
         _ => Err(match status {
             401 | 403 => LinearError::InvalidKey,
             429 => LinearError::RateLimited,
-            s if s >= 500 => LinearError::Api(format!("Linear no está disponible (HTTP {s})")),
-            s if (200..300).contains(&s) => LinearError::Api("respuesta inesperada".into()),
+            s if s >= 500 => LinearError::Api(format!("Linear is unavailable (HTTP {s})")),
+            s if (200..300).contains(&s) => LinearError::Api("unexpected response".into()),
             s => LinearError::Api(format!("HTTP {s}")),
         }),
     }
@@ -390,10 +390,10 @@ mod tests {
         assert_eq!(interpret_response::<ViewerData>(429, "").unwrap_err(), LinearError::RateLimited);
 
         let other = r#"{"data":null,"errors":[{"message":"Argument Validation Error",
-          "extensions":{"code":"INVALID_INPUT","userPresentableMessage":"Filtro inválido"}}]}"#;
+          "extensions":{"code":"INVALID_INPUT","userPresentableMessage":"Invalid filter"}}]}"#;
         assert_eq!(
             interpret_response::<ViewerData>(400, other).unwrap_err(),
-            LinearError::Api("Filtro inválido".into())
+            LinearError::Api("Invalid filter".into())
         );
         assert_eq!(interpret_response::<ViewerData>(401, "no json").unwrap_err(), LinearError::InvalidKey);
         assert!(matches!(
@@ -421,7 +421,7 @@ mod tests {
         assert_eq!(all["or"][1]["completedAt"]["gt"], "-P14D");
         assert_eq!(all["or"][2]["canceledAt"]["gt"], "-P14D");
 
-        assert_eq!(issue_filter(Some(&[]), 14), all, "lista vacía = todos los teams");
+        assert_eq!(issue_filter(Some(&[]), 14), all, "empty list = all teams");
 
         let ids = vec!["t1".to_string(), "t2".to_string()];
         let some = issue_filter(Some(&ids), 14);

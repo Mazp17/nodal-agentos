@@ -9,27 +9,27 @@ const ACCOUNT: &str = "linear-api-key";
 
 fn entry() -> Result<keyring::Entry, LinearError> {
     keyring::Entry::new(SERVICE, ACCOUNT)
-        .map_err(|e| LinearError::Keychain(format!("No se pudo abrir el llavero: {e}")))
+        .map_err(|e| LinearError::Keychain(format!("Could not open the keychain: {e}")))
 }
 
 fn read_keychain() -> Result<Option<String>, LinearError> {
     match entry()?.get_password() {
         Ok(k) if !k.trim().is_empty() => Ok(Some(k.trim().to_string())),
         Ok(_) | Err(keyring::Error::NoEntry) => Ok(None),
-        Err(e) => Err(LinearError::Keychain(format!("No se pudo leer el llavero: {e}"))),
+        Err(e) => Err(LinearError::Keychain(format!("Could not read the keychain: {e}"))),
     }
 }
 
 fn write_keychain(key: &str) -> Result<(), LinearError> {
     entry()?
         .set_password(key)
-        .map_err(|e| LinearError::Keychain(format!("No se pudo guardar en el llavero: {e}")))
+        .map_err(|e| LinearError::Keychain(format!("Could not save to the keychain: {e}")))
 }
 
 fn delete_keychain() -> Result<(), LinearError> {
     match entry()?.delete_credential() {
         Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
-        Err(e) => Err(LinearError::Keychain(format!("No se pudo borrar del llavero: {e}"))),
+        Err(e) => Err(LinearError::Keychain(format!("Could not delete from the keychain: {e}"))),
     }
 }
 
@@ -40,7 +40,7 @@ async fn blocking<T: Send + 'static>(
 ) -> Result<T, LinearError> {
     tauri::async_runtime::spawn_blocking(f)
         .await
-        .map_err(|e| LinearError::Keychain(format!("Fallo interno leyendo el llavero: {e}")))?
+        .map_err(|e| LinearError::Keychain(format!("Internal error reading the keychain: {e}")))?
 }
 
 /// `None` = todavía no se leyó el llavero; `Some(None)` = se leyó y no hay key.

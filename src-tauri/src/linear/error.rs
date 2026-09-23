@@ -31,19 +31,19 @@ impl fmt::Display for LinearError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             LinearError::MissingKey => {
-                write!(f, "Falta la API key de Linear. Configurala en Ajustes.")
+                write!(f, "Linear API key is missing. Add it in Settings.")
             }
             LinearError::InvalidKey => write!(
                 f,
-                "Linear rechazó la API key (inválida o revocada). Reemplazala en Ajustes."
+                "Linear rejected the API key (invalid or revoked). Replace it in Settings."
             ),
             LinearError::Network(m) => write!(f, "{m}"),
             LinearError::RateLimited => write!(
                 f,
-                "Linear está limitando las peticiones (rate limit). Probá de nuevo en un rato."
+                "Linear is rate limiting requests. Try again in a moment."
             ),
             LinearError::Keychain(m) => write!(f, "{m}"),
-            LinearError::Api(m) => write!(f, "Error de Linear: {m}"),
+            LinearError::Api(m) => write!(f, "Linear error: {m}"),
         }
     }
 }
@@ -63,16 +63,16 @@ impl Serialize for LinearError {
 impl From<reqwest::Error> for LinearError {
     fn from(e: reqwest::Error) -> Self {
         if e.is_timeout() {
-            LinearError::Network("Linear no respondió a tiempo. Revisá tu conexión.".into())
+            LinearError::Network("Linear did not respond in time. Check your connection.".into())
         } else if e.is_connect() {
             LinearError::Network(
-                "No se pudo conectar con Linear. Revisá tu conexión a internet.".into(),
+                "Could not connect to Linear. Check your internet connection.".into(),
             )
         } else if e.is_decode() {
-            LinearError::Api("respuesta ilegible".into())
+            LinearError::Api("unreadable response".into())
         } else {
             // `without_url` por prolijidad; la key va en un header, nunca en la URL.
-            LinearError::Network(format!("Fallo de red al hablar con Linear: {}", e.without_url()))
+            LinearError::Network(format!("Network error talking to Linear: {}", e.without_url()))
         }
     }
 }
