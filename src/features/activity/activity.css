@@ -1,0 +1,60 @@
+/* Actividad de Claude en un repo: sesiones y subagentes vivos. */
+
+.act-panel { display: flex; flex-direction: column; gap: var(--sp-5); min-width: 0; }
+.act-head { display: flex; align-items: center; gap: var(--sp-3); }
+.act-title { font-size: var(--fs-lg); font-weight: var(--fw-semibold); }
+.act-live {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  font-size: var(--fs-xs);
+  color: var(--text-dim);
+}
+.act-live.on { color: var(--accent); }
+.act-empty { font-size: var(--fs-md); color: var(--text-dim); }
+
+.act-group { display: flex; flex-direction: column; gap: var(--sp-1); }
+.act-group > .section-label { margin-bottom: var(--sp-1); }
+.act-past > summary { cursor: default; list-style-position: inside; margin-bottom: var(--sp-1); }
+.act-past > summary:hover { color: var(--text-subtle); }
+
+.act-row {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-4);
+  padding: 7px 9px;
+  border-radius: var(--r-lg);
+  background: var(--fill-1);
+  border: 1px solid var(--border-faint);
+  text-align: left;
+  min-width: 0;
+}
+button.act-row:hover { background: var(--fill-4); }
+.act-row > .dot { margin-top: 5px; }
+.act-row-dim { opacity: 0.7; }
+
+.act-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: var(--sp-0); }
+.act-line { display: flex; align-items: center; gap: var(--sp-2); min-width: 0; }
+.act-name { font-size: var(--fs-md); color: var(--text-2); }
+.act-sub { font-size: var(--fs-xs); color: var(--text-faint); }
+.act-chip {
+  flex: none;
+  height: 16px;
+  padding: 0 5px;
+  display: inline-flex;
+  align-items: center;
+  border-radius: var(--r-xs);
+  background: var(--fill-4);
+  font-size: var(--fs-2xs);
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+.act-chip-app { background: var(--accent-tint-16); color: var(--accent); }
+.act-state { flex: none; color: var(--tone); font-weight: var(--fw-medium); }
+.act-path { flex: none; max-width: 40%; font-size: var(--fs-2xs); color: var(--text-subtle); }
+.act-owner { flex: none; max-width: 30%; }
+.act-tool { flex: 1; font-family: var(--font-mono); font-size: var(--fs-2xs); }
+.act-tool-name { color: var(--text-4); }
+.act-tool-sum { color: var(--text-dim); }
+.act-time { flex: none; font-size: var(--fs-xs); color: var(--text-dim); margin-top: 2px; }

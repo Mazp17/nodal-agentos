@@ -1,0 +1,61 @@
+[
+  {
+    "pid": 34066,
+    "cwd": "/Users/me/Code",
+    "kind": "interactive",
+    "startedAt": 1790171395536,
+    "sessionId": "11111111-2222-3333-4444-555555555555",
+    "name": "code-7e",
+    "status": "busy"
+  },
+  {
+    "pid": 63237,
+    "id": "99999999",
+    "cwd": "/Users/me/Code/repo",
+    "kind": "background",
+    "startedAt": 1790192544785,
+    "sessionId": "99999999-0000-0000-0000-000000000001",
+    "name": "plan task demo",
+    "status": "busy",
+    "state": "working"
+  },
+  {
+    "pid": 21111,
+    "id": "af5deb85",
+    "cwd": "/Users/me/Code/repo-sandbox",
+    "kind": "background",
+    "startedAt": 1790198688952,
+    "sessionId": "af5deb85-3fe1-4ea9-b172-00b68389e167",
+    "name": "create perm-test.txt",
+    "status": "waiting",
+    "waitingFor": "permission prompt",
+    "state": "blocked"
+  },
+  {
+    "id": "43495c2e",
+    "cwd": "/Users/me/Code/repo",
+    "kind": "background",
+    "startedAt": 1790196202990,
+    "sessionId": "43495c2e-056b-4f96-8cab-4dd89a61e005",
+    "name": "bmad skills list",
+    "state": "done"
+  },
+  {
+    "pid": 5942,
+    "cwd": "/Users/me/Code/repo/.claude/worktrees/feature-x",
+    "kind": "interactive",
+    "startedAt": 1790102910146,
+    "sessionId": "77777777-0000-0000-0000-000000000003",
+    "name": "feature-x",
+    "status": "idle",
+    "futureField": {
+      "x": 1
+    }
+  },
+  {
+    "id": "deadbeef",
+    "cwd": "/Users/me/Code/repo",
+    "kind": "background",
+    "state": "done"
+  }
+]
