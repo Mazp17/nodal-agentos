@@ -4,6 +4,7 @@ import { formatDuration, formatTokens } from "../../lib/format";
 import { useToast } from "../../ui/Toasts";
 import type { RunActions } from "./actions";
 import { launchRun } from "./api";
+import { pickRepoFolder, tildify, useHome } from "./folders";
 import type { RunKind, RunView } from "./status";
 import type { RunsState } from "./useRuns";
 import "./runs.css";
@@ -116,7 +117,7 @@ export function RunsView({ runs, issues, config, actions, tab, onTab, onOpenRun 
                 <span>
                   <span className={`badge tone-${v.tone}`}>
                     <span className="dot dot-sm" aria-hidden />
-                    {v.kind === "running" ? "Running" : v.label}
+                    {v.kind === "running" && !v.waitingFor ? "Running" : v.label}
                   </span>
                 </span>
               </button>
@@ -173,20 +174,36 @@ export function RunsView({ runs, issues, config, actions, tab, onTab, onOpenRun 
   );
 }
 
+// Opción del select que abre el selector nativo de carpetas.
+const OTHER_FOLDER = "\u0000other";
+
 /** Lanzar `claude --bg` a mano en un repo, sin issue. */
 function ManualLaunch({ config, onLaunched }: { config: AppConfig; onLaunched: () => void }) {
   const toast = useToast();
+  const home = useHome();
   const [cwd, setCwd] = useState(config.repos[0]?.path ?? "");
+  const [picked, setPicked] = useState<string[]>([]);
   const [prompt, setPrompt] = useState("");
   const [launching, setLaunching] = useState(false);
-  const paths = [...new Set(config.repos.map((r) => r.path))];
+  const paths = [...new Set([...config.repos.map((r) => r.path), ...picked])];
+
+  const chooseFolder = async () => {
+    try {
+      const res = await pickRepoFolder(cwd || null);
+      if (!res) return;
+      setPicked((p) => (p.includes(res.path) ? p : [...p, res.path]));
+      setCwd(res.path);
+    } catch (err) {
+      toast("Couldn't open the folder picker", String(err), "danger");
+    }
+  };
 
   const onSubmit = async (e: FormEvent) => {
     e.preventDefault();
     setLaunching(true);
     try {
-      const ref = await launchRun(cwd.trim(), prompt);
-      toast("Run launched", `${ref.id} · ${ref.cwd}`, "ok");
+      const ref = await launchRun(cwd, prompt);
+      toast("Run launched", `${ref.id} · ${tildify(ref.cwd, home)}`, "ok");
       setPrompt("");
       onLaunched();
     } catch (err) {
@@ -198,20 +215,24 @@ function ManualLaunch({ config, onLaunched }: { config: AppConfig; onLaunched: (
 
   return (
     <form className="runs-manual" onSubmit={onSubmit}>
-      <input
+      {/* Carpeta elegida con el selector nativo (o un repo mapeado): sin texto libre. */}
+      <select
         className="input input-mono runs-manual-cwd"
-        list="manual-repos"
-        aria-label="Repository folder"
+        aria-label="Folder to run in"
         value={cwd}
-        onChange={(e) => setCwd(e.target.value)}
-        placeholder="/path/to/repo"
-        spellCheck={false}
-      />
-      <datalist id="manual-repos">
+        onChange={(e) => {
+          if (e.target.value === OTHER_FOLDER) void chooseFolder();
+          else setCwd(e.target.value);
+        }}
+      >
+        {!cwd && <option value="">Choose a folder…</option>}
         {paths.map((p) => (
-          <option key={p} value={p} />
+          <option key={p} value={p}>
+            {tildify(p, home)}
+          </option>
         ))}
-      </datalist>
+        <option value={OTHER_FOLDER}>Other folder…</option>
+      </select>
       <input
         className="input runs-manual-prompt"
         aria-label="Prompt"
@@ -220,7 +241,7 @@ function ManualLaunch({ config, onLaunched }: { config: AppConfig; onLaunched: (
         placeholder="/skill args"
         spellCheck={false}
       />
-      <button type="submit" className="btn btn-primary btn-lg" disabled={launching || !cwd.trim() || !prompt.trim()}>
+      <button type="submit" className="btn btn-primary btn-lg" disabled={launching || !cwd || !prompt.trim()}>
         {launching ? "Launching…" : "Launch"}
       </button>
     </form>

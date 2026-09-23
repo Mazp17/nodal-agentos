@@ -4,6 +4,8 @@ import {
   linearApi,
   toLinearError,
   type AppConfig,
+  type Effort,
+  type FinishMode,
   type Issue,
   type RepoMapping,
   type Team,
@@ -11,6 +13,7 @@ import {
 } from "./api";
 import { BrandMark } from "../../ui/BrandMark";
 import { useToast } from "../../ui/Toasts";
+import { pickRepoFolder, tildify, useHome } from "../runs/folders";
 import "./settings.css";
 
 export type SettingsSection = "linear" | "repos" | "exec" | "diag";
@@ -109,32 +112,47 @@ export function Onboarding({ onSaved }: { onSaved: (viewer: Viewer) => void }) {
   );
 }
 
+/** Lo editable de un mapeo, sin team/proyecto (que es la clave). */
+type RepoSettings = Omit<RepoMapping, "teamId" | "projectId">;
+
 interface Draft {
-  teams: Record<string, string>;
-  projects: Record<string, string>;
+  teams: Record<string, RepoSettings>;
+  projects: Record<string, RepoSettings>;
   /** Mapeos team+proyecto editados a mano en config.json: se preservan tal cual. */
   other: RepoMapping[];
   concurrency: number;
 }
 
+const settingsOf = ({ teamId: _t, projectId: _p, ...rest }: RepoMapping): RepoSettings => rest;
+
 function toDraft(config: AppConfig): Draft {
   const d: Draft = { teams: {}, projects: {}, other: [], concurrency: config.concurrency };
   for (const m of config.repos) {
-    if (m.teamId && !m.projectId) d.teams[m.teamId] = m.path;
-    else if (m.projectId && !m.teamId) d.projects[m.projectId] = m.path;
+    if (m.teamId && !m.projectId) d.teams[m.teamId] = settingsOf(m);
+    else if (m.projectId && !m.teamId) d.projects[m.projectId] = settingsOf(m);
     else d.other.push(m);
   }
   return d;
 }
 
+/** Sin campos vacíos: `undefined` = usar el default de Claude Code. */
+function clean(s: RepoSettings): RepoSettings {
+  const out: RepoSettings = { path: s.path.trim() };
+  if (s.model) out.model = s.model;
+  if (s.effort) out.effort = s.effort;
+  if (s.permissionMode) out.permissionMode = s.permissionMode;
+  if (s.finish) out.finish = s.finish;
+  return out;
+}
+
 function fromDraft(d: Draft): AppConfig {
   const repos: RepoMapping[] = [
     ...Object.entries(d.teams)
-      .filter(([, p]) => p.trim())
-      .map(([teamId, path]) => ({ teamId, path: path.trim() })),
+      .filter(([, s]) => s.path.trim())
+      .map(([teamId, s]) => ({ teamId, ...clean(s) })),
     ...Object.entries(d.projects)
-      .filter(([, p]) => p.trim())
-      .map(([projectId, path]) => ({ projectId, path: path.trim() })),
+      .filter(([, s]) => s.path.trim())
+      .map(([projectId, s]) => ({ projectId, ...clean(s) })),
     ...d.other,
   ];
   return { repos, concurrency: d.concurrency };
@@ -144,10 +162,56 @@ function sameConfig(a: AppConfig, b: AppConfig): boolean {
   const key = (c: AppConfig) =>
     JSON.stringify([
       c.concurrency,
-      c.repos.map((m) => `${m.teamId ?? ""}|${m.projectId ?? ""}|${m.path}`).sort(),
+      c.repos
+        .map((m) =>
+          [m.teamId, m.projectId, m.path, m.model, m.effort, m.permissionMode, m.finish].map((x) => x ?? "").join("|"),
+        )
+        .sort(),
     ]);
   return key(a) === key(b);
 }
+
+/** Copia de `rec` con `key` puesto a `value` (o quitado si `undefined`). */
+function withEntry(rec: Record<string, RepoSettings>, key: string, value: RepoSettings | undefined) {
+  const next = { ...rec };
+  if (value && value.path.trim()) next[key] = value;
+  else delete next[key];
+  return next;
+}
+
+const MODELS: { value: string; label: string }[] = [
+  { value: "", label: "Claude default" },
+  { value: "opus", label: "Opus" },
+  { value: "sonnet", label: "Sonnet" },
+  { value: "haiku", label: "Haiku" },
+  { value: "fable", label: "Fable" },
+];
+const EFFORTS: { value: Effort | ""; label: string }[] = [
+  { value: "", label: "Default" },
+  { value: "low", label: "Low" },
+  { value: "medium", label: "Medium" },
+  { value: "high", label: "High" },
+  { value: "xhigh", label: "XHigh" },
+  { value: "max", label: "Max" },
+];
+/** Valores de `claude --permission-mode` (`manual` es alias de `default`). */
+const PERMISSION_MODES: { value: string; label: string; desc: string }[] = [
+  { value: "", label: "Claude default", desc: "Whatever your Claude Code settings say." },
+  { value: "default", label: "Ask for risky tools", desc: "The run pauses until you attach and answer each prompt." },
+  { value: "acceptEdits", label: "Auto-accept edits", desc: "File edits run freely; shell commands still ask." },
+  { value: "auto", label: "Auto", desc: "A classifier approves safe actions; risky ones still ask." },
+  { value: "plan", label: "Plan only", desc: "Read-only: the agent plans but doesn't change anything." },
+  { value: "dontAsk", label: "Don't ask", desc: "Anything not pre-approved is denied instead of prompting." },
+  {
+    value: "bypassPermissions",
+    label: "Bypass permissions",
+    desc: "Nothing asks. Only for sandboxed repos. Accept the bypass warning once in an interactive claude first.",
+  },
+];
+const FINISH: { value: FinishMode; label: string }[] = [
+  { value: "pr", label: "Open PR" },
+  { value: "branch", label: "Branch only" },
+];
 
 export interface Diagnostics {
   cli: { ok: boolean; text: string } | null;
@@ -180,6 +244,7 @@ export function SettingsView(p: Props) {
   const [replacing, setReplacing] = useState(false);
   const [clearing, setClearing] = useState(false);
   const [checking, setChecking] = useState(false);
+  const home = useHome();
 
   useEffect(() => setDraft(toDraft(p.config)), [p.config]);
 
@@ -261,42 +326,177 @@ export function SettingsView(p: Props) {
   );
 
   /** Estado por fila: error del último guardado, sin guardar, guardado o sin mapear. */
-  const rowStatus = (path: string, savedPath: string | undefined) => {
-    const raw = path.trim();
-    const err = raw ? errorLines.find((l) => l.includes(`«${raw}»`)) : undefined;
+  const rowStatus = (cur: RepoSettings | undefined, prev: RepoSettings | undefined) => {
+    const raw = cur?.path.trim() ?? "";
+    const err = raw ? errorLines.find((l) => l.includes(`"${raw}"`)) : undefined;
     if (err) return { tone: "danger", text: err };
-    if (raw !== (savedPath ?? "")) return { tone: "warn", text: raw ? "Unsaved" : "Will be removed" };
+    if (raw !== (prev?.path ?? "")) return { tone: "warn", text: raw ? "Unsaved" : "Will be removed" };
+    if (raw && JSON.stringify(clean(cur!)) !== JSON.stringify(clean(prev!))) return { tone: "warn", text: "Unsaved" };
     if (raw) return { tone: "ok", text: "Git repo · saved" };
     return { tone: "muted", text: "Not mapped" };
   };
 
-  const repoRow = (kind: string, id: string, name: string, path: string, savedPath: string | undefined, onChange: (v: string) => void) => {
-    const st = rowStatus(path, savedPath);
+  /** Mapeos editables (team o proyecto) con su setter, para Repos y Execution. */
+  type Row = { key: string; kind: "Team" | "Project"; name: string; cur: RepoSettings | undefined; prev: RepoSettings | undefined; set: (s: RepoSettings | undefined) => void };
+  const rows: Row[] = [
+    ...p.teams.map((t): Row => ({
+      key: `team-${t.id}`,
+      kind: "Team",
+      name: `${t.name} · ${t.key}`,
+      cur: draft.teams[t.id],
+      prev: saved.teams[t.id],
+      set: (s) => setDraft((d) => ({ ...d, teams: withEntry(d.teams, t.id, s) })),
+    })),
+    ...projects.map(([id, name]): Row => ({
+      key: `project-${id}`,
+      kind: "Project",
+      name,
+      cur: draft.projects[id],
+      prev: saved.projects[id],
+      set: (s) => setDraft((d) => ({ ...d, projects: withEntry(d.projects, id, s) })),
+    })),
+  ];
+
+  async function choose(r: Row) {
+    try {
+      const res = await pickRepoFolder(r.cur?.path);
+      if (!res) return;
+      if (!res.isRepo) {
+        toast("Not a git repository", `${tildify(res.path, home)} — pick the root folder of a git checkout.`, "danger");
+        return;
+      }
+      r.set({ ...(r.cur ?? {}), path: res.path });
+      setSaveError(null);
+    } catch (e) {
+      toast("Couldn't open the folder picker", String(e), "danger");
+    }
+  }
+
+  const repoRow = (r: Row) => {
+    const st = rowStatus(r.cur, r.prev);
+    const path = r.cur?.path ?? "";
     return (
-      <div key={`${kind}-${id}`} className="repo-cols repo-row">
+      <div key={r.key} className="repo-cols repo-row">
         <span className="repo-scope">
-          <span className="repo-kind">{kind}</span>
-          <span className="ellipsis">{name}</span>
+          <span className="repo-kind">{r.kind}</span>
+          <span className="ellipsis">{r.name}</span>
         </span>
-        <input
-          className="input input-mono repo-path"
-          spellCheck={false}
-          placeholder={kind === "Project" ? "Uses the team's repo" : "/Users/…/repo"}
-          aria-label={`Local path for ${kind.toLowerCase()} ${name}`}
-          value={path}
-          onChange={(e) => onChange(e.target.value)}
-        />
+        <button
+          type="button"
+          className="repo-pick"
+          aria-label={`${path ? "Change" : "Choose"} the local repo for ${r.kind.toLowerCase()} ${r.name}`}
+          title={path || undefined}
+          onClick={() => void choose(r)}
+        >
+          <span className={`repo-pick-path ellipsis ${path ? "" : "empty"}`}>
+            {path ? tildify(path, home) : r.kind === "Project" ? "Uses the team's repo" : "No repo"}
+          </span>
+          <span className="repo-pick-act">{path ? "Change…" : "Choose folder…"}</span>
+        </button>
         <span className={`repo-status tone-${st.tone}`} title={st.text}>
           <span className="dot dot-sm" aria-hidden />
           <span className="ellipsis">{st.text}</span>
         </span>
         <span className="repo-acts">
           {path && (
-            <button type="button" className="btn btn-sm btn-ghost repo-remove" onClick={() => onChange("")}>
+            <button type="button" className="btn btn-sm btn-ghost repo-remove" onClick={() => r.set(undefined)}>
               Remove
             </button>
           )}
         </span>
+      </div>
+    );
+  };
+
+  const mapped = rows.filter((r) => r.cur?.path.trim());
+  const setOpt = (r: Row, patch: Partial<RepoSettings>) => r.set({ ...r.cur!, ...patch });
+
+  const execRepo = (r: Row) => {
+    const s = r.cur!;
+    const perm = PERMISSION_MODES.find((m) => m.value === (s.permissionMode ?? ""));
+    const models = s.model && !MODELS.some((m) => m.value === s.model) ? [...MODELS, { value: s.model, label: s.model }] : MODELS;
+    const st = rowStatus(r.cur, r.prev);
+    return (
+      <div key={r.key} className="exec-repo">
+        <div className="exec-repo-head">
+          <span className="repo-kind">{r.kind}</span>
+          <span className="exec-repo-name ellipsis">{r.name}</span>
+          <span className="exec-repo-path mono ellipsis" title={s.path}>
+            {tildify(s.path, home)}
+          </span>
+          {st.tone !== "ok" && (
+            <span className={`repo-status tone-${st.tone}`} title={st.text}>
+              <span className="dot dot-sm" aria-hidden />
+              <span className="ellipsis">{st.text}</span>
+            </span>
+          )}
+        </div>
+        <div className="exec-grid">
+          <label className="exec-field">
+            <span className="exec-field-label">Model</span>
+            <select className="input exec-select" value={s.model ?? ""} onChange={(e) => setOpt(r, { model: e.target.value || undefined })}>
+              {models.map((m) => (
+                <option key={m.value} value={m.value}>
+                  {m.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <div className="exec-field">
+            <span className="exec-field-label" id={`${r.key}-effort`}>
+              Effort
+            </span>
+            <div className="seg" role="radiogroup" aria-labelledby={`${r.key}-effort`}>
+              {EFFORTS.map((o) => (
+                <button
+                  key={o.value}
+                  type="button"
+                  role="radio"
+                  aria-checked={(s.effort ?? "") === o.value}
+                  className={`seg-opt ${(s.effort ?? "") === o.value ? "on" : ""}`}
+                  onClick={() => setOpt(r, { effort: o.value || undefined })}
+                >
+                  {o.label}
+                </button>
+              ))}
+            </div>
+          </div>
+          <label className="exec-field">
+            <span className="exec-field-label">Permission mode</span>
+            <select
+              className="input exec-select"
+              value={s.permissionMode ?? ""}
+              onChange={(e) => setOpt(r, { permissionMode: e.target.value || undefined })}
+            >
+              {PERMISSION_MODES.map((m) => (
+                <option key={m.value} value={m.value}>
+                  {m.label}
+                </option>
+              ))}
+              {perm === undefined && <option value={s.permissionMode}>{s.permissionMode}</option>}
+            </select>
+          </label>
+          <div className="exec-field">
+            <span className="exec-field-label" id={`${r.key}-finish`}>
+              Finish
+            </span>
+            <div className="seg" role="radiogroup" aria-labelledby={`${r.key}-finish`}>
+              {FINISH.map((o) => (
+                <button
+                  key={o.value}
+                  type="button"
+                  role="radio"
+                  aria-checked={(s.finish ?? "pr") === o.value}
+                  className={`seg-opt ${(s.finish ?? "pr") === o.value ? "on" : ""}`}
+                  onClick={() => setOpt(r, { finish: o.value === "pr" ? undefined : o.value })}
+                >
+                  {o.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+        {perm && <p className="exec-desc exec-perm-desc">{perm.desc}</p>}
       </div>
     );
   };
@@ -404,16 +604,7 @@ export function SettingsView(p: Props) {
                   <span />
                 </div>
                 {p.teams.length === 0 && <div className="repo-empty">No teams loaded from Linear yet.</div>}
-                {p.teams.map((t) =>
-                  repoRow("Team", t.id, `${t.name} · ${t.key}`, draft.teams[t.id] ?? "", saved.teams[t.id], (v) =>
-                    setDraft({ ...draft, teams: { ...draft.teams, [t.id]: v } }),
-                  ),
-                )}
-                {projects.map(([id, name]) =>
-                  repoRow("Project", id, name, draft.projects[id] ?? "", saved.projects[id], (v) =>
-                    setDraft({ ...draft, projects: { ...draft.projects, [id]: v } }),
-                  ),
-                )}
+                {rows.map(repoRow)}
                 {draft.other.map((m, i) => (
                   <div key={`${m.teamId}-${m.projectId}-${i}`} className="repo-cols repo-row">
                     <span className="repo-scope">
@@ -480,6 +671,18 @@ export function SettingsView(p: Props) {
                   </div>
                 </div>
               </div>
+              <div className="settings-title-row">
+                <h3 className="settings-subtitle">Per repo</h3>
+                <p className="settings-desc">
+                  Passed to <span className="mono">claude --bg</span> for runs in that repo. “Finish” tells workflows that
+                  support it whether to open a PR or just push a branch.
+                </p>
+              </div>
+              {mapped.length === 0 ? (
+                <div className="panel repo-empty">Map a repo in Settings → Repos first.</div>
+              ) : (
+                <div className="panel">{mapped.map(execRepo)}</div>
+              )}
               {saveBar}
             </>
           )}

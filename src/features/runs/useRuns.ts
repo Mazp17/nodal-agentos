@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getRunDetail, listIssueRuns, listRuns } from "./api";
 import { issueRunKey, viewOfIssueRun, viewOfSession, type RunView } from "./status";
-import type { IssueRun, RunDetail, RunSummary } from "./types";
+import { isInProgress, type IssueRun, type RunDetail, type RunSummary } from "./types";
 
 const POLL_MS = 3000;
 /** Runs lanzados a mano (sin issue) que se siguen mostrando. */
@@ -81,14 +81,14 @@ export function useRuns(enabled: boolean): RunsState {
       .map((x) => findRun(all, x))
       .filter((x): x is RunSummary => x !== undefined && !linked.includes(x));
     const relevant = [...new Set([...linked, ...history, ...otherRunsOf(all, irs)])];
-    const pending = relevant.filter((x) => x.state === "working" || !settled.current.has(x.sessionId));
+    const pending = relevant.filter((x) => isInProgress(x) || !settled.current.has(x.sessionId));
     const fetched = await Promise.all(
       pending.map(async (x) => {
         try {
           const d = await getRunDetail(x.sessionId, x.cwd ?? "");
           // Al terminar, el resumen final puede tardar un poco en aparecer: no se da por
           // cerrado un detalle `live` hasta varios polls después.
-          if (x.state !== "working") {
+          if (!isInProgress(x)) {
             const n = (liveTries.current.get(x.sessionId) ?? 0) + 1;
             liveTries.current.set(x.sessionId, n);
             if (d === null || d.source === "final" || n >= SETTLE_TRIES) settled.current.add(x.sessionId);
