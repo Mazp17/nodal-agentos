@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import "./App.css";
+import { RunsPanel } from "./features/runs/RunsPanel";
 
 // Placeholder hasta conectar Linear: las columnas reales salen de los estados de cada team.
 const COLUMNS = ["Todo", "In Progress", "In Review", "Blocked", "Done"];
@@ -32,6 +33,7 @@ function App() {
           </section>
         ))}
       </main>
+      <RunsPanel />
     </div>
   );
 }

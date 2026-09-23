@@ -1,0 +1,151 @@
+/* Panel de runs. Usa las variables de src/App.css (--bg, --panel, --border, --text,
+   --muted, --danger), así que hereda el dark mode. */
+
+.runs-panel {
+  --run-ok: #16a34a;
+  --run-warn: #ca8a04;
+  --run-accent: #2563eb;
+  border-top: 1px solid var(--border);
+  padding: 12px 20px 16px;
+  max-height: 50vh;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 0;
+}
+
+@media (prefers-color-scheme: dark) {
+  .runs-panel {
+    --run-ok: #4ade80;
+    --run-warn: #facc15;
+    --run-accent: #60a5fa;
+  }
+}
+
+.runs-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.runs-head h2 { font-size: 13px; font-weight: 600; margin: 0; }
+.runs-count { color: var(--muted); font-weight: 400; margin-left: 4px; }
+
+.runs-form { display: flex; gap: 6px; flex: 1; justify-content: flex-end; min-width: 0; }
+.runs-input {
+  font: inherit;
+  font-size: 12px;
+  color: var(--text);
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 5px 8px;
+  min-width: 0;
+  width: 200px;
+}
+.runs-input-cwd { width: 300px; font-family: ui-monospace, monospace; }
+.runs-form button {
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--panel);
+  background: var(--text);
+  border: none;
+  border-radius: 6px;
+  padding: 5px 12px;
+  cursor: pointer;
+}
+.runs-form button:disabled { opacity: 0.5; cursor: default; }
+
+.runs-msg { margin: 0; font-size: 12px; color: var(--muted); font-family: ui-monospace, monospace; }
+.runs-error { color: var(--danger); white-space: pre-wrap; }
+
+.runs-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 10px;
+  overflow-y: auto;
+  min-height: 0;
+}
+
+.run-card {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+.run-card-head { display: flex; align-items: center; gap: 8px; }
+.run-card-head h3 {
+  font-size: 13px;
+  font-weight: 600;
+  margin: 0;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.run-state, .run-result {
+  font-size: 11px;
+  border-radius: 999px;
+  padding: 1px 8px;
+  border: 1px solid var(--border);
+  color: var(--muted);
+  white-space: nowrap;
+}
+.run-state-en-curso { color: var(--run-accent); border-color: currentColor; }
+.run-state-interrumpido, .run-state-detenido { color: var(--danger); border-color: currentColor; }
+.run-result { font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em; }
+.run-result-green { color: var(--run-ok); border-color: currentColor; }
+.run-result-yellow { color: var(--run-warn); border-color: currentColor; }
+.run-result-red { color: var(--danger); border-color: currentColor; }
+
+.run-meta, .run-phase, .run-empty { margin: 0; font-size: 12px; color: var(--muted); }
+.run-meta code { font-family: ui-monospace, monospace; }
+.run-phase strong { color: var(--text); font-weight: 600; }
+
+.run-agents { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.run-agent {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr) auto auto;
+  column-gap: 8px;
+  align-items: baseline;
+  font-size: 12px;
+}
+.run-agent-icon { text-align: center; color: var(--muted); }
+.run-agent-done .run-agent-icon { color: var(--run-ok); }
+.run-agent-running .run-agent-icon { color: var(--run-accent); }
+.run-agent-failed .run-agent-icon { color: var(--danger); }
+.run-agent-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.run-agent-model, .run-agent-tokens { color: var(--muted); font-size: 11px; white-space: nowrap; }
+.run-agent-tokens { font-variant-numeric: tabular-nums; min-width: 32px; text-align: right; }
+.run-agent-tool {
+  grid-column: 2 / -1;
+  color: var(--muted);
+  font-size: 11px;
+  font-family: ui-monospace, monospace;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.run-totals {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  font-size: 11px;
+  color: var(--muted);
+  border-top: 1px solid var(--border);
+  padding-top: 6px;
+  font-variant-numeric: tabular-nums;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .run-agent-running .run-agent-icon { display: inline-block; animation: run-spin 1.2s linear infinite; }
+}
+@keyframes run-spin { to { transform: rotate(360deg); } }

@@ -1,0 +1,1 @@
+{"agentType":"workflow-subagent","description":"cerrar:indice","workflowPhase":"Cerrar","spawnDepth":1,"requestShape":"foreground","requestNonInteractive":false,"model":"claude-sonnet-5"}

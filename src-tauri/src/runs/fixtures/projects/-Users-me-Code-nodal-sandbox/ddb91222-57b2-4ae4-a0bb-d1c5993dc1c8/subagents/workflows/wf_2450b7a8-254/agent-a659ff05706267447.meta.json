@@ -1,0 +1,1 @@
+{"agentType":"workflow-subagent","description":"escribir:como-se-forman","workflowPhase":"Escribir","spawnDepth":1,"requestShape":"foreground","requestNonInteractive":false,"model":"claude-sonnet-5"}

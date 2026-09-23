@@ -1,0 +1,1 @@
+{"agentType":"workflow-subagent","description":"revisar:tipos-de-volcanes","workflowPhase":"Revisar","spawnDepth":1,"requestShape":"foreground","requestNonInteractive":false,"model":"claude-sonnet-5"}

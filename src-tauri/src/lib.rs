@@ -1,5 +1,7 @@
 use std::process::Command;
 
+mod runs;
+
 /// Versión del CLI de `claude`: prueba mínima de que el core puede invocarlo.
 /// Ojo: una app abierta desde Finder no hereda el PATH del shell; en `tauri dev` sí.
 /// `async` para que corra fuera del main thread: arrancar el CLI tarda y congelaría la UI.
@@ -19,7 +21,12 @@ async fn claude_version() -> Result<String, String> {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
-        .invoke_handler(tauri::generate_handler![claude_version])
+        .invoke_handler(tauri::generate_handler![
+            claude_version,
+            runs::launch_run,
+            runs::list_runs,
+            runs::get_run_detail
+        ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
