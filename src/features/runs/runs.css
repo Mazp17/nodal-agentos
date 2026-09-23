@@ -2,12 +2,12 @@
    --muted, --danger), así que hereda el dark mode. */
 
 .runs-panel {
-  --run-ok: #16a34a;
   --run-warn: #ca8a04;
-  --run-accent: #2563eb;
   border-top: 1px solid var(--border);
   padding: 12px 20px 16px;
-  max-height: 50vh;
+  max-height: 35vh;
+  overflow-y: auto;
+  flex-shrink: 0;
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -16,9 +16,7 @@
 
 @media (prefers-color-scheme: dark) {
   .runs-panel {
-    --run-ok: #4ade80;
     --run-warn: #facc15;
-    --run-accent: #60a5fa;
   }
 }
 
@@ -98,10 +96,10 @@
   color: var(--muted);
   white-space: nowrap;
 }
-.run-state-en-curso { color: var(--run-accent); border-color: currentColor; }
+.run-state-en-curso { color: var(--accent); border-color: currentColor; }
 .run-state-interrumpido, .run-state-detenido { color: var(--danger); border-color: currentColor; }
 .run-result { font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em; }
-.run-result-green { color: var(--run-ok); border-color: currentColor; }
+.run-result-green { color: var(--ok); border-color: currentColor; }
 .run-result-yellow { color: var(--run-warn); border-color: currentColor; }
 .run-result-red { color: var(--danger); border-color: currentColor; }
 
@@ -118,8 +116,8 @@
   font-size: 12px;
 }
 .run-agent-icon { text-align: center; color: var(--muted); }
-.run-agent-done .run-agent-icon { color: var(--run-ok); }
-.run-agent-running .run-agent-icon { color: var(--run-accent); }
+.run-agent-done .run-agent-icon { color: var(--ok); }
+.run-agent-running .run-agent-icon { color: var(--accent); }
 .run-agent-failed .run-agent-icon { color: var(--danger); }
 .run-agent-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .run-agent-model, .run-agent-tokens { color: var(--muted); font-size: 11px; white-space: nowrap; }

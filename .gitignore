@@ -23,5 +23,9 @@ dist-ssr
 *.sln
 *.sw?
 
+# por si alguien exporta LINEAR_API_KEY para los tests live
+.env
+.env.*
+
 # worktrees de agentes de Claude Code
 .claude/

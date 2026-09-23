@@ -11,8 +11,8 @@ import {
 } from "./features/linear/api";
 import { BoardView, ErrorState } from "./features/linear/Board";
 import { Onboarding, SettingsView } from "./features/linear/Settings";
-import "./App.css";
 import { RunsPanel } from "./features/runs/RunsPanel";
+import "./App.css";
 
 const TEAM_FILTER_KEY = "agent-desk.teamFilter";
 const DEFAULT_CONFIG: AppConfig = { repos: [], concurrency: 3 };
@@ -219,7 +219,8 @@ function App() {
       )}
       {configError && <div className="banner error">{configError}</div>}
       {content}
-      <RunsPanel />
+      {/* Solo en el board: fuera de él el polling a `claude agents` no aporta. */}
+      {keyConfigured && view === "board" && <RunsPanel />}
     </div>
   );
 }
