@@ -28,6 +28,8 @@ use store::{RunsData, TasksData};
 const TICK: Duration = Duration::from_secs(5);
 
 struct Inner {
+    /// Para `runs::launch_run`, que lee las opciones del repo (model, effort…) de la config.
+    app: AppHandle,
     tasks_path: PathBuf,
     runs_path: PathBuf,
     plans_dir: PathBuf,
@@ -71,6 +73,7 @@ pub fn init(app: &AppHandle) -> Result<(), String> {
     let tasks = load_or_backup(&tasks_path, store::load_tasks)?;
     let runs = load_or_backup(&runs_path, store::load_runs)?;
     let inner = Arc::new(Inner {
+        app: app.clone(),
         tasks_path,
         runs_path,
         plans_dir: data_dir.join(store::PLANS_DIR),
@@ -155,7 +158,7 @@ async fn pump(inner: &Inner) -> Result<(), String> {
     };
 
     for run in to_launch {
-        let result = runs::launch_run(run.cwd.clone(), run.prompt.clone()).await;
+        let result = runs::launch_run(inner.app.clone(), run.cwd.clone(), run.prompt.clone()).await;
         let mut data = inner.runs.lock().await;
         let entry = data.runs.iter_mut().find(|r| {
             r.task_id == run.task_id && r.queued_at == run.queued_at && r.status == TaskRunStatus::Launching
@@ -416,8 +419,21 @@ pub async fn launch_task_run(
 ) -> Result<TaskRun, String> {
     check_id(&id)?;
     let inner = state.0.clone();
-    let finish = validate::finish(finish.as_deref())?;
     let task = find_task(&*inner.tasks.lock().await, &id)?;
+    // Sin `finish` explícito manda el del repo en Settings; si tampoco hay, "pr".
+    let finish = match finish {
+        Some(f) => Some(f),
+        None => {
+            let (config_path, repo) = (inner.config_path.clone(), task.repo_path.clone());
+            blocking(move || {
+                Ok(config::load_from(&config_path)
+                    .ok()
+                    .and_then(|c| config::find_by_path(&c, &repo).and_then(|m| m.finish.clone())))
+            })
+            .await?
+        }
+    };
+    let finish = validate::finish(finish.as_deref())?;
     let text_path = text_plan_path(&inner, &id);
     let (cwd, prompt) = {
         let task = task.clone();

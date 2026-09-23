@@ -314,6 +314,7 @@ mod tests {
             pid: None,
             status: None,
             state: Some(state.into()),
+            waiting_for: None,
         }
     }
 
