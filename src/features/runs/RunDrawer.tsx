@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { attachRun, cancelQueued, stopRun } from "./api";
 import { RunCard } from "./RunCard";
+import { LAUNCH_GRACE_MS } from "./status";
 import { findRun, type RunsState } from "./useRuns";
 import "./runs.css";
 
@@ -88,7 +89,11 @@ export function RunDrawer({ issueId, runs, onClose }: Props) {
             (run ? (
               <RunCard run={run} detail={runs.details[run.sessionId]} />
             ) : (
-              <p className="run-empty">Iniciando: esperando que el run aparezca en claude agents…</p>
+              <p className="run-empty">
+                {ir.launchedAt != null && Date.now() - ir.launchedAt < LAUNCH_GRACE_MS
+                  ? "Iniciando: esperando que el run aparezca en claude agents…"
+                  : "El run no aparece en claude agents; podés relanzarlo desde la card."}
+              </p>
             ))}
 
           {ir?.runId && (

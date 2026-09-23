@@ -100,8 +100,12 @@ async fn pump(inner: &Inner) -> Result<(), String> {
             data.runs[i].status = IssueRunStatus::Launching;
             changed = true;
         }
+        // Un fallo de escritura no corta la pasada: la memoria manda y se reintenta
+        // guardar en la próxima; cortar dejaría entradas colgadas en `launching`.
         if changed {
-            persist(inner, &data).await?;
+            if let Err(e) = persist(inner, &data).await {
+                eprintln!("issue-runs: {e}");
+            }
         }
         picked.iter().map(|&i| data.runs[i].clone()).collect()
     };
@@ -125,7 +129,9 @@ async fn pump(inner: &Inner) -> Result<(), String> {
                 }
             }
         }
-        persist(inner, &data).await?;
+        if let Err(e) = persist(inner, &data).await {
+            eprintln!("issue-runs: {e}");
+        }
     }
     Ok(())
 }
@@ -240,8 +246,12 @@ pub async fn launch_issue_run(
             error: None,
         };
         data.runs.push(entry.clone());
+        if let Err(e) = persist(&inner, &data).await {
+            // Sin persistir no se encola: si no, el tick lo lanzaría igual tras el error.
+            data.runs.retain(|r| !(r.issue_id == entry.issue_id && r.queued_at == entry.queued_at));
+            return Err(e);
+        }
         store::prune(&mut data);
-        persist(&inner, &data).await?;
         entry
     };
 

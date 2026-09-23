@@ -10,6 +10,9 @@ export interface RunBadge {
   active: boolean;
 }
 
+/** Espejo de `LAUNCH_GRACE_MS` en src-tauri/src/issue_runs/store.rs. */
+export const LAUNCH_GRACE_MS = 90_000;
+
 const RESULT_TONE: Record<string, BadgeTone> = { green: "ok", yellow: "warn", red: "danger" };
 
 export function issueRunBadge(
@@ -24,8 +27,14 @@ export function issueRunBadge(
   if (ir.status === "queued" || ir.status === "launching") {
     return { label: "en cola", tone: "muted", title, active: true };
   }
-  // Lanzado pero todavía no aparece en `claude agents`.
-  if (!run) return { label: "iniciando", tone: "accent", title, active: true };
+  // Lanzado pero todavía no aparece en `claude agents`. Pasada la misma gracia que usa
+  // el backend (LAUNCH_GRACE_MS en store.rs) se deja relanzar.
+  if (!run) {
+    const fresh = ir.launchedAt != null && Date.now() - ir.launchedAt < LAUNCH_GRACE_MS;
+    return fresh
+      ? { label: "iniciando", tone: "accent", title, active: true }
+      : { label: "perdido", tone: "danger", title: `El run ${ir.runId ?? ""} no aparece en claude agents`, active: false };
+  }
   if (run.state === "working") {
     if (detail?.currentPhaseIndex != null) {
       const total = detail.phases.length || "?";
