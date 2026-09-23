@@ -19,7 +19,10 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Deserializer};
 use serde_json::Value;
 
-use super::types::{AgentInfo, AgentState, DetailSource, PhaseInfo, RunDetail, RunSummary};
+use super::types::{
+    AgentInfo, AgentState, DetailSource, PhaseInfo, RunDetail, RunResult, RunSummary, ToolResultInfo, Transcript,
+    TranscriptItem,
+};
 
 /// Deserializa un campo opcional sin fallar si el tipo no es el esperado.
 fn lenient<'de, D, T>(d: D) -> Result<Option<T>, D::Error>
@@ -105,13 +108,15 @@ struct RawAgent {
     status: Option<String>,
     #[serde(default, deserialize_with = "lenient")]
     state: Option<String>,
+    #[serde(default, deserialize_with = "lenient")]
+    waiting_for: Option<String>,
 }
 
 /// Sesiones `kind == "background"`, más recientes primero. Entradas sin `id` o
 /// `sessionId` se descartan (las interactivas, por ejemplo, no traen `id`).
 pub fn parse_agents_json(text: &str) -> Result<Vec<RunSummary>, String> {
     let values: Vec<Value> = serde_json::from_str(text.trim())
-        .map_err(|e| format!("la salida de `claude agents --json` no es la lista JSON esperada: {e}"))?;
+        .map_err(|e| format!("`claude agents --json` didn't return the expected JSON list: {e}"))?;
     let mut runs: Vec<RunSummary> = values
         .into_iter()
         .filter_map(|v| serde_json::from_value::<RawAgent>(v).ok())
@@ -126,6 +131,7 @@ pub fn parse_agents_json(text: &str) -> Result<Vec<RunSummary>, String> {
                 pid: a.pid,
                 status: a.status,
                 state: a.state,
+                waiting_for: a.waiting_for,
             })
         })
         .collect();
@@ -352,7 +358,7 @@ pub fn parse_final(text: &str, wf_id: &str) -> Option<RunDetail> {
         .filter(|p| p.kind.as_deref() == Some("workflow_agent"))
         .map(|p| AgentInfo {
             state: map_state(p.state.as_deref()),
-            label: p.label.or_else(|| p.agent_id.clone()).unwrap_or_else(|| "(sin nombre)".into()),
+            label: p.label.or_else(|| p.agent_id.clone()).unwrap_or_else(|| "(unnamed)".into()),
             agent_id: p.agent_id,
             phase: p.phase_title,
             model: p.model,
@@ -380,6 +386,7 @@ pub fn parse_final(text: &str, wf_id: &str) -> Option<RunDetail> {
         total_tool_calls: raw.total_tool_calls,
         duration_ms: raw.duration_ms,
         result_status: result_status(raw.result.as_ref()),
+        result: parse_result(raw.result.as_ref()),
         workflow_count: 1,
     })
 }
@@ -506,6 +513,7 @@ fn read_live(session_dir: &Path, wf_id: &str) -> RunDetail {
         total_tool_calls: None,
         duration_ms: None,
         result_status: None,
+        result: None,
         workflow_count: 1,
     }
 }
@@ -675,21 +683,351 @@ pub fn last_tool_in_lines(text: &str) -> Option<(String, Option<String>)> {
 }
 
 fn tool_summary(input: &Value) -> Option<String> {
+    tool_summary_n(input, 80)
+}
+
+fn tool_summary_n(input: &Value, max: usize) -> Option<String> {
     const KEYS: [&str; 9] =
         ["command", "file_path", "pattern", "path", "url", "query", "skill", "description", "prompt"];
     let s = KEYS.iter().find_map(|k| input.get(*k)?.as_str())?;
     let one_line = s.lines().next().unwrap_or("").trim();
-    Some(truncate(one_line, 80))
+    Some(truncate(one_line, max))
 }
 
 fn truncate(s: &str, max: usize) -> String {
-    if s.chars().count() <= max {
-        s.to_string()
-    } else {
-        let mut out: String = s.chars().take(max).collect();
-        out.push('…');
-        out
+    clip(s, max).0
+}
+
+/// Recorta a `max` caracteres (con `…`) e indica si recortó.
+fn clip(s: &str, max: usize) -> (String, bool) {
+    match s.char_indices().nth(max) {
+        None => (s.to_string(), false),
+        Some((cut, _)) => {
+            let mut out = s[..cut].to_string();
+            out.push('…');
+            (out, true)
+        }
     }
+}
+
+// --- Resultado del workflow ---------------------------------------------------
+
+const RESULT_RAW_MAX: usize = 8000;
+const RESULT_LIST_MAX: usize = 100;
+const RESULT_ITEM_MAX: usize = 2000;
+
+fn str_field(obj: &serde_json::Map<String, Value>, key: &str) -> Option<String> {
+    obj.get(key)?.as_str().map(str::trim).filter(|s| !s.is_empty()).map(|s| truncate(s, RESULT_ITEM_MAX))
+}
+
+/// Lista de strings; ignora elementos que no lo sean. `None` si el campo no es un array.
+fn str_list(obj: &serde_json::Map<String, Value>, key: &str) -> Option<Vec<String>> {
+    let arr = obj.get(key)?.as_array()?;
+    Some(
+        arr.iter()
+            .filter_map(Value::as_str)
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .take(RESULT_LIST_MAX)
+            .map(|s| truncate(s, RESULT_ITEM_MAX))
+            .collect(),
+    )
+}
+
+/// Campos conocidos del `result` (forma de `linear-issue`) más el JSON crudo recortado.
+/// `result` es libre: lo que no tenga la forma esperada queda en `None`.
+pub fn parse_result(result: Option<&Value>) -> Option<RunResult> {
+    let v = result.filter(|v| !v.is_null())?;
+    let raw = match v {
+        Value::String(s) => s.clone(),
+        other => serde_json::to_string_pretty(other).unwrap_or_default(),
+    };
+    let mut out = RunResult { raw: Some(truncate(&raw, RESULT_RAW_MAX)), ..RunResult::default() };
+    if let Some(obj) = v.as_object() {
+        out.issue = str_field(obj, "issue");
+        // Solo URLs web: el frontend la abre con el opener del sistema.
+        out.pr = str_field(obj, "pr").filter(|u| u.starts_with("https://") || u.starts_with("http://"));
+        out.branch = str_field(obj, "branch");
+        out.workdir = str_field(obj, "workdir");
+        out.where_ = str_field(obj, "where");
+        out.unmet_acceptance = str_list(obj, "unmetAcceptance");
+        out.nits = str_list(obj, "nits");
+    }
+    Some(out)
+}
+
+// --- Transcript completo de un subagente ---------------------------------------
+
+/// Por encima de esto se lee el principio (prompt) y la cola (conversación reciente).
+const TRANSCRIPT_MAX_READ: u64 = 16 * 1024 * 1024;
+const TRANSCRIPT_HEAD: u64 = 1024 * 1024;
+const PROMPT_MAX: usize = 8000;
+const TEXT_MAX: usize = 4000;
+const TOOL_INPUT_MAX: usize = 2000;
+const TOOL_RESULT_MAX: usize = 1500;
+const SUMMARY_MAX: usize = 160;
+pub const TRANSCRIPT_DEFAULT_LIMIT: u32 = 200;
+pub const TRANSCRIPT_MAX_LIMIT: u32 = 2000;
+
+/// Ids que terminan en una ruta (`wf_...`, id de agente): solo `[A-Za-z0-9_-]`.
+pub fn is_valid_path_id(id: &str) -> bool {
+    !id.is_empty()
+        && id.len() <= 128
+        && !id.starts_with('-')
+        && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+}
+
+#[derive(Deserialize)]
+struct RawTranscriptLine {
+    #[serde(default, rename = "type", deserialize_with = "lenient")]
+    kind: Option<String>,
+    #[serde(default)]
+    message: Option<Value>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RawAgentMeta {
+    #[serde(default, deserialize_with = "lenient")]
+    model: Option<String>,
+    #[serde(default, deserialize_with = "lenient")]
+    description: Option<String>,
+    #[serde(default, deserialize_with = "lenient")]
+    workflow_phase: Option<String>,
+}
+
+/// Lo que sale de parsear el texto del transcript.
+#[derive(Debug, Default)]
+pub struct ParsedTranscript {
+    pub prompt: Option<String>,
+    pub items: Vec<TranscriptItem>,
+    pub total: usize,
+    pub final_output: Option<String>,
+}
+
+/// El workflow envuelve la tarea: `[Workflow harness — computed task] ... follows:` y el
+/// texto indentado con dos espacios. Devuelve el texto sin el marco.
+fn unwrap_harness(text: &str) -> Option<String> {
+    if !text.starts_with("[Workflow harness") || !text.contains("computed task]") {
+        return None;
+    }
+    let (_, body) = text.split_once("follows:\n")?;
+    Some(body.lines().map(|l| l.strip_prefix("  ").unwrap_or(l)).collect::<Vec<_>>().join("\n"))
+}
+
+fn is_harness_request(text: &str) -> bool {
+    text.starts_with("[Workflow harness") && text.contains("user request]")
+}
+
+fn tool_result_text(block: &Value) -> String {
+    match block.get("content") {
+        Some(Value::String(s)) => s.clone(),
+        Some(Value::Array(parts)) => parts
+            .iter()
+            .filter_map(|p| match p.get("type").and_then(Value::as_str) {
+                Some("text") => p.get("text").and_then(Value::as_str).map(str::to_string),
+                Some("image") => Some("[image]".into()),
+                Some("tool_reference") => {
+                    Some(format!("[tool: {}]", p.get("tool_name").and_then(Value::as_str).unwrap_or("?")))
+                }
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+            .join("\n"),
+        _ => String::new(),
+    }
+}
+
+/// Parsea las líneas de un `agent-<id>.jsonl`: prompt inicial, conversación con cada
+/// `tool_result` pegado a su `tool_use`, y salida final. Devuelve como mucho los últimos
+/// `limit` items. Tolera líneas rotas y tipos desconocidos.
+pub fn parse_transcript(text: &str, limit: usize) -> ParsedTranscript {
+    let mut prompts: Vec<String> = Vec::new();
+    let mut items: Vec<TranscriptItem> = Vec::new();
+    let mut seen_assistant = false;
+    let mut last_text: Option<String> = None;
+    let mut structured: Option<String> = None;
+
+    for line in text.lines() {
+        // Filtro barato: los adjuntos (listas de skills, snapshots) son la mayor parte del archivo.
+        if line.trim().is_empty() || !(line.contains("\"assistant\"") || line.contains("\"user\"")) {
+            continue;
+        }
+        let Ok(entry) = serde_json::from_str::<RawTranscriptLine>(line) else { continue };
+        let content = entry.message.as_ref().and_then(|m| m.get("content"));
+        match entry.kind.as_deref() {
+            Some("user") => match content {
+                Some(Value::String(s)) => {
+                    if seen_assistant {
+                        let (text, truncated) = clip(s, TEXT_MAX);
+                        items.push(TranscriptItem::User { text, truncated });
+                    } else {
+                        prompts.push(s.clone());
+                    }
+                }
+                Some(Value::Array(blocks)) => {
+                    for b in blocks {
+                        match b.get("type").and_then(Value::as_str) {
+                            Some("tool_result") => {
+                                let id = b.get("tool_use_id").and_then(Value::as_str);
+                                let (text, truncated) = clip(&tool_result_text(b), TOOL_RESULT_MAX);
+                                let info = ToolResultInfo {
+                                    text,
+                                    is_error: b.get("is_error").and_then(Value::as_bool).unwrap_or(false),
+                                    truncated,
+                                };
+                                // El tool_use suele estar muy cerca: se busca desde el final.
+                                let slot = items.iter_mut().rev().find_map(|it| match it {
+                                    TranscriptItem::ToolUse { id: Some(tid), result, .. } if Some(tid.as_str()) == id => {
+                                        Some(result)
+                                    }
+                                    _ => None,
+                                });
+                                if let Some(slot) = slot {
+                                    *slot = Some(info);
+                                }
+                            }
+                            Some("text") => {
+                                let Some(s) = b.get("text").and_then(Value::as_str) else { continue };
+                                if seen_assistant {
+                                    let (text, truncated) = clip(s, TEXT_MAX);
+                                    items.push(TranscriptItem::User { text, truncated });
+                                } else {
+                                    prompts.push(s.to_string());
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+                _ => {}
+            },
+            Some("assistant") => {
+                seen_assistant = true;
+                let Some(Value::Array(blocks)) = content else { continue };
+                for b in blocks {
+                    match b.get("type").and_then(Value::as_str) {
+                        Some("text") => {
+                            let s = b.get("text").and_then(Value::as_str).unwrap_or("").trim();
+                            if s.is_empty() {
+                                continue;
+                            }
+                            let (text, truncated) = clip(s, TEXT_MAX);
+                            last_text = Some(text.clone());
+                            items.push(TranscriptItem::Text { text, truncated });
+                        }
+                        Some("thinking") => {
+                            let s = b.get("thinking").and_then(Value::as_str).unwrap_or("").trim();
+                            if !s.is_empty() {
+                                let (text, truncated) = clip(s, TEXT_MAX);
+                                items.push(TranscriptItem::Thinking { text, truncated });
+                            }
+                        }
+                        Some("tool_use") => {
+                            let Some(name) = b.get("name").and_then(Value::as_str) else { continue };
+                            let input = b.get("input");
+                            let pretty = input
+                                .filter(|v| v.as_object().is_none_or(|o| !o.is_empty()))
+                                .and_then(|v| serde_json::to_string_pretty(v).ok());
+                            if name == "StructuredOutput" {
+                                structured = pretty.clone();
+                            }
+                            items.push(TranscriptItem::ToolUse {
+                                id: b.get("id").and_then(Value::as_str).map(str::to_string),
+                                name: name.to_string(),
+                                summary: input.and_then(|i| tool_summary_n(i, SUMMARY_MAX)),
+                                input: pretty.map(|p| truncate(&p, TOOL_INPUT_MAX)),
+                                result: None,
+                            });
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    let prompt = prompts
+        .iter()
+        .find_map(|p| unwrap_harness(p))
+        .or_else(|| {
+            let rest: Vec<&str> = prompts.iter().filter(|p| !is_harness_request(p)).map(String::as_str).collect();
+            (!rest.is_empty()).then(|| rest.join("\n\n"))
+        })
+        .map(|p| truncate(p.trim(), PROMPT_MAX));
+
+    let total = items.len();
+    if total > limit {
+        items.drain(..total - limit);
+    }
+    ParsedTranscript {
+        prompt,
+        items,
+        total,
+        final_output: structured.or(last_text).map(|s| truncate(&s, TEXT_MAX)),
+    }
+}
+
+/// Lee el archivo entero, o si es muy grande su principio (donde está el prompt) y su
+/// cola. Devuelve `(texto, parcial, bytes)`.
+fn read_transcript_text(path: &Path) -> std::io::Result<(String, bool, u64)> {
+    let mut file = fs::File::open(path)?;
+    let len = file.metadata()?.len();
+    if len <= TRANSCRIPT_MAX_READ {
+        let mut buf = Vec::with_capacity(len as usize);
+        file.read_to_end(&mut buf)?;
+        return Ok((String::from_utf8_lossy(&buf).into_owned(), false, len));
+    }
+    let mut head = Vec::new();
+    file.by_ref().take(TRANSCRIPT_HEAD).read_to_end(&mut head)?;
+    let head = String::from_utf8_lossy(&head);
+    // Solo líneas completas del principio.
+    let head = head.rsplit_once('\n').map_or("", |(h, _)| h);
+    let tail_len = TRANSCRIPT_MAX_READ - TRANSCRIPT_HEAD;
+    file.seek(SeekFrom::Start(len - tail_len))?;
+    let mut tail = Vec::new();
+    file.take(tail_len).read_to_end(&mut tail)?;
+    let tail = String::from_utf8_lossy(&tail);
+    let tail = tail.split_once('\n').map_or("", |(_, r)| r);
+    Ok((format!("{head}\n{tail}"), true, len))
+}
+
+/// Transcript del agente `agent_id` del workflow `wf_id`. `Ok(None)` si no hay archivo.
+/// Los ids tienen que venir validados con `is_valid_path_id`.
+pub fn read_agent_transcript(
+    session_dir: &Path,
+    wf_id: &str,
+    agent_id: &str,
+    limit: usize,
+) -> Result<Option<Transcript>, String> {
+    if !is_valid_path_id(wf_id) || !is_valid_path_id(agent_id) {
+        return Err("Invalid workflow or agent id.".into());
+    }
+    let dir = wf_live_dir(session_dir, wf_id);
+    let path = dir.join(format!("agent-{agent_id}.jsonl"));
+    let (text, partial, bytes) = match read_transcript_text(&path) {
+        Ok(r) => r,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(e) => return Err(format!("Couldn't read the transcript: {e}")),
+    };
+    let meta = fs::read_to_string(dir.join(format!("agent-{agent_id}.meta.json")))
+        .ok()
+        .and_then(|t| serde_json::from_str::<RawAgentMeta>(&t).ok());
+    let parsed = parse_transcript(&text, limit);
+    Ok(Some(Transcript {
+        agent_id: agent_id.to_string(),
+        label: meta.as_ref().and_then(|m| m.description.clone()),
+        model: meta.as_ref().and_then(|m| m.model.clone()),
+        phase: meta.and_then(|m| m.workflow_phase),
+        prompt: parsed.prompt,
+        omitted: (parsed.total - parsed.items.len()) as u32,
+        total_items: parsed.total as u32,
+        items: parsed.items,
+        final_output: parsed.final_output,
+        partial,
+        bytes,
+    }))
 }
 
 // ---------------------------------------------------------------------------
@@ -877,11 +1215,166 @@ mod tests {
     }
 
     #[test]
+    fn agents_json_exposes_blocked_on_permission() {
+        // Entrada real de una sesión --bg esperando aprobación de un Write (claude 2.1.281).
+        let text = r#"[{"pid":21111,"id":"af5deb85","cwd":"/Users/me/Code/nodal-sandbox",
+          "kind":"background","startedAt":1790198688952,"sessionId":"af5deb85-3fe1-4ea9-b172-00b68389e167",
+          "name":"create perm-test.txt","status":"waiting","waitingFor":"permission prompt","state":"blocked"}]"#;
+        let r = &parse_agents_json(text).unwrap()[0];
+        assert_eq!(r.state.as_deref(), Some("blocked"));
+        assert_eq!(r.status.as_deref(), Some("waiting"));
+        assert_eq!(r.waiting_for.as_deref(), Some("permission prompt"));
+        assert!(r.is_in_progress());
+    }
+
+    #[test]
+    fn linear_issue_result_is_typed() {
+        let v: Value = serde_json::from_str(
+            r#"{"issue":"ACME-4","status":"green","pr":"https://github.com/o/r/pull/3","branch":"feat/acme-4",
+            "workdir":"/w/run-acme-4","states":{"inReview":"In Review"},"children":["ACME-35"],"levels":[["ACME-35"]],
+            "plan":null,"unmetAcceptance":["Works offline", 3],"nits":["Extract hook"," "]}"#,
+        )
+        .unwrap();
+        let r = parse_result(Some(&v)).unwrap();
+        assert_eq!(r.issue.as_deref(), Some("ACME-4"));
+        assert_eq!(r.pr.as_deref(), Some("https://github.com/o/r/pull/3"));
+        assert_eq!(r.branch.as_deref(), Some("feat/acme-4"));
+        assert_eq!(r.workdir.as_deref(), Some("/w/run-acme-4"));
+        assert_eq!(r.unmet_acceptance, Some(vec!["Works offline".to_string()]));
+        assert_eq!(r.nits, Some(vec!["Extract hook".to_string()]));
+        assert!(r.raw.unwrap().contains("\"children\""));
+
+        // Otro workflow: sin campos conocidos, pero con el JSON crudo.
+        let demo = read_run_detail(&fixtures_projects().join(project_slug(SANDBOX)).join(DONE_SESSION)).unwrap();
+        let res = demo.result.unwrap();
+        assert_eq!((res.pr, res.unmet_acceptance, res.nits), (None, None, None));
+        assert!(res.raw.unwrap().contains("\"tema\": \"volcanes\""));
+
+        // PR que no es URL web: se descarta. `null` o ausente: sin resultado.
+        let v: Value = serde_json::from_str(r#"{"pr":"javascript:alert(1)","nits":"no-lista"}"#).unwrap();
+        let r = parse_result(Some(&v)).unwrap();
+        assert_eq!((r.pr, r.nits), (None, None));
+        assert_eq!(parse_result(Some(&Value::Null)), None);
+        assert_eq!(parse_result(None), None);
+        assert_eq!(parse_result(Some(&Value::String("hecho".into()))).unwrap().raw.as_deref(), Some("hecho"));
+    }
+
+    #[test]
+    fn transcript_from_real_fixture() {
+        let dir = fixtures_projects().join(project_slug(SANDBOX)).join(DONE_SESSION);
+        let t = read_agent_transcript(&dir, "wf_2450b7a8-254", "a1007a0f03db17270", 200).unwrap().unwrap();
+        assert_eq!(t.label.as_deref(), Some("revisar:volcanes-famosos"));
+        assert_eq!(t.model.as_deref(), Some("claude-sonnet-5"));
+        assert_eq!(t.phase.as_deref(), Some("Revisar"));
+        // Sin el marco del harness y sin la indentación.
+        let prompt = t.prompt.unwrap();
+        assert!(prompt.starts_with("Leé /Users/me/Code/nodal-sandbox/demo-out/04-volcanes-famosos.md"), "{prompt}");
+        assert!(!prompt.contains("Workflow harness"));
+        // thinking vacío (firmado) se omite: Bash, texto, StructuredOutput.
+        assert_eq!(t.total_items, 3);
+        assert_eq!(t.omitted, 0);
+        match &t.items[0] {
+            TranscriptItem::ToolUse { name, summary, result, .. } => {
+                assert_eq!(name, "Bash");
+                assert!(summary.as_deref().unwrap().starts_with("cat /Users/me/Code/nodal-sandbox/demo-out/04"));
+                let r = result.as_ref().unwrap();
+                assert!(r.text.starts_with("# Volcanes famosos del mundo"));
+                assert!(!r.is_error);
+            }
+            other => panic!("{other:?}"),
+        }
+        assert!(matches!(&t.items[1], TranscriptItem::Text { text, .. } if text.starts_with("160 palabras")));
+        assert!(t.final_output.unwrap().contains("\"ok\": true"));
+        assert!(!t.partial);
+
+        // Límite: solo los últimos N.
+        let t = read_agent_transcript(&dir, "wf_2450b7a8-254", "a1007a0f03db17270", 1).unwrap().unwrap();
+        assert_eq!((t.items.len(), t.omitted, t.total_items), (1, 2, 3));
+        assert!(matches!(&t.items[0], TranscriptItem::ToolUse { name, .. } if name == "StructuredOutput"));
+
+        // Sin archivo → None; ids con rutas → error.
+        assert_eq!(read_agent_transcript(&dir, "wf_2450b7a8-254", "nope", 10).unwrap(), None);
+        assert!(read_agent_transcript(&dir, "wf_2450b7a8-254", "../x", 10).is_err());
+        assert!(read_agent_transcript(&dir, "..", "a1", 10).is_err());
+    }
+
+    #[test]
+    fn transcript_tolerates_errors_arrays_and_long_text() {
+        let long = "x".repeat(TEXT_MAX + 50);
+        let lines = [
+            r#"{"type":"user","message":{"role":"user","content":"Tarea sin marco"}}"#.to_string(),
+            r#"{"type":"attachment","attachment":{"type":"skill_listing","content":"user assistant"}}"#.to_string(),
+            format!(r#"{{"type":"assistant","message":{{"content":[{{"type":"thinking","thinking":"pienso"}},{{"type":"text","text":"{long}"}}]}}}}"#),
+            r#"{"type":"assistant","message":{"content":[{"type":"tool_use","id":"t1","name":"Read","input":{"file_path":"/a/b.rs"}}]}}"#.to_string(),
+            r#"{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"t1","is_error":true,"content":[{"type":"text","text":"File not found"},{"type":"image"}]}]}}"#.to_string(),
+            r#"{"type":"user","message":{"content":"¿seguís?"}}"#.to_string(),
+            r#"{"type":"assistant","message":{"content":[{"type":"tool_use","id":"t2","name":"Bash","input":{}}]}}"#.to_string(),
+            r#"{"type":"assistant","message":{"content":[{"type":"text","te"#.to_string(),
+        ];
+        let p = parse_transcript(&lines.join("\n"), 100);
+        assert_eq!(p.prompt.as_deref(), Some("Tarea sin marco"));
+        assert_eq!(p.total, 5);
+        assert!(matches!(&p.items[0], TranscriptItem::Thinking { text, .. } if text == "pienso"));
+        assert!(matches!(&p.items[1], TranscriptItem::Text { truncated: true, text } if text.chars().count() == TEXT_MAX + 1));
+        match &p.items[2] {
+            TranscriptItem::ToolUse { summary, result: Some(r), .. } => {
+                assert_eq!(summary.as_deref(), Some("/a/b.rs"));
+                assert!(r.is_error);
+                assert_eq!(r.text, "File not found\n[image]");
+            }
+            other => panic!("{other:?}"),
+        }
+        assert!(matches!(&p.items[3], TranscriptItem::User { text, .. } if text == "¿seguís?"));
+        // Tool sin resultado todavía (agente corriendo) e input vacío.
+        assert!(matches!(&p.items[4], TranscriptItem::ToolUse { result: None, input: None, summary: None, .. }));
+        // Sin StructuredOutput: la salida final es el último texto.
+        assert!(p.final_output.unwrap().starts_with("xxx"));
+    }
+
+    #[test]
+    fn path_ids() {
+        assert!(is_valid_path_id("wf_2450b7a8-254"));
+        assert!(is_valid_path_id("a1007a0f03db17270"));
+        for bad in ["", "..", "a/b", "a\\b", "-rf", "wf_x.json", "a b"] {
+            assert!(!is_valid_path_id(bad), "{bad}");
+        }
+    }
+
+    #[test]
     fn session_without_workflows_has_no_detail() {
         let tmp = std::env::temp_dir().join(format!("agent-desk-runs-test-{}", std::process::id()));
         fs::create_dir_all(&tmp).unwrap();
         assert_eq!(read_run_detail(&tmp), None);
         let _ = fs::remove_dir_all(&tmp);
+    }
+
+    /// Todos los transcripts de workflows de esta máquina: ninguno falla y se miden tiempos.
+    #[test]
+    #[ignore]
+    fn real_transcripts_on_disk() {
+        let projects = claude_config_dir().unwrap().join("projects");
+        let (mut n, mut slowest) = (0, (std::time::Duration::ZERO, PathBuf::new()));
+        for proj in fs::read_dir(&projects).unwrap().flatten() {
+            for sess in fs::read_dir(proj.path()).into_iter().flatten().flatten() {
+                let wfs = sess.path().join("subagents").join("workflows");
+                for wf in fs::read_dir(&wfs).into_iter().flatten().flatten() {
+                    let wf_id = wf.file_name().to_string_lossy().into_owned();
+                    for f in fs::read_dir(wf.path()).into_iter().flatten().flatten() {
+                        let name = f.file_name().to_string_lossy().into_owned();
+                        let Some(agent) = name.strip_prefix("agent-").and_then(|s| s.strip_suffix(".jsonl")) else { continue };
+                        let t0 = std::time::Instant::now();
+                        let t = read_agent_transcript(&sess.path(), &wf_id, agent, 200).unwrap().unwrap();
+                        let dt = t0.elapsed();
+                        assert!(t.items.len() <= 200);
+                        if dt > slowest.0 {
+                            slowest = (dt, f.path());
+                        }
+                        n += 1;
+                    }
+                }
+            }
+        }
+        eprintln!("{n} transcripts; slowest {:?} {}", slowest.0, slowest.1.display());
     }
 
     /// Contra los datos reales de esta máquina: `cargo test -- --ignored`.

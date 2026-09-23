@@ -40,7 +40,7 @@ pub fn init(app: &AppHandle) -> Result<(), String> {
         .path()
         .app_data_dir()
         .map(|d| d.join(store::FILE_NAME))
-        .map_err(|e| format!("No se encontró la carpeta de datos de la app: {e}"))?;
+        .map_err(|e| format!("Couldn't find the app data folder: {e}"))?;
     let config_path = config::config_path(app)?;
     let data = match store::load_from(&store_path) {
         Ok(d) => d,
@@ -48,7 +48,7 @@ pub fn init(app: &AppHandle) -> Result<(), String> {
             // No perder el archivo: se aparta y se arranca vacío.
             let backup = store_path.with_extension(format!("json.corrupt-{}", store::now_ms()));
             let _ = std::fs::rename(&store_path, &backup);
-            eprintln!("issue-runs: {e}; se movió a {}", backup.display());
+            eprintln!("issue-runs: {e}; moved to {}", backup.display());
             StoreData::default()
         }
     };
@@ -68,7 +68,7 @@ pub fn init(app: &AppHandle) -> Result<(), String> {
 async fn blocking<T: Send + 'static>(f: impl FnOnce() -> Result<T, String> + Send + 'static) -> Result<T, String> {
     tauri::async_runtime::spawn_blocking(f)
         .await
-        .map_err(|e| format!("Fallo interno: {e}"))?
+        .map_err(|e| format!("Internal error: {e}"))?
 }
 
 async fn persist(inner: &Inner, data: &StoreData) -> Result<(), String> {
@@ -111,7 +111,7 @@ async fn pump(inner: &Inner) -> Result<(), String> {
     };
 
     for run in to_launch {
-        let result = runs::launch_run(run.cwd.clone(), run.prompt()).await;
+        let result = runs::launch_with(run.cwd.clone(), run.prompt(), &run.options).await;
         let mut data = inner.data.lock().await;
         let entry = data.runs.iter_mut().find(|r| {
             r.issue_id == run.issue_id && r.queued_at == run.queued_at && r.status == IssueRunStatus::Launching
@@ -158,7 +158,7 @@ pub async fn list_workflows(repo_path: Option<String>) -> Result<Vec<WorkflowInf
     let repo = repo_path.map(|p| p.trim().to_string()).filter(|p| !p.is_empty());
     if let Some(r) = &repo {
         if !Path::new(r).is_absolute() {
-            return Err(format!("La ruta del repo tiene que ser absoluta: {r}"));
+            return Err(format!("The repo path must be absolute: {r}"));
         }
     }
     blocking(move || Ok(workflows::list_from(user_workflows_dir().as_deref(), repo.as_deref().map(Path::new)))).await
@@ -186,20 +186,24 @@ pub async fn launch_issue_run(
     let identifier = identifier.trim().to_string();
     let workflow = workflow.trim().to_string();
     if issue_id.trim().is_empty() {
-        return Err("Falta el id de la issue.".into());
+        return Err("Missing issue id.".into());
     }
     if !is_valid_identifier(&identifier) {
-        return Err(format!("Identificador de issue inválido: «{identifier}»."));
+        return Err(format!("Invalid issue identifier: \"{identifier}\"."));
     }
     if !workflows::is_valid_workflow_name(&workflow) {
-        return Err(format!("Nombre de workflow inválido: «{workflow}»."));
+        return Err(format!("Invalid workflow name: \"{workflow}\"."));
     }
 
     let cfg = load_config(&inner).await?;
     let project_id = project_id.filter(|p| !p.trim().is_empty());
-    let repo = config::resolve(&cfg, &team_id, project_id.as_deref()).ok_or_else(|| {
-        format!("{identifier} no tiene un repo mapeado para su team/proyecto. Configuralo en Ajustes.")
+    let mapping = config::resolve_mapping(&cfg, &team_id, project_id.as_deref()).ok_or_else(|| {
+        format!("{identifier} has no repo mapped for its team/project. Set one up in Settings → Repos.")
     })?;
+    let repo = mapping.path.clone();
+    // Se validan ya (y no recién al lanzar) para que el error llegue a quien lanza.
+    let options = runs::options::normalize(&mapping.launch_options())
+        .map_err(|e| format!("The repo settings for {repo} are invalid:\n{}", e.join("\n")))?;
     let (repo_ok, catalog) = {
         let repo = repo.clone();
         blocking(move || {
@@ -209,11 +213,11 @@ pub async fn launch_issue_run(
         .await?
     };
     if !repo_ok {
-        return Err(format!("La carpeta del repo mapeado no existe: {repo}"));
+        return Err(format!("The mapped repo folder doesn't exist: {repo}"));
     }
     if !catalog.iter().any(|w| w.name == workflow) {
         return Err(format!(
-            "No existe el workflow «{workflow}» ni en ~/.claude/workflows ni en {repo}/.claude/workflows."
+            "Workflow \"{workflow}\" not found in ~/.claude/workflows or {repo}/.claude/workflows."
         ));
     }
 
@@ -226,9 +230,9 @@ pub async fn launch_issue_run(
         if let Some(cur) = current {
             if store::is_active(cur, live.as_deref(), now) {
                 let what = match cur.status {
-                    IssueRunStatus::Queued => "ya está en cola",
-                    IssueRunStatus::Launching => "se está lanzando",
-                    _ => "ya tiene un run en curso",
+                    IssueRunStatus::Queued => "is already queued",
+                    IssueRunStatus::Launching => "is launching",
+                    _ => "already has a run in progress",
                 };
                 return Err(format!("{identifier} {what}."));
             }
@@ -244,6 +248,7 @@ pub async fn launch_issue_run(
             launched_at: None,
             status: IssueRunStatus::Queued,
             error: None,
+            options,
         };
         data.runs.push(entry.clone());
         if let Err(e) = persist(&inner, &data).await {
@@ -275,12 +280,12 @@ pub async fn cancel_queued(state: State<'_, IssueRunsState>, issue_id: String) -
     let inner = state.0.clone();
     let mut data = inner.data.lock().await;
     if data.runs.iter().any(|r| r.issue_id == issue_id && r.status == IssueRunStatus::Launching) {
-        return Err("El run ya se está lanzando; esperá a que arranque y detenelo con Stop.".into());
+        return Err("The run is already launching; wait for it to start and stop it with Stop.".into());
     }
     let before = data.runs.len();
     data.runs.retain(|r| !(r.issue_id == issue_id && r.status == IssueRunStatus::Queued));
     if data.runs.len() == before {
-        return Err("Esa issue no tiene runs en cola.".into());
+        return Err("That issue has no queued runs.".into());
     }
     persist(&inner, &data).await
 }
@@ -288,13 +293,13 @@ pub async fn cancel_queued(state: State<'_, IssueRunsState>, issue_id: String) -
 #[tauri::command]
 pub async fn stop_run(run_id: String) -> Result<(), String> {
     if !is_valid_run_id(&run_id) {
-        return Err(format!("Id de run inválido: «{run_id}»."));
+        return Err(format!("Invalid run id: \"{run_id}\"."));
     }
     let mut cmd = claude_bin::claude_command()?;
     cmd.args(["stop", &run_id]);
     let out = claude_bin::output_with_timeout(cmd, STOP_TIMEOUT, "`claude stop`").await?;
     if !out.status.success() {
-        return Err(format!("`claude stop {run_id}` falló: {}", claude_bin::error_text(&out)));
+        return Err(format!("`claude stop {run_id}` failed: {}", claude_bin::error_text(&out)));
     }
     Ok(())
 }
@@ -324,10 +329,10 @@ fn attach_script(claude: &Path, run_id: &str) -> Vec<String> {
 #[tauri::command]
 pub async fn attach_run(run_id: String) -> Result<(), String> {
     if !is_valid_run_id(&run_id) {
-        return Err(format!("Id de run inválido: «{run_id}»."));
+        return Err(format!("Invalid run id: \"{run_id}\"."));
     }
     if !cfg!(target_os = "macos") {
-        return Err("Attach solo está disponible en macOS (usa Terminal.app).".into());
+        return Err("Attach is only available on macOS (it uses Terminal.app).".into());
     }
     let claude = claude_bin::resolve_claude()?;
     let mut cmd = tokio::process::Command::new("/usr/bin/osascript");
@@ -337,7 +342,7 @@ pub async fn attach_run(run_id: String) -> Result<(), String> {
     cmd.stdin(std::process::Stdio::null());
     let out = claude_bin::output_with_timeout(cmd, OSASCRIPT_TIMEOUT, "osascript").await?;
     if !out.status.success() {
-        return Err(format!("No se pudo abrir Terminal: {}", claude_bin::error_text(&out)));
+        return Err(format!("Couldn't open Terminal: {}", claude_bin::error_text(&out)));
     }
     Ok(())
 }

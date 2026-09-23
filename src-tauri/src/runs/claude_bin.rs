@@ -40,20 +40,26 @@ fn is_executable(p: &Path) -> bool {
     }
 }
 
-/// Ruta del binario `claude`: primero el PATH, después `~/.local/bin/claude` y afines.
-pub fn resolve_claude() -> Result<PathBuf, String> {
+/// Ruta de un ejecutable: primero el PATH, después los directorios conocidos.
+pub fn resolve_bin(name: &str) -> Option<PathBuf> {
     let from_path = std::env::var_os("PATH")
         .map(|p| std::env::split_paths(&p).collect::<Vec<_>>())
         .unwrap_or_default();
-    from_path
-        .into_iter()
-        .chain(extra_dirs())
-        .map(|d| d.join("claude"))
-        .find(|c| is_executable(c))
-        .ok_or_else(|| {
-            "No se encontró el ejecutable `claude` ni en el PATH ni en ~/.local/bin. ¿Está instalado Claude Code?"
-                .to_string()
-        })
+    from_path.into_iter().chain(extra_dirs()).map(|d| d.join(name)).find(|c| is_executable(c))
+}
+
+/// `name` listo para configurar: sin stdin y con PATH ampliado.
+pub fn tool_command(name: &str) -> Option<Command> {
+    let mut cmd = Command::new(resolve_bin(name)?);
+    cmd.env("PATH", augmented_path()).stdin(Stdio::null());
+    Some(cmd)
+}
+
+/// Ruta del binario `claude`: primero el PATH, después `~/.local/bin/claude` y afines.
+pub fn resolve_claude() -> Result<PathBuf, String> {
+    resolve_bin("claude").ok_or_else(|| {
+        "Couldn't find the `claude` executable in PATH or ~/.local/bin. Is Claude Code installed?".to_string()
+    })
 }
 
 fn augmented_path() -> OsString {
@@ -78,12 +84,12 @@ pub fn claude_command() -> Result<Command, String> {
 /// Ejecuta y espera la salida completa; si pasa `limit`, mata el proceso.
 pub async fn output_with_timeout(mut cmd: Command, limit: Duration, what: &str) -> Result<Output, String> {
     cmd.stdout(Stdio::piped()).stderr(Stdio::piped()).kill_on_drop(true);
-    let child = cmd.spawn().map_err(|e| format!("No se pudo ejecutar {what}: {e}"))?;
+    let child = cmd.spawn().map_err(|e| format!("Couldn't run {what}: {e}"))?;
     match tokio::time::timeout(limit, child.wait_with_output()).await {
         Ok(Ok(out)) => Ok(out),
-        Ok(Err(e)) => Err(format!("Falló {what}: {e}")),
+        Ok(Err(e)) => Err(format!("{what} failed: {e}")),
         // Al soltar el futuro se suelta el hijo y `kill_on_drop` lo mata.
-        Err(_) => Err(format!("{what} no respondió en {} s y se canceló.", limit.as_secs())),
+        Err(_) => Err(format!("{what} didn't respond within {} s and was cancelled.", limit.as_secs())),
     }
 }
 
