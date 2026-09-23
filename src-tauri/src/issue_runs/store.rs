@@ -6,7 +6,7 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
-use crate::runs::types::RunSummary;
+use crate::runs::types::{LaunchOptions, RunSummary};
 
 pub const FILE_NAME: &str = "issue-runs.json";
 /// Historial máximo guardado (los en cola nunca se descartan).
@@ -47,6 +47,9 @@ pub struct IssueRun {
     pub status: IssueRunStatus,
     #[serde(default)]
     pub error: Option<String>,
+    /// Model/effort/permission mode del repo, fijados al encolar.
+    #[serde(default, skip_serializing_if = "LaunchOptions::is_empty")]
+    pub options: LaunchOptions,
 }
 
 impl IssueRun {
@@ -72,14 +75,14 @@ pub fn now_ms() -> i64 {
 /// anterior no se sabe si llegó a lanzarse: pasa a `failed` con explicación.
 pub fn load_from(path: &Path) -> Result<StoreData, String> {
     let mut data: StoreData = match std::fs::read_to_string(path) {
-        Ok(s) => serde_json::from_str(&s).map_err(|e| format!("{} está corrupto: {e}", path.display()))?,
+        Ok(s) => serde_json::from_str(&s).map_err(|e| format!("{} is corrupt: {e}", path.display()))?,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => StoreData::default(),
-        Err(e) => return Err(format!("No se pudo leer {}: {e}", path.display())),
+        Err(e) => return Err(format!("Couldn't read {}: {e}", path.display())),
     };
     for r in data.runs.iter_mut().filter(|r| r.status == IssueRunStatus::Launching) {
         r.status = IssueRunStatus::Failed;
         r.error = Some(
-            "La app se cerró mientras se lanzaba el run; revisá la lista de runs antes de reintentar.".into(),
+            "The app closed while the run was launching; check the runs list before retrying.".into(),
         );
     }
     Ok(data)
@@ -88,12 +91,12 @@ pub fn load_from(path: &Path) -> Result<StoreData, String> {
 /// Escritura atómica: temporal + rename.
 pub fn save_to(path: &Path, data: &StoreData) -> Result<(), String> {
     if let Some(dir) = path.parent() {
-        std::fs::create_dir_all(dir).map_err(|e| format!("No se pudo crear {}: {e}", dir.display()))?;
+        std::fs::create_dir_all(dir).map_err(|e| format!("Couldn't create {}: {e}", dir.display()))?;
     }
     let json = serde_json::to_string_pretty(data).map_err(|e| e.to_string())?;
     let tmp = path.with_extension(format!("json.{}.tmp", std::process::id()));
-    std::fs::write(&tmp, json).map_err(|e| format!("No se pudo escribir {}: {e}", tmp.display()))?;
-    std::fs::rename(&tmp, path).map_err(|e| format!("No se pudo guardar {}: {e}", path.display()))
+    std::fs::write(&tmp, json).map_err(|e| format!("Couldn't write {}: {e}", tmp.display()))?;
+    std::fs::rename(&tmp, path).map_err(|e| format!("Couldn't save {}: {e}", path.display()))
 }
 
 /// Recorta el historial viejo (terminados), sin tocar los en cola ni los que se lanzan.
@@ -119,7 +122,7 @@ pub fn is_active(r: &IssueRun, live: Option<&[RunSummary]>, now: i64) -> bool {
         IssueRunStatus::Launched => {
             let Some(live) = live else { return false };
             match live.iter().find(|s| Some(&s.id) == r.run_id.as_ref()) {
-                Some(s) => s.state.as_deref() == Some("working"),
+                Some(s) => s.is_in_progress(),
                 None => r.launched_at.is_some_and(|t| now - t < LAUNCH_GRACE_MS),
             }
         }
@@ -129,6 +132,8 @@ pub fn is_active(r: &IssueRun, live: Option<&[RunSummary]>, now: i64) -> bool {
 /// Slots ocupados: toda sesión en background `working` (sea nuestra o no), más los
 /// nuestros que se están lanzando o que se lanzaron hace poco y aún no figuran.
 pub fn occupied_slots(runs: &[IssueRun], live: &[RunSummary], now: i64) -> usize {
+    // `blocked` (esperando permiso/input) no ocupa slot: no consume y, si nadie responde,
+    // frenaría la cola entera. Sí cuenta en `is_active` (no se relanza la issue).
     let working = live.iter().filter(|s| s.state.as_deref() == Some("working")).count();
     let pending = runs
         .iter()
@@ -191,6 +196,7 @@ mod tests {
             launched_at: None,
             status,
             error: None,
+            options: LaunchOptions::default(),
         }
     }
 
@@ -212,6 +218,7 @@ mod tests {
             pid: None,
             status: None,
             state: Some(state.into()),
+            waiting_for: None,
         }
     }
 
@@ -278,6 +285,15 @@ mod tests {
         assert!(!is_active(&launched("c", "cccc", NOW - LAUNCH_GRACE_MS), Some(&lv), NOW));
     }
 
+    #[test]
+    fn blocked_sessions_stay_active_but_free_their_slot() {
+        // `state: "blocked"` = esperando un permiso o input: sigue viva, pero no frena la cola.
+        let lv = vec![live("aaaa", "blocked"), live("bbbb", "failed")];
+        assert!(is_active(&launched("a", "aaaa", 1), Some(&lv), NOW));
+        assert!(!is_active(&launched("b", "bbbb", 1), Some(&lv), NOW));
+        assert_eq!(occupied_slots(&[], &lv, NOW), 0);
+    }
+
     fn temp_file(name: &str) -> std::path::PathBuf {
         let d = std::env::temp_dir().join(format!("agent-desk-issue-runs-{}-{name}", std::process::id()));
         let _ = std::fs::remove_dir_all(&d);
@@ -300,14 +316,14 @@ mod tests {
         assert_eq!(back.runs[0], data.runs[0]);
         assert_eq!(back.runs[1], data.runs[1]);
         assert_eq!(back.runs[2].status, IssueRunStatus::Failed);
-        assert!(back.runs[2].error.as_deref().unwrap().contains("se cerró"));
+        assert!(back.runs[2].error.as_deref().unwrap().contains("closed while"));
 
         // camelCase en disco, como el resto de la app.
         let raw = std::fs::read_to_string(&path).unwrap();
         assert!(raw.contains("\"issueId\"") && raw.contains("\"queued\""), "{raw}");
 
         std::fs::write(&path, "{nope").unwrap();
-        assert!(load_from(&path).unwrap_err().contains("corrupto"));
+        assert!(load_from(&path).unwrap_err().contains("corrupt"));
         std::fs::remove_dir_all(path.parent().unwrap().parent().unwrap()).unwrap();
     }
 

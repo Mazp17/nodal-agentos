@@ -60,7 +60,19 @@ export interface IssueDetail {
   commentsTruncated: boolean;
 }
 
-export interface RepoMapping { teamId?: string; projectId?: string; path: string }
+export type Effort = "low" | "medium" | "high" | "xhigh" | "max";
+export type FinishMode = "pr" | "branch";
+/** Espejo de config::RepoMapping. model/effort/permissionMode se pasan a `claude --bg`; finish lo leen los workflows. */
+export interface RepoMapping {
+  teamId?: string;
+  projectId?: string;
+  path: string;
+  model?: string;
+  effort?: Effort;
+  permissionMode?: string;
+  /** Default "pr". */
+  finish?: FinishMode;
+}
 export interface AppConfig { repos: RepoMapping[]; concurrency: number }
 
 export type LinearErrorKind =

@@ -3,16 +3,19 @@
 
 pub mod claude_bin;
 pub(crate) mod claude_fs;
+pub mod options;
 pub mod types;
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::time::Duration;
 
+use tauri::AppHandle;
 use tokio::io::{AsyncBufReadExt, AsyncRead, BufReader};
 use tokio::sync::mpsc;
 
-use types::{RunDetail, RunRef, RunSummary};
+use crate::config;
+use types::{LaunchOptions, RunDetail, RunRef, RunSummary, Transcript};
 
 const LAUNCH_TIMEOUT: Duration = Duration::from_secs(30);
 const LIST_TIMEOUT: Duration = Duration::from_secs(15);
@@ -29,32 +32,34 @@ fn forward_lines<R: AsyncRead + Unpin + Send + 'static>(stream: R, tx: mpsc::Unb
     });
 }
 
-/// Lanza `claude --bg <prompt>` en `cwd` y devuelve el id corto de la sesión.
-/// El prompt va como argumento propio (sin shell), así que no hay nada que escapar.
-#[tauri::command]
-pub async fn launch_run(cwd: String, prompt: String) -> Result<RunRef, String> {
+/// Lanza `claude --bg [flags] <prompt>` en `cwd` y devuelve el id corto de la sesión.
+/// Todo va como argumentos propios (sin shell), así que no hay nada que escapar; los
+/// flags se validan contra las listas permitidas de `options`.
+pub async fn launch_with(cwd: String, prompt: String, opts: &LaunchOptions) -> Result<RunRef, String> {
     let dir = Path::new(&cwd);
     if !dir.is_absolute() {
-        return Err(format!("La carpeta tiene que ser una ruta absoluta: {cwd}"));
+        return Err(format!("The folder must be an absolute path: {cwd}"));
     }
     if !dir.is_dir() {
-        return Err(format!("La carpeta no existe o no es un directorio: {cwd}"));
+        return Err(format!("The folder doesn't exist or isn't a directory: {cwd}"));
     }
     if prompt.trim().is_empty() {
-        return Err("El prompt está vacío.".into());
+        return Err("The prompt is empty.".into());
     }
     // `claude` lo interpretaría como una opción, no como prompt.
     if prompt.trim_start().starts_with('-') {
-        return Err("El prompt no puede empezar con «-».".into());
+        return Err("The prompt can't start with \"-\".".into());
     }
+    let flags = options::to_args(opts)?;
 
     let mut cmd = claude_bin::claude_command()?;
     cmd.arg("--bg")
+        .args(&flags)
         .arg(&prompt)
         .current_dir(dir)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-    let mut child = cmd.spawn().map_err(|e| format!("No se pudo ejecutar `claude --bg`: {e}"))?;
+    let mut child = cmd.spawn().map_err(|e| format!("Couldn't run `claude --bg`: {e}"))?;
 
     // No se espera a EOF: basta con ver la línea `backgrounded · <id>` en cualquiera de
     // los dos streams (no hay garantía de que la sesión en background suelte los pipes).
@@ -93,20 +98,38 @@ pub async fn launch_run(cwd: String, prompt: String) -> Result<RunRef, String> {
             }
             let _ = child.start_kill();
             let code = match status {
-                Ok(Ok(s)) => s.code().map(|c| format!(" (código {c})")).unwrap_or_default(),
+                Ok(Ok(s)) => s.code().map(|c| format!(" (exit code {c})")).unwrap_or_default(),
                 _ => String::new(),
             };
             let seen: String = seen.trim().chars().take(500).collect();
-            Err(format!("`claude --bg` terminó sin devolver el id de la sesión{code}: {seen}"))
+            Err(format!("`claude --bg` exited without returning the session id{code}: {seen}"))
         }
         Err(_) => {
             let _ = child.start_kill();
             Err(format!(
-                "`claude --bg` no devolvió el id de la sesión en {} s. Puede haberse lanzado igual: revisá la lista antes de reintentar.",
+                "`claude --bg` didn't return the session id within {} s. It may have launched anyway: check the runs list before retrying.",
                 LAUNCH_TIMEOUT.as_secs()
             ))
         }
     }
+}
+
+/// Lanzamiento manual: usa el model/effort/permission mode del repo si `cwd` está mapeado.
+#[tauri::command]
+pub async fn launch_run(app: AppHandle, cwd: String, prompt: String) -> Result<RunRef, String> {
+    let path = config::config_path(&app)?;
+    let key = cwd.clone();
+    // Una config ilegible no bloquea el lanzamiento manual: se lanza sin flags.
+    let opts = tauri::async_runtime::spawn_blocking(move || match config::load_from(&path) {
+        Ok(cfg) => config::find_by_path(&cfg, &key).map(|m| m.launch_options()).unwrap_or_default(),
+        Err(e) => {
+            eprintln!("launch_run: {e}; launching without repo options");
+            LaunchOptions::default()
+        }
+    })
+    .await
+    .map_err(|e| format!("Internal error: {e}"))?;
+    launch_with(cwd, prompt, &opts).await
 }
 
 /// Sesiones en background (`claude agents --json --all`), más recientes primero.
@@ -116,9 +139,15 @@ pub async fn list_runs() -> Result<Vec<RunSummary>, String> {
     cmd.args(["agents", "--json", "--all"]);
     let out = claude_bin::output_with_timeout(cmd, LIST_TIMEOUT, "`claude agents`").await?;
     if !out.status.success() {
-        return Err(format!("`claude agents` falló: {}", claude_bin::error_text(&out)));
+        return Err(format!("`claude agents` failed: {}", claude_bin::error_text(&out)));
     }
     claude_fs::parse_agents_json(&String::from_utf8_lossy(&out.stdout))
+}
+
+fn projects_dir() -> Result<PathBuf, String> {
+    Ok(claude_fs::claude_config_dir()
+        .ok_or("Couldn't locate the Claude Code folder ($HOME is not set).")?
+        .join("projects"))
 }
 
 /// Detalle del workflow más reciente de la sesión. `None` si la sesión todavía no tiene
@@ -126,17 +155,48 @@ pub async fn list_runs() -> Result<Vec<RunSummary>, String> {
 #[tauri::command]
 pub async fn get_run_detail(session_id: String, cwd: String) -> Result<Option<RunDetail>, String> {
     if !claude_fs::is_valid_session_id(&session_id) {
-        return Err(format!("Id de sesión inválido: {session_id}"));
+        return Err(format!("Invalid session id: {session_id}"));
     }
     tauri::async_runtime::spawn_blocking(move || -> Result<Option<RunDetail>, String> {
-        let projects = claude_fs::claude_config_dir()
-            .ok_or("No se pudo ubicar la carpeta de Claude Code (falta $HOME).")?
-            .join("projects");
-        Ok(claude_fs::find_session_dir(&projects, &cwd, &session_id)
-            .and_then(|dir| claude_fs::read_run_detail(&dir)))
+        let projects = projects_dir()?;
+        Ok(claude_fs::find_session_dir(&projects, &cwd, &session_id).and_then(|dir| claude_fs::read_run_detail(&dir)))
     })
     .await
-    .map_err(|e| format!("Error interno leyendo la sesión: {e}"))?
+    .map_err(|e| format!("Internal error reading the session: {e}"))?
+}
+
+/// Transcript de un subagente de un workflow: prompt, conversación (recortada) y salida.
+/// `limit`: cuántos items devolver como mucho, los más recientes (default 200, máx. 2000).
+/// `None` si el agente todavía no tiene archivo.
+#[tauri::command]
+pub async fn get_agent_transcript(
+    session_id: String,
+    cwd: String,
+    run_id: String,
+    agent_id: String,
+    limit: Option<u32>,
+) -> Result<Option<Transcript>, String> {
+    if !claude_fs::is_valid_session_id(&session_id) {
+        return Err(format!("Invalid session id: {session_id}"));
+    }
+    if !run_id.starts_with("wf_") || !claude_fs::is_valid_path_id(&run_id) {
+        return Err(format!("Invalid workflow run id: {run_id}"));
+    }
+    if !claude_fs::is_valid_path_id(&agent_id) {
+        return Err(format!("Invalid agent id: {agent_id}"));
+    }
+    let limit = limit
+        .unwrap_or(claude_fs::TRANSCRIPT_DEFAULT_LIMIT)
+        .clamp(1, claude_fs::TRANSCRIPT_MAX_LIMIT) as usize;
+    tauri::async_runtime::spawn_blocking(move || -> Result<Option<Transcript>, String> {
+        let projects = projects_dir()?;
+        let Some(dir) = claude_fs::find_session_dir(&projects, &cwd, &session_id) else {
+            return Ok(None);
+        };
+        claude_fs::read_agent_transcript(&dir, &run_id, &agent_id, limit)
+    })
+    .await
+    .map_err(|e| format!("Internal error reading the transcript: {e}"))?
 }
 
 #[cfg(test)]
@@ -149,7 +209,7 @@ mod tests {
     #[ignore]
     fn real_list_and_detail() {
         let runs = tauri::async_runtime::block_on(list_runs()).expect("list_runs");
-        eprintln!("{} runs en background", runs.len());
+        eprintln!("{} background runs", runs.len());
         for r in runs.iter().take(5) {
             let cwd = r.cwd.clone().unwrap_or_default();
             let d = tauri::async_runtime::block_on(get_run_detail(r.session_id.clone(), cwd)).expect("detail");
@@ -161,7 +221,25 @@ mod tests {
                 d.map(|d| (d.workflow_id, d.source, d.current_phase, d.agents.len()))
             );
         }
-        let err = tauri::async_runtime::block_on(launch_run("/no/existe".into(), "x".into())).unwrap_err();
-        assert_eq!(err, "La carpeta no existe o no es un directorio: /no/existe");
+        let err = tauri::async_runtime::block_on(launch_with("/no/existe".into(), "x".into(), &LaunchOptions::default()))
+            .unwrap_err();
+        assert_eq!(err, "The folder doesn't exist or isn't a directory: /no/existe");
+    }
+
+    #[test]
+    fn transcript_rejects_traversal_ids() {
+        let call = |run: &str, agent: &str| {
+            tauri::async_runtime::block_on(get_agent_transcript(
+                "ddb91222-57b2-4ae4-a0bb-d1c5993dc1c8".into(),
+                "/x".into(),
+                run.into(),
+                agent.into(),
+                None,
+            ))
+        };
+        assert!(call("wf_../../etc", "a1").unwrap_err().contains("Invalid workflow run id"));
+        assert!(call("../wf_x", "a1").unwrap_err().contains("Invalid workflow run id"));
+        assert!(call("wf_abc", "../../x").unwrap_err().contains("Invalid agent id"));
+        assert!(call("wf_abc", "a/b").unwrap_err().contains("Invalid agent id"));
     }
 }

@@ -1,14 +1,15 @@
 import { useEffect, useState } from "react";
-import { revealItemInDir } from "@tauri-apps/plugin-opener";
+import { openUrl, revealItemInDir } from "@tauri-apps/plugin-opener";
 import type { Issue } from "../linear/api";
 import { formatDateTime, formatDuration, formatTokens } from "../../lib/format";
-import { useFocusTrap } from "../../ui/useFocusTrap";
 import { RunBadge } from "../linear/Board";
 import type { RunActions } from "./actions";
+import { AGENT_STATUS, AgentTranscript, modelName } from "./AgentTranscript";
 import { getRunDetail } from "./api";
 import type { RunView } from "./status";
-import type { AgentInfo, AgentState, RunDetail } from "./types";
+import { isInProgress, type AgentInfo, type RunDetail, type RunResult } from "./types";
 import "./run-detail.css";
+import "./transcript.css";
 
 const DETAIL_POLL_MS = 3000;
 
@@ -22,7 +23,7 @@ function useRunDetail(view: RunView): RunDetail | null | undefined {
   const need = view.detail === undefined && run !== undefined;
   const sid = run?.sessionId;
   const cwd = run?.cwd ?? view.cwd ?? "";
-  const working = run?.state === "working";
+  const working = isInProgress(run);
 
   useEffect(() => {
     if (!need || !sid) return;
@@ -48,16 +49,6 @@ function useRunDetail(view: RunView): RunDetail | null | undefined {
   return own && own.sid === sid ? own.detail : undefined;
 }
 
-const AGENT_STATUS: Record<AgentState, { label: string; tone: string }> = {
-  done: { label: "Done", tone: "ok" },
-  running: { label: "Running", tone: "accent" },
-  queued: { label: "Pending", tone: "muted" },
-  failed: { label: "Failed", tone: "danger" },
-  unknown: { label: "Unknown", tone: "muted" },
-};
-
-const modelName = (m: string | null) => m?.replace(/^claude-/, "") ?? "—";
-
 function lastAction(a: AgentInfo): string {
   if (!a.lastToolName) return "—";
   return a.lastToolSummary ? `${a.lastToolName} ${a.lastToolSummary}` : a.lastToolName;
@@ -76,7 +67,7 @@ interface Props {
 export function RunDetailView({ view, issue, backLabel, actions, onBack, onOpenIssue, onRunAgain }: Props) {
   const detail = useRunDetail(view);
   const [agentIdx, setAgentIdx] = useState<number | null>(null);
-  const working = view.run?.state === "working";
+  const working = isInProgress(view.run);
   const title = issue?.title ?? view.run?.name ?? (view.identifier ? view.identifier : "Manual run");
   const phases = detail?.phases ?? [];
   const cur = detail?.currentPhaseIndex ?? null;
@@ -178,6 +169,11 @@ export function RunDetailView({ view, issue, backLabel, actions, onBack, onOpenI
               Open issue
             </button>
           )}
+          {detail?.result?.pr && (
+            <button type="button" className="btn btn-primary" onClick={() => openPr(detail.result!.pr!)}>
+              Open PR ↗
+            </button>
+          )}
           {stoppedEarly && onRunAgain && (
             <button type="button" className="btn btn-primary" onClick={onRunAgain}>
               Run again
@@ -185,6 +181,32 @@ export function RunDetailView({ view, issue, backLabel, actions, onBack, onOpenI
           )}
         </div>
       </div>
+
+      {view.waitingFor && (
+        // Claude Code no expone forma de aprobar/denegar desde fuera de la sesión (ni CLI
+        // ni socket): solo se detecta vía `claude agents` y se responde con attach.
+        <div className="rd-alert rd-alert-amber" role="status">
+          <span className="dot dot-lg pulse" aria-hidden />
+          <div className="rd-alert-body">
+            <span className="rd-alert-title">
+              {view.waitingFor === "permission prompt"
+                ? `${view.identifier ?? "This run"} is waiting for permission`
+                : `${view.identifier ?? "This run"} is waiting for you`}
+            </span>
+            <span className="rd-alert-text">
+              {view.waitingFor === "permission prompt"
+                ? "A tool call needs approval. Claude Code only lets you allow or deny it from inside the session."
+                : `Blocked on: ${view.waitingFor}.`}
+            </span>
+            {view.runId && <span className="rd-alert-mono">claude attach {view.runId}</span>}
+          </div>
+          {view.runId && (
+            <button type="button" className="btn btn-amber" disabled={actions.busy} onClick={() => void actions.attach(view)}>
+              Attach to respond
+            </button>
+          )}
+        </div>
+      )}
 
       {view.ir?.status === "failed" && (
         <div className="rd-alert rd-alert-red" role="alert">
@@ -291,10 +313,11 @@ export function RunDetailView({ view, issue, backLabel, actions, onBack, onOpenI
       </div>
 
       {agent && (
-        <AgentPanel
+        <AgentTranscript
           agent={agent}
           phaseNum={phases.findIndex((p) => p.title === agent.phase) + 1 || null}
           view={view}
+          workflowId={detail?.workflowId ?? null}
           onClose={() => setAgentIdx(null)}
         />
       )}
@@ -307,6 +330,89 @@ const RESULT_TEXT: Record<string, string> = {
   yellow: "Result: yellow",
   red: "Result: red",
 };
+
+function openPr(url: string) {
+  openUrl(url).catch((e) => console.error("open PR", e));
+}
+
+/** "#482" para URLs de PR de GitHub; si no, la URL tal cual. */
+function prLabel(url: string): string {
+  const m = /\/pull\/(\d+)/.exec(url);
+  return m ? `#${m[1]}` : url;
+}
+
+/** PR, rama, criterios no cumplidos y nits (forma de linear-issue); si no hay nada de eso, el JSON crudo. */
+function ResultFields({ r }: { r: RunResult }) {
+  const known = r.pr != null || r.branch != null || r.unmetAcceptance != null || r.nits != null;
+  return (
+    <>
+      {r.pr ? (
+        <button type="button" className="rd-pr" onClick={() => openPr(r.pr!)}>
+          <span className="rd-pr-title">Pull request {prLabel(r.pr)} ↗</span>
+          {r.branch && <span className="rd-pr-sub mono">{r.branch}</span>}
+        </button>
+      ) : (
+        r.branch && (
+          <div className="rd-res-sec">
+            <span className="rd-res-label">Branch · no PR</span>
+            <span className="rd-res-mono">{r.branch}</span>
+          </div>
+        )
+      )}
+      {r.where && (
+        <div className="rd-res-sec">
+          <span className="rd-res-label">Stopped at</span>
+          <span className="rd-res-item">{r.where}</span>
+        </div>
+      )}
+      {r.unmetAcceptance != null && (
+        <div className="rd-res-sec">
+          <span className="rd-res-label">Unmet acceptance criteria</span>
+          {r.unmetAcceptance.length === 0 ? (
+            <div className="rd-res-item">
+              <span className="rd-res-mark tone-ok" aria-hidden>
+                ✓
+              </span>
+              All criteria met
+            </div>
+          ) : (
+            <ul className="rd-res-list">
+              {r.unmetAcceptance.map((u, i) => (
+                <li key={i} className="rd-res-item">
+                  <span className="rd-res-mark tone-danger" aria-hidden>
+                    ✕
+                  </span>
+                  <span>{u}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+      {r.nits != null && r.nits.length > 0 && (
+        <div className="rd-res-sec">
+          <span className="rd-res-label">Reviewer nits</span>
+          <ul className="rd-res-list">
+            {r.nits.map((n, i) => (
+              <li key={i} className="rd-res-item rd-res-nit">
+                <span className="rd-res-mark tone-muted" aria-hidden>
+                  ·
+                </span>
+                <span>{n}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {r.raw && (
+        <details className="rd-res-raw" open={!known}>
+          <summary>{known ? "Full result" : "Workflow result"}</summary>
+          <pre>{r.raw}</pre>
+        </details>
+      )}
+    </>
+  );
+}
 
 function ResultCard({ view, detail }: { view: RunView; detail: RunDetail | null | undefined }) {
   let body;
@@ -322,14 +428,15 @@ function ResultCard({ view, detail }: { view: RunView; detail: RunDetail | null 
         The result appears when the run finishes.{view.phaseName ? ` Currently in ${view.phaseName}.` : ""}
       </p>
     );
-  } else if (detail?.resultStatus && detail.source === "final") {
+  } else if (detail?.source === "final" && (detail.resultStatus || detail.result)) {
     body = (
       <>
         <div className={`rd-result-status tone-${view.tone}`}>
           <span className="dot dot-lg" aria-hidden />
-          {RESULT_TEXT[detail.resultStatus] ?? detail.resultStatus}
+          {detail.resultStatus ? (RESULT_TEXT[detail.resultStatus] ?? detail.resultStatus) : view.label}
         </div>
         {detail.status && <p className="rd-result-note">Workflow status: {detail.status}</p>}
+        {detail.result && <ResultFields r={detail.result} />}
       </>
     );
   } else {
@@ -376,89 +483,5 @@ function ResultCard({ view, detail }: { view: RunView; detail: RunDetail | null 
         </p>
       )}
     </div>
-  );
-}
-
-/** Subagente: lo que expone `get_run_detail` (sin prompt ni conversación completa). */
-function AgentPanel({
-  agent,
-  phaseNum,
-  view,
-  onClose,
-}: {
-  agent: AgentInfo;
-  phaseNum: number | null;
-  view: RunView;
-  onClose: () => void;
-}) {
-  const ref = useFocusTrap<HTMLDivElement>(onClose);
-  const st = AGENT_STATUS[agent.state];
-  const sub = [
-    modelName(agent.model),
-    agent.phase ? `Phase${phaseNum ? ` ${phaseNum}` : ""} ${agent.phase}` : null,
-    view.identifier,
-    view.runId,
-  ]
-    .filter(Boolean)
-    .join(" · ");
-  const outTone = agent.state === "done" ? "ok" : agent.state === "failed" ? "danger" : "none";
-
-  return (
-    <>
-      <div className="scrim" onClick={onClose} aria-hidden />
-      <div ref={ref} className="sheet agent-panel" role="dialog" aria-modal="true" aria-labelledby="agent-title" tabIndex={-1}>
-        <header className="ap-head">
-          <div className="ap-head-main">
-            <div className="ap-title-row">
-              <h2 id="agent-title" className="ap-title">
-                {agent.label}
-              </h2>
-              <span className={`rd-agent-st tone-${st.tone}`}>
-                <span className={`dot dot-sm ${agent.state === "running" ? "pulse" : ""}`} aria-hidden />
-                {st.label}
-              </span>
-            </div>
-            <span className="ap-sub">{sub}</span>
-          </div>
-          <button type="button" className="icon-btn" aria-label="Close" onClick={onClose}>
-            ✕
-          </button>
-        </header>
-        <div className="ap-body">
-          <dl className="rd-stats">
-            <div>
-              <dt>Tokens</dt>
-              <dd className="num">{formatTokens(agent.tokens)}</dd>
-            </div>
-            <div>
-              <dt>Tool calls</dt>
-              <dd className="num">{agent.toolCalls ?? "—"}</dd>
-            </div>
-            <div>
-              <dt>Time</dt>
-              <dd className="num">{formatDuration(agent.durationMs)}</dd>
-            </div>
-          </dl>
-          <section className="ap-section">
-            <h3 className="section-label">Last action</h3>
-            {agent.lastToolName ? (
-              <div className="ap-tool">
-                <span className="ap-tool-name">{agent.lastToolName}</span>
-                {agent.lastToolSummary && <span className="ap-tool-arg">{agent.lastToolSummary}</span>}
-              </div>
-            ) : (
-              <p className="rd-result-note">No tool calls recorded.</p>
-            )}
-          </section>
-          <section className="ap-section">
-            <h3 className="section-label">Final output</h3>
-            <div className={`ap-out ap-out-${outTone}`}>
-              {agent.resultPreview ??
-                (agent.state === "running" ? "Still running…" : agent.state === "queued" ? "Not started." : "No output recorded.")}
-            </div>
-          </section>
-        </div>
-      </div>
-    </>
   );
 }

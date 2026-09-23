@@ -22,6 +22,7 @@ async fn claude_version() -> Result<String, String> {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_dialog::init())
         .manage(linear::LinearState::new())
         .setup(|app| {
             issue_runs::init(app.handle())?;
@@ -32,6 +33,7 @@ pub fn run() {
             runs::launch_run,
             runs::list_runs,
             runs::get_run_detail,
+            runs::get_agent_transcript,
             linear::linear_key_status,
             linear::linear_set_api_key,
             linear::linear_clear_api_key,
@@ -42,6 +44,8 @@ pub fn run() {
             config::get_config,
             config::save_config,
             config::resolve_repo,
+            config::resolve_repo_config,
+            config::resolve_git_root,
             issue_runs::list_workflows,
             issue_runs::launch_issue_run,
             issue_runs::list_issue_runs,

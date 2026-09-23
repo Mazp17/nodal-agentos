@@ -1,0 +1,246 @@
+import { useEffect, useState } from "react";
+import { formatDuration, formatTokens } from "../../lib/format";
+import { useFocusTrap } from "../../ui/useFocusTrap";
+import { getAgentTranscript } from "./api";
+import type { RunView } from "./status";
+import type { AgentInfo, AgentState, Transcript, TranscriptItem } from "./types";
+
+const POLL_MS = 3000;
+const DEFAULT_LIMIT = 200;
+const FULL_LIMIT = 1000;
+/** Archivos grandes: re-leerlos cada 3 s cuesta; se espacia el polling. */
+const BIG_FILE = 4 * 1024 * 1024;
+const POLL_BIG_MS = 10_000;
+
+export const AGENT_STATUS: Record<AgentState, { label: string; tone: string }> = {
+  done: { label: "Done", tone: "ok" },
+  running: { label: "Running", tone: "accent" },
+  queued: { label: "Pending", tone: "muted" },
+  failed: { label: "Failed", tone: "danger" },
+  unknown: { label: "Unknown", tone: "muted" },
+};
+
+export const modelName = (m: string | null) => m?.replace(/^claude-/, "") ?? "—";
+
+type Load = { status: "loading" } | { status: "error"; error: string } | { status: "ok"; transcript: Transcript | null };
+
+/** Transcript del agente; se repite mientras el agente siga corriendo. */
+function useTranscript(sessionId: string | null, cwd: string, wfId: string | null, agentId: string | null, live: boolean, limit: number): Load {
+  const [state, setState] = useState<{ key: string; load: Load } | null>(null);
+  const key = `${sessionId}|${wfId}|${agentId}|${limit}`;
+
+  useEffect(() => {
+    if (!sessionId || !wfId || !agentId) return;
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout>;
+    let lastBytes = 0;
+    const load = async () => {
+      try {
+        const t = await getAgentTranscript(sessionId, cwd, wfId, agentId, limit);
+        lastBytes = t?.bytes ?? 0;
+        if (!cancelled) setState({ key, load: { status: "ok", transcript: t } });
+      } catch (e) {
+        // Un fallo en un poll no borra lo que ya se mostraba.
+        if (!cancelled) setState((prev) => (prev?.key === key && prev.load.status === "ok" ? prev : { key, load: { status: "error", error: String(e) } }));
+      }
+      if (!cancelled && live) timer = setTimeout(load, lastBytes > BIG_FILE ? POLL_BIG_MS : POLL_MS);
+    };
+    void load();
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [sessionId, cwd, wfId, agentId, live, limit, key]);
+
+  return state?.key === key ? state.load : { status: "loading" };
+}
+
+function firstLine(s: string): string {
+  const line = s.split("\n").find((l) => l.trim()) ?? "";
+  return line.length > 200 ? `${line.slice(0, 200)}…` : line;
+}
+
+function ToolCard({ item }: { item: Extract<TranscriptItem, { kind: "toolUse" }> }) {
+  const [open, setOpen] = useState(false);
+  const r = item.result;
+  const expandable = item.input != null || (r != null && r.text.includes("\n"));
+  return (
+    <div className={`tr-tool ${r?.isError ? "tr-tool-err" : ""}`}>
+      <button
+        type="button"
+        className="tr-tool-head"
+        aria-expanded={expandable ? open : undefined}
+        disabled={!expandable}
+        onClick={() => setOpen(!open)}
+      >
+        <span className="tr-tool-name">{item.name}</span>
+        <span className="tr-tool-arg ellipsis">{item.summary ?? ""}</span>
+        {expandable && <span className="tr-tool-chev" aria-hidden>{open ? "▾" : "▸"}</span>}
+      </button>
+      {open && item.input && <pre className="tr-pre">{item.input}</pre>}
+      <div className="tr-tool-res">
+        {r == null ? (
+          <span className="tr-dim">→ waiting for result…</span>
+        ) : open ? (
+          <pre className="tr-pre tr-pre-res">
+            {r.text || "(empty)"}
+            {r.truncated && <span className="tr-dim"> [truncated]</span>}
+          </pre>
+        ) : (
+          <>→ {r.isError ? "Error: " : ""}{firstLine(r.text) || "(empty)"}</>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function Item({ item }: { item: TranscriptItem }) {
+  switch (item.kind) {
+    case "text":
+      return <div className="tr-msg">{item.text}</div>;
+    case "user":
+      return (
+        <div className="tr-user">
+          <span className="tr-user-label">Message to agent</span>
+          {item.text}
+        </div>
+      );
+    case "thinking":
+      return (
+        <details className="tr-thinking">
+          <summary>Thinking</summary>
+          <div>{item.text}</div>
+        </details>
+      );
+    case "toolUse":
+      return <ToolCard item={item} />;
+  }
+}
+
+/** Pantalla "Subagent transcript": prompt, conversación y salida final de un subagente. */
+export function AgentTranscript({
+  agent,
+  phaseNum,
+  view,
+  workflowId,
+  onClose,
+}: {
+  agent: AgentInfo;
+  phaseNum: number | null;
+  view: RunView;
+  workflowId: string | null;
+  onClose: () => void;
+}) {
+  const ref = useFocusTrap<HTMLDivElement>(onClose);
+  const [limit, setLimit] = useState(DEFAULT_LIMIT);
+  const st = AGENT_STATUS[agent.state];
+  const live = agent.state === "running" && (view.run?.state === "working" || view.run?.state === "blocked");
+  const load = useTranscript(view.run?.sessionId ?? null, view.run?.cwd ?? view.cwd ?? "", workflowId, agent.agentId, live, limit);
+  const t = load.status === "ok" ? load.transcript : null;
+
+  const sub = [
+    modelName(agent.model ?? t?.model ?? null),
+    agent.phase ? `Phase${phaseNum ? ` ${phaseNum}` : ""} ${agent.phase}` : null,
+    view.identifier,
+    view.runId,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+  const output =
+    // Mientras corre, el "último texto" es charla intermedia, no la salida final.
+    (agent.state === "running" ? null : t?.finalOutput) ??
+    agent.resultPreview ??
+    (agent.state === "running"
+      ? view.waitingFor === "permission prompt"
+        ? "Paused: the run is waiting for permission."
+        : "Still running…"
+      : agent.state === "queued"
+        ? "Not started."
+        : "No output recorded.");
+  const outTone = agent.state === "done" ? "ok" : agent.state === "failed" ? "danger" : "none";
+
+  return (
+    <>
+      <div className="scrim" onClick={onClose} aria-hidden />
+      <div ref={ref} className="sheet agent-panel" role="dialog" aria-modal="true" aria-labelledby="agent-title" tabIndex={-1}>
+        <header className="ap-head">
+          <div className="ap-head-main">
+            <div className="ap-title-row">
+              <h2 id="agent-title" className="ap-title">
+                {agent.label}
+              </h2>
+              <span className={`rd-agent-st tone-${st.tone}`}>
+                <span className={`dot dot-sm ${agent.state === "running" ? "pulse" : ""}`} aria-hidden />
+                {st.label}
+              </span>
+            </div>
+            <span className="ap-sub">{sub}</span>
+          </div>
+          <button type="button" className="icon-btn" aria-label="Close" onClick={onClose}>
+            ✕
+          </button>
+        </header>
+        <div className="ap-body">
+          <dl className="rd-stats">
+            <div>
+              <dt>Tokens</dt>
+              <dd className="num">{formatTokens(agent.tokens)}</dd>
+            </div>
+            <div>
+              <dt>Tool calls</dt>
+              <dd className="num">{agent.toolCalls ?? "—"}</dd>
+            </div>
+            <div>
+              <dt>Time</dt>
+              <dd className="num">{formatDuration(agent.durationMs)}</dd>
+            </div>
+          </dl>
+
+          {!agent.agentId || !workflowId || !view.run ? (
+            <p className="rd-result-note">No transcript available for this agent.</p>
+          ) : load.status === "loading" ? (
+            <p className="rd-result-note">Loading transcript…</p>
+          ) : load.status === "error" ? (
+            <p className="rd-result-note tr-error" role="alert">
+              Couldn't load the transcript: {load.error}
+            </p>
+          ) : t === null ? (
+            <p className="rd-result-note">
+              {agent.state === "queued" ? "The agent hasn't started yet." : "No transcript file for this agent yet."}
+            </p>
+          ) : (
+            <>
+              <section className="ap-section">
+                <h3 className="section-label">Input prompt</h3>
+                <div className="tr-prompt">{t.prompt ?? "—"}</div>
+              </section>
+              <section className="ap-section tr-conv" aria-live={live ? "polite" : undefined}>
+                <h3 className="section-label">Conversation</h3>
+                {(t.omitted > 0 || t.partial) && (
+                  <div className="tr-omitted">
+                    {t.omitted > 0 && `${t.omitted} earlier item${t.omitted === 1 ? "" : "s"} hidden. `}
+                    {t.partial && "The transcript file is large; only its beginning and end were read. "}
+                    {t.omitted > 0 && limit < FULL_LIMIT && (
+                      <button type="button" className="btn btn-xs" onClick={() => setLimit(FULL_LIMIT)}>
+                        Show more
+                      </button>
+                    )}
+                  </div>
+                )}
+                {t.items.length === 0 && <p className="rd-result-note">No messages yet.</p>}
+                {t.items.map((it, i) => (
+                  <Item key={`${t.omitted + i}`} item={it} />
+                ))}
+              </section>
+            </>
+          )}
+
+          <section className="ap-section">
+            <h3 className="section-label">Final output</h3>
+            <div className={`ap-out ap-out-${outTone}`}>{output}</div>
+          </section>
+        </div>
+      </div>
+    </>
+  );
+}

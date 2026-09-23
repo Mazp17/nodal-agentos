@@ -1,4 +1,4 @@
-import type { IssueRun, RunDetail, RunSummary } from "./types";
+import { isInProgress, type IssueRun, type RunDetail, type RunSummary } from "./types";
 
 export type BadgeTone = "accent" | "ok" | "warn" | "danger" | "muted";
 
@@ -34,6 +34,8 @@ export interface RunView extends RunBadge {
   startedAt: number | null;
   /** Posición en la cola (1-based) si `kind === "queued"`. */
   queuePos: number | null;
+  /** La sesión está bloqueada esperando al usuario: "permission prompt", "input needed", ... */
+  waitingFor: string | null;
 }
 
 /** Espejo de `LAUNCH_GRACE_MS` en src-tauri/src/issue_runs/store.rs. */
@@ -54,6 +56,14 @@ function phaseLabel(detail: RunDetail | null | undefined): string | null {
 
 /** Estado de un run ya visible en `claude agents` (con o sin issue). */
 function fromSession(run: RunSummary, detail: RunDetail | null | undefined, title: string) {
+  if (run.state === "blocked") {
+    // Esperando al usuario (permiso, input): sigue viva y ocupa slot.
+    const label = run.waitingFor === "permission prompt" ? "Needs permission" : "Needs input";
+    return { kind: "running" as const, label, tone: "warn" as const, title: `${label} · ${title}`, active: true };
+  }
+  if (run.state === "failed") {
+    return { kind: "failed" as const, label: "Failed", tone: "danger" as const, title, active: false };
+  }
   if (run.state === "working") {
     // `null` = sesión sin workflow (p. ej. lanzada a mano): corre, pero sin fases.
     const label = phaseLabel(detail) ?? (detail === undefined ? "Starting" : "Running");
@@ -104,9 +114,9 @@ export function issueRunBadge(
 }
 
 function durationOf(run: RunSummary | undefined, detail: RunDetail | null | undefined): number | null {
-  if (detail?.durationMs != null && run?.state !== "working") return detail.durationMs;
+  if (detail?.durationMs != null && !isInProgress(run)) return detail.durationMs;
   if (run?.startedAt != null) {
-    if (run.state === "working") return Date.now() - run.startedAt;
+    if (isInProgress(run)) return Date.now() - run.startedAt;
     return detail?.durationMs ?? null;
   }
   return detail?.durationMs ?? null;
@@ -114,6 +124,7 @@ function durationOf(run: RunSummary | undefined, detail: RunDetail | null | unde
 
 function base(detail: RunDetail | null | undefined, run: RunSummary | undefined) {
   return {
+    waitingFor: run?.state === "blocked" ? (run.waitingFor ?? "input needed") : null,
     phaseIndex: detail?.currentPhaseIndex ?? null,
     phaseTotal: detail?.phases.length ?? 0,
     phaseName: detail?.currentPhase ?? null,
