@@ -8,6 +8,8 @@ const POLL_MS = 3000;
 const MAX_OTHER_RUNS = 6;
 /** Polls que se sigue pidiendo el detalle de un run terminado sin resumen final. */
 const SETTLE_TRIES = 3;
+/** Runs del historial (no vigentes) cuyo detalle también se pide, una vez cada uno. */
+const MAX_HISTORY_DETAILS = 40;
 
 export type Details = Record<string, RunDetail | null>;
 
@@ -72,7 +74,13 @@ export function useRuns(enabled: boolean): RunsState {
     const linked = currentIssueRuns(irs)
       .map((x) => findRun(all, x))
       .filter((x): x is RunSummary => x !== undefined);
-    const relevant = [...linked, ...otherRunsOf(all, irs)];
+    // Historial: se pide una vez (quedan `settled`) para pintar resultado, duración y tokens.
+    const history = [...irs]
+      .sort((a, b) => b.queuedAt - a.queuedAt)
+      .slice(0, MAX_HISTORY_DETAILS)
+      .map((x) => findRun(all, x))
+      .filter((x): x is RunSummary => x !== undefined && !linked.includes(x));
+    const relevant = [...new Set([...linked, ...history, ...otherRunsOf(all, irs)])];
     const pending = relevant.filter((x) => x.state === "working" || !settled.current.has(x.sessionId));
     const fetched = await Promise.all(
       pending.map(async (x) => {
@@ -140,7 +148,8 @@ export function useRuns(enabled: boolean): RunsState {
     const viewOf = (ir: IssueRun) => {
       const run = findRun(runs, ir);
       const pos = queued.indexOf(ir);
-      return viewOfIssueRun(ir, run, run ? details[run.sessionId] : undefined, pos >= 0 ? pos + 1 : null);
+      const isCurrent = current.some((c) => c.issueId === ir.issueId && c.queuedAt === ir.queuedAt);
+      return viewOfIssueRun(ir, run, run ? details[run.sessionId] : undefined, pos >= 0 ? pos + 1 : null, isCurrent);
     };
     const views = [
       ...[...issueRuns].sort((a, b) => b.queuedAt - a.queuedAt).map(viewOf),

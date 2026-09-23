@@ -10,6 +10,7 @@
   padding: var(--sp-5) var(--sp-8) 0;
   border-bottom: 1px solid var(--border);
 }
+.runs-tablist { display: flex; gap: var(--sp-1); }
 .runs-tab {
   height: 32px;
   display: flex;

@@ -1,7 +1,10 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useLayoutEffect, useRef } from "react";
 
 const FOCUSABLE =
   'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
+/** Diálogos montados, el último arriba: sólo ése atiende teclado. */
+const stack: HTMLElement[] = [];
 
 /**
  * Foco atrapado para diálogos: al montar enfoca `[data-autofocus]` (o el primer
@@ -11,7 +14,9 @@ const FOCUSABLE =
 export function useFocusTrap<T extends HTMLElement>(onEscape?: () => void) {
   const ref = useRef<T>(null);
   const escRef = useRef(onEscape);
-  escRef.current = onEscape;
+  useLayoutEffect(() => {
+    escRef.current = onEscape;
+  });
 
   useEffect(() => {
     const root = ref.current;
@@ -24,7 +29,11 @@ export function useFocusTrap<T extends HTMLElement>(onEscape?: () => void) {
       (root.querySelector<HTMLElement>("[data-autofocus]") ?? focusables()[0] ?? root).focus();
     }
 
+    stack.push(root);
+    // En `document` (no en el root): si el elemento enfocado se desmonta, el foco cae
+    // en el body y el diálogo igual tiene que responder a Escape y Tab.
     const onKey = (e: KeyboardEvent) => {
+      if (stack[stack.length - 1] !== root) return;
       if (e.key === "Escape" && escRef.current) {
         e.preventDefault();
         e.stopPropagation();
@@ -40,7 +49,10 @@ export function useFocusTrap<T extends HTMLElement>(onEscape?: () => void) {
       const first = list[0];
       const last = list[list.length - 1];
       const current = document.activeElement;
-      if (e.shiftKey && (current === first || current === root)) {
+      if (!root.contains(current)) {
+        e.preventDefault();
+        (e.shiftKey ? last : first).focus();
+      } else if (e.shiftKey && (current === first || current === root)) {
         e.preventDefault();
         last.focus();
       } else if (!e.shiftKey && current === last) {
@@ -48,9 +60,10 @@ export function useFocusTrap<T extends HTMLElement>(onEscape?: () => void) {
         first.focus();
       }
     };
-    root.addEventListener("keydown", onKey);
+    document.addEventListener("keydown", onKey);
     return () => {
-      root.removeEventListener("keydown", onKey);
+      document.removeEventListener("keydown", onKey);
+      stack.splice(stack.indexOf(root), 1);
       // Solo se devuelve el foco si sigue dentro del diálogo (o se perdió en el body).
       if (previous?.isConnected && (root.contains(document.activeElement) || document.activeElement === document.body)) {
         previous.focus();

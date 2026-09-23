@@ -7,13 +7,16 @@ import type { RunsState } from "./useRuns";
 import { pickWorkflow, type WorkflowCatalogs } from "./useWorkflows";
 import type { WorkflowInfo } from "./types";
 
+/** Un workflow para todas, o uno por issue (p. ej. el elegido en cada card). */
+export type WorkflowChoice = string | null | ((issue: Issue) => string | null | undefined);
+
 export interface Launcher {
   /** Issues con un lanzamiento en vuelo (para deshabilitar botones). */
   pending: Set<string>;
   catalogFor: (issue: Issue) => WorkflowInfo[];
   workflowFor: (issue: Issue, wanted?: string | null) => string;
   /** Lanza (o encola) cada issue con su workflow; avisa con toasts. */
-  launch: (issues: Issue[], workflow?: string | null) => Promise<void>;
+  launch: (issues: Issue[], workflow?: WorkflowChoice) => Promise<void>;
 }
 
 export function useLauncher(
@@ -38,7 +41,7 @@ export function useLauncher(
   );
 
   const launch = useCallback(
-    async (issues: Issue[], workflow?: string | null) => {
+    async (issues: Issue[], workflow?: WorkflowChoice) => {
       const ids = issues.map((i) => i.id);
       setPending((p) => new Set([...p, ...ids]));
       const started: string[] = [];
@@ -52,7 +55,7 @@ export function useLauncher(
               identifier: issue.identifier,
               teamId: issue.team.id,
               projectId: issue.project?.id ?? null,
-              workflow: workflowFor(issue, workflow),
+              workflow: workflowFor(issue, typeof workflow === "function" ? workflow(issue) : workflow),
             });
             (ir.status === "queued" ? queued : started).push(issue.identifier);
           } catch (e) {
@@ -130,11 +133,15 @@ export function useRunActions(runs: RunsState): RunActions {
   const cancel = useCallback(
     async (v: RunView) => {
       if (!v.issueId) return false;
-      const ok = await wrap(() => cancelQueued(v.issueId!), `Couldn't remove ${name(v)} from the queue`);
-      if (ok) toast(`${name(v)} removed from queue`, "It will not run.", "muted");
+      // Sin esperar el refresh: quien llama puede navegar antes de que el run desaparezca.
+      const ok = await wrap(() => cancelQueued(v.issueId!), `Couldn't remove ${name(v)} from the queue`, false);
+      if (ok) {
+        toast(`${name(v)} removed from queue`, "It will not run.", "muted");
+        void runs.refresh();
+      }
       return ok;
     },
-    [wrap, toast],
+    [wrap, toast, runs],
   );
 
   return { busy, stop, attach, cancel };

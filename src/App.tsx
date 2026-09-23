@@ -52,7 +52,7 @@ function Desk() {
 
   const [view, setView] = useState<View>("board");
   const [runKey, setRunKey] = useState<string | null>(null);
-  const [runFrom, setRunFrom] = useState<"board" | "runs">("board");
+  const [runFrom, setRunFrom] = useState<NavView>("board");
   const [runsTab, setRunsTab] = useState<RunsTab>("active");
   const [section, setSection] = useState<SettingsSection>("linear");
   const [panelIssue, setPanelIssue] = useState<string | null>(null);
@@ -158,6 +158,13 @@ function Desk() {
     if (keyConfigured) void loadBoard();
   }, [keyConfigured, loadBoard]);
 
+  // El board cargó, así que la key funciona: si el viewer había fallado (p. ej. sin
+  // red), reintentarlo para que el sidebar no siga marcando Linear caído.
+  useEffect(() => {
+    if (lastSync && viewerError) void loadViewer();
+    // Sólo tras cada sync exitoso.
+  }, [lastSync]);
+
   // Si el team guardado ya no existe (key de otro workspace), volver a "todos".
   useEffect(() => {
     if (teamFilter && teams.length > 0 && !teams.some((t) => t.id === teamFilter)) {
@@ -173,6 +180,11 @@ function Desk() {
     setTeams([]);
     setBoardError(null);
     setViewer(null);
+    setViewerError(null);
+    setSelected(new Set());
+    setPanelIssue(null);
+    setRunKey(null);
+    setView("board");
     setKeyConfigured(false);
   }
 
@@ -184,7 +196,7 @@ function Desk() {
   }, []);
   const openRun = useCallback(
     (key: string) => {
-      setRunFrom((prev) => (view === "run" ? prev : view === "runs" ? "runs" : "board"));
+      setRunFrom((prev) => (view === "run" ? prev : view));
       setRunKey(key);
       setView("run");
       setPanelIssue(null);
@@ -254,17 +266,22 @@ function Desk() {
   };
 
   const activeRuns = runs.views.filter((v) => v.kind === "running" || v.kind === "starting");
-  const queuedCount = runs.views.filter((v) => v.kind === "queued").length;
-  const freeSlots = queuedCount > 0 ? 0 : Math.max(0, config.concurrency - activeRuns.length);
+  const queuedCount = runs.views.filter((v) => v.ir?.status === "queued").length;
+  // Igual que el backend: un run `launching` ya ocupa slot; la cola sale en orden.
+  const launchingCount = runs.views.filter((v) => v.ir?.status === "launching").length;
+  const freeSlots = queuedCount > 0 ? 0 : Math.max(0, config.concurrency - activeRuns.length - launchingCount);
 
-  const canLaunch = (i: Issue) => repoOf(i) !== null && !runs.currentView.get(i.id)?.active;
-  const selectedIssues = [...selected].map((id) => issueById.get(id)).filter((i): i is Issue => i !== undefined);
+  const canLaunch = (i: Issue) =>
+    repoOf(i) !== null && !runs.currentView.get(i.id)?.active && !launcher.pending.has(i.id);
+  // Sólo cuenta lo seleccionado que sigue visible (los filtros pueden ocultar cards elegidas).
+  const selectedIssues = visible.filter((i) => selected.has(i.id));
   const launchable = selectedIssues.filter(canLaunch);
   const skipped = selectedIssues.length - launchable.length;
   const willQueue = Math.max(0, launchable.length - freeSlots);
   const launchSelected = () => {
     if (!launchable.length) return;
-    void launcher.launch(launchable);
+    // Cada issue con el workflow que muestra su card.
+    void launcher.launch(launchable, (i) => picks[i.id]);
     setSelected(new Set());
   };
 
@@ -398,7 +415,7 @@ function Desk() {
         key={rv.key}
         view={rv}
         issue={issue}
-        backLabel={runFrom === "runs" ? "Runs" : "Board"}
+        backLabel={VIEW_TITLE[runFrom]}
         actions={actions}
         onBack={() => setView(runFrom)}
         onOpenIssue={setPanelIssue}
@@ -408,7 +425,7 @@ function Desk() {
       <EmptyState
         title="This run is no longer available"
         text="It was removed from the history or the queue."
-        action={{ label: `Back to ${runFrom === "runs" ? "Runs" : "Board"}`, onClick: () => setView(runFrom) }}
+        action={{ label: `Back to ${VIEW_TITLE[runFrom]}`, onClick: () => setView(runFrom) }}
       />
     );
   } else if (!board && boardError) {
@@ -561,9 +578,9 @@ function Desk() {
 
         <div className="content">{content}</div>
 
-        {view === "board" && selected.size > 0 && (
+        {view === "board" && selectedIssues.length > 0 && (
           <div className="selbar" role="region" aria-label="Selection">
-            <span className="selbar-label">{selected.size} selected</span>
+            <span className="selbar-label">{selectedIssues.length} selected</span>
             {(skipped > 0 || willQueue > 0) && (
               <span className="selbar-note">
                 {[skipped ? `${skipped} skipped (running or no repo)` : "", willQueue ? `${willQueue} will queue` : ""]

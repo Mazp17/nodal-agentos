@@ -30,11 +30,14 @@ interface Props {
 export function IssuePanel(p: Props) {
   const { issue, current } = p;
   const ref = useFocusTrap<HTMLDivElement>(p.onClose);
-  const [workflow, setWorkflow] = useState(p.defaultWorkflow);
+  const [picked, setPicked] = useState(p.defaultWorkflow);
   const who = issue.assignee?.displayName || issue.assignee?.name;
   const queued = current?.kind === "queued";
   const active = current?.active && !queued;
   const showLaunch = p.repo !== null && !current?.active;
+  // Si el catálogo cargó después y no trae lo elegido, vale el default (que sí está).
+  const workflow = !p.catalog.length || p.catalog.some((w) => w.name === picked) ? picked : p.defaultWorkflow;
+  const setWorkflow = setPicked;
   const options = p.catalog.length ? p.catalog : [{ name: workflow, description: null, whenToUse: null }];
 
   const meta: [string, string][] = [

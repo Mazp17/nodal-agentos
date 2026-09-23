@@ -55,23 +55,26 @@ function phaseLabel(detail: RunDetail | null | undefined): string | null {
 /** Estado de un run ya visible en `claude agents` (con o sin issue). */
 function fromSession(run: RunSummary, detail: RunDetail | null | undefined, title: string) {
   if (run.state === "working") {
-    const label = phaseLabel(detail) ?? (detail ? "Running" : "Starting");
+    // `null` = sesión sin workflow (p. ej. lanzada a mano): corre, pero sin fases.
+    const label = phaseLabel(detail) ?? (detail === undefined ? "Starting" : "Running");
     return { kind: "running" as const, label, tone: "accent" as const, title, active: true };
   }
   if (detail?.resultStatus && detail.source !== "live") {
     const r = detail.resultStatus;
     return { kind: "done" as const, label: RESULT_LABEL[r] ?? r, tone: RESULT_TONE[r] ?? "muted", title, active: false };
   }
-  if (detail === undefined) return { kind: "done" as const, label: "Finished", tone: "muted" as const, title, active: false };
   if (run.state === "stopped") return { kind: "failed" as const, label: "Stopped", tone: "danger" as const, title, active: false };
+  if (detail === undefined) return { kind: "done" as const, label: "Finished", tone: "muted" as const, title, active: false };
   // Terminó sin resumen final del workflow: quedó cortado a mitad de camino.
   return { kind: "failed" as const, label: "Interrupted", tone: "danger" as const, title, active: false };
 }
 
+/** `current = false` para runs del historial que ya no son el vigente de su issue. */
 export function issueRunBadge(
   ir: IssueRun,
   run: RunSummary | undefined,
   detail: RunDetail | null | undefined,
+  current = true,
 ): RunBadge & { kind: RunKind } {
   const title = `${ir.workflow} · open run`;
   if (ir.status === "failed") {
@@ -81,6 +84,10 @@ export function issueRunBadge(
   if (ir.status === "launching") return { kind: "queued", label: "Launching", tone: "muted", title, active: true };
   // Lanzado pero todavía no aparece en `claude agents`. Pasada la misma gracia que usa
   // el backend se deja relanzar.
+  if (!run && !current && ir.launchedAt != null) {
+    // Run viejo cuya sesión `claude agents` ya no lista: no hay nada más que decir de él.
+    return { kind: "done", label: "Not tracked", tone: "muted", title: "claude agents no longer lists this session", active: false };
+  }
   if (!run) {
     const fresh = ir.launchedAt != null && Date.now() - ir.launchedAt < LAUNCH_GRACE_MS;
     return fresh
@@ -121,8 +128,9 @@ export function viewOfIssueRun(
   run: RunSummary | undefined,
   detail: RunDetail | null | undefined,
   queuePos: number | null,
+  current = true,
 ): RunView {
-  const badge = issueRunBadge(ir, run, detail);
+  const badge = issueRunBadge(ir, run, detail, current);
   return {
     ...badge,
     label: badge.kind === "queued" && queuePos != null && ir.status === "queued" ? `Queued · #${queuePos}` : badge.label,

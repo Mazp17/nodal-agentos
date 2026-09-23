@@ -59,10 +59,12 @@ export function RunsView({ runs, issues, config, actions, tab, onTab, onOpenRun 
   return (
     <div className="runs">
       <div className="runs-main">
-        <div className="runs-tabs" role="tablist" aria-label="Runs">
+        <div className="runs-tabs">
+          <div className="runs-tablist" role="tablist" aria-label="Runs">
           {TABS.map((t) => (
             <button
               key={t.id}
+              id={`runs-tab-${t.id}`}
               type="button"
               role="tab"
               aria-selected={tab === t.id}
@@ -73,6 +75,7 @@ export function RunsView({ runs, issues, config, actions, tab, onTab, onOpenRun 
               <span className="runs-tab-count num">{counts[t.id]}</span>
             </button>
           ))}
+          </div>
           <button
             type="button"
             className="btn btn-sm runs-manual-toggle"
@@ -93,7 +96,7 @@ export function RunsView({ runs, issues, config, actions, tab, onTab, onOpenRun 
           <span className="text-right">Tokens</span>
           <span>Result</span>
         </div>
-        <div className="runs-rows" role="tabpanel">
+        <div className="runs-rows" role="tabpanel" aria-labelledby={`runs-tab-${tab}`}>
           {rows.map((v) => {
             const issue = v.issueId ? issues.get(v.issueId) : undefined;
             const ph = phaseOf(v);
@@ -141,7 +144,9 @@ export function RunsView({ runs, issues, config, actions, tab, onTab, onOpenRun 
           const issue = v.issueId ? issues.get(v.issueId) : undefined;
           return (
             <div key={v.key} className="queue-item">
-              <span className="queue-pos num">{k + 1}</span>
+              <span className="queue-pos num" title={v.ir?.status === "launching" ? "Launching" : undefined}>
+                {v.ir?.status === "launching" ? "→" : v.queuePos ?? k + 1}
+              </span>
               <button type="button" className="queue-open" onClick={() => onOpenRun(v.key)}>
                 <span className="queue-issue">{v.identifier}</span>
                 <span className="queue-t ellipsis">{issue?.title ?? v.workflow}</span>
