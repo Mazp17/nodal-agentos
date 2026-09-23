@@ -1,0 +1,1 @@
+{"agentType": "code-reviewer", "inheritedWorktreePath": "/Users/me/Code/repo/.claude/worktrees/agent-alive0000000001", "spawnedWithWorktree": true, "description": "Review tasks module", "toolUseId": "toolu_3", "parentAgentId": "alive0000000001", "spawnDepth": 2, "requestShape": "background", "requestNonInteractive": true, "model": "sonnet"}

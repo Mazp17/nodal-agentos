@@ -1,7 +1,9 @@
+mod activity;
 mod config;
 mod issue_runs;
 mod linear;
 mod runs;
+mod tasks;
 
 use std::time::Duration;
 
@@ -25,6 +27,7 @@ pub fn run() {
         .manage(linear::LinearState::new())
         .setup(|app| {
             issue_runs::init(app.handle())?;
+            tasks::init(app.handle())?;
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -47,6 +50,16 @@ pub fn run() {
             issue_runs::cancel_queued,
             issue_runs::attach_run,
             issue_runs::stop_run,
+            tasks::create_task,
+            tasks::update_task,
+            tasks::delete_task,
+            tasks::list_tasks,
+            tasks::set_task_done,
+            tasks::read_task_plan,
+            tasks::launch_task_run,
+            tasks::list_task_runs,
+            tasks::cancel_task_run,
+            activity::repo_activity,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
