@@ -11,7 +11,9 @@ import {
 } from "./features/linear/api";
 import { BoardView, ErrorState } from "./features/linear/Board";
 import { Onboarding, SettingsView } from "./features/linear/Settings";
+import { RunDrawer } from "./features/runs/RunDrawer";
 import { RunsPanel } from "./features/runs/RunsPanel";
+import { useRuns } from "./features/runs/useRuns";
 import "./App.css";
 
 const TEAM_FILTER_KEY = "agent-desk.teamFilter";
@@ -49,6 +51,12 @@ function App() {
   // Hasta que get_config responda bien, Ajustes no deja guardar (pisaría el archivo).
   const [configLoaded, setConfigLoaded] = useState(false);
   const [configError, setConfigError] = useState<string | null>(null);
+  const [drawerIssue, setDrawerIssue] = useState<string | null>(null);
+  const closeDrawer = useCallback(() => setDrawerIssue(null), []);
+
+  // Solo en el board: fuera de él el polling a `claude agents` no aporta.
+  const onBoard = keyConfigured === true && view === "board";
+  const runs = useRuns(onBoard);
 
   useEffect(() => {
     invoke<string>("claude_version")
@@ -158,7 +166,7 @@ function App() {
       </div>
     );
   } else {
-    content = <BoardView issues={board.issues} config={config} />;
+    content = <BoardView issues={board.issues} config={config} runs={runs} onOpenRun={setDrawerIssue} />;
   }
 
   const showBoardControls = keyConfigured && view === "board";
@@ -219,8 +227,8 @@ function App() {
       )}
       {configError && <div className="banner error">{configError}</div>}
       {content}
-      {/* Solo en el board: fuera de él el polling a `claude agents` no aporta. */}
-      {keyConfigured && view === "board" && <RunsPanel />}
+      {onBoard && <RunsPanel runs={runs} config={config} onOpenRun={setDrawerIssue} />}
+      {onBoard && drawerIssue && <RunDrawer issueId={drawerIssue} runs={runs} onClose={closeDrawer} />}
     </div>
   );
 }

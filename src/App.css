@@ -130,12 +130,35 @@ input:focus, select:focus, button:focus-visible { outline: 2px solid var(--accen
   border: 1px solid var(--border);
   border-radius: 6px;
   padding: 8px 10px;
-  cursor: pointer;
 }
 .card:hover { border-color: var(--muted); }
+.card-open {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  background: none;
+  border: 0;
+  padding: 0;
+  text-align: left;
+  cursor: pointer;
+  border-radius: 4px;
+}
+.card-open:hover .card-title { text-decoration: underline; }
 .card-top { display: flex; align-items: center; gap: 6px; font-size: 12px; }
 .card-id { color: var(--muted); font-family: ui-monospace, monospace; font-size: 11px; }
 .card-title { font-size: 13px; line-height: 1.35; font-weight: 500; }
+.card-actions { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.card-workflow {
+  flex: 1;
+  min-width: 0;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 2px 4px;
+  font-size: 12px;
+}
+.card-error { margin: 0; color: var(--danger); font-size: 11px; white-space: pre-line; }
+.btn-sm { padding: 2px 10px; font-size: 12px; min-height: 24px; }
 .card-meta { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; font-size: 11px; }
 
 .chip {

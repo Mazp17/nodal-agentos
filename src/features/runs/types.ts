@@ -61,3 +61,31 @@ export interface RunDetail {
   resultStatus: string | null;
   workflowCount: number;
 }
+
+export interface WorkflowInfo {
+  name: string;
+  description: string | null;
+  whenToUse: string | null;
+  source: "user" | "repo";
+  path: string;
+}
+
+export type IssueRunStatus = "queued" | "launching" | "launched" | "failed";
+
+export interface IssueRun {
+  issueId: string;
+  identifier: string;
+  workflow: string;
+  /** Id corto de `claude --bg`; `null` mientras está en cola. */
+  runId: string | null;
+  /** Se completa recién cuando la sesión aparece en `list_runs`. */
+  sessionId: string | null;
+  cwd: string;
+  /** Epoch en ms. */
+  queuedAt: number;
+  /** Epoch en ms. */
+  launchedAt: number | null;
+  status: IssueRunStatus;
+  /** Motivo si `status === "failed"`. */
+  error: string | null;
+}

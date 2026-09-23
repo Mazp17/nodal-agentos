@@ -1,8 +1,12 @@
 /* Panel de runs. Usa las variables de src/App.css (--bg, --panel, --border, --text,
    --muted, --danger), así que hereda el dark mode. */
 
+:root { --run-warn: #ca8a04; }
+@media (prefers-color-scheme: dark) {
+  :root { --run-warn: #facc15; }
+}
+
 .runs-panel {
-  --run-warn: #ca8a04;
   border-top: 1px solid var(--border);
   padding: 12px 20px 16px;
   max-height: 35vh;
@@ -14,11 +18,7 @@
   min-height: 0;
 }
 
-@media (prefers-color-scheme: dark) {
-  .runs-panel {
-    --run-warn: #facc15;
-  }
-}
+.runs-panel.collapsed { padding-bottom: 12px; }
 
 .runs-head {
   display: flex;
@@ -27,10 +27,19 @@
   gap: 12px;
   flex-wrap: wrap;
 }
-.runs-head h2 { font-size: 13px; font-weight: 600; margin: 0; }
+.runs-toggle {
+  background: none;
+  border: 0;
+  padding: 2px 4px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  border-radius: 4px;
+}
 .runs-count { color: var(--muted); font-weight: 400; margin-left: 4px; }
+.runs-subhead { font-size: 12px; font-weight: 600; color: var(--muted); margin: 4px 0 0; }
 
-.runs-form { display: flex; gap: 6px; flex: 1; justify-content: flex-end; min-width: 0; }
+.runs-form { display: flex; gap: 6px; min-width: 0; }
 .runs-input {
   font: inherit;
   font-size: 12px;
@@ -43,18 +52,94 @@
   width: 200px;
 }
 .runs-input-cwd { width: 300px; font-family: ui-monospace, monospace; }
-.runs-form button {
-  font: inherit;
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--panel);
-  background: var(--text);
-  border: none;
-  border-radius: 6px;
-  padding: 5px 12px;
+.runs-form .runs-input:not(.runs-input-cwd) { flex: 1; }
+
+.runs-item {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
   cursor: pointer;
 }
-.runs-form button:disabled { opacity: 0.5; cursor: default; }
+.runs-item-head { display: flex; align-items: center; gap: 8px; min-width: 0; font-size: 12px; }
+.runs-item-open {
+  flex: 1;
+  min-width: 0;
+  background: none;
+  border: 0;
+  padding: 0;
+  text-align: left;
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  border-radius: 4px;
+}
+.runs-item:hover .run-card { border-color: var(--muted); }
+
+/* Badge de estado del run vigente (board, panel). */
+.run-badge {
+  font-size: 11px;
+  line-height: 18px;
+  min-height: 20px;
+  border-radius: 999px;
+  padding: 0 8px;
+  border: 1px solid currentColor;
+  background: none;
+  white-space: nowrap;
+  cursor: pointer;
+}
+span.run-badge { cursor: inherit; }
+.tone-accent { color: var(--accent); }
+.tone-ok { color: var(--ok); }
+.tone-warn { color: var(--run-warn); }
+.tone-danger { color: var(--danger); }
+.tone-muted { color: var(--muted); }
+
+/* ---- Drawer ---- */
+.drawer-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgb(0 0 0 / 0.2);
+  z-index: 10;
+}
+.drawer {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 420px;
+  max-width: 100vw;
+  background: var(--panel);
+  border-left: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  box-shadow: -8px 0 24px rgb(0 0 0 / 0.12);
+}
+.drawer-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+}
+.drawer-head h2 { flex: 1; margin: 0; font-size: 14px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.drawer-close {
+  background: none;
+  border: 0;
+  font-size: 20px;
+  line-height: 1;
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  cursor: pointer;
+  color: var(--muted);
+}
+.drawer-close:hover { background: var(--hover); color: var(--text); }
+.drawer-body { flex: 1; overflow-y: auto; padding: 12px 16px; display: flex; flex-direction: column; gap: 10px; }
+.drawer-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.drawer-cwd { font-family: ui-monospace, monospace; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .runs-msg { margin: 0; font-size: 12px; color: var(--muted); font-family: ui-monospace, monospace; }
 .runs-error { color: var(--danger); white-space: pre-wrap; }

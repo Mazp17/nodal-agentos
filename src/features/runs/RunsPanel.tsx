@@ -1,132 +1,188 @@
-import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
-import { getRunDetail, launchRun, listRuns } from "./api";
+import { useState, type FormEvent } from "react";
+import type { AppConfig } from "../linear/api";
+import { cancelQueued, launchRun } from "./api";
 import { RunCard } from "./RunCard";
-import type { RunDetail, RunSummary } from "./types";
+import { issueRunBadge } from "./status";
+import type { IssueRun } from "./types";
+import { findRun, type RunsState } from "./useRuns";
 import "./runs.css";
 
-const POLL_MS = 3000;
-/** Solo los más recientes: `claude agents --all` trae el historial completo. */
-const MAX_RUNS = 12;
-/** Polls que se sigue pidiendo el detalle de un run terminado sin resumen final. */
-const SETTLE_TRIES = 3;
-const DEFAULT_CWD = "/Users/me/Code/nodal-sandbox";
-const DEFAULT_PROMPT = "/demo-board volcanes";
+const OPEN_KEY = "agent-desk.runsPanelOpen";
 
-type Details = Record<string, RunDetail | null>;
+function readOpen(): boolean {
+  try {
+    return localStorage.getItem(OPEN_KEY) !== "false";
+  } catch {
+    return true;
+  }
+}
+function writeOpen(v: boolean) {
+  try {
+    localStorage.setItem(OPEN_KEY, String(v));
+  } catch {
+    /* ignorar */
+  }
+}
 
-export function RunsPanel() {
-  const [runs, setRuns] = useState<RunSummary[]>([]);
-  const [details, setDetails] = useState<Details>({});
-  const [error, setError] = useState<string | null>(null);
-  const [cwd, setCwd] = useState(DEFAULT_CWD);
-  const [prompt, setPrompt] = useState(DEFAULT_PROMPT);
-  const [launching, setLaunching] = useState(false);
-  const [launchMsg, setLaunchMsg] = useState<{ ok: boolean; text: string } | null>(null);
+interface Props {
+  runs: RunsState;
+  config: AppConfig;
+  onOpenRun: (issueId: string) => void;
+}
 
-  // Sesiones cuyo detalle ya no cambia (no están working): se piden una sola vez.
-  const settled = useRef(new Set<string>());
-  const liveTries = useRef(new Map<string, number>());
-  const inFlight = useRef(false);
+export function RunsPanel({ runs, config, onOpenRun }: Props) {
+  const [open, setOpen] = useState(readOpen);
+  const [manual, setManual] = useState(false);
+  const [itemError, setItemError] = useState<string | null>(null);
 
-  const poll = useCallback(async () => {
-    if (inFlight.current) return;
-    inFlight.current = true;
+  const toggle = () => {
+    setOpen(!open);
+    writeOpen(!open);
+  };
+
+  const onCancel = async (issueId: string) => {
+    setItemError(null);
     try {
-      const all = (await listRuns()).slice(0, MAX_RUNS);
-      setRuns(all);
-      setError(null);
-      const pending = all.filter((r) => r.state === "working" || !settled.current.has(r.sessionId));
-      const fetched = await Promise.all(
-        pending.map(async (r) => {
-          try {
-            const d = await getRunDetail(r.sessionId, r.cwd ?? "");
-            // Al terminar, el resumen final puede tardar un poco en aparecer: no se da por
-            // cerrado un detalle `live` hasta varios polls después.
-            if (r.state !== "working") {
-              const n = (liveTries.current.get(r.sessionId) ?? 0) + 1;
-              liveTries.current.set(r.sessionId, n);
-              if (d === null || d.source === "final" || n >= SETTLE_TRIES) settled.current.add(r.sessionId);
-            }
-            return [r.sessionId, d] as const;
-          } catch {
-            return null; // se reintenta en el próximo poll
-          }
-        }),
-      );
-      const updates = fetched.filter((x) => x !== null);
-      if (updates.length) setDetails((prev) => ({ ...prev, ...Object.fromEntries(updates) }));
-    } catch (err) {
-      setError(String(err));
-    } finally {
-      inFlight.current = false;
+      await cancelQueued(issueId);
+      await runs.refresh();
+    } catch (e) {
+      setItemError(String(e));
     }
-  }, []);
+  };
 
-  useEffect(() => {
-    let timer: ReturnType<typeof setTimeout>;
-    let cancelled = false;
-    const loop = async () => {
-      await poll();
-      if (!cancelled) timer = setTimeout(loop, POLL_MS);
-    };
-    loop();
-    return () => {
-      cancelled = true;
-      clearTimeout(timer);
-    };
-  }, [poll]);
+  return (
+    <section className={`runs-panel ${open ? "" : "collapsed"}`}>
+      <header className="runs-head">
+        <button type="button" className="runs-toggle" aria-expanded={open} onClick={toggle}>
+          <span aria-hidden>{open ? "▾" : "▸"}</span> Runs <span className="runs-count">{runs.current.length}</span>
+        </button>
+        {open && (
+          <button type="button" className="btn btn-sm" aria-expanded={manual} onClick={() => setManual(!manual)}>
+            Lanzar manual
+          </button>
+        )}
+      </header>
 
-  const onLaunch = async (e: FormEvent) => {
+      {open && (
+        <>
+          {manual && <ManualLaunch config={config} onLaunched={() => void runs.refresh()} />}
+          {runs.error && <p className="runs-msg runs-error">{runs.error}</p>}
+          {itemError && <p className="runs-msg runs-error">{itemError}</p>}
+
+          <div className="runs-list">
+            {runs.current.length === 0 && !runs.error && (
+              <p className="run-empty">Todavía no se lanzó ningún run desde el board.</p>
+            )}
+            {runs.current.map((ir) => (
+              <IssueRunItem key={ir.issueId} ir={ir} runs={runs} onOpen={onOpenRun} onCancel={onCancel} />
+            ))}
+          </div>
+
+          {manual && runs.otherRuns.length > 0 && (
+            <>
+              <h3 className="runs-subhead">Otros runs recientes</h3>
+              <div className="runs-list">
+                {runs.otherRuns.map((r) => (
+                  <RunCard key={r.sessionId} run={r} detail={runs.details[r.sessionId]} />
+                ))}
+              </div>
+            </>
+          )}
+        </>
+      )}
+    </section>
+  );
+}
+
+function IssueRunItem({
+  ir,
+  runs,
+  onOpen,
+  onCancel,
+}: {
+  ir: IssueRun;
+  runs: RunsState;
+  onOpen: (issueId: string) => void;
+  onCancel: (issueId: string) => void;
+}) {
+  const run = findRun(runs.runs, ir);
+  const detail = run ? runs.details[run.sessionId] : undefined;
+  const badge = issueRunBadge(ir, run, detail);
+
+  // El click en cualquier parte abre el drawer; para teclado está el botón del encabezado.
+  return (
+    <div className="runs-item" onClick={() => onOpen(ir.issueId)}>
+      <div className="runs-item-head">
+        <button type="button" className="runs-item-open" title="Ver detalle">
+          <strong>{ir.identifier}</strong> <span className="muted">· {ir.workflow}</span>
+        </button>
+        <span className={`run-badge tone-${badge.tone}`} title={badge.title}>
+          {badge.label}
+        </span>
+        {ir.status === "queued" && (
+          <button
+            type="button"
+            className="btn btn-sm"
+            onClick={(e) => {
+              e.stopPropagation();
+              onCancel(ir.issueId);
+            }}
+          >
+            Cancelar
+          </button>
+        )}
+      </div>
+      {ir.status === "failed" && <p className="runs-msg runs-error">{ir.error ?? "Falló el lanzamiento."}</p>}
+      {ir.status === "launched" && run && <RunCard run={run} detail={detail} />}
+    </div>
+  );
+}
+
+function ManualLaunch({ config, onLaunched }: { config: AppConfig; onLaunched: () => void }) {
+  const [cwd, setCwd] = useState(config.repos[0]?.path ?? "");
+  const [prompt, setPrompt] = useState("");
+  const [launching, setLaunching] = useState(false);
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+
+  const onSubmit = async (e: FormEvent) => {
     e.preventDefault();
     setLaunching(true);
-    setLaunchMsg(null);
+    setMsg(null);
     try {
       const ref = await launchRun(cwd.trim(), prompt);
-      setLaunchMsg({ ok: true, text: `Lanzado: ${ref.id}` });
-      void poll();
+      setMsg({ ok: true, text: `Lanzado: ${ref.id}` });
+      onLaunched();
     } catch (err) {
-      setLaunchMsg({ ok: false, text: String(err) });
+      setMsg({ ok: false, text: String(err) });
     } finally {
       setLaunching(false);
     }
   };
 
   return (
-    <section className="runs-panel">
-      <header className="runs-head">
-        <h2>
-          Runs en background <span className="runs-count">{runs.length}</span>
-        </h2>
-        <form className="runs-form" onSubmit={onLaunch}>
-          <input
-            aria-label="Carpeta"
-            className="runs-input runs-input-cwd"
-            value={cwd}
-            onChange={(e) => setCwd(e.target.value)}
-            placeholder="/ruta/al/repo"
-          />
-          <input
-            aria-label="Prompt"
-            className="runs-input"
-            value={prompt}
-            onChange={(e) => setPrompt(e.target.value)}
-            placeholder="/skill args"
-          />
-          <button type="submit" disabled={launching || !cwd.trim() || !prompt.trim()}>
-            {launching ? "Lanzando…" : "Lanzar"}
-          </button>
-        </form>
-      </header>
-
-      {launchMsg && <p className={launchMsg.ok ? "runs-msg" : "runs-msg runs-error"}>{launchMsg.text}</p>}
-      {error && <p className="runs-msg runs-error">{error}</p>}
-
-      <div className="runs-list">
-        {runs.length === 0 && !error && <p className="run-empty">No hay runs en background.</p>}
-        {runs.map((r) => (
-          <RunCard key={r.sessionId} run={r} detail={details[r.sessionId]} />
-        ))}
-      </div>
-    </section>
+    <>
+      <form className="runs-form" onSubmit={onSubmit}>
+        <input
+          type="text"
+          aria-label="Carpeta"
+          className="runs-input runs-input-cwd"
+          value={cwd}
+          onChange={(e) => setCwd(e.target.value)}
+          placeholder="/ruta/al/repo"
+        />
+        <input
+          type="text"
+          aria-label="Prompt"
+          className="runs-input"
+          value={prompt}
+          onChange={(e) => setPrompt(e.target.value)}
+          placeholder="/skill args"
+        />
+        <button type="submit" className="btn primary" disabled={launching || !cwd.trim() || !prompt.trim()}>
+          {launching ? "Lanzando…" : "Lanzar"}
+        </button>
+      </form>
+      {msg && <p className={msg.ok ? "runs-msg" : "runs-msg runs-error"}>{msg.text}</p>}
+    </>
   );
 }
