@@ -210,9 +210,11 @@ pub fn prune(data: &mut RunsData) {
     data.runs.sort_by_key(|r| std::cmp::Reverse(r.queued_at));
     let mut kept = 0;
     data.runs.retain(|r| {
-        let active = matches!(r.status, TaskRunStatus::Queued | TaskRunStatus::Launching);
+        if matches!(r.status, TaskRunStatus::Queued | TaskRunStatus::Launching) {
+            return true;
+        }
         kept += 1;
-        active || kept <= MAX_HISTORY
+        kept <= MAX_HISTORY
     });
 }
 

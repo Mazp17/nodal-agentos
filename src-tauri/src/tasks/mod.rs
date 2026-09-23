@@ -49,15 +49,17 @@ impl TasksState {
     }
 }
 
-fn load_or_backup<T: Default>(path: &Path, load: impl Fn(&Path) -> Result<T, String>) -> T {
+fn load_or_backup<T: Default>(path: &Path, load: impl Fn(&Path) -> Result<T, String>) -> Result<T, String> {
     match load(path) {
-        Ok(d) => d,
+        Ok(d) => Ok(d),
+        // Un error de lectura (permisos, E/S) no es corrupción: no se aparta el archivo.
+        Err(e) if !e.contains("is corrupt") => Err(e),
         Err(e) => {
             // No perder el archivo: se aparta y se arranca vacío.
             let backup = path.with_extension(format!("json.corrupt-{}", store::now_ms()));
             let _ = std::fs::rename(path, &backup);
             eprintln!("tasks: {e}; moved to {}", backup.display());
-            T::default()
+            Ok(T::default())
         }
     }
 }
@@ -66,8 +68,8 @@ pub fn init(app: &AppHandle) -> Result<(), String> {
     let data_dir = app.path().app_data_dir().map_err(|e| format!("Couldn't find the app data folder: {e}"))?;
     let tasks_path = data_dir.join(store::TASKS_FILE);
     let runs_path = data_dir.join(store::RUNS_FILE);
-    let tasks = load_or_backup(&tasks_path, store::load_tasks);
-    let runs = load_or_backup(&runs_path, store::load_runs);
+    let tasks = load_or_backup(&tasks_path, store::load_tasks)?;
+    let runs = load_or_backup(&runs_path, store::load_runs)?;
     let inner = Arc::new(Inner {
         tasks_path,
         runs_path,
@@ -178,12 +180,13 @@ async fn pump(inner: &Inner) -> Result<(), String> {
     Ok(())
 }
 
-/// Valida el plan y, si es texto, lo escribe en `tasks/<id>/plan.md`.
-fn apply_plan(repo: &Path, plan: PlanInput, text_path: &Path) -> Result<PlanRef, String> {
+/// Valida el plan y, si es texto, lo escribe en `path` (el definitivo al crear, o un
+/// archivo de staging al editar, que se renombra recién cuando se guardó `tasks.json`).
+fn apply_plan(repo: &Path, plan: PlanInput, path: &Path) -> Result<PlanRef, String> {
     match plan {
         PlanInput::Text { text } => {
             validate::plan_text(&text)?;
-            store::write_atomic(text_path, text.as_bytes())?;
+            store::write_atomic(path, text.as_bytes())?;
             Ok(PlanRef::Text)
         }
         PlanInput::File { path } => {
@@ -246,33 +249,50 @@ pub async fn update_task(
     let inner = state.0.clone();
     let title = title.map(|t| validate::title(&t)).transpose()?;
     let mut data = inner.tasks.lock().await;
-    let mut task = find_task(&data, &id)?;
+    let old = find_task(&data, &id)?;
+    let mut task = old.clone();
+    let text_path = text_plan_path(&inner, &id);
+    let staged = text_path.with_extension("md.new");
     if let Some(plan) = plan {
         let repo = task.repo_path.clone();
-        let text_path = text_plan_path(&inner, &id);
-        let was_text = task.plan == PlanRef::Text;
+        let staged = staged.clone();
         task.plan = blocking(move || {
             let repo = validate::repo_root(&repo)?;
-            let new = apply_plan(&repo, plan, &text_path)?;
-            // De texto a archivo: el plan.md viejo ya no se usa.
-            if was_text && new != PlanRef::Text {
-                let _ = std::fs::remove_file(&text_path);
-            }
-            Ok(new)
+            apply_plan(&repo, plan, &staged)
         })
         .await?;
     }
     if let Some(t) = title {
         task.title = t;
     }
-    let before = data.clone();
     if let Some(slot) = data.tasks.iter_mut().find(|t| t.id == id) {
         *slot = task.clone();
     }
-    if let Err(e) = persist_tasks(&inner, &data).await {
-        *data = before;
+    let saved = persist_tasks(&inner, &data).await;
+    let ok = saved.is_ok();
+    let new_is_text = task.plan == PlanRef::Text;
+    let was_text = old.plan == PlanRef::Text;
+    // Recién ahora se tocan los archivos del plan: si el guardado falló, quedan como estaban.
+    let files = blocking(move || {
+        if !ok {
+            let _ = std::fs::remove_file(&staged);
+            return Ok(());
+        }
+        if staged.is_file() {
+            std::fs::rename(&staged, &text_path).map_err(|e| format!("Couldn't save the plan: {e}"))?;
+        } else if was_text && !new_is_text {
+            let _ = std::fs::remove_file(&text_path);
+        }
+        Ok(())
+    })
+    .await;
+    if let Err(e) = saved {
+        if let Some(slot) = data.tasks.iter_mut().find(|t| t.id == id) {
+            *slot = old;
+        }
         return Err(e);
     }
+    files?;
     Ok(task)
 }
 
@@ -373,11 +393,15 @@ pub async fn read_task_plan(state: State<'_, TasksState>, id: String) -> Result<
     let text_path = text_plan_path(&inner, &id);
     blocking(move || {
         let path = resolve_plan_path(&task, text_path)?;
-        let meta = std::fs::metadata(&path).map_err(|e| format!("Couldn't read the plan: {e}"))?;
-        if meta.len() > validate::MAX_PLAN_BYTES {
+        use std::io::Read;
+        let file = std::fs::File::open(&path).map_err(|e| format!("Couldn't read the plan: {e}"))?;
+        let mut bytes = Vec::new();
+        file.take(validate::MAX_PLAN_BYTES + 1)
+            .read_to_end(&mut bytes)
+            .map_err(|e| format!("Couldn't read the plan: {e}"))?;
+        if bytes.len() as u64 > validate::MAX_PLAN_BYTES {
             return Err(format!("The plan is too large to show (max {} KB).", validate::MAX_PLAN_BYTES / 1024));
         }
-        let bytes = std::fs::read(&path).map_err(|e| format!("Couldn't read the plan: {e}"))?;
         Ok(String::from_utf8_lossy(&bytes).into_owned())
     })
     .await
@@ -410,6 +434,9 @@ pub async fn launch_task_run(
     // Un solo run activo por tarea. Si `claude agents` falla, se decide con lo que hay.
     let live = runs::list_runs().await.ok();
     let entry = {
+        // Orden tasks → runs (como delete_task): la tarea no puede borrarse en el medio.
+        let tasks = inner.tasks.lock().await;
+        find_task(&tasks, &id)?;
         let mut data = inner.runs.lock().await;
         let now = store::now_ms();
         let current = data.runs.iter().filter(|r| r.task_id == id).max_by_key(|r| r.queued_at);
@@ -435,25 +462,25 @@ pub async fn launch_task_run(
             status: TaskRunStatus::Queued,
             error: None,
         };
+        let before = data.clone();
         data.runs.push(entry.clone());
+        store::prune(&mut data);
         if let Err(e) = persist_runs(&inner, &data).await {
-            data.runs.retain(|r| !(r.task_id == entry.task_id && r.queued_at == entry.queued_at));
+            *data = before;
             return Err(e);
         }
-        store::prune(&mut data);
         entry
     };
 
-    if let Err(e) = pump(&inner).await {
-        eprintln!("tasks: {e}");
-    }
-    let data = inner.runs.lock().await;
-    Ok(data
-        .runs
-        .iter()
-        .find(|r| r.task_id == entry.task_id && r.queued_at == entry.queued_at)
-        .cloned()
-        .unwrap_or(entry))
+    // La pasada (que puede lanzar varios en serie) corre aparte: el click vuelve enseguida
+    // con el run en cola y el frontend ve el cambio de estado en el próximo poll.
+    let pumped = inner.clone();
+    tauri::async_runtime::spawn(async move {
+        if let Err(e) = pump(&pumped).await {
+            eprintln!("tasks: {e}");
+        }
+    });
+    Ok(entry)
 }
 
 /// Historial de runs de tareas (de una o de todas), más recientes primero.

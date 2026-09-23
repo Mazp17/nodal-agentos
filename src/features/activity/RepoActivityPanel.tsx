@@ -187,7 +187,7 @@ export function RepoActivityPanel({ repoPath, onOpenSession }: RepoActivityPanel
       )}
       {(pastSessions.length > 0 || pastAgents.length > 0) && (
         <details className="act-group act-past">
-          <summary className="section-label">Recently finished · {pastSessions.length + pastAgents.length}</summary>
+          <summary className="section-label">Inactive · {pastSessions.length + pastAgents.length}</summary>
           {pastSessions.map((s) => (
             <SessionRow key={s.sessionId} s={s} now={now} onOpen={onOpenSession} />
           ))}

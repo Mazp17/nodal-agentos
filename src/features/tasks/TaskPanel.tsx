@@ -197,7 +197,7 @@ export function TaskPanel({ task, current, history, actions, onClose, onEdit, on
               </button>
             </>
           )}
-          {current && queued && current.label !== "Launching" && (
+          {current && queued && current.queuePos != null && (
             <button type="button" className="btn" disabled={busy} onClick={() => void actions.cancel(task)}>
               Remove from queue
             </button>

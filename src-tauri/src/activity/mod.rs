@@ -29,6 +29,8 @@ const RECENT_SESSION_MS: i64 = 12 * 60 * 60_000;
 /// Una sesión que `claude agents` no lista cuenta como activa si escribió hace menos de esto.
 const UNLISTED_ACTIVE_MS: i64 = 2 * 60_000;
 const MAX_SUBAGENTS: usize = 80;
+/// Un `.meta.json` más grande que esto no es el formato conocido: se ignora.
+const META_MAX_BYTES: u64 = 64 * 1024;
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -151,7 +153,7 @@ fn subagent_of(owner: &Owner, f: &SubagentFile, roots: &RepoRoots, now: i64) -> 
     let meta = f
         .meta
         .as_deref()
-        .and_then(|m| std::fs::read_to_string(m).ok())
+        .and_then(|m| claude_sessions::read_tail(m, META_MAX_BYTES).filter(|_| std::fs::metadata(m).is_ok_and(|x| x.len() <= META_MAX_BYTES)))
         .map(|t| claude_sessions::parse_meta(&t))
         .unwrap_or_default();
     let tail = claude_sessions::read_tail(&f.transcript, TAIL_BYTES)
@@ -204,8 +206,16 @@ fn assemble(repo_paths: &[PathBuf], agents: &[AgentSession], projects: &Path, ap
         if !alive && !in_repo {
             continue;
         }
+        // Un solo lookup por sesión: el transcript en `<slug(cwd)>/<sid>.jsonl`; solo si
+        // no está ahí se recorre `projects` (y la carpeta de subagentes es su hermana).
+        let jsonl = claude_sessions::find_session_jsonl(projects, a.cwd.as_deref(), &sid);
+        let last_activity = jsonl.as_deref().and_then(claude_sessions::mtime_ms);
+        // "Reciente" por la última escritura (una sesión larga puede haber terminado recién).
+        let recent = last_activity.or(started_at).is_some_and(|t| now - t < RECENT_SESSION_MS);
+        if !alive && !recent {
+            continue;
+        }
         let is_app_run = app.contains(a.id.as_deref(), &sid);
-        let dir = claude_fs::find_session_dir(projects, a.cwd.as_deref().unwrap_or(""), &sid);
         owners.push(Owner {
             session_id: sid.clone(),
             name: a.name.clone(),
@@ -214,13 +224,11 @@ fn assemble(repo_paths: &[PathBuf], agents: &[AgentSession], projects: &Path, ap
             alive,
             in_repo,
             is_app_run,
-            dir,
+            dir: jsonl.as_deref().map(|p| p.with_extension("")).filter(|d| d.is_dir()),
         });
-        let recent = started_at.is_some_and(|t| now - t < RECENT_SESSION_MS);
-        if !in_repo || !(alive || recent) {
+        if !in_repo {
             continue;
         }
-        let jsonl = claude_sessions::find_session_jsonl(projects, a.cwd.as_deref(), &sid);
         let tail = if alive {
             jsonl.as_deref().and_then(|p| claude_sessions::read_tail(p, TAIL_BYTES)).map(|t| claude_sessions::parse_tail(&t))
         } else {
@@ -240,7 +248,7 @@ fn assemble(repo_paths: &[PathBuf], agents: &[AgentSession], projects: &Path, ap
             pid: a.pid,
             alive,
             is_app_run,
-            last_activity_at: jsonl.as_deref().and_then(claude_sessions::mtime_ms),
+            last_activity_at: last_activity,
             last_tool: tail.last_tool,
             last_tool_summary: tail.last_tool_summary,
             entrypoint: tail.entrypoint,

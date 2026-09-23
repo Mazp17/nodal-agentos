@@ -41,7 +41,10 @@ export function useTasks(repoPath: string | null, enabled = true): TasksState {
   repoRef.current = repoPath;
 
   const pollOnce = useCallback(async () => {
-    const [t, tr, r] = await Promise.allSettled([listTasks(repoRef.current), listTaskRuns(null), listRuns()]);
+    const repo = repoRef.current;
+    const [t, tr, r] = await Promise.allSettled([listTasks(repo), listTaskRuns(null), listRuns()]);
+    // Cambió el repo mientras tanto: esta respuesta es del anterior.
+    if (repo !== repoRef.current) return;
     const errors: string[] = [];
     if (t.status === "fulfilled") setTasks(t.value);
     else errors.push(`Couldn't list tasks: ${String(t.reason)}`);

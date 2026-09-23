@@ -44,6 +44,9 @@ pub fn plan_file(repo: &Path, path: &str) -> Result<PathBuf, String> {
     if !canon.starts_with(repo) {
         return Err(format!("The plan file must be inside the repository ({}).", repo.display()));
     }
+    if canon.strip_prefix(repo).is_ok_and(|rel| rel.components().any(|c| c.as_os_str() == ".git")) {
+        return Err("The plan file can't be inside .git.".into());
+    }
     let is_md = canon.extension().and_then(|e| e.to_str()).is_some_and(|e| e.eq_ignore_ascii_case("md"));
     if !is_md {
         return Err(format!("The plan file must be a Markdown (.md) file: {raw}"));
@@ -154,6 +157,8 @@ mod tests {
         assert!(plan_file(&repo, "docs/missing.md").unwrap_err().contains("doesn't exist"));
         assert!(plan_file(&repo, "docs/notes.txt").unwrap_err().contains(".md"));
         assert!(plan_file(&repo, "").is_err());
+        std::fs::write(repo.join(".git/x.md"), "#").unwrap();
+        assert!(plan_file(&repo, ".git/x.md").unwrap_err().contains(".git"));
     }
 
     #[cfg(unix)]
