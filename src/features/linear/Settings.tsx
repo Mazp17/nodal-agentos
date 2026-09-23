@@ -477,7 +477,7 @@ export function SettingsView(p: Props) {
             </select>
           </label>
           <div className="exec-field">
-            <span className="exec-field-label" id={`${r.key}-finish`}>
+            <span className="exec-field-label" id={`${r.key}-finish`} title="Used by plan-task: open a PR or leave a branch">
               Finish
             </span>
             <div className="seg" role="radiogroup" aria-labelledby={`${r.key}-finish`}>
@@ -674,8 +674,8 @@ export function SettingsView(p: Props) {
               <div className="settings-title-row">
                 <h3 className="settings-subtitle">Per repo</h3>
                 <p className="settings-desc">
-                  Passed to <span className="mono">claude --bg</span> for runs in that repo. “Finish” tells workflows that
-                  support it whether to open a PR or just push a branch.
+                  Passed to <span className="mono">claude --bg</span> for runs in that repo. “Finish” is used by
+                  plan-task: open a PR or leave a branch.
                 </p>
               </div>
               {mapped.length === 0 ? (

@@ -26,6 +26,8 @@ export interface RunsState {
   /** Vista del run vigente por issue. */
   currentView: Map<string, RunView>;
   error: string | null;
+  /** `list_runs` respondió bien al menos una vez (`runs` vacío ya significa "no hay"). */
+  loaded: boolean;
   refresh: () => Promise<void>;
 }
 
@@ -52,6 +54,7 @@ export function useRuns(enabled: boolean): RunsState {
   const [issueRuns, setIssueRuns] = useState<IssueRun[]>([]);
   const [details, setDetails] = useState<Details>({});
   const [error, setError] = useState<string | null>(null);
+  const [loaded, setLoaded] = useState(false);
 
   // Sesiones cuyo detalle ya no cambia (no están working): se piden una sola vez.
   const settled = useRef(new Set<string>());
@@ -62,8 +65,10 @@ export function useRuns(enabled: boolean): RunsState {
   const pollOnce = useCallback(async () => {
     const [r, ir] = await Promise.allSettled([listRuns(), listIssueRuns()]);
     const errors: string[] = [];
-    if (r.status === "fulfilled") setRuns(r.value);
-    else errors.push(`Couldn't list runs: ${String(r.reason)}`);
+    if (r.status === "fulfilled") {
+      setRuns(r.value);
+      setLoaded(true);
+    } else errors.push(`Couldn't list runs: ${String(r.reason)}`);
     if (ir.status === "fulfilled") setIssueRuns(ir.value);
     else errors.push(`Couldn't list issue runs: ${String(ir.reason)}`);
     setError(errors.length ? errors.join("\n") : null);
@@ -164,5 +169,5 @@ export function useRuns(enabled: boolean): RunsState {
     return { views, currentView };
   }, [issueRuns, runs, details, otherRuns, current]);
 
-  return { runs, current, byIssue, otherRuns, details, views, currentView, error, refresh };
+  return { runs, current, byIssue, otherRuns, details, views, currentView, error, loaded, refresh };
 }

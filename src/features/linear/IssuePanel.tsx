@@ -4,8 +4,9 @@ import type { Issue, IssueDetail, IssueRef, RelationKind, StateRef } from "./api
 import { useIssueDetail, type IssueDetailCache } from "./issueDetail";
 import { PRIORITY_LABELS } from "./columns";
 import type { RunActions } from "../runs/actions";
+import { LaunchBlockerNotice } from "../runs/LaunchBlockerNotice";
 import type { RunView } from "../runs/status";
-import type { WorkflowInfo } from "../runs/types";
+import { isInProgress, type WorkflowInfo } from "../runs/types";
 import { formatDuration, formatTokens } from "../../lib/format";
 import { useFocusTrap } from "../../ui/useFocusTrap";
 import { SafeMarkdown } from "../../ui/Markdown";
@@ -146,6 +147,8 @@ export function IssuePanel(p: Props) {
           )}
           {detail && <DetailSections detail={detail} isOnBoard={p.isOnBoard} onOpenIssue={p.onOpenIssue} />}
 
+          <LaunchBlockerNotice view={current} compact />
+
           <section className="ip-section">
             <h3 className="section-label">Run history</h3>
             {p.history.map((v) => (
@@ -193,7 +196,7 @@ export function IssuePanel(p: Props) {
             </button>
           ) : active && current ? (
             <>
-              {current.run?.state === "working" && current.runId && (
+              {isInProgress(current.run) && current.runId && (
                 <button type="button" className="btn btn-danger" disabled={p.actions.busy} onClick={() => void p.actions.stop(current)}>
                   Stop
                 </button>

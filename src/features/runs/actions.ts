@@ -2,6 +2,7 @@ import { useCallback, useState } from "react";
 import { resolveRepo, type AppConfig, type Issue } from "../linear/api";
 import { useToast } from "../../ui/Toasts";
 import { attachRun, cancelQueued, launchIssueRun, stopRun } from "./api";
+import { launchErrorHint } from "./LaunchBlockerNotice";
 import type { RunView } from "./status";
 import type { RunsState } from "./useRuns";
 import { pickWorkflow, type WorkflowCatalogs } from "./useWorkflows";
@@ -57,6 +58,10 @@ export function useLauncher(
               projectId: issue.project?.id ?? null,
               workflow: workflowFor(issue, typeof workflow === "function" ? workflow(issue) : workflow),
             });
+            if (ir.status === "failed") {
+              toast(`Couldn't launch ${issue.identifier}`, launchErrorHint(ir.error, ir.cwd), "danger");
+              continue;
+            }
             (ir.status === "queued" ? queued : started).push(issue.identifier);
           } catch (e) {
             toast(`Couldn't launch ${issue.identifier}`, String(e), "danger");

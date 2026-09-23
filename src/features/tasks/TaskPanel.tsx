@@ -1,6 +1,7 @@
 import { useEffect, useId, useState } from "react";
 import { formatDateTime, formatDuration, formatTokens } from "../../lib/format";
 import { useFocusTrap } from "../../ui/useFocusTrap";
+import { LaunchBlockerNotice } from "../runs/LaunchBlockerNotice";
 import type { RunView } from "../runs/status";
 import type { TaskActions } from "./actions";
 import { readTaskPlan } from "./api";
@@ -22,6 +23,8 @@ export interface TaskPanelProps {
   onOpenRun?: (view: RunView) => void;
   /** Cambiarlo fuerza a releer el plan (p. ej. después de editarlo). */
   planVersion?: number;
+  /** "Finish" del repo en Settings (lo que usa el backend si no se elige otro). */
+  defaultFinish?: FinishMode;
 }
 
 const FINISH: { value: FinishMode; label: string; hint: string }[] = [
@@ -30,12 +33,24 @@ const FINISH: { value: FinishMode; label: string; hint: string }[] = [
 ];
 
 /** Drawer de detalle de una tarea local (mismo layout que el Issue detail). */
-export function TaskPanel({ task, current, history, actions, onClose, onEdit, onOpenRun, planVersion = 0 }: TaskPanelProps) {
+export function TaskPanel({
+  task,
+  current,
+  history,
+  actions,
+  onClose,
+  onEdit,
+  onOpenRun,
+  planVersion = 0,
+  defaultFinish = "pr",
+}: TaskPanelProps) {
   const ref = useFocusTrap<HTMLDivElement>(onClose);
   const titleId = useId();
   const [plan, setPlan] = useState<string | null>(null);
   const [planError, setPlanError] = useState<string | null>(null);
-  const [finish, setFinish] = useState<FinishMode>("pr");
+  // `null` = el del repo: el backend lo resuelve al lanzar.
+  const [picked, setFinish] = useState<FinishMode | null>(null);
+  const finish = picked ?? defaultFinish;
   const busy = actions.pending.has(task.id);
   const done = task.status === "done";
   const planKey = task.plan.kind === "file" ? task.plan.path : "text";
@@ -126,6 +141,8 @@ export function TaskPanel({ task, current, history, actions, onClose, onEdit, on
             )}
           </section>
 
+          <LaunchBlockerNotice view={current} compact />
+
           <section className="tk-section" aria-labelledby={`${titleId}-runs`}>
             <h3 id={`${titleId}-runs`} className="section-label">
               Run history
@@ -208,7 +225,7 @@ export function TaskPanel({ task, current, history, actions, onClose, onEdit, on
             </button>
           )}
           {!done && !current?.active && (
-            <button type="button" className="btn btn-primary" disabled={busy} onClick={() => void actions.run(task, finish)}>
+            <button type="button" className="btn btn-primary" disabled={busy} onClick={() => void actions.run(task, picked)}>
               {current ? "Run again" : "Run"}
             </button>
           )}

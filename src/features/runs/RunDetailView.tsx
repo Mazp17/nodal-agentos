@@ -6,6 +6,7 @@ import { RunBadge } from "../linear/Board";
 import type { RunActions } from "./actions";
 import { AGENT_STATUS, AgentTranscript, modelName } from "./AgentTranscript";
 import { getRunDetail } from "./api";
+import { classifyLaunchError, LaunchBlockerNotice } from "./LaunchBlockerNotice";
 import type { RunView } from "./status";
 import { isInProgress, type AgentInfo, type RunDetail, type RunResult } from "./types";
 import "./run-detail.css";
@@ -208,22 +209,23 @@ export function RunDetailView({ view, issue, backLabel, actions, onBack, onOpenI
         </div>
       )}
 
-      {view.ir?.status === "failed" && (
+      <LaunchBlockerNotice view={view} />
+      {view.launchError && !classifyLaunchError(view.launchError, view.cwd) && (
         <div className="rd-alert rd-alert-red" role="alert">
           <span className="dot dot-lg" aria-hidden />
           <div className="rd-alert-body">
             <span className="rd-alert-title">Launch failed</span>
-            <span className="rd-alert-text">{view.ir.error ?? "The run couldn't be started."}</span>
+            <span className="rd-alert-text">{view.launchError}</span>
           </div>
         </div>
       )}
-      {view.kind === "failed" && view.ir?.status === "launched" && !view.run && (
+      {view.kind === "failed" && !view.launchError && !view.run && (
         <div className="rd-alert rd-alert-red" role="alert">
           <span className="dot dot-lg" aria-hidden />
           <div className="rd-alert-body">
             <span className="rd-alert-title">Run lost</span>
             <span className="rd-alert-text">
-              It was launched but never showed up in claude agents. You can launch the issue again.
+              It was launched but never showed up in claude agents. You can run it again.
             </span>
           </div>
         </div>
@@ -447,7 +449,7 @@ function ResultCard({ view, detail }: { view: RunView; detail: RunDetail | null 
           {view.label}
         </div>
         <p className="rd-result-note">
-          {view.ir?.status === "failed"
+          {view.launchError
             ? "The run never started."
             : detail === null
               ? "The session ended without running a workflow."

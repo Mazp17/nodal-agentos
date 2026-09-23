@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import {
   configApi,
   linearApi,
@@ -12,7 +13,9 @@ import {
   type Team,
   type Viewer,
 } from "./features/linear/api";
-import { BoardSkeleton, BoardView, EmptyState, ErrorState } from "./features/linear/Board";
+import { RepoActivityPanel } from "./features/activity/RepoActivityPanel";
+import { useActivitySummary } from "./features/activity/useActivitySummary";
+import { BoardSkeleton, BoardView, EmptyState, ErrorState, type BoardTask } from "./features/linear/Board";
 import { IssuePanel } from "./features/linear/IssuePanel";
 import { IssueDetailCache } from "./features/linear/issueDetail";
 import { Onboarding, SettingsView, type SettingsSection } from "./features/linear/Settings";
@@ -20,8 +23,15 @@ import { CommandPalette, type PaletteItem } from "./features/palette/CommandPale
 import { useLauncher, useRunActions } from "./features/runs/actions";
 import { RunDetailView } from "./features/runs/RunDetailView";
 import { RunsView, type RunsTab } from "./features/runs/RunsView";
+import { sessionKey, viewOfSession, type RunView } from "./features/runs/status";
 import { useRuns } from "./features/runs/useRuns";
 import { readLastWorkflow, useWorkflows, writeLastWorkflow } from "./features/runs/useWorkflows";
+import { useTaskActions } from "./features/tasks/actions";
+import { NewTaskDialog } from "./features/tasks/NewTaskDialog";
+import { TaskPanel } from "./features/tasks/TaskPanel";
+import { TasksView } from "./features/tasks/TasksView";
+import type { FinishMode, Task } from "./features/tasks/types";
+import { samePath, useTasks } from "./features/tasks/useTasks";
 import { localGet, localSet } from "./lib/format";
 import { Sidebar, type NavView } from "./shell/Sidebar";
 import { FilterChip } from "./ui/FilterChip";
@@ -29,12 +39,29 @@ import { ToastProvider } from "./ui/Toasts";
 import "./shell/shell.css";
 
 const TEAM_FILTER_KEY = "agent-desk.teamFilter";
+const ACTIVITY_REPO_KEY = "agent-desk.activityRepo";
+/** Como las issues cerradas que trae el board: las tareas hechas se muestran 14 días. */
+const DONE_TASK_WINDOW_MS = 14 * 24 * 60 * 60_000;
 const DEFAULT_CONFIG: AppConfig = { repos: [], concurrency: 3 };
 const UNASSIGNED = "__unassigned";
 
 type View = NavView | "run";
+type Source = "linear" | "local";
 
-const VIEW_TITLE: Record<View, string> = { board: "Board", runs: "Runs", settings: "Settings", run: "Run" };
+const VIEW_TITLE: Record<View, string> = {
+  board: "Board",
+  runs: "Runs",
+  tasks: "Tasks",
+  activity: "Activity",
+  settings: "Settings",
+  run: "Run",
+};
+const SHORTCUTS: Record<string, NavView> = { "1": "board", "2": "runs", "3": "tasks", "4": "activity", ",": "settings" };
+const SOURCE_OPTIONS = [
+  { value: "linear", label: "Linear" },
+  { value: "local", label: "Local" },
+];
+const basename = (p: string) => p.replace(/\/+$/, "").split("/").pop() || p;
 
 export default function App() {
   return (
@@ -78,6 +105,13 @@ function Desk() {
   const [projectFilter, setProjectFilter] = useState<string | null>(null);
   const [assigneeFilter, setAssigneeFilter] = useState<string | null>(null);
   const [hasRepoFilter, setHasRepoFilter] = useState(false);
+  const [sourceFilter, setSourceFilter] = useState<Source | null>(null);
+  const [repoFilter, setRepoFilter] = useState<string | null>(null);
+  const [tasksRepo, setTasksRepo] = useState<string | null>(null);
+  const [activityRepo, setActivityRepo] = useState<string | null>(() => localGet(ACTIVITY_REPO_KEY));
+  const [panelTask, setPanelTask] = useState<string | null>(null);
+  const [taskDialog, setTaskDialog] = useState<{ task: Task | null } | null>(null);
+  const [taskPlanVersion, setTaskPlanVersion] = useState(0);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [picks, setPicks] = useState<Record<string, string>>({});
   const [lastWorkflow, setLastWorkflow] = useState(readLastWorkflow);
@@ -86,6 +120,20 @@ function Desk() {
   const catalogs = useWorkflows(config.repos.map((r) => r.path));
   const launcher = useLauncher(config, catalogs, lastWorkflow, runs);
   const actions = useRunActions(runs);
+  // Comparte la lista de `claude agents` de useRuns: un solo `list_runs` por intervalo.
+  const tasks = useTasks(null, keyConfigured === true, runs.loaded ? runs.runs : undefined);
+  const taskActions = useTaskActions(tasks.refresh);
+  const mappedRepos = useMemo(() => [...new Set(config.repos.map((r) => r.path))], [config.repos]);
+  const activity = useActivitySummary(mappedRepos, keyConfigured === true);
+  const repoOptions = useMemo(() => mappedRepos.map((r) => ({ value: r, label: basename(r) })), [mappedRepos]);
+  const finishOf = useCallback(
+    (repo: string): FinishMode | undefined => config.repos.find((r) => samePath(r.path, repo))?.finish,
+    [config.repos],
+  );
+  const pickFile = useCallback(async (repo: string) => {
+    const picked = await openDialog({ filters: [{ name: "Markdown", extensions: ["md"] }], defaultPath: repo });
+    return typeof picked === "string" ? picked : null;
+  }, []);
 
   const checkCli = useCallback(
     () =>
@@ -187,6 +235,7 @@ function Desk() {
     setViewerError(null);
     setSelected(new Set());
     setPanelIssue(null);
+    setPanelTask(null);
     setRunKey(null);
     setView("board");
     setKeyConfigured(false);
@@ -196,6 +245,7 @@ function Desk() {
   const go = useCallback((v: NavView) => {
     setView(v);
     setPanelIssue(null);
+    setPanelTask(null);
     setPaletteOpen(false);
   }, []);
   const openRun = useCallback(
@@ -204,9 +254,24 @@ function Desk() {
       setRunKey(key);
       setView("run");
       setPanelIssue(null);
+      setPanelTask(null);
     },
     [view],
   );
+  const openRunView = useCallback((v: RunView) => openRun(v.key), [openRun]);
+  // Un solo drawer a la vez.
+  const openIssue = useCallback((id: string) => {
+    setPanelTask(null);
+    setPanelIssue(id);
+  }, []);
+  const openTask = useCallback((id: string) => {
+    setPanelIssue(null);
+    setPanelTask(id);
+  }, []);
+  const openTaskDialog = useCallback((task: Task | null) => {
+    setPaletteOpen(false);
+    setTaskDialog({ task });
+  }, []);
   const openSettings = (s: SettingsSection) => {
     setSection(s);
     go("settings");
@@ -218,16 +283,16 @@ function Desk() {
       if (e.metaKey && e.key.toLowerCase() === "k") {
         e.preventDefault();
         setPaletteOpen((o) => !o);
-      } else if (e.metaKey && (e.key === "1" || e.key === "2" || e.key === ",")) {
+      } else if (e.metaKey && e.key in SHORTCUTS) {
         e.preventDefault();
-        go(e.key === "1" ? "board" : e.key === "2" ? "runs" : "settings");
-      } else if (e.key === "Escape" && view === "run" && !panelIssue && !paletteOpen) {
+        go(SHORTCUTS[e.key]!);
+      } else if (e.key === "Escape" && view === "run" && !panelIssue && !panelTask && !taskDialog && !paletteOpen) {
         setView(runFrom);
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [keyConfigured, go, view, panelIssue, paletteOpen, runFrom]);
+  }, [keyConfigured, go, view, panelIssue, panelTask, taskDialog, paletteOpen, runFrom]);
 
   // ---- Board: filtros y selección ----
   const allIssues = useMemo(() => board?.issues ?? [], [board]);
@@ -243,13 +308,29 @@ function Desk() {
     () =>
       allIssues.filter(
         (i) =>
+          sourceFilter !== "local" &&
+          (!repoFilter || (repoOf(i) !== null && samePath(repoOf(i)!, repoFilter))) &&
           (!projectFilter || i.project?.id === projectFilter) &&
           (!assigneeFilter || (assigneeFilter === UNASSIGNED ? !i.assignee : i.assignee?.id === assigneeFilter)) &&
           (!hasRepoFilter || repoOf(i) !== null) &&
           (!q || `${i.identifier} ${i.title}`.toLowerCase().includes(q)),
       ),
-    [allIssues, projectFilter, assigneeFilter, hasRepoFilter, q, repoOf],
+    [allIssues, sourceFilter, repoFilter, projectFilter, assigneeFilter, hasRepoFilter, q, repoOf],
   );
+  // Tareas locales en el board: los filtros propios de Linear (team, project, assignee)
+  // no las afectan; sí la fuente, el repo y el texto.
+  const boardTasks = useMemo((): BoardTask[] => {
+    if (sourceFilter === "linear") return [];
+    const since = Date.now() - DONE_TASK_WINDOW_MS;
+    return tasks.tasks
+      .filter(
+        (t) =>
+          (t.status !== "done" || (t.doneAt ?? t.createdAt) >= since) &&
+          (!repoFilter || samePath(t.repoPath, repoFilter)) &&
+          (!q || t.title.toLowerCase().includes(q)),
+      )
+      .map((task) => ({ task, view: tasks.current.get(task.id) }));
+  }, [tasks.tasks, tasks.current, sourceFilter, repoFilter, q]);
   const projectOptions = useMemo(() => {
     const m = new Map<string, string>();
     for (const i of allIssues) if (i.project) m.set(i.project.id, i.project.name);
@@ -261,7 +342,7 @@ function Desk() {
     const list = [...m].map(([value, label]) => ({ value, label })).sort((a, b) => a.label.localeCompare(b.label));
     return [...list, { value: UNASSIGNED, label: "Unassigned" }];
   }, [allIssues]);
-  const hasFilters = !!(q || projectFilter || assigneeFilter || hasRepoFilter || teamFilter);
+  const hasFilters = !!(q || projectFilter || assigneeFilter || hasRepoFilter || teamFilter || sourceFilter || repoFilter);
   const setTeam = (v: string | null) => {
     setTeamFilter(v ?? "");
     localSet(TEAM_FILTER_KEY, v ?? "");
@@ -271,6 +352,8 @@ function Desk() {
     setProjectFilter(null);
     setAssigneeFilter(null);
     setHasRepoFilter(false);
+    setSourceFilter(null);
+    setRepoFilter(null);
     setTeam(null);
   };
 
@@ -300,10 +383,40 @@ function Desk() {
     writeLastWorkflow(wf);
   };
 
+  // ---- Runs de tareas y sesiones sueltas ----
+  const taskOfRunKey = (key: string): Task | undefined => {
+    // `t:<taskId>:<queuedAt>`
+    const id = key.startsWith("t:") ? key.slice(2, key.lastIndexOf(":")) : null;
+    return id ? tasks.tasks.find((t) => t.id === id) : undefined;
+  };
+  /** `i:`/`s:` de useRuns, `t:` de tareas, o cualquier sesión que liste `claude agents`. */
+  const resolveRunView = (key: string): RunView | undefined => {
+    const found = runs.views.find((v) => v.key === key);
+    if (found) return found;
+    const task = taskOfRunKey(key);
+    if (task) return tasks.historyOf(task.id).find((v) => v.key === key);
+    if (key.startsWith("s:")) {
+      const sid = key.slice(2);
+      const r = runs.runs.find((x) => x.sessionId === sid);
+      if (r) return viewOfSession(r, runs.details[sid]);
+    }
+    return undefined;
+  };
+  /** Una sesión de la vista Activity: si es de una issue o tarea, abre ese run. */
+  const openSession = (sid: string) => {
+    const own =
+      runs.views.find((v) => v.run?.sessionId === sid) ??
+      [...tasks.current.values()].find((v) => v.run?.sessionId === sid);
+    openRun(own?.key ?? sessionKey(sid));
+  };
+
   // ---- Paleta ----
   const paletteActions: PaletteItem[] = [
     { id: "go-board", kind: "Action", label: "Go to Board", sub: "⌘1", run: () => go("board") },
     { id: "go-runs", kind: "Action", label: "Go to Runs", sub: "⌘2", run: () => go("runs") },
+    { id: "go-tasks", kind: "Action", label: "Go to Tasks", sub: "⌘3", run: () => go("tasks") },
+    { id: "go-activity", kind: "Action", label: "Go to Activity", sub: "⌘4", run: () => go("activity") },
+    { id: "new-task", kind: "Action", label: "New task…", sub: "Local plan → /plan-task", run: () => openTaskDialog(null) },
     { id: "go-settings", kind: "Action", label: "Open Settings", sub: "⌘,", run: () => go("settings") },
     { id: "refresh", kind: "Action", label: "Refresh board", run: () => void loadBoard() },
     ...(launchable.length
@@ -345,10 +458,24 @@ function Desk() {
       sub: i.team.key,
       run: () => {
         setView("board");
-        setPanelIssue(i.id);
+        openIssue(i.id);
       },
     }));
-    return [...runItems, ...issueItems];
+    const taskItems = tasks.tasks
+      .filter((t) => !pq || t.title.toLowerCase().includes(pq))
+      .slice(0, pq ? 4 : 2)
+      .map((t) => ({
+        id: `task-${t.id}`,
+        kind: "Task" as const,
+        label: t.title,
+        sub: basename(t.repoPath),
+        run: () => {
+          // La vista Tasks tiene su propio drawer: se abre desde el board para no apilar dos.
+          if (view === "tasks") setView("board");
+          openTask(t.id);
+        },
+      }));
+    return [...runItems, ...issueItems, ...taskItems];
   };
 
   // ---- Pantallas fuera del shell ----
@@ -416,9 +543,39 @@ function Desk() {
         onOpenRun={openRun}
       />
     );
+  } else if (view === "tasks") {
+    content = (
+      <TasksView
+        repoPath={tasksRepo}
+        repos={mappedRepos}
+        pickFile={pickFile}
+        onOpenRun={openRunView}
+        state={tasks}
+        actions={taskActions}
+        finishOf={finishOf}
+      />
+    );
+  } else if (view === "activity") {
+    const repo = activityRepo && mappedRepos.includes(activityRepo) ? activityRepo : (mappedRepos[0] ?? null);
+    content = repo ? (
+      <div className="activity-view">
+        <RepoActivityPanel key={repo} repoPath={repo} onOpenSession={(s) => openSession(s.sessionId)} />
+      </div>
+    ) : (
+      <EmptyState
+        title="No repositories mapped"
+        text="Map a repository in Settings to see what Claude Code is doing in it."
+        action={{ label: "Map a repo", onClick: () => openSettings("repos") }}
+      />
+    );
   } else if (view === "run") {
-    const rv = runs.views.find((v) => v.key === runKey);
+    const rv = runKey ? resolveRunView(runKey) : undefined;
     const issue = rv?.issueId ? issueById.get(rv.issueId) : undefined;
+    const task = rv && !rv.issueId ? taskOfRunKey(rv.key) : undefined;
+    const taskRunAgain =
+      task && task.status !== "done" && !tasks.current.get(task.id)?.active && !taskActions.pending.has(task.id)
+        ? () => void taskActions.run(task)
+        : undefined;
     content = rv ? (
       <RunDetailView
         key={rv.key}
@@ -427,8 +584,8 @@ function Desk() {
         backLabel={VIEW_TITLE[runFrom]}
         actions={actions}
         onBack={() => setView(runFrom)}
-        onOpenIssue={setPanelIssue}
-        onRunAgain={issue && canLaunch(issue) ? () => void launcher.launch([issue], rv.workflow) : undefined}
+        onOpenIssue={openIssue}
+        onRunAgain={issue && canLaunch(issue) ? () => void launcher.launch([issue], rv.workflow) : taskRunAgain}
       />
     ) : (
       <EmptyState
@@ -449,25 +606,34 @@ function Desk() {
     );
   } else if (!board) {
     content = <BoardSkeleton />;
-  } else if (visible.length === 0) {
+  } else if (visible.length === 0 && boardTasks.length === 0) {
     content =
-      allIssues.length > 0 || hasFilters ? (
+      allIssues.length > 0 || tasks.tasks.length > 0 || hasFilters ? (
         <EmptyState
-          title="No issues match these filters"
+          title="Nothing matches these filters"
           text="Try another team or project, or clear filters to see everything pulled from Linear."
           action={{ label: "Clear filters", onClick: clearFilters }}
         />
       ) : (
         <EmptyState
           title="No issues"
-          text="Nothing open, and nothing closed in the last 14 days."
-          action={{ label: "Refresh", onClick: () => void loadBoard() }}
+          text="Nothing open in Linear, nothing closed in the last 14 days, and no local tasks."
+          action={{ label: "New task", onClick: () => openTaskDialog(null) }}
         />
       );
   } else {
     content = (
       <BoardView
         issues={visible}
+        tasks={boardTasks}
+        taskHandlers={{
+          isBusy: (id) => taskActions.pending.has(id),
+          selectedId: panelTask,
+          onOpen: (t) => openTask(t.id),
+          onRun: (t) => void taskActions.run(t),
+          onToggleDone: (t) => void taskActions.toggleDone(t),
+          onOpenRun: openRunView,
+        }}
         config={config}
         currentView={runs.currentView}
         launcher={launcher}
@@ -482,7 +648,7 @@ function Desk() {
             return n;
           })
         }
-        onOpenIssue={setPanelIssue}
+        onOpenIssue={openIssue}
         onOpenRun={openRun}
         onMapRepo={() => openSettings("repos")}
       />
@@ -490,13 +656,28 @@ function Desk() {
   }
 
   const panel = panelIssue ? issueById.get(panelIssue) : undefined;
+  const taskPanel = panelTask ? tasks.tasks.find((t) => t.id === panelTask) : undefined;
   const navCurrent: NavView = view === "run" ? runFrom : view;
+  const working = activity ? activity.sessions + activity.agents : 0;
+  const activityLabel = activity
+    ? `${activity.sessions} session${activity.sessions === 1 ? "" : "s"} and ${activity.agents} agent${activity.agents === 1 ? "" : "s"} working`
+    : "";
+  const setActivity = (v: string | null) => {
+    setActivityRepo(v);
+    localSet(ACTIVITY_REPO_KEY, v ?? "");
+  };
 
   return (
     <div className="desk">
       <Sidebar
         current={navCurrent}
-        counts={{ board: board ? allIssues.length : undefined, runs: activeRuns.length }}
+        counts={{
+          board: board ? allIssues.length : undefined,
+          runs: activeRuns.length,
+          tasks: tasks.loading ? undefined : tasks.tasks.filter((t) => t.status === "todo").length,
+          activity: working || undefined,
+        }}
+        live={working ? { activity: activityLabel } : undefined}
         activeRuns={activeRuns}
         viewer={viewer}
         linear={
@@ -538,6 +719,14 @@ function Desk() {
               >
                 Has repo
               </button>
+              <FilterChip
+                label="Source"
+                value={sourceFilter}
+                options={SOURCE_OPTIONS}
+                anyLabel="All"
+                onChange={(v) => setSourceFilter(v as Source | null)}
+              />
+              <FilterChip label="Repo" value={repoFilter} options={repoOptions} onChange={setRepoFilter} />
               {hasFilters && (
                 <button type="button" className="btn btn-ghost btn-sm" onClick={clearFilters}>
                   Clear
@@ -545,11 +734,32 @@ function Desk() {
               )}
             </div>
           )}
+          {view === "tasks" && (
+            <div className="topbar-filters">
+              <FilterChip label="Repo" value={tasksRepo} options={repoOptions} onChange={setTasksRepo} />
+            </div>
+          )}
+          {view === "activity" && mappedRepos.length > 0 && (
+            <div className="topbar-filters">
+              <FilterChip
+                label="Repo"
+                value={activityRepo && mappedRepos.includes(activityRepo) ? activityRepo : (mappedRepos[0] ?? null)}
+                options={repoOptions}
+                anyLabel={null}
+                onChange={setActivity}
+              />
+            </div>
+          )}
           <div className="topbar-spacer" />
           {view === "board" && (
-            <button type="button" className="btn topbar-btn" onClick={() => void loadBoard()} disabled={loading}>
-              {loading ? "Syncing…" : "Refresh"}
-            </button>
+            <>
+              <button type="button" className="btn topbar-btn" onClick={() => openTaskDialog(null)}>
+                New task
+              </button>
+              <button type="button" className="btn topbar-btn" onClick={() => void loadBoard()} disabled={loading}>
+                {loading ? "Syncing…" : "Refresh"}
+              </button>
+            </>
           )}
           <button type="button" className="runs-pill" onClick={() => go("runs")} aria-label="Open runs">
             <span className="runs-pill-running">
@@ -586,6 +796,12 @@ function Desk() {
         )}
 
         <div className="content">{content}</div>
+
+        {view === "board" && tasks.error && (
+          <div className="banner banner-error" role="alert">
+            {tasks.error}
+          </div>
+        )}
 
         {view === "board" && selectedIssues.length > 0 && (
           <div className="selbar" role="region" aria-label="Selection">
@@ -630,8 +846,38 @@ function Desk() {
             }}
             detailCache={detailCache}
             isOnBoard={(id) => issueById.has(id)}
-            onOpenIssue={setPanelIssue}
+            onOpenIssue={openIssue}
             onClose={() => setPanelIssue(null)}
+          />
+        )}
+        {taskPanel && view !== "tasks" && (
+          <TaskPanel
+            key={taskPanel.id}
+            task={taskPanel}
+            current={tasks.current.get(taskPanel.id)}
+            history={tasks.historyOf(taskPanel.id)}
+            actions={taskActions}
+            planVersion={taskPlanVersion}
+            defaultFinish={finishOf(taskPanel.repoPath)}
+            onClose={() => setPanelTask(null)}
+            onEdit={(t) => openTaskDialog(t)}
+            onOpenRun={openRunView}
+          />
+        )}
+        {taskDialog && (
+          <NewTaskDialog
+            repos={mappedRepos}
+            defaultRepo={taskDialog.task ? null : view === "tasks" ? tasksRepo : repoFilter}
+            task={taskDialog.task}
+            pickFile={pickFile}
+            onClose={() => setTaskDialog(null)}
+            onSaved={(t) => {
+              setTaskDialog(null);
+              setTaskPlanVersion((v) => v + 1);
+              // En la vista Tasks el drawer propio lo muestra la lista; en el resto, el del shell.
+              if (view !== "tasks") openTask(t.id);
+              void tasks.refresh();
+            }}
           />
         )}
       </main>

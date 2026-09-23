@@ -89,7 +89,7 @@ export function TaskCard({ task, view, showRepo, selected, busy, onOpen, onRun, 
               type="button"
               className="btn btn-xs tk-btn-run"
               disabled={busy || active}
-              title={active ? "A run is already in progress" : "Run /plan-task and open a PR"}
+              title={active ? "A run is already in progress" : "Run /plan-task"}
               onClick={() => onRun(task)}
             >
               ▶ Run

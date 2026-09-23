@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getRunDetail, listRuns } from "../runs/api";
 import type { RunView } from "../runs/status";
-import type { RunDetail, RunSummary } from "../runs/types";
+import { isInProgress, type RunDetail, type RunSummary } from "../runs/types";
 import { findRun } from "../runs/useRuns";
 import { listTaskRuns, listTasks } from "./api";
 import { asIssueRun, viewOfTaskRun } from "./status";
@@ -25,11 +25,16 @@ export interface TasksState {
 /**
  * Polling de tareas + runs de tareas + `claude agents` (y el detalle de los runs
  * vigentes) mientras `enabled`. `repoPath = null` trae las de todos los repos.
+ * `sharedRuns`: la lista de `claude agents` que ya pollea otro hook (`useRuns`), una vez
+ * cargada (`undefined` mientras no); con ella no se vuelve a llamar a `list_runs`.
  */
-export function useTasks(repoPath: string | null, enabled = true): TasksState {
+export function useTasks(repoPath: string | null, enabled = true, sharedRuns?: RunSummary[]): TasksState {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [taskRuns, setTaskRuns] = useState<TaskRun[]>([]);
-  const [runs, setRuns] = useState<RunSummary[]>([]);
+  const [ownRuns, setRuns] = useState<RunSummary[]>([]);
+  const runs = sharedRuns ?? ownRuns;
+  const sharedRef = useRef(sharedRuns);
+  sharedRef.current = sharedRuns;
   const [details, setDetails] = useState<Record<string, RunDetail | null>>({});
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -42,7 +47,12 @@ export function useTasks(repoPath: string | null, enabled = true): TasksState {
 
   const pollOnce = useCallback(async () => {
     const repo = repoRef.current;
-    const [t, tr, r] = await Promise.allSettled([listTasks(repo), listTaskRuns(null), listRuns()]);
+    const shared = sharedRef.current;
+    const [t, tr, r] = await Promise.allSettled([
+      listTasks(repo),
+      listTaskRuns(null),
+      shared ? Promise.resolve(shared) : listRuns(),
+    ]);
     // Cambió el repo mientras tanto: esta respuesta es del anterior.
     if (repo !== repoRef.current) return;
     const errors: string[] = [];
@@ -50,7 +60,9 @@ export function useTasks(repoPath: string | null, enabled = true): TasksState {
     else errors.push(`Couldn't list tasks: ${String(t.reason)}`);
     if (tr.status === "fulfilled") setTaskRuns(tr.value);
     else errors.push(`Couldn't list task runs: ${String(tr.reason)}`);
-    if (r.status === "fulfilled") setRuns(r.value);
+    if (r.status === "fulfilled") {
+      if (!shared) setRuns(r.value);
+    }
     else errors.push(`Couldn't list runs: ${String(r.reason)}`);
     setError(errors.length ? errors.join("\n") : null);
     setLoading(false);
@@ -62,12 +74,12 @@ export function useTasks(repoPath: string | null, enabled = true): TasksState {
     const pending = [...latest.values()]
       .map((x) => findRun(r.value, asIssueRun(x, "")))
       .filter((x): x is RunSummary => x !== undefined)
-      .filter((x) => x.state === "working" || !settled.current.has(x.sessionId));
+      .filter((x) => isInProgress(x) || !settled.current.has(x.sessionId));
     const fetched = await Promise.all(
       pending.map(async (x) => {
         try {
           const d = await getRunDetail(x.sessionId, x.cwd ?? "");
-          if (x.state !== "working") {
+          if (!isInProgress(x)) {
             const n = (tries.current.get(x.sessionId) ?? 0) + 1;
             tries.current.set(x.sessionId, n);
             if (d === null || d.source === "final" || n >= SETTLE_TRIES) settled.current.add(x.sessionId);
@@ -139,6 +151,9 @@ export function useTasks(repoPath: string | null, enabled = true): TasksState {
 
   return { tasks, current, historyOf, error, loading, refresh };
 }
+
+/** Misma ruta salvo barras finales (las de tareas vienen canonicalizadas, las de config no). */
+export const samePath = (a: string, b: string) => a.replace(/\/+$/, "") === b.replace(/\/+$/, "");
 
 function latestByTask(all: TaskRun[]): Map<string, TaskRun> {
   const latest = new Map<string, TaskRun>();

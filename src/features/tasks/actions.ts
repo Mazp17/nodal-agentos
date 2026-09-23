@@ -1,6 +1,7 @@
 import { useCallback, useState } from "react";
 import { useToast } from "../../ui/Toasts";
 import { attachRun, stopRun } from "../runs/api";
+import { launchErrorHint } from "../runs/LaunchBlockerNotice";
 import type { RunView } from "../runs/status";
 import { cancelTaskRun, deleteTask, launchTaskRun, setTaskDone } from "./api";
 import type { FinishMode, Task } from "./types";
@@ -8,7 +9,8 @@ import type { FinishMode, Task } from "./types";
 export interface TaskActions {
   /** Ids de tareas con una acción en vuelo. */
   pending: Set<string>;
-  run: (task: Task, finish?: FinishMode) => Promise<void>;
+  /** Sin `finish`, el backend usa el del repo en Settings (o "pr"). */
+  run: (task: Task, finish?: FinishMode | null) => Promise<void>;
   toggleDone: (task: Task) => Promise<void>;
   cancel: (task: Task) => Promise<void>;
   remove: (task: Task) => Promise<boolean>;
@@ -43,13 +45,13 @@ export function useTaskActions(refresh: () => Promise<void>): TaskActions {
   );
 
   const run = useCallback(
-    async (task: Task, finish: FinishMode = "pr") => {
+    async (task: Task, finish?: FinishMode | null) => {
       await wrap(
         task,
         async () => {
-          const tr = await launchTaskRun(task.id, finish);
+          const tr = await launchTaskRun(task.id, finish ?? null);
           if (tr.status === "queued") toast(`${task.title} queued`, "Starts when a slot frees up.", "muted");
-          else if (tr.status === "failed") toast(`Couldn't launch ${task.title}`, tr.error ?? undefined, "danger");
+          else if (tr.status === "failed") toast(`Couldn't launch ${task.title}`, launchErrorHint(tr.error, tr.cwd), "danger");
           else toast(`${task.title} launched`, "Running /plan-task.", "ok");
         },
         `Couldn't launch ${task.title}`,

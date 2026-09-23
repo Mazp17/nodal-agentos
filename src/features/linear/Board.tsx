@@ -1,9 +1,12 @@
 import { useMemo } from "react";
 import { resolveRepo, type AppConfig, type Issue, type LinearError } from "./api";
-import { COLUMNS, groupByColumn, PRIORITY_LABELS } from "./columns";
+import { COLUMNS, groupByColumn, PRIORITY_LABELS, type ColumnId } from "./columns";
 import type { Launcher } from "../runs/actions";
 import type { RunView } from "../runs/status";
 import type { WorkflowInfo } from "../runs/types";
+import { TaskCard } from "../tasks/TaskCard";
+import { taskColumn } from "../tasks/status";
+import type { Task } from "../tasks/types";
 import { avatarHue, formatClock, initials } from "../../lib/format";
 import "./board.css";
 
@@ -200,8 +203,26 @@ function IssueCard(p: CardProps) {
   );
 }
 
+/** Tarea local mezclada en el board, con su run vigente. */
+export interface BoardTask {
+  task: Task;
+  view: RunView | undefined;
+}
+
+export interface BoardTaskHandlers {
+  isBusy: (taskId: string) => boolean;
+  selectedId: string | null;
+  onOpen: (task: Task) => void;
+  onRun: (task: Task) => void;
+  onToggleDone: (task: Task) => void;
+  onOpenRun: (view: RunView) => void;
+}
+
 interface BoardViewProps {
   issues: Issue[];
+  /** Tareas locales: van en la columna que corresponde a su estado derivado. */
+  tasks?: BoardTask[];
+  taskHandlers?: BoardTaskHandlers;
   config: AppConfig;
   currentView: Map<string, RunView>;
   launcher: Launcher;
@@ -216,19 +237,46 @@ interface BoardViewProps {
 
 export function BoardView(p: BoardViewProps) {
   const grouped = useMemo(() => groupByColumn(p.issues), [p.issues]);
-  const columns = COLUMNS.filter((c) => !c.hideWhenEmpty || grouped.get(c.id)!.length > 0);
+  const taskGroups = useMemo(() => {
+    const m = new Map<string, BoardTask[]>();
+    for (const t of p.tasks ?? []) {
+      const col = taskColumn(t.task, t.view);
+      m.set(col, [...(m.get(col) ?? []), t]);
+    }
+    return m;
+  }, [p.tasks]);
+  const countOf = (id: ColumnId) => grouped.get(id)!.length + (taskGroups.get(id)?.length ?? 0);
+  const columns = COLUMNS.filter((c) => !c.hideWhenEmpty || countOf(c.id) > 0);
+  const th = p.taskHandlers;
 
   return (
     <div className="board" role="list" aria-label="Board">
       {columns.map((col) => {
         const list = grouped.get(col.id)!;
+        const tasks = th ? (taskGroups.get(col.id) ?? []) : [];
+        const count = list.length + tasks.length;
         return (
-          <section key={col.id} className="column" role="listitem" aria-label={`${col.label}, ${list.length} issues`}>
+          <section key={col.id} className="column" role="listitem" aria-label={`${col.label}, ${count} cards`}>
             <h2 className="column-head">
               <span className={`column-ring col-${col.tone}`} aria-hidden />
               <span>{col.label}</span>
-              <span className="column-count num">{list.length}</span>
+              <span className="column-count num">{count}</span>
             </h2>
+            {th &&
+              tasks.map(({ task, view }) => (
+                <TaskCard
+                  key={`task-${task.id}`}
+                  task={task}
+                  view={view}
+                  showRepo
+                  selected={th.selectedId === task.id}
+                  busy={th.isBusy(task.id)}
+                  onOpen={th.onOpen}
+                  onRun={th.onRun}
+                  onToggleDone={th.onToggleDone}
+                  onOpenRun={th.onOpenRun}
+                />
+              ))}
             {list.map((issue) => {
               const repo = resolveRepo(p.config, issue.team.id, issue.project?.id);
               return (
@@ -250,7 +298,7 @@ export function BoardView(p: BoardViewProps) {
                 />
               );
             })}
-            {list.length === 0 && <div className="column-empty">No issues</div>}
+            {count === 0 && <div className="column-empty">{th ? "Nothing here" : "No issues"}</div>}
           </section>
         );
       })}

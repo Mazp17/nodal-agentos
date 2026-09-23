@@ -3,11 +3,13 @@ import type { RunView } from "../features/runs/status";
 import { BrandMark } from "../ui/BrandMark";
 import { Avatar } from "../features/linear/Board";
 
-export type NavView = "board" | "runs" | "settings";
+export type NavView = "board" | "runs" | "tasks" | "activity" | "settings";
 
 interface Props {
   current: NavView;
   counts: Partial<Record<NavView, number>>;
+  /** Pulso en el item (p. ej. agentes trabajando en los repos) y su tooltip. */
+  live?: Partial<Record<NavView, string>>;
   activeRuns: RunView[];
   viewer: Viewer | null;
   linear: { ok: boolean; label: string };
@@ -19,6 +21,8 @@ interface Props {
 const NAV: { id: NavView; label: string; shortcut: string }[] = [
   { id: "board", label: "Board", shortcut: "⌘1" },
   { id: "runs", label: "Runs", shortcut: "⌘2" },
+  { id: "tasks", label: "Tasks", shortcut: "⌘3" },
+  { id: "activity", label: "Activity", shortcut: "⌘4" },
   { id: "settings", label: "Settings", shortcut: "⌘," },
 ];
 
@@ -42,10 +46,11 @@ export function Sidebar(p: Props) {
             type="button"
             className={`side-nav-item ${p.current === n.id ? "on" : ""}`}
             aria-current={p.current === n.id ? "page" : undefined}
-            title={`${n.label} (${n.shortcut})`}
+            title={p.live?.[n.id] ? `${n.label} (${n.shortcut}) · ${p.live[n.id]}` : `${n.label} (${n.shortcut})`}
             onClick={() => p.onNav(n.id)}
           >
             <span className="side-nav-label">{n.label}</span>
+            {p.live?.[n.id] && <span className="dot dot-sm pulse tone-accent" role="img" aria-label={p.live[n.id]} />}
             {p.counts[n.id] != null && <span className="side-nav-count num">{p.counts[n.id]}</span>}
           </button>
         ))}

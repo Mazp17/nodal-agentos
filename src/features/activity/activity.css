@@ -58,3 +58,7 @@ button.act-row:hover { background: var(--fill-4); }
 .act-tool-name { color: var(--text-4); }
 .act-tool-sum { color: var(--text-dim); }
 .act-time { flex: none; font-size: var(--fs-xs); color: var(--text-dim); margin-top: 2px; }
+
+/* Vista "Activity" del shell. */
+.activity-view { flex: 1; min-height: 0; overflow: auto; padding: var(--sp-6) var(--sp-8); }
+.activity-view > .act-panel { max-width: 960px; }

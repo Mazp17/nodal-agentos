@@ -10,10 +10,12 @@ interface Props {
   value: string | null;
   options: ChipOption[];
   onChange: (value: string | null) => void;
+  /** Texto de la opción "sin filtro"; `null` la oculta (hay que elegir una). */
+  anyLabel?: string | null;
 }
 
 /** Chip de filtro con menú desplegable (Team / Project / Assignee). */
-export function FilterChip({ label, value, options, onChange }: Props) {
+export function FilterChip({ label, value, options, onChange, anyLabel = "Any" }: Props) {
   const [open, setOpen] = useState(false);
   const wrap = useRef<HTMLDivElement>(null);
   const trigger = useRef<HTMLButtonElement>(null);
@@ -72,7 +74,7 @@ export function FilterChip({ label, value, options, onChange }: Props) {
       </button>
       {open && (
         <div className="menu chip-menu" role="menu" aria-label={label} onKeyDown={onMenuKey}>
-          {[{ value: null, label: "Any" } as { value: string | null; label: string }, ...options].map((o) => (
+          {[...(anyLabel === null ? [] : [{ value: null, label: anyLabel }]), ...options].map((o: { value: string | null; label: string }) => (
             <button
               key={o.value ?? "__any"}
               type="button"

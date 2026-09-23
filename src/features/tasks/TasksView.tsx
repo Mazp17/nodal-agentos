@@ -1,11 +1,11 @@
 import { useState } from "react";
 import type { RunView } from "../runs/status";
-import { useTaskActions } from "./actions";
+import { useTaskActions, type TaskActions } from "./actions";
 import { NewTaskDialog } from "./NewTaskDialog";
 import { TaskCard } from "./TaskCard";
 import { TaskPanel } from "./TaskPanel";
-import { useTasks } from "./useTasks";
-import type { Task } from "./types";
+import { samePath, useTasks, type TasksState } from "./useTasks";
+import type { FinishMode, Task } from "./types";
 import "./tasks.css";
 
 export interface TasksViewProps {
@@ -16,19 +16,28 @@ export interface TasksViewProps {
   pickFile?: (repoPath: string) => Promise<string | null>;
   /** Abrir el detalle de un run. */
   onOpenRun?: (view: RunView) => void;
+  /** Estado compartido (p. ej. el que ya usa el board): evita un segundo polling. Trae todos los repos. */
+  state?: TasksState;
+  /** Acciones compartidas con `state`. */
+  actions?: TaskActions;
+  /** "Finish" del repo en Settings, para preseleccionarlo en el drawer. */
+  finishOf?: (repoPath: string) => FinishMode | undefined;
 }
 
 /** Lista de tareas locales con su diálogo de alta/edición y su drawer de detalle. */
-export function TasksView({ repoPath, repos, pickFile, onOpenRun }: TasksViewProps) {
-  const state = useTasks(repoPath);
-  const actions = useTaskActions(state.refresh);
+export function TasksView({ repoPath, repos, pickFile, onOpenRun, finishOf, ...shared }: TasksViewProps) {
+  const own = useTasks(repoPath, !shared.state);
+  const state = shared.state ?? own;
+  const ownActions = useTaskActions(state.refresh);
+  const actions = shared.actions ?? ownActions;
+  const tasks = shared.state && repoPath ? state.tasks.filter((t) => samePath(t.repoPath, repoPath)) : state.tasks;
   const [openId, setOpenId] = useState<string | null>(null);
   const [dialog, setDialog] = useState<{ task: Task | null } | null>(null);
   const [planVersion, setPlanVersion] = useState(0);
 
-  const open = state.tasks.find((t) => t.id === openId) ?? null;
-  const todo = state.tasks.filter((t) => t.status === "todo");
-  const done = state.tasks.filter((t) => t.status === "done");
+  const open = tasks.find((t) => t.id === openId) ?? null;
+  const todo = tasks.filter((t) => t.status === "todo");
+  const done = tasks.filter((t) => t.status === "done");
 
   const card = (t: Task) => (
     <TaskCard
@@ -49,7 +58,7 @@ export function TasksView({ repoPath, repos, pickFile, onOpenRun }: TasksViewPro
     <div className="tk-view">
       <div className="tk-view-bar">
         <h2 className="tk-view-title">Tasks</h2>
-        <span className="tk-count num">{state.tasks.length}</span>
+        <span className="tk-count num">{tasks.length}</span>
         <button type="button" className="btn btn-primary btn-sm tk-view-new" onClick={() => setDialog({ task: null })}>
           New task
         </button>
@@ -60,7 +69,7 @@ export function TasksView({ repoPath, repos, pickFile, onOpenRun }: TasksViewPro
         </div>
       )}
       <div className="tk-view-body">
-        {!state.loading && state.tasks.length === 0 ? (
+        {!state.loading && tasks.length === 0 ? (
           <div className="center-state">
             <div className="center-state-body">
               <span className="state-icon-empty" aria-hidden />
@@ -98,6 +107,7 @@ export function TasksView({ repoPath, repos, pickFile, onOpenRun }: TasksViewPro
           history={state.historyOf(open.id)}
           actions={actions}
           planVersion={planVersion}
+          defaultFinish={finishOf?.(open.repoPath)}
           onClose={() => setOpenId(null)}
           onEdit={(t) => setDialog({ task: t })}
           onOpenRun={onOpenRun}

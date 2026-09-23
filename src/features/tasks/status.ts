@@ -1,6 +1,6 @@
 import { viewOfIssueRun, type RunView } from "../runs/status";
 import type { IssueRun, RunDetail, RunSummary } from "../runs/types";
-import type { TaskRun } from "./types";
+import type { Task, TaskRun } from "./types";
 
 export const TASK_WORKFLOW = "plan-task";
 
@@ -36,4 +36,19 @@ export function viewOfTaskRun(
 ): RunView {
   const v = viewOfIssueRun(asIssueRun(tr, title), run, detail, queuePos, current);
   return { ...v, key: taskRunKey(tr), ir: null, issueId: null, identifier: title };
+}
+
+/** Columna del board para una tarea local, según su estado derivado. */
+export type TaskColumn = "unstarted" | "started" | "review" | "completed";
+
+/**
+ * Done → Done; run en cola o en curso → In Progress; run terminado en verde o amarillo
+ * sin marcar la tarea → In Review; el resto (sin run, falló, rojo) → Todo.
+ */
+export function taskColumn(task: Task, view: RunView | undefined): TaskColumn {
+  if (task.status === "done") return "completed";
+  if (view?.active) return "started";
+  const r = view?.kind === "done" ? view.detail?.resultStatus : null;
+  if (r === "green" || r === "yellow") return "review";
+  return "unstarted";
 }
