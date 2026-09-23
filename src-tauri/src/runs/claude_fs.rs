@@ -1037,6 +1037,70 @@ pub fn read_agent_transcript(
 }
 
 // ---------------------------------------------------------------------------
+// Motivo por el que una sesión en background no llegó a arrancar su workflow
+// ---------------------------------------------------------------------------
+
+/// Texto con que Claude Code (2.1.281) rechaza la tool `Workflow` cuando el workflow es
+/// nuevo o cambió y nadie lo aprobó en `/workflows`. En una sesión `--bg` no hay a quién
+/// preguntarle: queda como `tool_result` con `is_error` y la sesión termina sin workflow.
+pub const WORKFLOW_REVIEW_TEXT: &str = "Review dynamic workflow before running";
+/// Lo que se lee del principio del transcript: la llamada a `Workflow` es de lo primero.
+const BLOCKER_SCAN_BYTES: u64 = 4 * 1024 * 1024;
+
+/// `<projects>/<slug(cwd)>/<sid>.jsonl`, o el primero que aparezca en otro proyecto.
+pub fn find_session_jsonl(projects: &Path, cwd: &str, session_id: &str) -> Option<PathBuf> {
+    let file = format!("{session_id}.jsonl");
+    let direct = projects.join(project_slug(cwd)).join(&file);
+    if direct.is_file() {
+        return Some(direct);
+    }
+    fs::read_dir(projects).ok()?.flatten().map(|e| e.path().join(&file)).find(|p| p.is_file())
+}
+
+/// Busca en las líneas de un transcript de sesión la llamada a `Workflow` rechazada por
+/// falta de aprobación. `Some(nombre)` si la encuentra (el nombre puede faltar).
+pub fn find_workflow_review_denial(text: &str) -> Option<Option<String>> {
+    // id del tool_use → nombre del workflow pedido.
+    let mut calls: Vec<(String, Option<String>)> = Vec::new();
+    for line in text.lines() {
+        let has_call = line.contains("\"Workflow\"");
+        let has_denial = line.contains(WORKFLOW_REVIEW_TEXT);
+        if !has_call && !has_denial {
+            continue;
+        }
+        let Ok(v) = serde_json::from_str::<Value>(line) else { continue };
+        let Some(blocks) = v.pointer("/message/content").and_then(Value::as_array) else { continue };
+        for b in blocks {
+            match b.get("type").and_then(Value::as_str) {
+                Some("tool_use") if b.get("name").and_then(Value::as_str) == Some("Workflow") => {
+                    if let Some(id) = b.get("id").and_then(Value::as_str) {
+                        let name = b.pointer("/input/name").and_then(Value::as_str).map(str::to_string);
+                        calls.push((id.to_string(), name));
+                    }
+                }
+                Some("tool_result") if tool_result_text(b).contains(WORKFLOW_REVIEW_TEXT) => {
+                    let id = b.get("tool_use_id").and_then(Value::as_str);
+                    let name = calls.iter().find(|(c, _)| Some(c.as_str()) == id).and_then(|(_, n)| n.clone());
+                    return Some(name);
+                }
+                _ => {}
+            }
+        }
+    }
+    None
+}
+
+/// Lee el principio del transcript y busca el rechazo (una última línea cortada no
+/// parsea como JSON y se ignora).
+pub fn read_workflow_review_denial(path: &Path) -> Option<Option<String>> {
+    let file = fs::File::open(path).ok()?;
+    let mut buf = Vec::new();
+    file.take(BLOCKER_SCAN_BYTES).read_to_end(&mut buf).ok()?;
+    let text = String::from_utf8_lossy(&buf);
+    find_workflow_review_denial(&text)
+}
+
+// ---------------------------------------------------------------------------
 // Tests: fixtures recortados de runs reales en `src/runs/fixtures/`.
 // ---------------------------------------------------------------------------
 
@@ -1050,6 +1114,25 @@ mod tests {
 
     fn fixtures_projects() -> PathBuf {
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src/runs/fixtures/projects")
+    }
+
+    #[test]
+    fn workflow_review_denial_from_real_session() {
+        // Líneas reales (recortadas) de una sesión --bg de claude 2.1.281 con plan-task sin aprobar.
+        let text = concat!(
+            r#"{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_01D3","name":"Workflow","input":{"name":"plan-task","args":{"finish":"branch"}}}]}}"#,
+            "\n",
+            r#"{"type":"user","message":{"role":"user","content":[{"type":"tool_result","content":"Review dynamic workflow before running","is_error":true,"tool_use_id":"toolu_01D3"}]},"toolUseResult":"Error: Review dynamic workflow before running"}"#,
+            "\n",
+        );
+        assert_eq!(find_workflow_review_denial(text), Some(Some("plan-task".into())));
+        // Sin la llamada (o con otro formato): se detecta igual, sin nombre.
+        let only = text.lines().nth(1).unwrap();
+        assert_eq!(find_workflow_review_denial(only), Some(None));
+        // Un texto del asistente que cita el mensaje no cuenta.
+        let quoted = r#"{"type":"assistant","message":{"content":[{"type":"text","text":"Review dynamic workflow before running"}]}}"#;
+        assert_eq!(find_workflow_review_denial(quoted), None);
+        assert_eq!(find_workflow_review_denial("{roto\n"), None);
     }
 
     #[test]

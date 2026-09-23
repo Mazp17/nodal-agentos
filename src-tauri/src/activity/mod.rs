@@ -317,6 +317,31 @@ fn assemble(repo_paths: &[PathBuf], agents: &[AgentSession], projects: &Path, ap
     }
 }
 
+/// Cuántas sesiones y subagentes están trabajando ahora en un conjunto de repos.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ActivitySummary {
+    /// Sesiones vivas trabajando o esperando al usuario.
+    pub sessions: u32,
+    /// Subagentes activos.
+    pub agents: u32,
+    pub generated_at: i64,
+}
+
+/// Mismo criterio que el panel (`sessionState(...).live` en RepoActivityPanel).
+fn summarize(act: &RepoActivity) -> ActivitySummary {
+    let live = |s: &SessionActivity| {
+        s.alive
+            && (matches!(s.state.as_deref(), Some("working" | "blocked"))
+                || matches!(s.status.as_deref(), Some("busy" | "waiting")))
+    };
+    ActivitySummary {
+        sessions: act.sessions.iter().filter(|s| live(s)).count() as u32,
+        agents: act.subagents.iter().filter(|a| a.active).count() as u32,
+        generated_at: act.generated_at,
+    }
+}
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct RawIssueRun {
@@ -389,6 +414,53 @@ pub async fn repo_activity(app: AppHandle, repo_path: String) -> Result<RepoActi
             .map(|d| d.as_millis() as i64)
             .unwrap_or(0);
         Ok(assemble(&roots, &agents, &projects, &refs, now))
+    })
+    .await
+    .map_err(|e| format!("Internal error reading activity: {e}"))?
+}
+
+/// Resumen de actividad de varios repos en una sola pasada (un `claude agents` y un
+/// recorrido de `projects`), para el indicador del sidebar. Las rutas que no existen se
+/// ignoran; sin rutas válidas devuelve ceros.
+#[tauri::command]
+pub async fn activity_summary(repo_paths: Vec<String>) -> Result<ActivitySummary, String> {
+    let raw: Vec<PathBuf> = repo_paths
+        .iter()
+        .map(|p| PathBuf::from(p.trim()))
+        .filter(|p| p.is_absolute())
+        .collect();
+    let now = || {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as i64)
+            .unwrap_or(0)
+    };
+    if raw.is_empty() {
+        return Ok(ActivitySummary { sessions: 0, agents: 0, generated_at: now() });
+    }
+    let agents = list_agents().await?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut roots: Vec<PathBuf> = Vec::new();
+        for r in raw {
+            if !r.is_dir() {
+                continue;
+            }
+            if let Ok(c) = r.canonicalize() {
+                if c != r && !roots.contains(&c) {
+                    roots.push(c);
+                }
+            }
+            if !roots.contains(&r) {
+                roots.push(r);
+            }
+        }
+        if roots.is_empty() {
+            return Ok(ActivitySummary { sessions: 0, agents: 0, generated_at: now() });
+        }
+        let projects = claude_fs::claude_config_dir()
+            .ok_or("Couldn't locate the Claude Code folder ($HOME is not set).")?
+            .join("projects");
+        Ok(summarize(&assemble(&roots, &agents, &projects, &AppRuns::default(), now())))
     })
     .await
     .map_err(|e| format!("Internal error reading activity: {e}"))?
@@ -490,6 +562,21 @@ mod tests {
         assert_eq!(wf.workflow_id.as_deref(), Some("wf_1234"));
         assert!(wf.session_is_app_run);
 
+        std::fs::remove_dir_all(&projects).unwrap();
+    }
+
+    #[test]
+    fn summary_counts_live_sessions_and_active_agents_across_repos() {
+        let (projects, now) = setup("summary");
+        let repo = PathBuf::from("/Users/me/Code/repo");
+        let one = summarize(&assemble(&[repo.clone()], &agents(now), &projects, &AppRuns::default(), now));
+        // alive0000000001, acdrepo00000001 y aworkflow000000001.
+        assert_eq!(one.agents, 3, "{one:?}");
+        assert_eq!(one.sessions, 2, "background working + headless: {one:?}");
+        // Sumar la sandbox agrega (al menos) su sesión bloqueada esperando permiso.
+        let sandbox = PathBuf::from("/Users/me/Code/repo-sandbox");
+        let both = summarize(&assemble(&[repo, sandbox], &agents(now), &projects, &AppRuns::default(), now));
+        assert!(both.sessions > one.sessions, "{one:?} {both:?}");
         std::fs::remove_dir_all(&projects).unwrap();
     }
 

@@ -36,6 +36,8 @@ export interface RunView extends RunBadge {
   queuePos: number | null;
   /** La sesión está bloqueada esperando al usuario: "permission prompt", "input needed", ... */
   waitingFor: string | null;
+  /** Error del lanzamiento (`claude --bg` falló) si el run quedó `failed` en la cola. */
+  launchError: string | null;
 }
 
 /** Espejo de `LAUNCH_GRACE_MS` en src-tauri/src/issue_runs/store.rs. */
@@ -155,6 +157,7 @@ export function viewOfIssueRun(
     runId: ir.runId ?? run?.id ?? null,
     cwd: ir.cwd,
     queuePos: badge.kind === "queued" ? queuePos : null,
+    launchError: ir.status === "failed" ? (ir.error ?? "The run couldn't be started.") : null,
     ...base(detail, run),
   };
 }
@@ -173,6 +176,7 @@ export function viewOfSession(run: RunSummary, detail: RunDetail | null | undefi
     runId: run.id,
     cwd: run.cwd,
     queuePos: null,
+    launchError: null,
     ...base(detail, run),
   };
 }

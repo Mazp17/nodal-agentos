@@ -37,6 +37,7 @@ pub fn run() {
             runs::list_runs,
             runs::get_run_detail,
             runs::get_agent_transcript,
+            runs::get_launch_blocker,
             linear::linear_key_status,
             linear::linear_set_api_key,
             linear::linear_clear_api_key,
@@ -55,6 +56,7 @@ pub fn run() {
             issue_runs::cancel_queued,
             issue_runs::attach_run,
             issue_runs::stop_run,
+            issue_runs::open_terminal_at,
             tasks::create_task,
             tasks::update_task,
             tasks::delete_task,
@@ -65,6 +67,7 @@ pub fn run() {
             tasks::list_task_runs,
             tasks::cancel_task_run,
             activity::repo_activity,
+            activity::activity_summary,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

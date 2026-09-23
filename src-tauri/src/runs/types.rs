@@ -30,6 +30,14 @@ pub struct RunRef {
     pub cwd: String,
 }
 
+/// Por qué una sesión en background terminó sin llegar a correr su workflow.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum LaunchBlocker {
+    /// La tool `Workflow` se rechazó con "Review dynamic workflow before running".
+    WorkflowReview { workflow: Option<String> },
+}
+
 /// Una sesión en background según `claude agents --json --all`.
 /// Las sesiones detenidas no traen `pid` ni `status`.
 #[derive(Debug, Clone, PartialEq, Serialize)]

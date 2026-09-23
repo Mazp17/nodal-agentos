@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import type { RepoMapping } from "../linear/api";
-import type { IssueRun, RunDetail, RunRef, RunSummary, Transcript, WorkflowInfo } from "./types";
+import type { IssueRun, LaunchBlocker, RunDetail, RunRef, RunSummary, Transcript, WorkflowInfo } from "./types";
 
 /** Usa el model/effort/permission mode del repo si `cwd` está mapeado. */
 export const launchRun = (cwd: string, prompt: string) => invoke<RunRef>("launch_run", { cwd, prompt });
@@ -36,6 +36,14 @@ export const launchIssueRun = (args: LaunchIssueArgs) => invoke<IssueRun>("launc
 export const listIssueRuns = () => invoke<IssueRun[]>("list_issue_runs");
 
 export const cancelQueued = (issueId: string) => invoke<void>("cancel_queued", { issueId });
+
+/** `null` salvo que la sesión haya terminado sin correr su workflow por un motivo conocido. */
+export const getLaunchBlocker = (sessionId: string, cwd: string) =>
+  invoke<LaunchBlocker | null>("get_launch_blocker", { sessionId, cwd });
+
+/** Abre Terminal.app en `path`; con `runClaude`, arranca `claude` ahí. */
+export const openTerminalAt = (path: string, runClaude = false) =>
+  invoke<void>("open_terminal_at", { path, runClaude });
 
 /** Abre Terminal.app con `claude attach <id>`. */
 export const attachRun = (runId: string) => invoke<void>("attach_run", { runId });

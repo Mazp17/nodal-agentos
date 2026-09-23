@@ -15,7 +15,7 @@ use tokio::io::{AsyncBufReadExt, AsyncRead, BufReader};
 use tokio::sync::mpsc;
 
 use crate::config;
-use types::{LaunchOptions, RunDetail, RunRef, RunSummary, Transcript};
+use types::{LaunchBlocker, LaunchOptions, RunDetail, RunRef, RunSummary, Transcript};
 
 const LAUNCH_TIMEOUT: Duration = Duration::from_secs(30);
 const LIST_TIMEOUT: Duration = Duration::from_secs(15);
@@ -160,6 +160,24 @@ pub async fn get_run_detail(session_id: String, cwd: String) -> Result<Option<Ru
     tauri::async_runtime::spawn_blocking(move || -> Result<Option<RunDetail>, String> {
         let projects = projects_dir()?;
         Ok(claude_fs::find_session_dir(&projects, &cwd, &session_id).and_then(|dir| claude_fs::read_run_detail(&dir)))
+    })
+    .await
+    .map_err(|e| format!("Internal error reading the session: {e}"))?
+}
+
+/// Si la sesión terminó sin correr su workflow porque Claude Code pidió aprobarlo
+/// ("Review dynamic workflow before running"), lo dice. `None` si no hay transcript o no
+/// aparece ese rechazo. Lee como mucho los primeros 4 MB del transcript principal.
+#[tauri::command]
+pub async fn get_launch_blocker(session_id: String, cwd: String) -> Result<Option<LaunchBlocker>, String> {
+    if !claude_fs::is_valid_session_id(&session_id) {
+        return Err(format!("Invalid session id: {session_id}"));
+    }
+    tauri::async_runtime::spawn_blocking(move || -> Result<Option<LaunchBlocker>, String> {
+        let projects = projects_dir()?;
+        Ok(claude_fs::find_session_jsonl(&projects, &cwd, &session_id)
+            .and_then(|p| claude_fs::read_workflow_review_denial(&p))
+            .map(|workflow| LaunchBlocker::WorkflowReview { workflow }))
     })
     .await
     .map_err(|e| format!("Internal error reading the session: {e}"))?

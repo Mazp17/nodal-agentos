@@ -154,3 +154,6 @@ export interface IssueRun {
   /** Flags del repo fijados al encolar (ausente si no hay ninguno). */
   options?: LaunchOptions;
 }
+
+/** Por qué una sesión en background terminó sin correr su workflow (`get_launch_blocker`). */
+export type LaunchBlocker = { kind: "workflowReview"; workflow: string | null };
