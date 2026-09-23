@@ -2,11 +2,13 @@
 //! no pasa por el webview y la CSP no necesita abrir `connect-src` a linear.app.
 
 mod client;
+mod detail;
 mod error;
 mod key;
 mod model;
 
 use client::{http_client, LinearClient};
+use detail::IssueDetail;
 pub use error::LinearError;
 use key::KeyCache;
 use model::{Board, Team, Viewer};
@@ -76,6 +78,17 @@ pub async fn linear_board(
     LinearClient::new(&state.http, &key).board(team_ids.as_deref()).await
 }
 
+/// Detalle completo de una issue para el panel lateral. `issue_id` acepta UUID o
+/// identifier ("ACME-8").
+#[tauri::command]
+pub async fn linear_issue_detail(
+    state: State<'_, LinearState>,
+    issue_id: String,
+) -> Result<IssueDetail, LinearError> {
+    let key = state.key.require().await?;
+    LinearClient::new(&state.http, &key).issue_detail(&issue_id).await
+}
+
 #[cfg(test)]
 mod live_tests {
     //! Contra la API real. `cargo test -- --ignored live_` con LINEAR_API_KEY en el
@@ -90,7 +103,7 @@ mod live_tests {
     #[ignore]
     fn live_viewer_teams_board() {
         let Some(key) = env_key() else {
-            eprintln!("LINEAR_API_KEY no seteada: se salta la prueba real");
+            eprintln!("LINEAR_API_KEY not set: skipping live test");
             return;
         };
         tauri::async_runtime::block_on(async {
@@ -103,11 +116,21 @@ mod live_tests {
             println!("{} teams: {}", teams.len(), keys.join(", "));
             let board = c.board(None).await.expect("board");
             println!(
-                "board: {} issues, {} teams con estados, truncated={}",
+                "board: {} issues, {} teams with states, truncated={}",
                 board.issues.len(),
                 board.teams.len(),
                 board.truncated
             );
+            if let Some(first) = board.issues.first() {
+                let d = c.issue_detail(&first.identifier).await.expect("issue detail");
+                println!(
+                    "detail {}: {} children, {} relations, {} comments",
+                    d.identifier,
+                    d.children.len(),
+                    d.relations.len(),
+                    d.comments.len()
+                );
+            }
         });
     }
 

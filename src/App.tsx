@@ -14,6 +14,7 @@ import {
 } from "./features/linear/api";
 import { BoardSkeleton, BoardView, EmptyState, ErrorState } from "./features/linear/Board";
 import { IssuePanel } from "./features/linear/IssuePanel";
+import { IssueDetailCache } from "./features/linear/issueDetail";
 import { Onboarding, SettingsView, type SettingsSection } from "./features/linear/Settings";
 import { CommandPalette, type PaletteItem } from "./features/palette/CommandPalette";
 import { useLauncher, useRunActions } from "./features/runs/actions";
@@ -56,6 +57,12 @@ function Desk() {
   const [runsTab, setRunsTab] = useState<RunsTab>("active");
   const [section, setSection] = useState<SettingsSection>("linear");
   const [panelIssue, setPanelIssue] = useState<string | null>(null);
+  // Detalle de Linear cacheado mientras el panel sigue abierto (navegar entre
+  // sub-issues no vuelve a pedirlo); se descarta al cerrarlo.
+  const [detailCache] = useState(() => new IssueDetailCache());
+  useEffect(() => {
+    if (!panelIssue) detailCache.clear();
+  }, [panelIssue, detailCache]);
   const [paletteOpen, setPaletteOpen] = useState(false);
 
   const [teams, setTeams] = useState<Team[]>([]);
@@ -619,6 +626,9 @@ function Desk() {
               setRunsTab("queued");
               go("runs");
             }}
+            detailCache={detailCache}
+            isOnBoard={(id) => issueById.has(id)}
+            onOpenIssue={setPanelIssue}
             onClose={() => setPanelIssue(null)}
           />
         )}

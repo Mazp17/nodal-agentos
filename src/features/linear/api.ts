@@ -34,6 +34,32 @@ export interface Board {
   truncated: boolean;
 }
 
+// Espejo de src-tauri/src/linear/detail.rs.
+export interface StateRef { name: string; type: StateType | string; color: string }
+export interface IssueRef { id: string; identifier: string; title: string; state: StateRef }
+export interface UserRef { id: string; name: string; displayName: string }
+export type RelationKind = "blocks" | "blocked_by" | "related" | "duplicate";
+export interface IssueDetail {
+  id: string;
+  identifier: string;
+  /** Markdown crudo de Linear. */
+  description: string | null;
+  parent: IssueRef | null;
+  children: (IssueRef & { assignee: UserRef | null })[];
+  childrenTruncated: boolean;
+  /** `inverse` sólo importa para `duplicate`: true = la otra issue duplica a ésta. */
+  relations: { kind: RelationKind; inverse: boolean; issue: IssueRef }[];
+  labels: { id: string; name: string; color: string }[];
+  estimate: number | null;
+  /** "YYYY-MM-DD" */
+  dueDate: string | null;
+  createdAt: string;
+  creator: UserRef | null;
+  /** Los más recientes, en orden cronológico ascendente. */
+  comments: { id: string; body: string; author: string | null; createdAt: string }[];
+  commentsTruncated: boolean;
+}
+
 export interface RepoMapping { teamId?: string; projectId?: string; path: string }
 export interface AppConfig { repos: RepoMapping[]; concurrency: number }
 
@@ -63,6 +89,8 @@ export const linearApi = {
   viewer: () => invoke<Viewer>("linear_viewer"),
   teams: () => invoke<Team[]>("linear_teams"),
   board: (teamIds: string[] | null) => invoke<Board>("linear_board", { teamIds }),
+  /** Acepta UUID o identifier ("ACME-8"). */
+  issueDetail: (issueId: string) => invoke<IssueDetail>("linear_issue_detail", { issueId }),
 };
 
 export const configApi = {

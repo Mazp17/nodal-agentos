@@ -38,6 +38,7 @@ pub fn run() {
             linear::linear_viewer,
             linear::linear_teams,
             linear::linear_board,
+            linear::linear_issue_detail,
             config::get_config,
             config::save_config,
             config::resolve_repo,

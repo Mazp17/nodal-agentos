@@ -1,5 +1,6 @@
 //! Cliente HTTP mínimo para la API GraphQL de Linear.
 
+use super::detail::{issue_detail_query, IssueDetail, IssueDetailData};
 use super::error::LinearError;
 use super::model::*;
 use reqwest::header::{HeaderValue, AUTHORIZATION, CONTENT_TYPE};
@@ -15,7 +16,7 @@ pub fn http_client() -> reqwest::Client {
         .timeout(Duration::from_secs(30))
         .user_agent(concat!("agent-desk/", env!("CARGO_PKG_VERSION")))
         .build()
-        .expect("config de reqwest válida")
+        .expect("valid reqwest config")
 }
 
 pub struct LinearClient<'a> {
@@ -85,5 +86,12 @@ impl<'a> LinearClient<'a> {
         }
 
         Ok(Board { teams: states.into_team_states(), issues, truncated })
+    }
+
+    pub async fn issue_detail(&self, issue_id: &str) -> Result<IssueDetail, LinearError> {
+        let d: IssueDetailData = self
+            .query(&issue_detail_query(), json!({ "id": issue_id }))
+            .await?;
+        Ok(d.into_detail())
     }
 }
