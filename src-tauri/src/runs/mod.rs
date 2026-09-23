@@ -1,7 +1,7 @@
 //! Runs en background de Claude Code: lanzarlos (`claude --bg`), listarlos
 //! (`claude agents`) y seguir el workflow que corren leyendo sus archivos de sesión.
 
-mod claude_bin;
+pub mod claude_bin;
 mod claude_fs;
 pub mod types;
 

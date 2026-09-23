@@ -22,6 +22,6 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
-.env
-.env.*
-!.env.example
+
+# worktrees de agentes de Claude Code
+.claude/
