@@ -17,9 +17,28 @@ pub fn expand_home(path: &str) -> PathBuf {
     }
 }
 
-/// `~/.nodal`: worktrees de las tareas.
+/// Debug builds (`pnpm tauri dev`) keep their own database, worktrees and keychain entries,
+/// so they never touch the data of an installed Nodal.
+pub const DEV: bool = cfg!(debug_assertions);
+
+/// `~/.nodal` (`~/.nodal-dev` in debug builds): worktrees de las tareas.
 pub fn nodal_home() -> Result<PathBuf, String> {
-    home().map(|h| h.join(".nodal")).ok_or_else(|| "$HOME is not set.".to_string())
+    let name = if DEV { ".nodal-dev" } else { ".nodal" };
+    home().map(|h| h.join(name)).ok_or_else(|| "$HOME is not set.".to_string())
+}
+
+/// App data folder (database, plans). Debug builds use `<identifier>.dev` next to it.
+pub fn data_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    use tauri::Manager;
+    let dir = app.path().app_data_dir().map_err(|e| format!("Couldn't find the app data folder: {e}"))?;
+    Ok(if DEV { dev_sibling(&dir) } else { dir })
+}
+
+/// `/x/io.github.mazp17.nodal` → `/x/io.github.mazp17.nodal.dev`.
+fn dev_sibling(dir: &std::path::Path) -> PathBuf {
+    let mut name = dir.file_name().unwrap_or_default().to_os_string();
+    name.push(".dev");
+    dir.with_file_name(name)
 }
 
 /// Carpeta absoluta y existente (con `~` expandido).
@@ -94,6 +113,14 @@ pub(crate) mod tests {
         std::fs::write(dir.join("README.md"), "# demo\n").unwrap();
         run(&["add", "."]);
         run(&["commit", "-q", "-m", "init"]);
+    }
+
+    #[test]
+    fn dev_data_lives_next_to_the_release_data() {
+        let dir = Path::new("/Users/me/Library/Application Support/io.github.mazp17.nodal");
+        assert_eq!(dev_sibling(dir), Path::new("/Users/me/Library/Application Support/io.github.mazp17.nodal.dev"));
+        // `cargo test` is a debug build unless run with --release.
+        assert_eq!(nodal_home().unwrap().ends_with(".nodal-dev"), DEV);
     }
 
     #[test]

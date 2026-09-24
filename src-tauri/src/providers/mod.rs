@@ -391,7 +391,7 @@ impl ProvidersState {
 /// Registra el estado y arranca el worker de sync. Necesita `LinearState` y la base
 /// (`db::Db`) ya registrados; si la base no abrió, el worker no hace nada.
 pub fn init(app: &AppHandle) -> Result<(), String> {
-    let data_dir = app.path().app_data_dir().map_err(|e| format!("Couldn't find the app data folder: {e}"))?;
+    let data_dir = crate::util::paths::data_dir(app)?;
     app.manage(ProvidersState {
         data_dir,
         sync_lock: tokio::sync::Mutex::new(sync::SyncMemo::default()),
