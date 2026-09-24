@@ -2,7 +2,6 @@ import { useState } from "react";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import type { Issue, IssueDetail, IssueRef, RelationKind, StateRef } from "./api";
 import { useIssueDetail, type IssueDetailCache } from "./issueDetail";
-import { PRIORITY_LABELS } from "./columns";
 import type { RunActions } from "../runs/actions";
 import { LaunchBlockerNotice } from "../runs/LaunchBlockerNotice";
 import type { RunView } from "../runs/status";
@@ -10,6 +9,9 @@ import { isInProgress, type WorkflowInfo } from "../runs/types";
 import { formatDuration, formatTokens } from "../../lib/format";
 import { useFocusTrap } from "../../ui/useFocusTrap";
 import { SafeMarkdown } from "../../ui/Markdown";
+
+// Antes en `linear/columns.ts` (borrado en F2-E).
+const PRIORITY_LABELS: Record<number, string> = { 0: "No priority", 1: "Urgent", 2: "High", 3: "Medium", 4: "Low" };
 import "./issue-panel.css";
 
 interface Props {

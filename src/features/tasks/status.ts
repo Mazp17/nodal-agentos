@@ -1,54 +1,49 @@
-import { viewOfIssueRun, type RunView } from "../runs/status";
-import type { IssueRun, RunDetail, RunSummary } from "../runs/types";
-import type { Task, TaskRun } from "./types";
+import type { Finish, Isolation, Priority, TaskStatus } from "../../domain/types";
 
-export const TASK_WORKFLOW = "plan-task";
-
-export const taskRunKey = (tr: TaskRun) => `t:${tr.taskId}:${tr.queuedAt}`;
-
-/**
- * Un `TaskRun` tiene la misma forma de cola que un `IssueRun`: se adapta para reusar
- * toda la derivación de estado de `runs/status.ts` (badges, fases, resultado).
- */
-export function asIssueRun(tr: TaskRun, title: string): IssueRun {
-  return {
-    issueId: tr.taskId,
-    identifier: title,
-    workflow: TASK_WORKFLOW,
-    runId: tr.runId,
-    sessionId: tr.sessionId,
-    cwd: tr.cwd,
-    queuedAt: tr.queuedAt,
-    launchedAt: tr.launchedAt,
-    status: tr.status,
-    error: tr.error,
-  };
+export interface StatusMeta {
+  label: string;
+  /** Variable CSS del color del estado. */
+  color: string;
+  /** Anillo punteado (en curso). */
+  dashed: boolean;
 }
 
-/** `ir`/`issueId` quedan en null: las acciones de issue (cancel) no aplican a tareas. */
-export function viewOfTaskRun(
-  tr: TaskRun,
-  title: string,
-  run: RunSummary | undefined,
-  detail: RunDetail | null | undefined,
-  queuePos: number | null,
-  current: boolean,
-): RunView {
-  const v = viewOfIssueRun(asIssueRun(tr, title), run, detail, queuePos, current);
-  return { ...v, key: taskRunKey(tr), ir: null, issueId: null, identifier: title };
-}
+export const STATUS_META: Record<TaskStatus, StatusMeta> = {
+  backlog: { label: "Backlog", color: "var(--text-disabled)", dashed: true },
+  todo: { label: "Todo", color: "var(--gray)", dashed: false },
+  in_progress: { label: "In Progress", color: "var(--accent)", dashed: true },
+  in_review: { label: "In Review", color: "var(--amber)", dashed: false },
+  blocked: { label: "Blocked", color: "var(--red)", dashed: false },
+  done: { label: "Done", color: "var(--green)", dashed: false },
+  canceled: { label: "Canceled", color: "var(--text-disabled)", dashed: false },
+};
 
-/** Columna del board para una tarea local, según su estado derivado. */
-export type TaskColumn = "unstarted" | "started" | "review" | "completed";
+/** Columnas visibles por defecto; Backlog y Canceled quedan detrás de un filtro. */
+export const BOARD_COLUMNS: TaskStatus[] = ["todo", "in_progress", "in_review", "blocked", "done"];
+export const HIDDEN_COLUMNS: TaskStatus[] = ["backlog", "canceled"];
 
-/**
- * Done → Done; run en cola o en curso → In Progress; run terminado en verde o amarillo
- * sin marcar la tarea → In Review; el resto (sin run, falló, rojo) → Todo.
- */
-export function taskColumn(task: Task, view: RunView | undefined): TaskColumn {
-  if (task.status === "done") return "completed";
-  if (view?.active) return "started";
-  const r = view?.kind === "done" ? view.detail?.resultStatus : null;
-  if (r === "green" || r === "yellow") return "review";
-  return "unstarted";
-}
+export const isClosed = (s: TaskStatus) => s === "done" || s === "canceled";
+
+export const PRIORITY_LABEL: Record<Priority, string> = {
+  urgent: "Urgent",
+  high: "High",
+  medium: "Medium",
+  low: "Low",
+  none: "No priority",
+};
+export const PRIORITIES: Priority[] = ["urgent", "high", "medium", "low", "none"];
+
+export const FINISH_LABEL: Record<Finish, string> = { changes: "Changes only", commit: "Commit", pr: "Open PR" };
+export const FINISH_HINT: Record<Finish, string> = {
+  changes: "Leaves the changes uncommitted",
+  commit: "Commits on the task branch, no push",
+  pr: "Commits, pushes and opens a PR",
+};
+export const ISOLATION_LABEL: Record<Isolation, string> = { worktree: "Worktree", in_place: "In place" };
+export const ISOLATION_HINT: Record<Isolation, string> = {
+  worktree: "Own branch and folder under ~/.nodal/worktrees",
+  in_place: "Works in the repo folder; one in-place run per repo at a time",
+};
+
+export const PROVIDER_LABEL: Record<string, string> = { linear: "Linear" };
+export const providerLabel = (p: string) => PROVIDER_LABEL[p] ?? p.charAt(0).toUpperCase() + p.slice(1);

@@ -1,7 +1,7 @@
 import type { Viewer } from "../features/linear/api";
 import type { RunView } from "../features/runs/status";
 import { BrandMark } from "../ui/BrandMark";
-import { Avatar } from "../features/linear/Board";
+import { Avatar } from "../ui/Avatar";
 
 export type NavView = "board" | "runs" | "tasks" | "activity" | "settings";
 

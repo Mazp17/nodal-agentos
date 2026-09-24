@@ -1,0 +1,13 @@
+.avatar {
+  flex: none;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  /* Matiz por nombre (--hue, inline); luminancia y croma fijos. */
+  background: oklch(0.5 0.08 var(--hue, 250));
+  color: var(--text-2);
+  font-weight: var(--fw-semibold);
+}
+.avatar-sm { width: 18px; height: 18px; font-size: 8.5px; }
+.avatar-md { width: 24px; height: 24px; font-size: 10px; }
+.avatar-empty { background: transparent; border: 1px dashed var(--border-strong); }

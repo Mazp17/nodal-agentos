@@ -2,7 +2,6 @@ import { useEffect, useState } from "react";
 import { openUrl, revealItemInDir } from "@tauri-apps/plugin-opener";
 import type { Issue } from "../linear/api";
 import { formatDateTime, formatDuration, formatTokens } from "../../lib/format";
-import { RunBadge } from "../linear/Board";
 import type { RunActions } from "./actions";
 import { AGENT_STATUS, AgentTranscript, modelName } from "./AgentTranscript";
 import { getRunDetail } from "./api";
@@ -10,6 +9,17 @@ import { classifyLaunchError, LaunchBlockerNotice } from "./LaunchBlockerNotice"
 import type { RunView } from "./status";
 import { isInProgress, type AgentInfo, type RunDetail, type RunResult } from "./types";
 import "./run-detail.css";
+
+// Antes en `linear/Board.tsx` (borrado en F2-E); lo reemplaza G.
+function RunBadge({ view }: { view: RunView }) {
+  const pulse = view.kind === "running" || view.kind === "starting";
+  return (
+    <span className={`badge tone-${view.tone}`} title={view.title}>
+      <span className={`dot dot-sm ${pulse ? "pulse" : ""}`} aria-hidden />
+      {view.label}
+    </span>
+  );
+}
 import "./transcript.css";
 
 const DETAIL_POLL_MS = 3000;
