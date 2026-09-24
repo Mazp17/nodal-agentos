@@ -319,6 +319,7 @@ details > summary.tp-step-sub { cursor: pointer; }
 
 .tp-foot {
   display: flex;
+  flex-wrap: wrap; /* a linked task with a diff has up to six buttons */
   align-items: center;
   gap: var(--sp-2);
   padding: var(--sp-5) var(--sp-8);

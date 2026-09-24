@@ -624,6 +624,11 @@ export function TaskPanel({ taskId, onClose, onOpenRun, onOpenDiff, onOpenTask, 
             Open last run
           </button>
         ) : null}
+        {lastWork && (
+          <button type="button" className="btn btn-sm" onClick={() => onOpenDiff(lastWork.id)}>
+            View diff
+          </button>
+        )}
         {closed ? (
           <button type="button" className="btn btn-sm" disabled={busy !== null} onClick={() => setStatus("todo")}>
             Reopen
