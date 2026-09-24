@@ -1,8 +1,16 @@
 import { useCallback, useEffect, useId, useState, type ReactNode } from "react";
-import { invoke } from "@tauri-apps/api/core";
-import { providerStatus, setSettings, type ProviderStatus } from "../../domain/api";
+import {
+  claudeVersion,
+  gitVersion,
+  providerStatus,
+  repoTrust,
+  setSettings,
+  type ProviderStatus,
+  type RepoTrust,
+} from "../../domain/api";
 import { useProjects } from "../../domain/hooks/projects";
-import type { Settings } from "../../domain/types";
+import type { Repo, Settings } from "../../domain/types";
+import { openTerminalAt } from "../runs/api";
 import { IntegrationsSettings } from "../providers";
 import { resolveGitRoot } from "../projects/repoPicker";
 import { Segmented } from "../projects/fields";
@@ -235,14 +243,29 @@ type Check = { name: string; value: string; state: "ok" | "warn" | "error" | "ch
 function DiagnosticsSettings() {
   const { repos } = useProjects();
   const legacy = useLegacyImport();
+  const toast = useToast();
   const [checks, setChecks] = useState<Check[] | null>(null);
+  const [trust, setTrust] = useState<{ repo: Repo; trust: RepoTrust | null; error: string | null }[] | null>(null);
   const [busy, setBusy] = useState(false);
 
   const run = useCallback(async () => {
     setBusy(true);
-    const cli = invoke<string>("claude_version").then(
+    const cli = claudeVersion().then(
       (v): Check => ({ name: "Claude Code CLI", value: v, state: "ok" }),
       (e): Check => ({ name: "Claude Code CLI", value: String(e), state: "error" }),
+    );
+    const git = gitVersion().then(
+      (v): Check => ({ name: "git", value: v, state: "ok" }),
+      (e): Check => ({ name: "git", value: String(e), state: "error" }),
+    );
+    // Solo lee `~/.claude.json`: no lanza nada.
+    const trustChecks = Promise.all(
+      repos.map((repo) =>
+        repoTrust(repo.path).then(
+          (t) => ({ repo, trust: t, error: null }),
+          (e) => ({ repo, trust: null, error: String(e) }),
+        ),
+      ),
     );
     const linear = providerStatus("linear").then(
       (s: ProviderStatus): [Check, Check] => [
@@ -270,15 +293,9 @@ function DiagnosticsSettings() {
           () => ({ r, ok: false }),
         ),
       ),
-    ).then((rs): [Check, Check] => {
+    ).then((rs): Check => {
       const bad = rs.filter((x) => !x.ok);
-      const git: Check =
-        rs.length === 0
-          ? { name: "git", value: "Not checked · no repos yet", state: "na" }
-          : bad.length === rs.length
-            ? { name: "git", value: "Couldn't resolve any repo with git", state: "error" }
-            : { name: "git", value: "Resolves repo roots", state: "ok" };
-      const reposCheck: Check =
+      return (
         rs.length === 0
           ? { name: "Repos", value: "No repos yet", state: "na" }
           : bad.length
@@ -287,13 +304,23 @@ function DiagnosticsSettings() {
                 value: `${rs.length} repos · ${bad.length} missing or not a git repo: ${bad.map((b) => b.r.name).join(", ")}`,
                 state: "warn",
               }
-            : { name: "Repos", value: `${rs.length} repo${rs.length === 1 ? "" : "s"} · all reachable`, state: "ok" };
-      return [git, reposCheck];
+            : { name: "Repos", value: `${rs.length} repo${rs.length === 1 ? "" : "s"} · all reachable`, state: "ok" }
+      );
     });
-    const [c, [kc, lc], [gc, rc]] = await Promise.all([cli, linear, repoChecks]);
+    const [c, gc, [kc, lc], rc, tr] = await Promise.all([cli, git, linear, repoChecks, trustChecks]);
     setChecks([c, kc, gc, rc, lc]);
+    setTrust(tr);
     setBusy(false);
   }, [repos]);
+
+  const openTerminal = async (repo: Repo) => {
+    try {
+      await openTerminalAt(repo.path, true);
+      toast("Terminal opened", `Accept Claude Code's trust prompt for ${repo.name}, then run the checks again.`, "accent");
+    } catch (e) {
+      toast("Couldn't open Terminal", String(e), "danger");
+    }
+  };
 
   useEffect(() => {
     void run();
@@ -326,9 +353,68 @@ function DiagnosticsSettings() {
           </div>
         ))}
       </div>
-      <p className="settings-note">
-        Whether Claude Code trusts each repo (its trust dialog) isn't checked yet.
-      </p>
+
+      <SectionHead
+        title="Repo trust"
+        text="Claude Code asks once per folder whether to trust it. Background runs can't answer that prompt, so an untrusted repo stalls its runs."
+      />
+      <div className="panel diag-list" aria-busy={busy}>
+        {repos.length === 0 && (
+          <div className="diag-row diag-na">
+            <span className="diag-mark" aria-hidden>
+              {MARK.na}
+            </span>
+            <span className="diag-name">No repos yet</span>
+          </div>
+        )}
+        {repos.map((repo) => {
+          const row = trust?.find((t) => t.repo.id === repo.id);
+          const t = row?.trust ?? null;
+          const state: Check["state"] =
+            busy || !row ? "checking" : row.error ? "error" : t?.trusted === true ? "ok" : t?.trusted === false ? "warn" : "na";
+          const label =
+            state === "checking"
+              ? LABEL.checking
+              : row?.error
+                ? "Error"
+                : t?.trusted === true
+                  ? "Trusted"
+                  : t?.trusted === false
+                    ? "Not trusted"
+                    : "Unknown";
+          const detail = row?.error
+            ? row.error
+            : t?.trusted === true
+              ? t.source === "parent" && t.matchedPath
+                ? `Via ${t.matchedPath}`
+                : repo.path
+              : t?.trusted === false
+                ? "Claude Code will show its trust prompt"
+                : t
+                  ? "Couldn't read Claude Code's config"
+                  : "";
+          return (
+            <div key={repo.id} className={`diag-row diag-${state}`}>
+              <span className="diag-mark" aria-hidden>
+                {MARK[state]}
+              </span>
+              <span className="diag-name ellipsis" title={repo.path}>
+                {repo.name}
+              </span>
+              <span className="diag-value mono ellipsis" title={detail}>
+                {detail}
+              </span>
+              {t?.trusted === false && !busy ? (
+                <button type="button" className="btn btn-sm" onClick={() => void openTerminal(repo)}>
+                  Open in Terminal
+                </button>
+              ) : (
+                <span className="diag-state">{label}</span>
+              )}
+            </div>
+          );
+        })}
+      </div>
 
       <SectionHead
         title="Previous version"
