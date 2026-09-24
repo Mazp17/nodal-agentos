@@ -10,20 +10,19 @@ import {
   updateTask,
   type TaskPatch,
 } from "../../domain/api";
-import { isRunActive, useAllRuns, useTaskRuns } from "../../domain/hooks/runs";
+import { isRunActive, useQueueSummary, useTaskRuns } from "../../domain/hooks/runs";
 import {
   invalidate,
   KEYS,
   setData,
   useProjectList,
   useRepos,
-  useSettings,
   useTask,
   useTaskPlan,
   useTaskRelations,
   useTasks,
 } from "../../domain/hooks/store";
-import { taskKey, TASK_STATUSES, type Executor, type RelationKind, type Run, type Task, type TaskStatus } from "../../domain/types";
+import { taskKey, TASK_STATUSES, type Executor, type RelationKind, type RunLight, type Task, type TaskStatus } from "../../domain/types";
 import { formatDateTime, formatDuration } from "../../lib/format";
 import { SafeMarkdown } from "../../ui/Markdown";
 import { useFocusTrap } from "../../ui/useFocusTrap";
@@ -74,8 +73,7 @@ export function TaskPanel({ taskId, onClose, onOpenRun, onOpenDiff, onOpenTask, 
   const projects = useProjectList();
   const repos = useRepos(task?.projectId ?? null);
   const runsQ = useTaskRuns(taskId);
-  const allRuns = useAllRuns();
-  const settings = useSettings();
+  const summary = useQueueSummary();
 
   const [tab, setTab] = useState<"overview" | "source">("overview");
   const [menu, setMenu] = useState<"status" | "repo" | null>(null);
@@ -130,9 +128,7 @@ export function TaskPanel({ taskId, onClose, onOpenRun, onOpenDiff, onOpenTask, 
   const src = task.source;
   const closed = isClosed(task.status);
   const canLaunch = !!repo && !activeRun && !closed;
-  const slotsBusy = (allRuns.data ?? []).filter((r) => r.status === "launching" || r.status === "launched").length;
-  const queued = (allRuns.data ?? []).some((r) => r.status === "queued");
-  const willQueue = queued || (settings.data ? slotsBusy >= settings.data.concurrency : false);
+  const willQueue = summary.queued > 0 || (summary.capacity > 0 && summary.running >= summary.capacity);
 
   const act = async (label: string, fn: () => Promise<unknown>, okMsg?: [string, string?]) => {
     setBusy(label);
@@ -775,7 +771,7 @@ function StepRow({
   onOpenRun,
   onOpenDiff,
 }: {
-  run: Run;
+  run: RunLight;
   n: number;
   onOpenRun: (id: string) => void;
   onOpenDiff: (id: string) => void;
@@ -795,7 +791,7 @@ function StepRow({
         <RunBadge run={run} />
         <span className="tk-muted num tp-step-dur">{dur != null ? formatDuration(dur) : "—"}</span>
       </div>
-      {(run.summary || v || run.error || run.extraInstructions) && (
+      {(run.summary || v || run.error) && (
         <div className="tp-step-detail">
           {run.error && <div className="tp-step-err">{run.error}</div>}
           {v?.summary && <div>{v.summary}</div>}
@@ -820,7 +816,6 @@ function StepRow({
               </ul>
             </details>
           )}
-          {run.extraInstructions && <div className="tk-muted">Extra: {run.extraInstructions}</div>}
         </div>
       )}
       <div className="tp-step-actions">

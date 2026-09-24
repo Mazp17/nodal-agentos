@@ -5,24 +5,31 @@
 // mutación, `invalidate(...)` relee al instante (y devuelve la promesa de esa relectura).
 // Las consultas por clave sin polling (relaciones, plan, ejecutores) usan el mismo motor con
 // intervalo 0 y se releen al invalidar su recurso.
+// El backend avisa con `nodal://changed` (ver `onChanged`): cada aviso invalida el recurso
+// que corresponde, así que el polling queda solo de respaldo (más lento).
 
 import { useCallback, useLayoutEffect, useMemo, useRef, useSyncExternalStore } from "react";
 import {
   getSettings,
+  onChanged,
   listExecutors,
   listProjects,
   listRepos,
   listTaskRelations,
   listTasks,
   readTaskPlan,
+  type ChangedKind,
   type ExecutorInfo,
 } from "../api";
 import type { Project, Repo, Settings, Task, TaskRelation } from "../types";
 
-export type Resource = "projects" | "repos" | "tasks" | "runs" | "settings";
+export type Resource = "projects" | "repos" | "tasks" | "runs" | "settings" | "sources";
 
-/** Intervalos de polling (ms). */
-export const POLL = { tasks: 5000, runs: 3000, slow: 30000 } as const;
+/**
+ * Intervalos de polling (ms), de respaldo: los cambios llegan por `nodal://changed`. `live`
+ * es para lo que depende de sesiones de Claude Code (`claude agents`), que no avisan.
+ */
+export const POLL = { tasks: 20_000, live: 5000, slow: 60_000 } as const;
 
 export interface Loadable<T> {
   data: T | undefined;
@@ -126,6 +133,47 @@ if (typeof document !== "undefined") {
     if (document.hidden) return;
     for (const [k, e] of store) if (e.listeners.size > 0 && e.interval > 0) void load(k);
   });
+}
+
+// ---------- Avisos del backend ----------
+
+/** Qué recursos relee cada `kind` de `nodal://changed`. */
+const CHANGED_RESOURCES: Record<ChangedKind, Resource[]> = {
+  tasks: ["tasks"],
+  runs: ["runs"],
+  queue: ["runs"],
+  sources: ["sources"],
+  // Repos y settings también avisan como `projects`.
+  projects: ["projects", "repos", "settings"],
+};
+
+/** Los avisos llegan por `kind` (runs, queue y tasks juntos): se agrupan en una sola relectura. */
+const CHANGE_BATCH_MS = 50;
+let pendingChanges = new Set<Resource>();
+let changeTimer: number | undefined;
+
+function flushChanges() {
+  changeTimer = undefined;
+  // Ventana oculta: se acumulan y se releen al volver.
+  if (document.hidden || !pendingChanges.size) return;
+  const rs = [...pendingChanges];
+  pendingChanges = new Set();
+  void invalidate(...rs);
+}
+
+function onBackendChange(kind: ChangedKind) {
+  for (const r of CHANGED_RESOURCES[kind] ?? []) pendingChanges.add(r);
+  if (changeTimer === undefined) changeTimer = window.setTimeout(flushChanges, CHANGE_BATCH_MS);
+}
+
+if (typeof document !== "undefined") {
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden && changeTimer === undefined) flushChanges();
+  });
+}
+
+if (typeof window !== "undefined" && "__TAURI_INTERNALS__" in window) {
+  onChanged((e) => onBackendChange(e.kind)).catch((err: unknown) => console.error("nodal://changed", err));
 }
 
 function entry(key: string, fetcher: () => Promise<unknown>, resources: Resource[], interval: number): Entry {

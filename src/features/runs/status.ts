@@ -1,7 +1,7 @@
 // Estado derivado de un run para pintar: cruza la fila de Nodal (`Run`) con lo que dice
 // Claude Code (`claude agents` y el detalle del workflow). Puro: sin hooks ni invoke.
 
-import { taskKey, type Executor, type Project, type Run, type RunOutcome, type Task } from "../../domain/types";
+import { taskKey, type Executor, type Project, type RunLight, type RunOutcome, type Task } from "../../domain/types";
 import type { RunDetail, RunSummary } from "./types";
 
 export type BadgeTone = "accent" | "ok" | "warn" | "danger" | "muted";
@@ -25,7 +25,7 @@ export type RunPhase =
 export type RunsTab = "active" | "queued" | "finished" | "failed";
 
 export interface RunView {
-  run: Run;
+  run: RunLight;
   /** Sesión en `claude agents`, si ya figura. */
   live: RunSummary | null;
   /** Detalle del workflow: `undefined` sin pedir aún, `null` si la sesión no corrió uno. */
@@ -46,17 +46,17 @@ export interface RunView {
   tokens: number | null;
   durationMs: number | null;
   /** Revisor lanzado sobre este run (el más reciente), si lo hay. */
-  review: Run | null;
+  review: RunLight | null;
 }
 
 /** Espejo de `LAUNCH_GRACE_MS` en src-tauri/src/work/queue.rs. */
 export const LAUNCH_GRACE_MS = 90_000;
 
 /** En cola, lanzándose o lanzado: la tarea tiene trabajo en curso. */
-export const isActive = (run: Run) => run.status === "queued" || run.status === "launching" || run.status === "launched";
+export const isActive = (run: RunLight) => run.status === "queued" || run.status === "launching" || run.status === "launched";
 
 /** Run migrado en cola que no se lanza hasta confirmarlo (`confirm_run`). */
-export const awaitingConfirmation = (run: Run) => run.status === "queued" && run.legacyLabel !== null;
+export const awaitingConfirmation = (run: RunLight) => run.status === "queued" && run.legacyLabel !== null;
 
 export function executorLabel(e: Executor): string {
   switch (e.kind) {
@@ -101,7 +101,7 @@ function waitingLabel(w: string | null): string {
   return w === "permission prompt" ? "Needs permission" : "Needs input";
 }
 
-function finishedLabel(run: Run): { label: string; tone: BadgeTone } {
+function finishedLabel(run: RunLight): { label: string; tone: BadgeTone } {
   if (run.kind === "review" && run.verdict) {
     return run.verdict.pass ? { label: "Review passed", tone: "ok" } : { label: "Review failed", tone: "danger" };
   }
@@ -118,16 +118,16 @@ export interface DeriveContext {
   /** Id de run → posición 1-based en la cola global. */
   queuePos: Map<string, number>;
   /** Id de run de trabajo → su revisor más reciente. */
-  reviews: Map<string, Run>;
+  reviews: Map<string, RunLight>;
   now: number;
 }
 
-export function findLive(run: Run, live: RunSummary[]): RunSummary | null {
+export function findLive(run: RunLight, live: RunSummary[]): RunSummary | null {
   if (!run.claudeRunId && !run.sessionId) return null;
   return live.find((s) => (run.claudeRunId && s.id === run.claudeRunId) || (run.sessionId && s.sessionId === run.sessionId)) ?? null;
 }
 
-export function deriveRunView(run: Run, ctx: DeriveContext): RunView {
+export function deriveRunView(run: RunLight, ctx: DeriveContext): RunView {
   const live = findLive(run, ctx.live);
   const detail = ctx.details[run.id];
   const queuePos = ctx.queuePos.get(run.id) ?? null;
@@ -266,14 +266,14 @@ export function phaseProgress(v: RunView): { text: string; pct: number } {
 }
 
 /** Id visible de la tarea del run (`PAY-12`) y su título; sin tarea, la etiqueta migrada. */
-export function runTaskRef(run: Run, task: Task | undefined, project: Project | undefined): { key: string | null; title: string } {
+export function runTaskRef(run: RunLight, task: Task | undefined, project: Project | undefined): { key: string | null; title: string } {
   if (task) return { key: project ? taskKey(project.key, task.number) : null, title: task.title };
   if (run.legacyLabel) return { key: null, title: run.legacyLabel };
   return { key: null, title: run.taskId ? "(deleted task)" : `${executorLabel(run.executor)} run` };
 }
 
 /** Nombre corto para toasts y confirmaciones. */
-export function runName(run: Run, task: Task | undefined, project: Project | undefined): string {
+export function runName(run: RunLight, task: Task | undefined, project: Project | undefined): string {
   const ref = runTaskRef(run, task, project);
   return ref.key ?? ref.title;
 }

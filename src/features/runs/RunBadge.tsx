@@ -1,21 +1,21 @@
-import type { Run } from "../../domain/types";
+import type { RunLight } from "../../domain/types";
 import { useRuns } from "../../domain/hooks/runs";
 import { deriveRunView, type RunView } from "./status";
 import "./runs.css";
 
 const EMPTY_CTX = { live: [], details: {}, queuePos: new Map(), reviews: new Map(), now: 0 };
 
-const isView = (x: Run | RunView): x is RunView => "run" in x && "phase" in x;
+const isView = (x: RunLight | RunView): x is RunView => "run" in x && "phase" in x;
 
 /** Vista derivada de un run: la del store compartido si ya lo tiene, o una sin datos en vivo. */
-export function useRunView(run: Run | RunView): RunView {
+export function useRunView(run: RunLight | RunView): RunView {
   const { byId } = useRuns();
   if (isView(run)) return run;
   return byId.get(run.id) ?? deriveRunView(run, { ...EMPTY_CTX, now: Date.now() });
 }
 
 /** Píldora de estado de un run ("Phase 3/9 · Implement", "Needs permission", "PR #12 · Green"). */
-export function RunBadge({ run, className }: { run: Run | RunView; className?: string }) {
+export function RunBadge({ run, className }: { run: RunLight | RunView; className?: string }) {
   const v = useRunView(run);
   return (
     <span className={`badge tone-${v.tone} ${className ?? ""}`} title={v.run.error ?? v.label}>
@@ -29,7 +29,7 @@ export function RunBadge({ run, className }: { run: Run | RunView; className?: s
  * Barra de fases segmentada (cards del board). Solo para workflows con fases conocidas;
  * para agentes y Claude no dibuja nada.
  */
-export function PhaseSegments({ run }: { run: Run | RunView }) {
+export function PhaseSegments({ run }: { run: RunLight | RunView }) {
   const v = useRunView(run);
   const n = v.phaseTotal;
   if (!n) return null;

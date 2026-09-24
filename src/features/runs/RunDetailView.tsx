@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { projectIdOf, useRun, type RunsState } from "../../domain/hooks/runs";
-import type { Run, Verdict } from "../../domain/types";
+import type { Run, RunLight, Verdict } from "../../domain/types";
 import { formatDateTime, formatDuration, formatTokens } from "../../lib/format";
 import { useRunActions } from "./actions";
 import { AGENT_STATUS, AgentTranscript, modelName } from "./AgentTranscript";
@@ -42,7 +42,7 @@ function lastAction(a: AgentInfo): string {
 
 /** Pantalla "Run detail": cabecera, avisos, fases y subagentes (o sesión), y resultado. */
 export function RunDetailView({ runId, onBack, onOpenTask, onOpenRun, onOpenDiff }: RunDetailViewProps) {
-  const { view, state } = useRun(runId);
+  const { view, full, state } = useRun(runId);
   const actions = useRunActions();
   const [agentIdx, setAgentIdx] = useState<number | null>(null);
   const blocker = useLaunchBlocker(view);
@@ -53,7 +53,7 @@ export function RunDetailView({ runId, onBack, onOpenTask, onOpenRun, onOpenDiff
         <button type="button" className="rd-back" onClick={onBack}>
           ← Back
         </button>
-        <p className="rd-result-note">{state.loaded ? "This run no longer exists." : "Loading run…"}</p>
+        <p className="rd-result-note">{state.loaded && full === null ? "This run no longer exists." : "Loading run…"}</p>
       </div>
     );
   }
@@ -211,7 +211,7 @@ export function RunDetailView({ runId, onBack, onOpenTask, onOpenRun, onOpenDiff
         {isWorkflow ? (
           <SubagentsPanel view={view} detail={detail} onOpen={setAgentIdx} />
         ) : (
-          <SessionPanel view={view} live={live} />
+          <SessionPanel view={view} full={full} live={live} />
         )}
         <div className="rd-side">
           <ResultCard view={view} detail={detail} branch={branch} ended={ended} />
@@ -466,7 +466,7 @@ function SubagentsPanel({
  * Runs de agente o de Claude: no hay fases ni subagentes que leer. Se muestra el prompt
  * que armó Nodal y el reporte final (el resumen que devolvió el agente en su último mensaje).
  */
-function SessionPanel({ view, live }: { view: RunView; live: boolean }) {
+function SessionPanel({ view, full, live }: { view: RunView; full: Run | null | undefined; live: boolean }) {
   const run = view.run;
   return (
     <div className="panel rd-session">
@@ -492,15 +492,15 @@ function SessionPanel({ view, live }: { view: RunView; live: boolean }) {
             </p>
           )}
         </section>
-        {run.extraInstructions && (
+        {full?.extraInstructions && (
           <section className="ap-section">
             <h3 className="section-label">Extra instructions</h3>
-            <div className="tr-prompt">{run.extraInstructions}</div>
+            <div className="tr-prompt">{full.extraInstructions}</div>
           </section>
         )}
         <details className="rd-res-raw">
           <summary>Prompt</summary>
-          <pre>{run.prompt}</pre>
+          <pre>{full ? full.prompt : "Loading…"}</pre>
         </details>
       </div>
     </div>
@@ -574,7 +574,7 @@ function VerdictBody({ verdict }: { verdict: Verdict }) {
 }
 
 /** JSON con lo que Nodal leyó del run (o el `result` del workflow). */
-function rawResult(run: Run, workflowResult: RunResult | null | undefined): string | null {
+function rawResult(run: RunLight, workflowResult: RunResult | null | undefined): string | null {
   if (workflowResult?.raw) return workflowResult.raw;
   const out: Record<string, unknown> = {};
   if (run.outcome) out.outcome = run.outcome;
@@ -686,7 +686,7 @@ function ResultCard({
 }
 
 /** Veredicto del revisor de Nodal sobre un run de trabajo. */
-function VerdictCard({ review, state, onOpenRun }: { review: Run; state: RunsState; onOpenRun?: (id: string) => void }) {
+function VerdictCard({ review, state, onOpenRun }: { review: RunLight; state: RunsState; onOpenRun?: (id: string) => void }) {
   const rv = state.byId.get(review.id);
   return (
     <div className="panel rd-result">

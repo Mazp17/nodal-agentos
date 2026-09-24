@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { latestRunByTask, useAllRuns } from "../../domain/hooks/runs";
+import { useLatestRunByTask } from "../../domain/hooks/runs";
 import { useProjectList, useRepos, useTasks } from "../../domain/hooks/store";
 import { taskKey, type Task } from "../../domain/types";
 import { RunBadge } from "../runs";
@@ -29,9 +29,8 @@ export function TasksView({ projectId, onOpenTask }: TasksViewProps) {
   const tasks = useTasks(projectId);
   const repos = useRepos(projectId);
   const projects = useProjectList();
-  const runs = useAllRuns();
 
-  const latest = useMemo(() => latestRunByTask(runs.data), [runs.data]);
+  const latest = useLatestRunByTask();
   const projectById = useMemo(() => new Map((projects.data ?? []).map((p) => [p.id, p])), [projects.data]);
 
   const list = useMemo(

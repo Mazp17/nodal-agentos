@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type DragEvent, type ReactNode } from "react";
 import { moveTask } from "../../domain/api";
-import { latestRunByTask, useAllRuns } from "../../domain/hooks/runs";
+import { useAllRuns, useLatestRunByTask } from "../../domain/hooks/runs";
 import { invalidate, useProjectList, useRepos, useTasks } from "../../domain/hooks/store";
 import { taskKey, type Task, type TaskStatus } from "../../domain/types";
 import { useToast } from "../../ui/Toasts";
@@ -98,7 +98,7 @@ export function BoardView({ projectId, onOpenTask, onOpenRun, onNewProject, onOp
     }
   }, [tasks.data, patched]);
 
-  const latest = useMemo(() => latestRunByTask(runs.data), [runs.data]);
+  const latest = useLatestRunByTask();
   const taskIds = useMemo(() => new Set(allTasks.map((t) => t.id)), [allTasks]);
   const viewRuns = useMemo(() => [...latest.values()].filter((r) => r.taskId && taskIds.has(r.taskId)), [latest, taskIds]);
   const phases = useRunPhases(viewRuns);

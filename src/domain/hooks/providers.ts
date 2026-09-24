@@ -15,6 +15,7 @@ import {
   type SourceStatesReport,
 } from "../api";
 import type { ScopeRef, SourceLink } from "../types";
+import { registerResource } from "./store";
 
 /** Los comandos rechazan con un string listo para mostrar; cualquier otra cosa se normaliza. */
 export function errorText(err: unknown): string {
@@ -43,6 +44,9 @@ export function invalidateProviders(topic: ProviderTopic) {
   }
   topicSubs.get(topic)?.forEach((fn) => fn());
 }
+
+// `nodal://changed` con `kind: "sources"` (sync, links) llega como el recurso "sources".
+registerResource("sources", async () => invalidateProviders("links"));
 
 // ---------- Carga genérica ----------
 
@@ -121,15 +125,24 @@ function setSnap(provider: string, snap: StatusSnap) {
   statusSubs.forEach((fn) => fn());
 }
 
+/** Sube con cada `setProviderStatus`: una lectura lanzada antes ya no pisa ese valor. */
+const statusGen = new Map<string, number>();
+
 function fetchStatus(provider: string): Promise<void> {
   const running = statusInflight.get(provider);
   if (running) return running;
   const prev = statusCache.get(provider) ?? EMPTY_SNAP;
+  const gen = statusGen.get(provider) ?? 0;
+  const stale = () => (statusGen.get(provider) ?? 0) !== gen;
   setSnap(provider, { ...prev, loading: true });
   const p = providerStatus(provider)
     .then(
-      (status) => setSnap(provider, { status, error: null, loading: false }),
-      (err) => setSnap(provider, { status: prev.status, error: errorText(err), loading: false }),
+      (status) => {
+        if (!stale()) setSnap(provider, { status, error: null, loading: false });
+      },
+      (err) => {
+        if (!stale()) setSnap(provider, { status: prev.status, error: errorText(err), loading: false });
+      },
     )
     .finally(() => {
       statusInflight.delete(provider);
@@ -148,6 +161,7 @@ function subscribeStatus(fn: () => void) {
 
 /** Fija el estado sin consultar (p. ej. con la respuesta de `providerSetKey`). */
 export function setProviderStatus(status: ProviderStatus) {
+  statusGen.set(status.provider, (statusGen.get(status.provider) ?? 0) + 1);
   statusFetchedAt.set(status.provider, Date.now());
   setSnap(status.provider, { status, error: null, loading: false });
 }

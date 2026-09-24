@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 import { useRuns } from "../../domain/hooks/runs";
-import type { Run } from "../../domain/types";
+import type { RunLight } from "../../domain/types";
 
 export interface PhaseProgress {
   /** 1-based. */
@@ -13,7 +13,7 @@ export interface PhaseProgress {
  * Fase actual de los runs de workflow en marcha (para los segmentos de la card). Sale del
  * store compartido de runs, que ya pide `get_run_detail` de los workflows activos.
  */
-export function useRunPhases(runs: Run[]): Map<string, PhaseProgress> {
+export function useRunPhases(runs: RunLight[]): Map<string, PhaseProgress> {
   const { byId } = useRuns();
   return useMemo(() => {
     const out = new Map<string, PhaseProgress>();

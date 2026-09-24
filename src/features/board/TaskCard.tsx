@@ -1,6 +1,6 @@
 import type { DragEvent, MouseEvent } from "react";
 import { isRunActive } from "../../domain/hooks/runs";
-import { taskKey, type Executor, type Project, type Repo, type Run, type Task } from "../../domain/types";
+import { taskKey, type Executor, type Project, type Repo, type RunLight, type Task } from "../../domain/types";
 import { ExecutorAvatar, executorLabel } from "../executors";
 import { RunBadge } from "../runs";
 import { PriorityBars } from "../tasks/bits";
@@ -14,7 +14,7 @@ export interface CardModel {
   project: Project | undefined;
   repo: Repo | undefined;
   assignee: Executor;
-  run: Run | undefined;
+  run: RunLight | undefined;
   phase: PhaseProgress | undefined;
 }
 
