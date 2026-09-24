@@ -187,7 +187,25 @@ CREATE TABLE legacy_imports (
 );
 "#;
 
-pub const MIGRATIONS: &[&str] = &[V1];
+/// v2: aditiva (solo `ADD COLUMN`, sin reconstruir tablas).
+/// - `projects.description`;
+/// - `source_links.last_synced_at`/`last_sync_error`: resultado de la última pasada del sync
+///   por link; `pending_state_changes`: JSON `{added, removed}` con los estados del proveedor
+///   que cambiaron contra `known_states` (se limpia al guardar el mapeo);
+/// - `tasks.src_unmapped`: el estado externo actual no está en el mapeo pull;
+/// - `runs.tokens`: tokens del transcript (agente/Claude/revisor) sumados al cerrar.
+///
+/// `Settings.defaultExecutor` es una fila más de `settings`: no necesita DDL.
+const V2: &str = r#"
+ALTER TABLE projects ADD COLUMN description TEXT;
+ALTER TABLE source_links ADD COLUMN last_synced_at INTEGER;
+ALTER TABLE source_links ADD COLUMN last_sync_error TEXT;
+ALTER TABLE source_links ADD COLUMN pending_state_changes TEXT;
+ALTER TABLE tasks ADD COLUMN src_unmapped INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE runs ADD COLUMN tokens INTEGER;
+"#;
+
+pub const MIGRATIONS: &[&str] = &[V1, V2];
 
 pub fn user_version(conn: &Connection) -> Result<i64, DbError> {
     Ok(conn.query_row("PRAGMA user_version", [], |r| r.get(0))?)

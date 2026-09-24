@@ -13,6 +13,7 @@
 // o `serde_with::double_option`): un `Option<Option<T>>` pelado lee `null` como "falta".
 
 import { invoke } from "@tauri-apps/api/core";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type {
   AgentSource,
   ExtKind,
@@ -27,6 +28,7 @@ import type {
   Repo,
   RepoRule,
   Run,
+  RunLight,
   ScopeRef,
   Settings,
   SourceLink,
@@ -35,8 +37,60 @@ import type {
   TaskRelation,
   TaskStatus,
 } from "./types";
+import type { Transcript } from "../features/runs/types";
 
 // ---------- DTOs ----------
+
+/**
+ * Confianza de Claude Code en una carpeta (solo lectura de `~/.claude.json`):
+ * `repo` = entrada de la raíz canónica del repo (el principal, para worktrees); `parent` =
+ * la carpeta o un padre dentro del repo; `notTrusted` = va a mostrar el diálogo; `unknown`
+ * (con `trusted: null`) = sin config legible.
+ */
+export interface RepoTrust {
+  trusted: boolean | null;
+  source: "repo" | "parent" | "notTrusted" | "unknown";
+  matchedPath: string | null;
+}
+
+/**
+ * `running`/`capacity`: slots ocupados de la concurrencia global (regla del pump). `needYou`:
+ * tareas Blocked + runs migrados sin confirmar + sesiones esperando permiso/input, sin contar
+ * dos veces la misma tarea. `queued`: listos para salir.
+ */
+export interface WorkSummary {
+  running: number;
+  capacity: number;
+  needYou: number;
+  queued: number;
+}
+
+/** Sesiones vivas trabajando/esperando y subagentes activos (mismo criterio que `activity_summary`). */
+export interface RepoActivityCount {
+  repoId: string;
+  repoPath: string;
+  sessions: number;
+  agents: number;
+}
+
+/** Totales sin contar dos veces lo que cae en repos anidados. */
+export interface ProjectActivity {
+  projectId: string;
+  repos: RepoActivityCount[];
+  sessions: number;
+  agents: number;
+  generatedAt: number;
+}
+
+/** `exists`: la carpeta es un worktree vivo. `ahead`: commits fuera de la base; `unpushed`: además fuera de todo remoto. */
+export interface WorktreeStatus {
+  exists: boolean;
+  branch: string | null;
+  base: string | null;
+  ahead: number;
+  unpushed: number;
+  dirty: boolean;
+}
 
 /**
  * `key`: 2-6 mayúsculas/dígitos, único. `color`: si falta, se asigna uno de la paleta.
@@ -47,10 +101,11 @@ export interface NewProject {
   name: string;
   key: string;
   color?: string;
+  description?: string | null;
 }
 
 /** Solo los campos presentes se cambian; `null` borra los opcionales. */
-export type ProjectPatch = Partial<Pick<Project, "name" | "key" | "color" | "defaultExecutor" | "reviewer">> & {
+export type ProjectPatch = Partial<Pick<Project, "name" | "key" | "color" | "description" | "defaultExecutor" | "reviewer">> & {
   archived?: boolean;
 };
 
@@ -151,9 +206,24 @@ export interface FileDiff {
   hunks: DiffHunk[];
 }
 
+export interface CommitInfo {
+  sha: string;
+  shortSha: string;
+  subject: string;
+  author: string;
+  /** Fecha del autor, epoch ms. */
+  at: number;
+}
+
 export interface RunDiff {
   /** Ref base (`git diff <base>...HEAD`). */
   base: string;
+  /** Rama del run; `null` con HEAD desacoplado. */
+  branch: string | null;
+  /** Commits de la rama que no están en `base`, del más nuevo al más viejo (hasta 200). */
+  commits: CommitInfo[];
+  /** El run sigue activo: el diff puede cambiar. */
+  live: boolean;
   cwd: string;
   /** Incluye cambios sin commitear (el run sigue activo). */
   includesWorkingTree: boolean;
@@ -168,6 +238,8 @@ export interface ProviderStatus {
   /** Nombre del usuario si la key es válida. */
   viewer: string | null;
   error: string | null;
+  /** Últimos 4 caracteres de la key guardada (nunca la key); `null` sin key o si es corta. */
+  keyHint: string | null;
 }
 
 export interface ImportableItem {
@@ -267,21 +339,52 @@ export const deleteTask = (id: string) => invoke<void>("delete_task", { id });
 /** Arrastre en el board: cambia de columna y/o posición. */
 export const moveTask = (id: string, status: TaskStatus, position: number) =>
   invoke<Task>("move_task", { id, status, position });
+/**
+ * Nuevo orden de una columna: renumera posiciones en una transacción. Todas las tareas deben
+ * estar en `status` y en el mismo proyecto; las de la columna que falten quedan detrás.
+ */
+export const reorderTasks = (status: TaskStatus, orderedIds: string[]) =>
+  invoke<void>("reorder_tasks", { status, orderedIds });
 export const readTaskPlan = (id: string) => invoke<string>("read_task_plan", { id });
 export const listTaskRelations = (taskId: string) => invoke<TaskRelation[]>("list_task_relations", { taskId });
 export const addTaskRelation = (taskId: string, otherId: string, kind: RelationKind) =>
   invoke<void>("add_task_relation", { taskId, otherId, kind });
 export const removeTaskRelation = (taskId: string, otherId: string, kind: RelationKind) =>
   invoke<void>("remove_task_relation", { taskId, otherId, kind });
-/** Borra el worktree y la rama de la tarea ("Clean up"). */
-export const cleanupWorktree = (taskId: string) => invoke<Task>("cleanup_worktree", { taskId });
+/**
+ * Borra el worktree y la rama de la tarea ("Clean up"). Sin `force` rechaza si hay commits
+ * sin publicar (`unpushed`) o cambios sin commitear (`dirty`).
+ */
+export const cleanupWorktree = (taskId: string, force = false) =>
+  invoke<Task>("cleanup_worktree", { taskId, force });
+/** Ruta absoluta. No lanza nada ni escribe el config de Claude Code. */
+export const repoTrust = (path: string) => invoke<RepoTrust>("repo_trust", { path });
+/** `git version 2.x.y`; rechaza si no hay git en el PATH. */
+export const gitVersion = () => invoke<string>("git_version");
+/** Actividad de Claude Code por repo del proyecto (un solo `claude agents`). */
+export const projectActivity = (projectId: string) => invoke<ProjectActivity>("project_activity", { projectId });
+/** Todo en cero/false/null si la tarea no tiene worktree. */
+export const worktreeStatus = (taskId: string) => invoke<WorktreeStatus>("worktree_status", { taskId });
 
 // ---------- Ejecutores y runs ----------
 
 /** Agentes, workflows y Claude; con `repoId` suma los del repo. */
 export const listExecutors = (repoId: string | null) => invoke<ExecutorInfo[]>("list_executors", { repoId });
 /** Runs de la tarea (o todos con `null`), más recientes primero. */
-export const listTaskRuns = (taskId: string | null) => invoke<Run[]>("list_task_runs", { taskId });
+export const listTaskRuns = (taskId: string | null, projectId: string | null = null) =>
+  invoke<Run[]>("list_task_runs", { taskId, projectId });
+/** Como `listTaskRuns` (hasta 500), sin `prompt` ni `extraInstructions`. Un run sin tarea cuenta en el proyecto de su repo. */
+export const listRunsLight = (projectId: string | null = null, taskId: string | null = null) =>
+  invoke<RunLight[]>("list_runs_light", { projectId, taskId });
+/** Run completo (con `prompt`). */
+export const getRun = (runId: string) => invoke<Run>("get_run", { runId });
+/** El último run de cada tarea, sin límite de historial. */
+export const latestRunsByTask = (projectId: string | null = null) =>
+  invoke<RunLight[]>("latest_runs_by_task", { projectId });
+/** `null`: global (incluye sesiones de Claude Code ajenas a la app); con proyecto, solo sus runs y tareas. */
+export const workSummary = (projectId: string | null = null) => invoke<WorkSummary>("work_summary", { projectId });
+/** Cola global: runs `queued`, en orden de salida. */
+export const listQueue = () => invoke<Run[]>("list_queue");
 /** Encola un run de trabajo (o lo lanza si hay slot). */
 export const launchTask = (taskId: string, input: LaunchInput = {}) => invoke<Run>("launch_task", { taskId, input });
 /** Siguiente paso de la cadena con otro ejecutor, sobre la misma rama/worktree. */
@@ -300,6 +403,13 @@ export const confirmRun = (runId: string) => invoke<Run>("confirm_run", { runId 
 /** Nuevo orden de la cola: ids de todos los runs `queued`. */
 export const reorderQueue = (runIds: string[]) => invoke<void>("reorder_queue", { runIds });
 export const runDiff = (runId: string) => invoke<RunDiff>("run_diff", { runId });
+/**
+ * Transcript de un run de agente, Claude o revisor (sesión principal; `agentId` = id del run).
+ * Rechaza para workflows (usar `getAgentTranscript`). `null` si la sesión aún no tiene archivo.
+ * `limit`: items más recientes (default 200, máx. 2000).
+ */
+export const getRunTranscript = (runId: string, limit?: number) =>
+  invoke<Transcript | null>("get_run_transcript", { runId, limit: limit ?? null });
 /** Abre la carpeta del run (o `file` dentro de ella) en el editor de Settings. */
 export const openInEditor = (runId: string, file: string | null = null) =>
   invoke<void>("open_in_editor", { runId, file });
@@ -341,5 +451,25 @@ export const importLegacyData = (folder: string) => invoke<LegacyImportReport>("
 
 // ---------- Settings ----------
 
+/** Salida de `claude --version` (p. ej. `2.1.0 (Claude Code)`); rechaza si no se encuentra el CLI. */
+export const claudeVersion = () => invoke<string>("claude_version");
+
 export const getSettings = () => invoke<Settings>("get_settings");
 export const setSettings = (settings: Settings) => invoke<Settings>("set_settings", { settings });
+
+// ---------- Eventos ----------
+
+export type ChangedKind = "tasks" | "runs" | "queue" | "sources" | "projects";
+
+/** Payload de `nodal://changed`. Sin `projectId`: puede afectar a cualquier proyecto. */
+export interface ChangedEvent {
+  kind: ChangedKind;
+  projectId?: string;
+}
+
+/**
+ * Avisa cuando algo cambió en el backend (cola, sync o comandos que mutan), con debounce
+ * del lado Rust. No trae datos: volver a pedir lo que se muestra. Devuelve el unlisten.
+ */
+export const onChanged = (cb: (e: ChangedEvent) => void): Promise<UnlistenFn> =>
+  listen<ChangedEvent>("nodal://changed", (ev) => cb(ev.payload));

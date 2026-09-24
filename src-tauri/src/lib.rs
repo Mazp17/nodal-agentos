@@ -1,6 +1,7 @@
 mod activity;
 mod db;
 mod domain;
+mod events;
 mod linear;
 mod migrate;
 mod providers;
@@ -34,6 +35,7 @@ pub fn run() {
         .manage(secrets)
         .setup(|app| {
             use tauri::Manager;
+            app.manage(events::Events::new(app.handle().clone()));
             // Único lugar que arranca los workers de fondo: el pump de la cola (`work::init`)
             // y el sync de proveedores (`providers::init`). Sin base la app abre igual (para
             // mostrar el error): no hay pump, el sync no hace nada y los comandos fallan.
@@ -62,6 +64,8 @@ pub fn run() {
             runs::terminal::stop_run,
             runs::terminal::open_terminal_at,
             util::paths::resolve_git_root,
+            util::git::git_version,
+            runs::claude_trust::repo_trust,
             linear::linear_key_status,
             linear::linear_set_api_key,
             linear::linear_clear_api_key,
@@ -83,14 +87,20 @@ pub fn run() {
             work::commands::update_task,
             work::commands::delete_task,
             work::commands::move_task,
+            work::commands::reorder_tasks,
             work::commands::read_task_plan,
             work::commands::list_task_relations,
             work::commands::add_task_relation,
             work::commands::remove_task_relation,
             work::commands::cleanup_worktree,
+            work::commands::worktree_status,
             work::commands::list_executors,
             work::commands::list_task_runs,
+            work::commands::list_runs_light,
+            work::commands::get_run,
+            work::commands::latest_runs_by_task,
             work::commands::list_queue,
+            work::commands::work_summary,
             work::commands::launch_task,
             work::commands::hand_off,
             work::commands::review_now,
@@ -98,6 +108,7 @@ pub fn run() {
             work::commands::cancel_run,
             work::commands::reorder_queue,
             work::commands::run_diff,
+            work::commands::get_run_transcript,
             work::commands::open_in_editor,
             work::commands::open_worktree,
             work::commands::get_settings,
@@ -118,6 +129,7 @@ pub fn run() {
             providers::commands::sync_now,
             activity::repo_activity,
             activity::activity_summary,
+            activity::project_activity,
             migrate::import_legacy_data,
         ])
         .run(tauri::generate_context!())

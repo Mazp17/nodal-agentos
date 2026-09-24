@@ -26,7 +26,7 @@ use tauri::{AppHandle, Manager};
 
 use crate::db::{rows, with_db, Db, DbError};
 use crate::util::now_ms;
-use crate::domain::{ExternalState, OutboxPayload, PlanRef, SourceLink, StateMap, Task, TaskStatus};
+use crate::domain::{ExternalState, OutboxPayload, PlanRef, SourceLink, StateChanges, StateMap, Task, TaskStatus};
 
 use super::import::{import_items, suggest_repo};
 use super::plan::{plan_path, render_plan, write_plan};
@@ -174,6 +174,8 @@ pub async fn sync_run(
             .collect();
 
         let mut current: HashMap<String, Vec<ExternalState>> = HashMap::new();
+        // Errores atribuibles a cada link en esta pasada (estados, pull, auto-import).
+        let mut link_errors: HashMap<String, Vec<String>> = HashMap::new();
         for link in &targets {
             match p.states(&link.scope).await {
                 Ok(states) => {
@@ -186,19 +188,36 @@ pub async fn sync_run(
                         if !removed.is_empty() {
                             report.notices.push(format!("{}: states removed: {}.", link.scope.name, names(&removed)));
                         }
+                        let (id, changes) = (link.id.clone(), StateChanges { added, removed });
+                        if let Err(e) = with_db(db, move |c| store::set_pending_changes(c, &id, &changes)).await {
+                            report.errors.push(err(e));
+                        }
                     }
                     current.insert(link.id.clone(), states);
                 }
-                Err(e) => report.errors.push(format!("{}: {e}", link.scope.name)),
+                Err(e) => {
+                    let msg = format!("{}: {e}", link.scope.name);
+                    link_errors.entry(link.id.clone()).or_default().push(msg.clone());
+                    report.errors.push(msg);
+                }
             }
         }
 
         let flagged = drain_outbox(db, p, &links, &current, link_filter, now, &mut report).await;
         for link in &targets {
+            let before = report.errors.len();
             pull_link(db, data_dir, p, link, &flagged, now, &mut report).await;
+            if link.auto_import {
+                auto_import_link(db, data_dir, p, link, now, &mut report).await;
+            }
+            link_errors.entry(link.id.clone()).or_default().extend(report.errors[before..].iter().cloned());
         }
-        for link in targets.iter().filter(|l| l.auto_import) {
-            auto_import_link(db, data_dir, p, link, now, &mut report).await;
+        for link in &targets {
+            let msg = link_errors.remove(&link.id).filter(|v| !v.is_empty()).map(|v| v.join("\n"));
+            let id = link.id.clone();
+            if let Err(e) = with_db(db, move |c| store::set_link_sync(c, &id, now, msg.as_deref())).await {
+                report.errors.push(err(e));
+            }
         }
     }
     report
@@ -362,6 +381,7 @@ fn apply_pull_task(
             external_state: d.record_state.then_some(&item.state),
             sync_error: d.sync_error.as_deref(),
             keep_error,
+            unmapped: !d.record_state,
             now,
         },
     )?;
@@ -527,7 +547,15 @@ pub async fn run_for_app(app: &AppHandle, link_filter: Option<&str>) -> PResult<
         }
     }
     let data_dir: PathBuf = state.data_dir.clone();
-    Ok(sync_run(&db, &data_dir, &providers, link_filter, now_ms()).await)
+    let report = sync_run(&db, &data_dir, &providers, link_filter, now_ms()).await;
+    if !providers.is_empty() {
+        use crate::events::Kind;
+        // El estado de los links cambia en cada pasada; las tareas solo si hubo movimiento.
+        let kinds: &[Kind] =
+            if report.pulled + report.pushed + report.imported > 0 { &[Kind::Sources, Kind::Tasks] } else { &[Kind::Sources] };
+        crate::events::notify(app, kinds, None);
+    }
+    Ok(report)
 }
 
 pub fn spawn_worker(app: AppHandle) {
@@ -844,18 +872,49 @@ mod tests {
         let a = env.task(&t.id);
         assert_eq!(a.status, TaskStatus::Todo);
         assert!(a.source.as_ref().unwrap().sync_error.as_ref().unwrap().contains("\"QA\" is not mapped"));
+        assert!(a.source.as_ref().unwrap().unmapped);
         let b = env.task(&t2.id);
-        assert!(b.source.unwrap().sync_error.unwrap().contains("Not found"));
+        let bs = b.source.unwrap();
+        assert!(bs.sync_error.unwrap().contains("Not found"));
+        assert!(!bs.unmapped);
         assert_eq!(r.pulled, 1);
+        let l = store::get_link(&env.db.lock().unwrap(), &env.link.id).unwrap();
+        assert_eq!((l.last_synced_at, l.last_sync_error), (Some(10), None), "un ítem faltante no es error del link");
+        let pending = l.pending_state_changes.expect("QA queda pendiente de revisar");
+        assert_eq!(pending.added.iter().map(|s| s.id.as_str()).collect::<Vec<_>>(), ["s-qa"]);
+        assert!(pending.removed.is_empty());
         // Sin mapear no se da por visto: cuando se mapea, el pull siguiente lo aplica.
         assert_eq!(a.source.as_ref().unwrap().external_state.as_ref().unwrap().id, "s-todo");
-        let mut link = env.link.clone();
-        link.state_map.pull.insert("s-qa".into(), TaskStatus::InReview);
-        store::save_link(&env.db.lock().unwrap(), &link).unwrap();
+        let mut map = env.link.state_map.clone();
+        map.pull.insert("s-qa".into(), TaskStatus::InReview);
+        map.known_states = env.fake.data().states.clone();
+        store::save_state_map(&env.db.lock().unwrap(), &env.link.id, &map).unwrap();
+        let l = store::get_link(&env.db.lock().unwrap(), &env.link.id).unwrap();
+        assert_eq!(l.pending_state_changes, None, "guardar el mapeo limpia lo pendiente");
         env.run(20);
         let a = env.task(&t.id);
         assert_eq!(a.status, TaskStatus::InReview);
-        assert_eq!(a.source.unwrap().sync_error, None);
+        let src = a.source.unwrap();
+        assert_eq!(src.sync_error, None);
+        assert!(!src.unmapped);
+        let l = store::get_link(&env.db.lock().unwrap(), &env.link.id).unwrap();
+        assert_eq!((l.last_synced_at, l.pending_state_changes), (Some(20), None));
+    }
+
+    #[test]
+    fn link_sync_error_is_recorded_and_cleared() {
+        let env = Env::new();
+        env.import(1, "s-todo");
+        env.fake.data().fail_states = Some(ProviderError { kind: ErrorKind::Transient, message: "boom".into() });
+        let r = env.run(10);
+        assert!(!r.errors.is_empty());
+        let l = store::get_link(&env.db.lock().unwrap(), &env.link.id).unwrap();
+        assert_eq!(l.last_synced_at, Some(10));
+        assert!(l.last_sync_error.unwrap().contains("boom"));
+        env.fake.data().fail_states = None;
+        env.run(20);
+        let l = store::get_link(&env.db.lock().unwrap(), &env.link.id).unwrap();
+        assert_eq!((l.last_synced_at, l.last_sync_error), (Some(20), None));
     }
 
     #[test]

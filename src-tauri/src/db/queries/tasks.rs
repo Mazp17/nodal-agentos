@@ -84,3 +84,10 @@ pub fn next_position(conn: &Connection, project_id: &str, status: TaskStatus) ->
         |r| r.get(0),
     )?)
 }
+
+/// Ids de las tareas bloqueadas del proyecto (`None`: todas).
+pub fn blocked_ids(conn: &Connection, project_id: Option<&str>) -> Result<Vec<String>, DbError> {
+    let mut stmt = conn.prepare("SELECT id FROM tasks WHERE status = 'blocked' AND (?1 IS NULL OR project_id = ?1)")?;
+    let rows = stmt.query_map([project_id], |r| r.get::<_, String>(0))?;
+    Ok(rows.collect::<rusqlite::Result<_>>()?)
+}

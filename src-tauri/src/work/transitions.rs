@@ -32,6 +32,8 @@ pub struct RunEnd {
     pub note: Option<String>,
     /// Terminó normalmente pero sin el bloque JSON final.
     pub missing_report: bool,
+    /// Tokens del transcript (agente/Claude/revisor); `None` = no tocar `runs.tokens`.
+    pub tokens: Option<i64>,
 }
 
 pub const NOTE_NO_REPORT: &str = "Finished without a report.";
@@ -53,6 +55,7 @@ pub fn read_end(run: &Run, signal: EndSignal, readout: &SessionReadout, executor
         verdict: None,
         note: None,
         missing_report: false,
+        tokens: None,
     };
     match signal {
         EndSignal::Stopped => {
@@ -404,6 +407,7 @@ mod tests {
             external_state: None,
             last_synced_at: None,
             sync_error: None,
+            unmapped: false,
         });
         t
     }

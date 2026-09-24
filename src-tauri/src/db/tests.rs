@@ -22,6 +22,7 @@ fn project(id: &str, key: &str) -> Project {
         reviewer: Some("code-reviewer".into()),
         created_at: 1_700_000_000_000,
         archived_at: None,
+        description: None,
     }
 }
 
@@ -94,6 +95,7 @@ fn imported_task(id: &str, project_id: &str, repo_id: &str, number: i64, ext: &s
             }),
             last_synced_at: Some(99),
             sync_error: Some("rate limited".into()),
+            unmapped: false,
         }),
         status: TaskStatus::InReview,
         closed_at: Some(123),
@@ -157,6 +159,52 @@ fn migrate_is_idempotent_and_rejects_newer_schema() {
     c.pragma_update(None, "user_version", 99).unwrap();
     let err = migrate(&mut c).unwrap_err().to_string();
     assert!(err.contains("newer version"), "{err}");
+}
+
+#[test]
+fn migrates_v1_data_to_v2() {
+    let mut c = Connection::open_in_memory().unwrap();
+    c.pragma_update(None, "foreign_keys", "ON").unwrap();
+    // Base v1 con datos, escrita a mano (las columnas v2 todavía no existen).
+    c.execute_batch(MIGRATIONS[0]).unwrap();
+    c.pragma_update(None, "user_version", 1).unwrap();
+    c.execute_batch(
+        r#"INSERT INTO projects (id, name, key, color, created_at) VALUES ('p1', 'Pay', 'PAY', '#fff', 1);
+         INSERT INTO repos (id, project_id, path, name, created_at) VALUES ('r1', 'p1', '/r1', 'web', 1);
+         INSERT INTO source_links (id, project_id, provider, scope_kind, scope_id, scope_name, state_map_json, created_at)
+           VALUES ('l1', 'p1', 'linear', 'team', 'tm', 'Eng', '{"pull":{},"push":{},"confirmedAt":null,"knownStates":[]}', 1);
+         INSERT INTO tasks (id, project_id, repo_id, number, title, status, plan_kind, created_at, updated_at,
+                            src_provider, src_link_id, src_external_id, src_identifier, src_url)
+           VALUES ('t1', 'p1', 'r1', 1, 'x', 'todo', 'text', 1, 1, 'linear', 'l1', 'e1', 'ENG-1', 'https://example.com/1');
+         INSERT INTO runs (id, cwd, executor_json, kind, prompt, finish, status, queue_position, queued_at)
+           VALUES ('u1', '/r1', '{"kind":"claude"}', 'work', 'p', 'pr', 'finished', 1, 1);
+         INSERT INTO settings (key, value_json) VALUES ('concurrency', '2');"#,
+    )
+    .unwrap();
+    migrate(&mut c).unwrap();
+    assert_eq!(user_version(&c).unwrap(), 2);
+    assert_eq!(get_project(&c, "p1").unwrap().unwrap().description, None);
+    let l = get_source_link(&c, "l1").unwrap().unwrap();
+    assert_eq!((l.last_synced_at, l.last_sync_error, l.pending_state_changes), (None, None, None));
+    assert!(!get_task(&c, "t1").unwrap().unwrap().source.unwrap().unmapped);
+    assert_eq!(get_run(&c, "u1").unwrap().unwrap().tokens, None);
+    let mut s = load_settings(&c).unwrap();
+    assert_eq!((s.concurrency, s.default_executor.clone()), (2, None));
+
+    // Los campos nuevos se guardan y se leen.
+    let changes = StateChanges {
+        added: vec![ExternalState { id: "s9".into(), name: "QA".into(), kind: ExtKind::Started, color: None }],
+        removed: vec![],
+    };
+    c.execute(
+        "UPDATE source_links SET pending_state_changes = ?1 WHERE id = 'l1'",
+        [serde_json::to_string(&changes).unwrap()],
+    )
+    .unwrap();
+    assert_eq!(get_source_link(&c, "l1").unwrap().unwrap().pending_state_changes, Some(changes));
+    s.default_executor = Some(Executor::Workflow { name: "plan-task".into() });
+    save_settings(&mut c, &s).unwrap();
+    assert_eq!(load_settings(&c).unwrap().default_executor, s.default_executor);
 }
 
 #[test]
@@ -264,6 +312,7 @@ fn run(id: &str, task: Option<&str>, repo: Option<&str>) -> Run {
         branch: Some("nodal/pay-1".into()),
         error: None,
         legacy_label: Some("ENG-7".into()),
+        tokens: None,
     }
 }
 
@@ -289,6 +338,9 @@ fn link(id: &str, project_id: &str, default_repo: Option<&str>) -> SourceLink {
         },
         auto_import: true,
         created_at: 7,
+        last_synced_at: None,
+        last_sync_error: None,
+        pending_state_changes: None,
     }
 }
 
@@ -370,14 +422,14 @@ fn settings_round_trip_and_defaults() {
     let db = conn();
     let mut c = db.lock().unwrap();
     assert_eq!(load_settings(&c).unwrap(), Settings::default());
-    let s = Settings { concurrency: 5, editor: Some("cursor".into()), reviewer: "strict-reviewer".into() };
+    let s = Settings { concurrency: 5, editor: Some("cursor".into()), reviewer: "strict-reviewer".into(), default_executor: None };
     save_settings(&mut c, &s).unwrap();
     assert_eq!(load_settings(&c).unwrap(), s);
     // Sobrescribir actualiza en lugar de duplicar.
     let s2 = Settings { editor: None, ..s };
     save_settings(&mut c, &s2).unwrap();
     assert_eq!(load_settings(&c).unwrap(), s2);
-    assert_eq!(count(&c, "settings"), 3);
+    assert_eq!(count(&c, "settings"), 4);
 }
 
 #[test]

@@ -291,6 +291,7 @@ fn existing_repo_is_reused_and_keys_do_not_collide() {
                 reviewer: None,
                 created_at: 1,
                 archived_at: None,
+                description: None,
             },
         )
         .unwrap();

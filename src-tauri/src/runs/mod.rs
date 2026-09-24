@@ -3,6 +3,7 @@
 
 pub mod claude_bin;
 pub(crate) mod claude_fs;
+pub mod claude_trust;
 pub mod options;
 pub mod terminal;
 pub mod types;
@@ -216,6 +217,15 @@ pub fn read_session(session_id: &str, cwd: &str) -> SessionReadout {
         last_message: jsonl.as_deref().and_then(claude_fs::read_last_assistant_text),
         blocker: jsonl.as_deref().and_then(claude_fs::read_workflow_review_denial),
     }
+}
+
+/// Tokens del transcript principal de la sesión (bloqueante). `None` si no hay archivo o usage.
+pub fn session_tokens(session_id: &str, cwd: &str) -> Option<i64> {
+    if !claude_fs::is_valid_session_id(session_id) {
+        return None;
+    }
+    let projects = projects_dir().ok()?;
+    claude_fs::read_usage_tokens(&claude_fs::find_session_jsonl(&projects, cwd, session_id)?)
 }
 
 /// Detalle del workflow más reciente de la sesión. `None` si la sesión todavía no tiene

@@ -6,7 +6,9 @@ use rusqlite::{params, Connection, OptionalExtension};
 
 use crate::db::rows::{self, outbox_from_row, source_link_from_row, task_from_row};
 use crate::db::DbError;
-use crate::domain::{ExternalState, OutboxItem, OutboxPayload, PlanRef, SourceLink, Task, TaskSource, TaskStatus};
+use crate::domain::{
+    ExternalState, OutboxItem, OutboxPayload, PlanRef, SourceLink, StateChanges, Task, TaskSource, TaskStatus,
+};
 
 use super::ExternalItem;
 
@@ -47,11 +49,31 @@ pub fn save_link(conn: &Connection, link: &SourceLink) -> Result<(), DbError> {
     Ok(())
 }
 
+/// Guarda el mapeo y limpia `pending_state_changes` (el usuario ya revisó los estados).
 pub fn save_state_map(conn: &Connection, link_id: &str, map: &crate::domain::StateMap) -> Result<(), DbError> {
-    let n = conn.execute("UPDATE source_links SET state_map_json = ?2 WHERE id = ?1", params![link_id, json(map)?])?;
+    let n = conn.execute(
+        "UPDATE source_links SET state_map_json = ?2, pending_state_changes = NULL WHERE id = ?1",
+        params![link_id, json(map)?],
+    )?;
     if n == 0 {
         return Err(DbError::Invalid("Source not found.".into()));
     }
+    Ok(())
+}
+
+/// Resultado de la pasada del sync sobre un link (`error: None` = fue bien).
+pub fn set_link_sync(conn: &Connection, link_id: &str, now: i64, error: Option<&str>) -> Result<(), DbError> {
+    conn.execute(
+        "UPDATE source_links SET last_synced_at = ?2, last_sync_error = ?3 WHERE id = ?1",
+        params![link_id, now, error],
+    )?;
+    Ok(())
+}
+
+/// Altas/bajas de estados contra `known_states`; vacías → `NULL`.
+pub fn set_pending_changes(conn: &Connection, link_id: &str, changes: &StateChanges) -> Result<(), DbError> {
+    let v = if changes.is_empty() { None } else { Some(json(changes)?) };
+    conn.execute("UPDATE source_links SET pending_state_changes = ?2 WHERE id = ?1", params![link_id, v])?;
     Ok(())
 }
 
@@ -187,6 +209,7 @@ pub fn insert_imported(conn: &Connection, n: NewImported) -> Result<Task, DbErro
             external_state: Some(n.item.state.clone()),
             last_synced_at: Some(n.now),
             sync_error: None,
+            unmapped: false,
         }),
         created_at: n.now,
         updated_at: n.now,
@@ -206,6 +229,8 @@ pub struct PullUpdate<'a> {
     pub sync_error: Option<&'a str>,
     /// Sin error propio del pull, conservar el que haya (lo dejó el push de esta pasada).
     pub keep_error: bool,
+    /// El estado externo no está en el mapeo pull.
+    pub unmapped: bool,
     pub now: i64,
 }
 
@@ -219,9 +244,20 @@ pub fn apply_pull(conn: &Connection, u: &PullUpdate) -> Result<(), DbError> {
                             WHEN ?3 IN ('done', 'canceled') THEN ?6 ELSE NULL END,
            src_state_json = COALESCE(?4, src_state_json), src_last_synced_at = ?6,
            src_sync_error = CASE WHEN ?5 IS NULL AND ?8 THEN src_sync_error ELSE ?5 END,
+           src_unmapped = ?9,
            updated_at = CASE WHEN ?7 THEN ?6 ELSE updated_at END
          WHERE id = ?1 AND src_provider IS NOT NULL",
-        params![u.task_id, u.title, u.status, u.external_state.map(json).transpose()?, u.sync_error, u.now, changed, u.keep_error],
+        params![
+            u.task_id,
+            u.title,
+            u.status,
+            u.external_state.map(json).transpose()?,
+            u.sync_error,
+            u.now,
+            changed,
+            u.keep_error,
+            u.unmapped
+        ],
     )?;
     Ok(())
 }
@@ -239,7 +275,7 @@ pub fn set_sync_error(conn: &Connection, task_id: &str, error: Option<&str>) -> 
 /// próximo pull no lo ve como un cambio.
 pub fn set_external_state(conn: &Connection, task_id: &str, state: &ExternalState, now: i64) -> Result<(), DbError> {
     conn.execute(
-        "UPDATE tasks SET src_state_json = ?2, src_last_synced_at = ?3, src_sync_error = NULL
+        "UPDATE tasks SET src_state_json = ?2, src_last_synced_at = ?3, src_sync_error = NULL, src_unmapped = 0
          WHERE id = ?1 AND src_provider IS NOT NULL",
         params![task_id, json(state)?, now],
     )?;

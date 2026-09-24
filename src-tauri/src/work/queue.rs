@@ -58,6 +58,79 @@ pub fn occupied_slots(runs: &[Run], live: &[RunSummary], now: i64) -> usize {
     working + pending
 }
 
+/// Resumen de la cola para la UI.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkSummary {
+    /// Slots ocupados (regla de `occupied_slots`).
+    pub running: u32,
+    /// Concurrencia global de Settings.
+    pub capacity: u32,
+    /// Cosas distintas esperando al usuario: tareas Blocked, runs migrados sin confirmar y
+    /// sesiones esperando permiso/input. Una tarea cuenta una sola vez.
+    pub need_you: u32,
+    /// En cola y listos para salir (sin los que esperan confirmación).
+    pub queued: u32,
+}
+
+/// La sesión espera al usuario (permiso, input, diálogo).
+fn waiting(s: &RunSummary) -> bool {
+    s.state.as_deref() == Some("blocked") || s.status.as_deref() == Some("waiting")
+}
+
+/// `runs`: los pendientes del alcance (`pending`/`pending_of`); `blocked_tasks`: ids de las
+/// tareas Blocked del alcance. `global`: sin filtro de proyecto, así que también cuentan las
+/// sesiones ajenas (trabajando ocupan slot; esperando, necesitan al usuario). Con proyecto,
+/// `running` son solo los runs propios que ocupan slot.
+pub fn work_summary(
+    runs: &[Run],
+    blocked_tasks: &[String],
+    live: &[RunSummary],
+    concurrency: u32,
+    global: bool,
+    now: i64,
+) -> WorkSummary {
+    let running = if global {
+        occupied_slots(runs, live, now)
+    } else {
+        runs.iter()
+            .filter(|r| match r.status {
+                RunStatus::Launching => true,
+                RunStatus::Launched => match live_of(r, live) {
+                    Some(s) => s.state.as_deref() == Some("working"),
+                    None => r.launched_at.is_some_and(|t| now - t < LAUNCH_GRACE_MS),
+                },
+                _ => false,
+            })
+            .count()
+    };
+    let queued = runs.iter().filter(|r| r.status == RunStatus::Queued && !awaiting_confirmation(r)).count();
+
+    let key = |r: &Run| match &r.task_id {
+        Some(t) => format!("task:{t}"),
+        None => format!("run:{}", r.id),
+    };
+    let mut need: HashSet<String> = blocked_tasks.iter().map(|t| format!("task:{t}")).collect();
+    let mut own_sessions: HashSet<&str> = HashSet::new();
+    for r in runs {
+        if awaiting_confirmation(r) {
+            need.insert(key(r));
+        }
+        if let Some(s) = (r.status == RunStatus::Launched).then(|| live_of(r, live)).flatten() {
+            own_sessions.insert(s.id.as_str());
+            if waiting(s) {
+                need.insert(key(r));
+            }
+        }
+    }
+    if global {
+        for s in live.iter().filter(|s| waiting(s) && !own_sessions.contains(s.id.as_str())) {
+            need.insert(format!("session:{}", s.session_id));
+        }
+    }
+    WorkSummary { running: running as u32, capacity: concurrency, need_you: need.len() as u32, queued: queued as u32 }
+}
+
 /// Repos con un run `in_place` activo: la cola no lanza otro ahí.
 fn locked_repos(runs: &[Run], live: &[RunSummary], now: i64) -> HashSet<String> {
     runs.iter()
@@ -188,6 +261,7 @@ mod tests {
             branch: None,
             error: None,
             legacy_label: None,
+            tokens: None,
         }
     }
 
@@ -207,6 +281,40 @@ mod tests {
             state: Some(state.into()),
             waiting_for: None,
         }
+    }
+
+    #[test]
+    fn work_summary_counts_slots_and_dedupes_need_you() {
+        let mut waiting_run = launched("a", "aaaa", NOW - 1_000_000);
+        waiting_run.task_id = Some("t-blocked".into());
+        let mut legacy = run("l", RunStatus::Queued, 2.0);
+        legacy.legacy_label = Some("ENG-1".into());
+        let runs = vec![
+            waiting_run,
+            launched("b", "bbbb", NOW - 1_000_000),
+            launched("c", "cccc", NOW - 1_000),
+            run("q", RunStatus::Queued, 1.0),
+            legacy,
+            run("n", RunStatus::Launching, 3.0),
+        ];
+        let mut perm = live("aaaa", "blocked");
+        perm.status = Some("waiting".into());
+        let mut foreign_wait = live("ffff", "working");
+        foreign_wait.status = Some("waiting".into());
+        let lv = vec![perm, live("bbbb", "working"), live("xxxx", "working"), foreign_wait];
+        let blocked = vec!["t-blocked".to_string(), "t-other".to_string()];
+
+        let g = work_summary(&runs, &blocked, &lv, 3, true, NOW);
+        // working: bbbb, xxxx, ffff (ajenas incluidas) + c (en gracia) + n (launching).
+        assert_eq!((g.running, g.capacity, g.queued), (5, 3, 1));
+        // t-blocked (tarea Blocked y su sesión esperando permiso: una vez), t-other, el
+        // migrado y la sesión ajena esperando.
+        assert_eq!(g.need_you, 4, "{g:?}");
+
+        let p = work_summary(&runs, &blocked, &lv, 3, false, NOW);
+        // Solo propios: b (working), c (gracia), n (launching). `a` está blocked: no ocupa slot.
+        assert_eq!((p.running, p.queued, p.need_you), (3, 1, 3), "{p:?}");
+        assert_eq!(work_summary(&[], &[], &[], 2, false, NOW), WorkSummary { capacity: 2, ..Default::default() });
     }
 
     #[test]

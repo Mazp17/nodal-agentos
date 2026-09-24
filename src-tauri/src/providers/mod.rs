@@ -253,14 +253,29 @@ pub fn check_provider(name: &str) -> PResult<()> {
 /// Proveedor listo para usar, o `None` si no hay key guardada.
 pub async fn resolve(app: &AppHandle, name: &str) -> PResult<Option<Provider>> {
     check_provider(name)?;
+    Ok(resolve_with_key(app, name).await?.map(|(p, _)| p))
+}
+
+/// Como `resolve`, más la key leída (para derivar `key_hint` sin leer el keychain dos veces).
+pub async fn resolve_with_key(app: &AppHandle, name: &str) -> PResult<Option<(Provider, String)>> {
+    check_provider(name)?;
     let Some(key) = app.state::<crate::secrets::Secrets>().get(name).await? else { return Ok(None) };
     match name {
         "linear" => {
             let http = app.state::<crate::linear::LinearState>().http().clone();
-            Ok(Some(Provider::Linear(linear::LinearProvider::new(http, key))))
+            Ok(Some((Provider::Linear(linear::LinearProvider::new(http, key.clone())), key)))
         }
         other => Err(format!("Unknown provider \"{other}\".")),
     }
+}
+
+/// Keys más cortas no muestran pista: los últimos 4 serían demasiado de la key.
+const KEY_HINT_MIN_CHARS: usize = 12;
+
+/// Últimos 4 caracteres de la key para reconocerla en la UI; nunca la key entera.
+pub fn key_hint(key: &str) -> Option<String> {
+    let chars: Vec<char> = key.trim().chars().collect();
+    (chars.len() >= KEY_HINT_MIN_CHARS).then(|| chars[chars.len() - 4..].iter().collect())
 }
 
 pub async fn require(app: &AppHandle, name: &str) -> PResult<Provider> {

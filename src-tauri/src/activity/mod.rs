@@ -399,6 +399,118 @@ pub async fn repo_activity(app: AppHandle, repo_path: String) -> Result<RepoActi
     .map_err(|e| format!("Internal error reading activity: {e}"))?
 }
 
+/// Rutas existentes, cada una tal cual y canonicalizada, sin repetir.
+fn existing_roots(raw: impl IntoIterator<Item = PathBuf>) -> Vec<PathBuf> {
+    let mut roots: Vec<PathBuf> = Vec::new();
+    for r in raw {
+        if !r.is_dir() {
+            continue;
+        }
+        if let Ok(c) = r.canonicalize() {
+            if c != r && !roots.contains(&c) {
+                roots.push(c);
+            }
+        }
+        if !roots.contains(&r) {
+            roots.push(r);
+        }
+    }
+    roots
+}
+
+fn now_ms() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0)
+}
+
+/// Actividad de un repo del proyecto (mismo criterio que `ActivitySummary`).
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RepoActivityCount {
+    pub repo_id: String,
+    pub repo_path: String,
+    pub sessions: u32,
+    pub agents: u32,
+}
+
+/// Actividad de los repos de un proyecto. Los totales cuentan una sola vez lo que cae en
+/// más de un repo (repos anidados).
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectActivity {
+    pub project_id: String,
+    pub repos: Vec<RepoActivityCount>,
+    pub sessions: u32,
+    pub agents: u32,
+    pub generated_at: i64,
+}
+
+/// Conteos por repo y totales con un solo listado de agentes. `roots` resuelve las rutas a
+/// comparar (en la app, `existing_roots`: un repo cuya carpeta no existe cuenta cero).
+fn project_counts(
+    project_id: &str,
+    repos: &[(String, PathBuf)],
+    agents: &[AgentSession],
+    projects: &Path,
+    now: i64,
+    roots: impl Fn(Vec<PathBuf>) -> Vec<PathBuf>,
+) -> ProjectActivity {
+    let none = AppRuns::default();
+    let per_repo = repos
+        .iter()
+        .map(|(id, path)| {
+            let roots = roots(vec![path.clone()]);
+            let (sessions, agents) = if roots.is_empty() {
+                (0, 0)
+            } else {
+                let s = summarize(&assemble(&roots, agents, projects, &none, now));
+                (s.sessions, s.agents)
+            };
+            RepoActivityCount { repo_id: id.clone(), repo_path: path.to_string_lossy().into_owned(), sessions, agents }
+        })
+        .collect();
+    let all = roots(repos.iter().map(|(_, p)| p.clone()).collect());
+    let total = if all.is_empty() {
+        ActivitySummary { sessions: 0, agents: 0, generated_at: now }
+    } else {
+        summarize(&assemble(&all, agents, projects, &none, now))
+    };
+    ProjectActivity {
+        project_id: project_id.to_string(),
+        repos: per_repo,
+        sessions: total.sessions,
+        agents: total.agents,
+        generated_at: now,
+    }
+}
+
+/// Sesiones y subagentes trabajando en cada repo del proyecto (un solo `claude agents`).
+#[tauri::command]
+pub async fn project_activity(app: AppHandle, project_id: String) -> Result<ProjectActivity, String> {
+    crate::util::check_id(&project_id, "project")?;
+    let db = app.try_state::<Db>().ok_or("The database isn't available.")?.inner().clone();
+    let pid = project_id.clone();
+    let repos: Vec<(String, PathBuf)> = with_db(&db, move |c| {
+        crate::db::queries::projects::get(c, &pid)?;
+        Ok(crate::db::queries::repos::list(c, Some(&pid))?.into_iter().map(|r| (r.id, PathBuf::from(r.path))).collect())
+    })
+    .await?;
+    if repos.is_empty() {
+        return Ok(ProjectActivity { project_id, repos: vec![], sessions: 0, agents: 0, generated_at: now_ms() });
+    }
+    let agents = list_agents().await?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let projects = claude_fs::claude_config_dir()
+            .ok_or("Couldn't locate the Claude Code folder ($HOME is not set).")?
+            .join("projects");
+        Ok(project_counts(&project_id, &repos, &agents, &projects, now_ms(), existing_roots))
+    })
+    .await
+    .map_err(|e| format!("Internal error reading activity: {e}"))?
+}
+
 /// Resumen de actividad de varios repos en una sola pasada (un `claude agents` y un
 /// recorrido de `projects`), para el indicador del sidebar. Las rutas que no existen se
 /// ignoran; sin rutas válidas devuelve ceros.
@@ -420,20 +532,7 @@ pub async fn activity_summary(repo_paths: Vec<String>) -> Result<ActivitySummary
     }
     let agents = list_agents().await?;
     tauri::async_runtime::spawn_blocking(move || {
-        let mut roots: Vec<PathBuf> = Vec::new();
-        for r in raw {
-            if !r.is_dir() {
-                continue;
-            }
-            if let Ok(c) = r.canonicalize() {
-                if c != r && !roots.contains(&c) {
-                    roots.push(c);
-                }
-            }
-            if !roots.contains(&r) {
-                roots.push(r);
-            }
-        }
+        let roots = existing_roots(raw);
         if roots.is_empty() {
             return Ok(ActivitySummary { sessions: 0, agents: 0, generated_at: now() });
         }
@@ -561,6 +660,33 @@ mod tests {
         let sandbox = PathBuf::from("/Users/me/Code/repo-sandbox");
         let both = summarize(&assemble(&[repo, sandbox], &agents(now), &projects, &AppRuns::default(), now));
         assert!(both.sessions > one.sessions, "{one:?} {both:?}");
+        std::fs::remove_dir_all(&projects).unwrap();
+    }
+
+    #[test]
+    fn project_counts_per_repo_and_total() {
+        let (projects, now) = setup("project");
+        let id = |v: Vec<PathBuf>| v;
+        let repo = PathBuf::from("/Users/me/Code/repo");
+        let sandbox = PathBuf::from("/Users/me/Code/repo-sandbox");
+        let nested = repo.join(".claude/worktrees/agent-alive0000000001");
+        let count = |paths: &[PathBuf]| summarize(&assemble(paths, &agents(now), &projects, &AppRuns::default(), now));
+        let repos = vec![("r1".to_string(), repo.clone()), ("r2".to_string(), sandbox.clone()), ("r3".to_string(), nested)];
+        let act = project_counts("p1", &repos, &agents(now), &projects, now, id);
+        assert_eq!(act.project_id, "p1");
+        let one = count(std::slice::from_ref(&repo));
+        assert_eq!((act.repos[0].repo_id.as_str(), act.repos[0].sessions, act.repos[0].agents), ("r1", one.sessions, one.agents));
+        assert_eq!((one.sessions, one.agents), (2, 3));
+        // El total no cuenta dos veces lo del repo anidado.
+        let both = count(&[repo, sandbox]);
+        assert_eq!((act.sessions, act.agents), (both.sessions, both.agents));
+        assert!(act.repos[2].agents >= 1, "{act:?}");
+        assert!(act.agents < act.repos.iter().map(|r| r.agents).sum::<u32>(), "{act:?}");
+
+        // En la app, una carpeta inexistente cuenta cero.
+        let real = project_counts("p1", &repos[..1], &agents(now), &projects, now, existing_roots);
+        assert_eq!((real.repos[0].sessions, real.repos[0].agents, real.sessions), (0, 0, 0));
+        assert!(project_counts("p1", &[], &agents(now), &projects, now, id).repos.is_empty());
         std::fs::remove_dir_all(&projects).unwrap();
     }
 

@@ -166,6 +166,7 @@ pub mod tests {
                 reviewer: None,
                 created_at: 1,
                 archived_at: None,
+                description: None,
             },
         )
         .unwrap();
@@ -181,6 +182,7 @@ pub mod tests {
                 reviewer: None,
                 created_at: 1,
                 archived_at: None,
+                description: None,
             },
         )
         .unwrap();
@@ -216,6 +218,9 @@ pub mod tests {
             state_map: map,
             auto_import: false,
             created_at: 1,
+            last_synced_at: None,
+            last_sync_error: None,
+            pending_state_changes: None,
         };
         insert_source_link(conn, &link).unwrap();
         link

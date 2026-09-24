@@ -30,14 +30,15 @@ pub const PLAN_INLINE_MAX: usize = 16 * 1024;
 
 // ---------- Resolución ----------
 
-/// Ejecutor efectivo: el del run → la tarea → el repo → el proyecto → Claude.
-pub fn pick_executor(task: &Task, repo: &Repo, project: &Project, input: &LaunchInput) -> Executor {
+/// Ejecutor efectivo: el del run → la tarea → el repo → el proyecto → Settings → Claude.
+pub fn pick_executor(task: &Task, repo: &Repo, project: &Project, settings: &Settings, input: &LaunchInput) -> Executor {
     input
         .executor
         .clone()
         .or_else(|| task.assignee.clone())
         .or_else(|| repo.default_executor.clone())
         .or_else(|| project.default_executor.clone())
+        .or_else(|| settings.default_executor.clone())
         .unwrap_or(Executor::Claude)
 }
 
@@ -462,6 +463,7 @@ fn blank_run(id: String, task: &Task, repo: &Repo, now: i64, queue_position: f64
         branch: None,
         error: None,
         legacy_label: None,
+        tokens: None,
     }
 }
 
@@ -474,7 +476,8 @@ pub fn enqueue_work(conn: &mut Connection, env: &Env, task_id: &str, input: &Lau
     let project = projects::get(conn, &task.project_id)?;
     check_no_pending(conn, task_id)?;
     let extra = validate::extra_instructions(input.extra_instructions.as_deref())?;
-    let executor = pick_executor(&task, &repo, &project, input);
+    let settings = rows::load_settings(conn)?;
+    let executor = pick_executor(&task, &repo, &project, &settings, input);
     let info = lookup(env, &repo, &executor)?;
     let executor = info.as_ref().map(|i| i.executor.clone()).unwrap_or(executor);
     let reviews = info.as_ref().is_some_and(|i| i.reviews);
@@ -755,16 +758,20 @@ mod tests {
         let mut repo = repo_of("r1", "p1", "/r");
         let mut task = task_of("t1");
         let none = LaunchInput::default();
-        assert_eq!(pick_executor(&task, &repo, &project, &none), Executor::Claude);
+        let mut settings = Settings::default();
+        assert_eq!(pick_executor(&task, &repo, &project, &settings, &none), Executor::Claude);
+        let be = Executor::Agent { name: "backend-developer".into(), source: AgentSource::User };
+        settings.default_executor = Some(be.clone());
+        assert_eq!(pick_executor(&task, &repo, &project, &settings, &none), be, "global como último fallback");
         project.default_executor = Some(Executor::Workflow { name: "plan-task".into() });
-        assert_eq!(pick_executor(&task, &repo, &project, &none), Executor::Workflow { name: "plan-task".into() });
+        assert_eq!(pick_executor(&task, &repo, &project, &settings, &none), Executor::Workflow { name: "plan-task".into() });
         let fe = Executor::Agent { name: "frontend-developer".into(), source: AgentSource::User };
         repo.default_executor = Some(fe.clone());
-        assert_eq!(pick_executor(&task, &repo, &project, &none), fe);
+        assert_eq!(pick_executor(&task, &repo, &project, &settings, &none), fe);
         task.assignee = Some(Executor::Claude);
-        assert_eq!(pick_executor(&task, &repo, &project, &none), Executor::Claude);
+        assert_eq!(pick_executor(&task, &repo, &project, &settings, &none), Executor::Claude);
         let input = LaunchInput { executor: Some(fe.clone()), ..Default::default() };
-        assert_eq!(pick_executor(&task, &repo, &project, &input), fe);
+        assert_eq!(pick_executor(&task, &repo, &project, &settings, &input), fe);
 
         repo.launch.model = Some("opus".into());
         repo.default_finish = Finish::Commit;

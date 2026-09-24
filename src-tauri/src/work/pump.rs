@@ -93,6 +93,9 @@ pub fn apply_end(
     done.branch = end.branch.clone();
     done.verdict = end.verdict.clone();
     done.error = note.clone();
+    if end.tokens.is_some() {
+        done.tokens = end.tokens;
+    }
     qruns::update(&tx, &done)?;
     if let Some(t) = &task {
         let comment = match (decision.closing, decision.task_status) {
@@ -147,15 +150,21 @@ async fn finish_run(inner: &Arc<Inner>, run: Run, signal: EndSignal) -> Result<(
     };
     let (session, cwd) = (run.session_id.clone(), run.cwd.clone());
     let (executor, env2) = (run.executor.clone(), env.clone());
-    let (readout, (reviews, manages)) = blocking(move || {
+    let (readout, (reviews, manages), tokens) = blocking(move || {
+        // Los workflows reparten el trabajo en subagentes con su propio transcript: sin tokens.
+        let tokens = match (&executor, &session) {
+            (Executor::Workflow { .. }, _) | (_, None) => None,
+            (_, Some(sid)) => runs::session_tokens(sid, &cwd),
+        };
         let readout = match (signal, session) {
             (EndSignal::Done, Some(sid)) => runs::read_session(&sid, &cwd),
             _ => SessionReadout::default(),
         };
-        Ok((readout, workflow_meta(&env2, repo_path.as_deref(), &executor)))
+        Ok((readout, workflow_meta(&env2, repo_path.as_deref(), &executor), tokens))
     })
     .await?;
-    let end = read_end(&run, signal, &readout, reviews);
+    let mut end = read_end(&run, signal, &readout, reviews);
+    end.tokens = tokens;
     let now = now_ms();
     with_db(&inner.db, move |c| {
         apply_end(c, &env, &run, &end, RunStatus::Finished, manages.as_deref(), now)
@@ -167,6 +176,17 @@ async fn finish_run(inner: &Arc<Inner>, run: Run, signal: EndSignal) -> Result<(
 
 /// Una pasada de la cola. Si no hay nada en cola ni lanzado, no consulta `claude agents`.
 pub async fn pump(inner: &Arc<Inner>) -> Result<(), String> {
+    let mut touched = false;
+    let r = pump_pass(inner, &mut touched).await;
+    if touched {
+        use crate::events::Kind;
+        inner.events.notify_all(&[Kind::Runs, Kind::Queue, Kind::Tasks], None);
+    }
+    r
+}
+
+/// `touched`: la pasada cambió algún run (para avisar a la UI aunque después falle).
+async fn pump_pass(inner: &Arc<Inner>, touched: &mut bool) -> Result<(), String> {
     let _turn = inner.pump.lock().await;
     let mut pending = with_db(&inner.db, |c| qruns::pending(c)).await?;
     if !queue::needs_tick(&pending) {
@@ -177,6 +197,7 @@ pub async fn pump(inner: &Arc<Inner>) -> Result<(), String> {
     let changed: Vec<Run> =
         queue::fill_session_ids(&mut pending, &live).into_iter().map(|i| pending[i].clone()).collect();
     if !changed.is_empty() {
+        *touched = true;
         with_db(&inner.db, move |c| {
             for r in &changed {
                 c.execute(
@@ -191,6 +212,7 @@ pub async fn pump(inner: &Arc<Inner>) -> Result<(), String> {
 
     for (id, signal) in queue::ended(&pending, &live, now_ms()) {
         let Some(run) = pending.iter().find(|r| r.id == id).cloned() else { continue };
+        *touched = true;
         if let Err(e) = finish_run(inner, run, signal).await {
             eprintln!("work: couldn't close run {id}: {e}");
         }
@@ -210,6 +232,7 @@ pub async fn pump(inner: &Arc<Inner>) -> Result<(), String> {
             .await?
         };
         let Some(run) = claimed else { continue };
+        *touched = true;
         let result = runs::launch_with(run.cwd.clone(), run.prompt.clone(), &run.options, &launch::extra_flags(&run)).await;
         let root = inner.env.worktrees_root.clone();
         with_db(&inner.db, move |c| {
@@ -266,7 +289,7 @@ mod tests {
         let db = open_in_memory().unwrap();
         let task = {
             let mut c = db.lock().unwrap();
-            let p = ops::create_project(&c, &NewProject { name: "Pay".into(), key: "PAY".into(), color: None }, 1).unwrap();
+            let p = ops::create_project(&c, &NewProject { name: "Pay".into(), key: "PAY".into(), color: None, description: None }, 1).unwrap();
             let input: NewRepo = serde_json::from_value(json!({"path": "x", "defaultIsolation": "in_place"})).unwrap();
             let r = ops::add_repo(&c, &p.id, &input, &repo_dir, 1).unwrap();
             let nt: NewTask = serde_json::from_value(json!({
@@ -303,7 +326,8 @@ mod tests {
         let agent = Executor::Agent { name: "frontend-developer".into(), source: AgentSource::User };
         let work = launched_run(&f, agent, RunKind::Work, true);
         tasks::set_status(&f.db.lock().unwrap(), &f.task.id, TaskStatus::InProgress, 3).unwrap();
-        let end = read_end(&work, EndSignal::Done, &done_readout("{\"status\":\"done\",\"summary\":\"listo\"}"), false);
+        let mut end = read_end(&work, EndSignal::Done, &done_readout("{\"status\":\"done\",\"summary\":\"listo\"}"), false);
+        end.tokens = Some(1234);
         let reviewer = apply_end(&mut f.db.lock().unwrap(), &f.env, &work, &end, RunStatus::Finished, None, 10).unwrap().unwrap();
         assert_eq!(reviewer.kind, RunKind::Review);
         assert_eq!(reviewer.parent_run_id.as_deref(), Some(work.id.as_str()));
@@ -312,6 +336,7 @@ mod tests {
         assert_eq!(task_status(&f), TaskStatus::InProgress, "sigue en In Progress mientras revisa");
         let saved = qruns::get(&f.db.lock().unwrap(), &work.id).unwrap();
         assert_eq!((saved.status, saved.outcome, saved.summary.as_deref()), (RunStatus::Finished, Some(RunOutcome::Green), Some("listo")));
+        assert_eq!(saved.tokens, Some(1234), "los tokens del transcript quedan en el run");
         // Aplicar dos veces no duplica (el run ya no está launched).
         assert!(apply_end(&mut f.db.lock().unwrap(), &f.env, &work, &end, RunStatus::Finished, None, 11).unwrap().is_none());
 
@@ -381,6 +406,9 @@ mod tests {
             state_map: map,
             auto_import: false,
             created_at: 1,
+            last_synced_at: None,
+            last_sync_error: None,
+            pending_state_changes: None,
         };
         rows::insert_source_link(&c, &link).unwrap();
         c.execute(

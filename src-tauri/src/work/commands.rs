@@ -11,7 +11,9 @@ use tauri::State;
 use crate::db::queries::{projects, relations, repos, runs as qruns, tasks};
 use crate::db::{rows, with_db, DbError};
 use crate::domain::*;
-use crate::runs::{claude_bin, terminal};
+use crate::events::Kind;
+use crate::runs::types::Transcript;
+use crate::runs::{claude_bin, claude_fs, terminal};
 use crate::util::{blocking, check_id, now_ms, paths};
 
 use super::diff::{self, RunDiff};
@@ -22,6 +24,8 @@ use super::transitions::{RunEnd, NOTE_STOPPED};
 use super::{kick, launch, ops, pump, validate, worktree, Inner, WorkState};
 
 const OPEN_TIMEOUT: Duration = Duration::from_secs(3);
+/// Lo que cambia al encolar, lanzar o cancelar un run.
+const RUN_KINDS: &[Kind] = &[Kind::Runs, Kind::Queue, Kind::Tasks];
 
 /// Corre `f` con la conexión; los errores de `ops` ya vienen listos para mostrar.
 async fn db<T, F>(inner: &Arc<Inner>, f: F) -> Result<T, String>
@@ -50,13 +54,17 @@ pub async fn list_projects(state: State<'_, WorkState>, include_archived: Option
 
 #[tauri::command]
 pub async fn create_project(state: State<'_, WorkState>, input: NewProject) -> Result<Project, String> {
-    db(&state.0, move |c| ops::create_project(c, &input, now_ms())).await
+    let p = db(&state.0, move |c| ops::create_project(c, &input, now_ms())).await?;
+    state.0.events.notify(Kind::Projects, None);
+    Ok(p)
 }
 
 #[tauri::command]
 pub async fn update_project(state: State<'_, WorkState>, id: String, patch: ProjectPatch) -> Result<Project, String> {
     check_id(&id, "project")?;
-    db(&state.0, move |c| ops::update_project(c, &id, &patch, now_ms())).await
+    let p = db(&state.0, move |c| ops::update_project(c, &id, &patch, now_ms())).await?;
+    state.0.events.notify(Kind::Projects, None);
+    Ok(p)
 }
 
 #[tauri::command]
@@ -64,6 +72,7 @@ pub async fn delete_project(state: State<'_, WorkState>, id: String) -> Result<(
     check_id(&id, "project")?;
     let env = state.0.env.clone();
     let task_ids = db(&state.0, move |c| ops::delete_project(c, &id)).await?;
+    state.0.events.notify_all(&[Kind::Projects, Kind::Tasks, Kind::Runs, Kind::Queue, Kind::Sources], None);
     blocking(move || {
         for t in task_ids {
             let _ = std::fs::remove_dir_all(env.plan_dir(&t));
@@ -87,19 +96,25 @@ pub async fn add_repo(state: State<'_, WorkState>, project_id: String, input: Ne
     check_id(&project_id, "project")?;
     let path = input.path.clone();
     let root = blocking(move || paths::require_git_root(&path)).await?;
-    db(&state.0, move |c| ops::add_repo(c, &project_id, &input, &root, now_ms())).await
+    let r = db(&state.0, move |c| ops::add_repo(c, &project_id, &input, &root, now_ms())).await?;
+    state.0.events.notify(Kind::Projects, Some(&r.project_id));
+    Ok(r)
 }
 
 #[tauri::command]
 pub async fn update_repo(state: State<'_, WorkState>, id: String, patch: RepoPatch) -> Result<Repo, String> {
     check_id(&id, "repo")?;
-    db(&state.0, move |c| ops::update_repo(c, &id, &patch)).await
+    let r = db(&state.0, move |c| ops::update_repo(c, &id, &patch)).await?;
+    state.0.events.notify(Kind::Projects, Some(&r.project_id));
+    Ok(r)
 }
 
 #[tauri::command]
 pub async fn delete_repo(state: State<'_, WorkState>, id: String) -> Result<(), String> {
     check_id(&id, "repo")?;
-    db(&state.0, move |c| ops::delete_repo(c, &id)).await
+    db(&state.0, move |c| ops::delete_repo(c, &id)).await?;
+    state.0.events.notify_all(&[Kind::Projects, Kind::Tasks], None);
+    Ok(())
 }
 
 // ---------- Tareas ----------
@@ -121,7 +136,9 @@ pub async fn create_task(state: State<'_, WorkState>, input: NewTask) -> Result<
     check_id(&input.project_id, "project")?;
     check_id(&input.repo_id, "repo")?;
     let env = state.0.env.clone();
-    db(&state.0, move |c| ops::create_task(c, &env, &input, now_ms())).await
+    let t = db(&state.0, move |c| ops::create_task(c, &env, &input, now_ms())).await?;
+    state.0.events.notify(Kind::Tasks, Some(&t.project_id));
+    Ok(t)
 }
 
 #[tauri::command]
@@ -131,20 +148,39 @@ pub async fn update_task(state: State<'_, WorkState>, id: String, patch: TaskPat
         check_id(r, "repo")?;
     }
     let env = state.0.env.clone();
-    db(&state.0, move |c| ops::update_task(c, &env, &id, &patch, now_ms())).await
+    let t = db(&state.0, move |c| ops::update_task(c, &env, &id, &patch, now_ms())).await?;
+    state.0.events.notify(Kind::Tasks, Some(&t.project_id));
+    Ok(t)
 }
 
 #[tauri::command]
 pub async fn delete_task(state: State<'_, WorkState>, id: String) -> Result<(), String> {
     check_id(&id, "task")?;
     let env = state.0.env.clone();
-    db(&state.0, move |c| ops::delete_task(c, &env, &id)).await
+    db(&state.0, move |c| ops::delete_task(c, &env, &id)).await?;
+    state.0.events.notify_all(&[Kind::Tasks, Kind::Runs, Kind::Queue], None);
+    Ok(())
 }
 
 #[tauri::command]
 pub async fn move_task(state: State<'_, WorkState>, id: String, status: TaskStatus, position: f64) -> Result<Task, String> {
     check_id(&id, "task")?;
-    db(&state.0, move |c| ops::move_task(c, &id, status, position, now_ms())).await
+    let t = db(&state.0, move |c| ops::move_task(c, &id, status, position, now_ms())).await?;
+    state.0.events.notify(Kind::Tasks, Some(&t.project_id));
+    Ok(t)
+}
+
+/// Nuevo orden de una columna del board (ids de un mismo proyecto, todos con `status`).
+#[tauri::command]
+pub async fn reorder_tasks(state: State<'_, WorkState>, status: TaskStatus, ordered_ids: Vec<String>) -> Result<(), String> {
+    for id in &ordered_ids {
+        check_id(id, "task")?;
+    }
+    let project = db(&state.0, move |c| ops::reorder_tasks(c, status, &ordered_ids, now_ms())).await?;
+    if let Some(p) = project {
+        state.0.events.notify(Kind::Tasks, Some(&p));
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -169,7 +205,9 @@ pub async fn add_task_relation(
 ) -> Result<(), String> {
     check_id(&task_id, "task")?;
     check_id(&other_id, "task")?;
-    db(&state.0, move |c| ops::add_relation(c, &task_id, &other_id, kind)).await
+    db(&state.0, move |c| ops::add_relation(c, &task_id, &other_id, kind)).await?;
+    state.0.events.notify(Kind::Tasks, None);
+    Ok(())
 }
 
 #[tauri::command]
@@ -181,13 +219,29 @@ pub async fn remove_task_relation(
 ) -> Result<(), String> {
     check_id(&task_id, "task")?;
     check_id(&other_id, "task")?;
-    db(&state.0, move |c| ops::remove_relation(c, &task_id, &other_id, kind)).await
+    db(&state.0, move |c| ops::remove_relation(c, &task_id, &other_id, kind)).await?;
+    state.0.events.notify(Kind::Tasks, None);
+    Ok(())
 }
 
-/// "Clean up": borra el worktree y la rama de la tarea. Rechaza con runs en curso.
 #[tauri::command]
-pub async fn cleanup_worktree(state: State<'_, WorkState>, task_id: String) -> Result<Task, String> {
+pub async fn worktree_status(state: State<'_, WorkState>, task_id: String) -> Result<worktree::WorktreeStatus, String> {
     check_id(&task_id, "task")?;
+    let (task, repo) = db(&state.0, move |c| {
+        let t = tasks::get(c, &task_id)?;
+        let r = repos::get(c, &t.repo_id)?;
+        Ok((t, r))
+    })
+    .await?;
+    blocking(move || worktree::status(Path::new(&repo.path), task.worktree.as_ref())).await
+}
+
+/// "Clean up": borra el worktree y la rama de la tarea. Rechaza con runs en curso y, sin
+/// `force`, si hay commits sin publicar o cambios sin commitear.
+#[tauri::command]
+pub async fn cleanup_worktree(state: State<'_, WorkState>, task_id: String, force: Option<bool>) -> Result<Task, String> {
+    check_id(&task_id, "task")?;
+    let force = force.unwrap_or(false);
     let id = task_id.clone();
     let (task, repo) = db(&state.0, move |c| {
         let t = tasks::get(c, &id)?;
@@ -199,15 +253,26 @@ pub async fn cleanup_worktree(state: State<'_, WorkState>, task_id: String) -> R
     })
     .await?;
     let Some(wt) = task.worktree.clone() else { return Ok(task) };
-    blocking(move || worktree::cleanup(Path::new(&repo.path), &wt)).await?;
-    db(&state.0, move |c| {
+    blocking(move || {
+        let repo = Path::new(&repo.path);
+        if !force {
+            if let Some(why) = worktree::cleanup_blocker(&worktree::status(repo, Some(&wt))?) {
+                return Err(why);
+            }
+        }
+        worktree::cleanup(repo, &wt)
+    })
+    .await?;
+    let t = db(&state.0, move |c| {
         let mut t = tasks::get(c, &task_id)?;
         t.worktree = None;
         t.updated_at = now_ms();
         tasks::update(c, &t)?;
         Ok(t)
     })
-    .await
+    .await?;
+    state.0.events.notify(Kind::Tasks, Some(&t.project_id));
+    Ok(t)
 }
 
 // ---------- Ejecutores y runs ----------
@@ -223,10 +288,61 @@ pub async fn list_executors(state: State<'_, WorkState>, repo_id: Option<String>
     blocking(move || Ok(executors::catalog(claude.as_deref(), repo_path.as_deref().map(Path::new)))).await
 }
 
+/// `project_id` (opcional) filtra por proyecto además de por tarea.
 #[tauri::command]
-pub async fn list_task_runs(state: State<'_, WorkState>, task_id: Option<String>) -> Result<Vec<Run>, String> {
+pub async fn list_task_runs(
+    state: State<'_, WorkState>,
+    task_id: Option<String>,
+    project_id: Option<String>,
+) -> Result<Vec<Run>, String> {
     let task_id = opt_id(task_id, "task")?;
-    db(&state.0, move |c| Ok(qruns::list(c, task_id.as_deref())?)).await
+    let project_id = opt_id(project_id, "project")?;
+    db(&state.0, move |c| Ok(qruns::list_filtered(c, project_id.as_deref(), task_id.as_deref())?)).await
+}
+
+/// Como `list_task_runs`, sin `prompt` ni `extraInstructions`.
+#[tauri::command]
+pub async fn list_runs_light(
+    state: State<'_, WorkState>,
+    project_id: Option<String>,
+    task_id: Option<String>,
+) -> Result<Vec<RunLight>, String> {
+    let task_id = opt_id(task_id, "task")?;
+    let project_id = opt_id(project_id, "project")?;
+    let runs = db(&state.0, move |c| Ok(qruns::list_filtered(c, project_id.as_deref(), task_id.as_deref())?)).await?;
+    Ok(runs.into_iter().map(RunLight::from).collect())
+}
+
+#[tauri::command]
+pub async fn get_run(state: State<'_, WorkState>, run_id: String) -> Result<Run, String> {
+    check_id(&run_id, "run")?;
+    db(&state.0, move |c| Ok(qruns::get(c, &run_id)?)).await
+}
+
+/// El último run de cada tarea (sin límite de historial), liviano.
+#[tauri::command]
+pub async fn latest_runs_by_task(state: State<'_, WorkState>, project_id: Option<String>) -> Result<Vec<RunLight>, String> {
+    let project_id = opt_id(project_id, "project")?;
+    let runs = db(&state.0, move |c| Ok(qruns::latest_by_task(c, project_id.as_deref())?)).await?;
+    Ok(runs.into_iter().map(RunLight::from).collect())
+}
+
+/// Slots ocupados/capacidad, cola y lo que espera al usuario (`project_id` null: todo, con
+/// las sesiones ajenas). Si `claude agents` falla, se calcula sin las sesiones vivas.
+#[tauri::command]
+pub async fn work_summary(state: State<'_, WorkState>, project_id: Option<String>) -> Result<super::queue::WorkSummary, String> {
+    let project_id = opt_id(project_id, "project")?;
+    let global = project_id.is_none();
+    let (runs, blocked, settings) = db(&state.0, move |c| {
+        let p = project_id.as_deref();
+        Ok((qruns::pending_of(c, p)?, tasks::blocked_ids(c, p)?, rows::load_settings(c)?))
+    })
+    .await?;
+    let live = crate::runs::list_runs().await.unwrap_or_else(|e| {
+        eprintln!("work_summary: {e}");
+        Vec::new()
+    });
+    Ok(super::queue::work_summary(&runs, &blocked, &live, settings.concurrency, global, now_ms()))
 }
 
 #[tauri::command]
@@ -241,6 +357,7 @@ pub async fn launch_task(state: State<'_, WorkState>, task_id: String, input: Op
     let input = input.unwrap_or_default();
     let run = db(&state.0, move |c| launch::enqueue_work(c, &env, &task_id, &input, false, now_ms())).await?;
     kick(&state.0);
+    state.0.events.notify_all(RUN_KINDS, None);
     Ok(run)
 }
 
@@ -256,6 +373,7 @@ pub async fn hand_off(
     let input = LaunchInput { executor: Some(executor), extra_instructions, ..Default::default() };
     let run = db(&state.0, move |c| launch::enqueue_work(c, &env, &task_id, &input, true, now_ms())).await?;
     kick(&state.0);
+    state.0.events.notify_all(RUN_KINDS, None);
     Ok(run)
 }
 
@@ -265,6 +383,7 @@ pub async fn review_now(state: State<'_, WorkState>, task_id: String, reviewer: 
     let env = state.0.env.clone();
     let run = db(&state.0, move |c| launch::enqueue_review(c, &env, &task_id, reviewer.as_deref(), now_ms())).await?;
     kick(&state.0);
+    state.0.events.notify_all(RUN_KINDS, None);
     Ok(run)
 }
 
@@ -275,6 +394,7 @@ pub async fn confirm_run(state: State<'_, WorkState>, run_id: String) -> Result<
     let env = state.0.env.clone();
     let run = db(&state.0, move |c| launch::confirm_legacy(c, &env, &run_id, now_ms())).await?;
     kick(&state.0);
+    state.0.events.notify_all(RUN_KINDS, None);
     Ok(run)
 }
 
@@ -283,7 +403,9 @@ pub async fn reorder_queue(state: State<'_, WorkState>, run_ids: Vec<String>) ->
     for id in &run_ids {
         check_id(id, "run")?;
     }
-    db(&state.0, move |c| Ok(qruns::reorder_queue(c, &run_ids)?)).await
+    db(&state.0, move |c| Ok(qruns::reorder_queue(c, &run_ids)?)).await?;
+    state.0.events.notify(Kind::Queue, None);
+    Ok(())
 }
 
 /// Base del diff de un run: la del worktree de la tarea si el run corrió ahí.
@@ -296,8 +418,14 @@ fn diff_base(task: Option<&Task>, run: &Run) -> Option<String> {
 /// patch en `<app_data>/runs/<id>/stopped.patch` y la tarea pasa a Blocked.
 #[tauri::command]
 pub async fn cancel_run(state: State<'_, WorkState>, run_id: String) -> Result<Run, String> {
+    let r = cancel_run_inner(&state.0, run_id).await;
+    state.0.events.notify_all(RUN_KINDS, None);
+    r
+}
+
+async fn cancel_run_inner(inner: &Arc<Inner>, run_id: String) -> Result<Run, String> {
     check_id(&run_id, "run")?;
-    let inner = state.0.clone();
+    let inner = inner.clone();
     // Con el turno de la cola: la pasada no puede cerrar este run en el medio (quedaría
     // `finished`, sin la nota del patch, y hasta con el revisor encolado).
     let _turn = inner.pump.lock().await;
@@ -366,6 +494,13 @@ pub async fn cancel_run(state: State<'_, WorkState>, run_id: String) -> Result<R
                 })
             };
             terminal::stop(&claude_id).await?;
+            let tokens = match (&run.executor, run.session_id.clone()) {
+                (Executor::Workflow { .. }, _) | (_, None) => None,
+                (_, Some(sid)) => {
+                    let cwd = run.cwd.clone();
+                    blocking(move || Ok(crate::runs::session_tokens(&sid, &cwd))).await.unwrap_or(None)
+                }
+            };
             let note = match &patch_path {
                 Some(p) => format!("{NOTE_STOPPED} Stopped by the user; partial changes saved to {}.", p.display()),
                 None => format!("{NOTE_STOPPED} Stopped by the user."),
@@ -379,6 +514,7 @@ pub async fn cancel_run(state: State<'_, WorkState>, run_id: String) -> Result<R
                 verdict: None,
                 note: Some(note),
                 missing_report: false,
+                tokens,
             };
             let env = inner.env.clone();
             let id = run.id.clone();
@@ -392,6 +528,38 @@ pub async fn cancel_run(state: State<'_, WorkState>, run_id: String) -> Result<R
         }
         _ => Err("The run already finished.".into()),
     }
+}
+
+/// Transcript de un run de agente, Claude o revisor (la sesión principal). Los workflows
+/// tienen uno por agente: `get_agent_transcript`. `None` si la sesión todavía no tiene archivo.
+/// `limit`: items más recientes (default 200, máx. 2000).
+#[tauri::command]
+pub async fn get_run_transcript(
+    state: State<'_, WorkState>,
+    run_id: String,
+    limit: Option<u32>,
+) -> Result<Option<Transcript>, String> {
+    check_id(&run_id, "run")?;
+    let run = db(&state.0, move |c| Ok(qruns::get(c, &run_id)?)).await?;
+    let label = match &run.executor {
+        Executor::Workflow { .. } => {
+            return Err("Workflow runs have one transcript per agent: open it from the run detail.".into())
+        }
+        Executor::Agent { name, .. } => name.clone(),
+        Executor::Claude => "Claude".into(),
+    };
+    let Some(sid) = run.session_id.clone().filter(|s| claude_fs::is_valid_session_id(s)) else { return Ok(None) };
+    let Some(claude_dir) = state.0.env.claude_dir.clone() else {
+        return Err("Couldn't locate the Claude Code folder ($HOME is not set).".into());
+    };
+    let limit = limit.unwrap_or(claude_fs::TRANSCRIPT_DEFAULT_LIMIT).clamp(1, claude_fs::TRANSCRIPT_MAX_LIMIT) as usize;
+    blocking(move || {
+        let Some(path) = claude_fs::find_session_jsonl(&claude_dir.join("projects"), &run.cwd, &sid) else {
+            return Ok(None);
+        };
+        claude_fs::read_session_transcript(&path, &run.id, Some(label), run.options.model.clone(), limit)
+    })
+    .await
 }
 
 #[tauri::command]
@@ -410,12 +578,18 @@ pub async fn run_diff(state: State<'_, WorkState>, run_id: String) -> Result<Run
         Ok((r, t, repo))
     })
     .await?;
+    let live = matches!(run.status, RunStatus::Launching | RunStatus::Launched);
     blocking(move || {
         // Un workflow trabaja en su propio worktree: se mira su rama desde el repo.
         if let (Executor::Workflow { .. }, Some(branch), Some(repo)) = (&run.executor, &run.branch, &repo) {
-            let base = worktree::current_base(Path::new(&repo.path))?;
-            let patch = diff::collect_branch(Path::new(&repo.path), &base, branch)?;
+            let repo_dir = Path::new(&repo.path);
+            let base = worktree::current_base(repo_dir)?;
+            let patch = diff::collect_branch(repo_dir, &base, branch)?;
+            let commits = diff::commits(repo_dir, &base, branch).unwrap_or_default();
             return Ok(RunDiff {
+                branch: Some(branch.clone()),
+                commits,
+                live,
                 base,
                 cwd: repo.path.clone(),
                 includes_working_tree: false,
@@ -429,7 +603,14 @@ pub async fn run_diff(state: State<'_, WorkState>, run_id: String) -> Result<Run
         }
         let base = diff_base(task.as_ref(), &run);
         let (patch, dirty) = diff::collect(cwd, base.as_deref())?;
+        let commits = match &base {
+            Some(b) => diff::commits(cwd, b, "HEAD").unwrap_or_default(),
+            None => Vec::new(),
+        };
         Ok(RunDiff {
+            branch: diff::current_branch(cwd),
+            commits,
+            live,
             base: base.unwrap_or_else(|| "HEAD".into()),
             cwd: run.cwd.clone(),
             includes_working_tree: dirty,
@@ -554,6 +735,7 @@ pub async fn get_settings(state: State<'_, WorkState>) -> Result<Settings, Strin
 #[tauri::command]
 pub async fn set_settings(state: State<'_, WorkState>, settings: Settings) -> Result<Settings, String> {
     let s = db(&state.0, move |c| ops::set_settings(c, &settings)).await?;
+    state.0.events.notify(Kind::Projects, None);
     // Más concurrencia puede liberar lugar para lo encolado.
     kick(&state.0);
     Ok(s)

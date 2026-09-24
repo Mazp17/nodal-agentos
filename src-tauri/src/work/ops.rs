@@ -35,6 +35,7 @@ pub fn create_project(conn: &Connection, input: &NewProject, now: i64) -> Result
         reviewer: None,
         created_at: now,
         archived_at: None,
+        description: validate::description(input.description.as_deref())?,
     };
     projects::insert(conn, &p)?;
     Ok(p)
@@ -50,6 +51,9 @@ pub fn update_project(conn: &Connection, id: &str, patch: &ProjectPatch, now: i6
     }
     if let Some(c) = &patch.color {
         p.color = validate::color(c)?;
+    }
+    if let Some(d) = &patch.description {
+        p.description = validate::description(d.as_deref())?;
     }
     if let Some(e) = &patch.default_executor {
         if let Some(e) = e {
@@ -390,6 +394,52 @@ pub fn move_task(conn: &mut Connection, id: &str, status: TaskStatus, position: 
     Ok(t)
 }
 
+/// Orden nuevo de la columna `status`: renumera las posiciones (1, 2, ...) en una
+/// transacción. Todas las tareas tienen que estar en esa columna y en el mismo proyecto; las
+/// de la columna que no vienen en la lista quedan detrás, en su orden actual. Devuelve el
+/// proyecto.
+pub fn reorder_tasks(conn: &mut Connection, status: TaskStatus, ids: &[String], now: i64) -> Result<Option<String>, String> {
+    let mut seen = std::collections::HashSet::new();
+    if let Some(dup) = ids.iter().find(|id| !seen.insert(id.as_str())) {
+        return Err(format!("Task {dup} appears twice in the new order."));
+    }
+    let tx = conn.transaction().map_err(|e| e.to_string())?;
+    let mut project: Option<String> = None;
+    for id in ids {
+        let t = tasks::get(&tx, id)?;
+        if t.status != status {
+            return Err(format!("{} isn't in that column anymore: refresh and try again.", t.title));
+        }
+        match &project {
+            Some(p) if *p != t.project_id => return Err("All tasks must belong to the same project.".into()),
+            _ => project = Some(t.project_id),
+        }
+    }
+    let Some(project_id) = project else { return Ok(None) };
+    let column: Vec<(String, f64)> = {
+        let mut stmt = tx
+            .prepare("SELECT id, position FROM tasks WHERE project_id = ?1 AND status = ?2 ORDER BY position, created_at, id")
+            .map_err(|e| e.to_string())?;
+        let rows = stmt
+            .query_map(rusqlite::params![project_id, status], |r| Ok((r.get::<_, String>(0)?, r.get::<_, f64>(1)?)))
+            .map_err(|e| e.to_string())?;
+        rows.collect::<rusqlite::Result<Vec<_>>>().map_err(|e| e.to_string())?
+    };
+    let old: std::collections::HashMap<&str, f64> = column.iter().map(|(id, p)| (id.as_str(), *p)).collect();
+    let order = ids.iter().map(String::as_str).chain(column.iter().map(|(id, _)| id.as_str()).filter(|id| !seen.contains(id)));
+    // Solo se tocan (y cambian `updated_at`) las que cambian de posición.
+    for (i, id) in order.enumerate() {
+        let pos = (i + 1) as f64;
+        if old.get(id) == Some(&pos) {
+            continue;
+        }
+        tx.execute("UPDATE tasks SET position = ?1, updated_at = ?2 WHERE id = ?3", rusqlite::params![pos, now, id])
+            .map_err(|e| e.to_string())?;
+    }
+    tx.commit().map_err(|e| e.to_string())?;
+    Ok(Some(project_id))
+}
+
 /// Cambia el estado de la tarea por una transición de la cola (respeta Done/Canceled) y
 /// deja las filas del outbox en la misma transacción. Devuelve el estado nuevo si cambió.
 pub fn apply_task_transition(
@@ -450,6 +500,13 @@ pub fn set_settings(conn: &mut Connection, s: &Settings) -> Result<Settings, Str
         concurrency: validate::concurrency(s.concurrency)?,
         editor: s.editor.as_deref().map(str::trim).filter(|e| !e.is_empty()).map(validate::editor).transpose()?,
         reviewer: validate::reviewer(&s.reviewer)?,
+        default_executor: match &s.default_executor {
+            Some(e) => {
+                validate::executor(e)?;
+                Some(e.clone())
+            }
+            None => None,
+        },
     };
     rows::save_settings(conn, &clean)?;
     Ok(rows::load_settings(conn)?)
@@ -490,12 +547,12 @@ mod tests {
     fn projects_crud_and_unique_keys() {
         let db = open_in_memory().unwrap();
         let mut c = db.lock().unwrap();
-        let p = create_project(&c, &NewProject { name: "Payments".into(), key: "pay".into(), color: None }, 10).unwrap();
+        let p = create_project(&c, &NewProject { name: "Payments".into(), key: "pay".into(), color: None, description: None }, 10).unwrap();
         assert_eq!(p.key, "PAY");
         assert_eq!(p.color, validate::PALETTE[0]);
-        let err = create_project(&c, &NewProject { name: "Otro".into(), key: "PAY".into(), color: None }, 11).unwrap_err();
+        let err = create_project(&c, &NewProject { name: "Otro".into(), key: "PAY".into(), color: None, description: None }, 11).unwrap_err();
         assert!(err.contains("already used"), "{err}");
-        let q = create_project(&c, &NewProject { name: "Web".into(), key: "WEB".into(), color: Some("#123456".into()) }, 12).unwrap();
+        let q = create_project(&c, &NewProject { name: "Web".into(), key: "WEB".into(), color: Some("#123456".into()), description: None }, 12).unwrap();
         let err = update_project(&c, &q.id, &ProjectPatch { key: Some("pay".into()), ..Default::default() }, 13).unwrap_err();
         assert!(err.contains("already used"));
         let patch: ProjectPatch = serde_json::from_value(json!({"name": "Web 2", "reviewer": "code-reviewer", "archived": true})).unwrap();
@@ -504,7 +561,13 @@ mod tests {
         let patch: ProjectPatch = serde_json::from_value(json!({"reviewer": null, "archived": false})).unwrap();
         let q = update_project(&c, &q.id, &patch, 15).unwrap();
         assert_eq!((q.reviewer, q.archived_at), (None, None));
-        assert_eq!(projects::list(&c, false).unwrap().len(), 2);
+        let patch: ProjectPatch = serde_json::from_value(json!({"description": "  Pagos y cobros  "})).unwrap();
+        assert_eq!(update_project(&c, &q.id, &patch, 15).unwrap().description.as_deref(), Some("Pagos y cobros"));
+        let patch: ProjectPatch = serde_json::from_value(json!({"description": null})).unwrap();
+        assert_eq!(update_project(&c, &q.id, &patch, 15).unwrap().description, None);
+        let d = NewProject { name: "Api".into(), key: "API".into(), color: None, description: Some("Backend".into()) };
+        assert_eq!(create_project(&c, &d, 15).unwrap().description.as_deref(), Some("Backend"));
+        assert_eq!(projects::list(&c, false).unwrap().len(), 3);
         assert!(delete_project(&mut c, &q.id).unwrap().is_empty());
         assert!(update_project(&c, &q.id, &ProjectPatch::default(), 16).unwrap_err().contains("no longer exists"));
     }
@@ -514,8 +577,8 @@ mod tests {
         let f = fx("ops-repos");
         let db = open_in_memory().unwrap();
         let mut c = db.lock().unwrap();
-        let p = create_project(&c, &NewProject { name: "Pay".into(), key: "PAY".into(), color: None }, 1).unwrap();
-        let q = create_project(&c, &NewProject { name: "Web".into(), key: "WEB".into(), color: None }, 1).unwrap();
+        let p = create_project(&c, &NewProject { name: "Pay".into(), key: "PAY".into(), color: None, description: None }, 1).unwrap();
+        let q = create_project(&c, &NewProject { name: "Web".into(), key: "WEB".into(), color: None, description: None }, 1).unwrap();
         let input: NewRepo = serde_json::from_value(json!({"path": "x", "model": "opus", "effort": "turbo"})).unwrap();
         assert!(add_repo(&c, &p.id, &input, &f.repo_dir, 2).unwrap_err().contains("Invalid effort"));
         let input: NewRepo = serde_json::from_value(json!({"path": "x", "model": " opus ", "defaultIsolation": "in_place"})).unwrap();
@@ -538,7 +601,7 @@ mod tests {
         let f = fx("ops-tasks");
         let db = open_in_memory().unwrap();
         let mut c = db.lock().unwrap();
-        let p = create_project(&c, &NewProject { name: "Pay".into(), key: "PAY".into(), color: None }, 1).unwrap();
+        let p = create_project(&c, &NewProject { name: "Pay".into(), key: "PAY".into(), color: None, description: None }, 1).unwrap();
         let r = add_repo(&c, &p.id, &NewRepo::default(), &f.repo_dir, 2).unwrap();
         let other_dir = f.repo_dir.parent().unwrap().join("api");
         std::fs::create_dir_all(&other_dir).unwrap();
@@ -584,6 +647,24 @@ mod tests {
         assert_eq!(t.closed_at, None);
         assert!(move_task(&mut c, &t1.id, TaskStatus::Todo, f64::NAN, 13).is_err());
 
+        // Reordenar la columna: renumera y deja detrás a las no listadas.
+        let t3 = create_task(&mut c, &f.env, &new_task(&p, &r, "Tercera"), 14).unwrap();
+        let pos = |c: &Connection, id: &str| tasks::get(c, id).unwrap().position;
+        let got = reorder_tasks(&mut c, TaskStatus::Todo, &[t3.id.clone(), t1.id.clone()], 15).unwrap();
+        assert_eq!(got.as_deref(), Some(p.id.as_str()));
+        assert_eq!((pos(&c, &t3.id), pos(&c, &t1.id), pos(&c, &t2.id)), (1.0, 2.0, 3.0));
+        // Repetir el mismo orden no toca ninguna fila.
+        reorder_tasks(&mut c, TaskStatus::Todo, &[t3.id.clone(), t1.id.clone()], 99).unwrap();
+        assert_eq!(tasks::get(&c, &t2.id).unwrap().updated_at, 15);
+        assert!(reorder_tasks(&mut c, TaskStatus::Todo, &[t1.id.clone(), t1.id.clone()], 16).unwrap_err().contains("twice"));
+        assert!(reorder_tasks(&mut c, TaskStatus::Done, std::slice::from_ref(&t1.id), 16).unwrap_err().contains("column"));
+        assert!(reorder_tasks(&mut c, TaskStatus::Todo, &["t-no".into()], 16).is_err());
+        // Un error no deja nada a medias.
+        assert!(reorder_tasks(&mut c, TaskStatus::Todo, &[t2.id.clone(), "t-no".into()], 16).is_err());
+        assert_eq!(pos(&c, &t2.id), 3.0);
+        assert_eq!(reorder_tasks(&mut c, TaskStatus::Todo, &[], 16).unwrap(), None);
+        delete_task(&c, &f.env, &t3.id).unwrap();
+
         // Relaciones.
         add_relation(&c, &t1.id, &t2.id, RelationKind::Related).unwrap();
         add_relation(&c, &t2.id, &t1.id, RelationKind::Related).unwrap();
@@ -605,7 +686,7 @@ mod tests {
         let f = fx("ops-imported");
         let db = open_in_memory().unwrap();
         let mut c = db.lock().unwrap();
-        let p = create_project(&c, &NewProject { name: "Pay".into(), key: "PAY".into(), color: None }, 1).unwrap();
+        let p = create_project(&c, &NewProject { name: "Pay".into(), key: "PAY".into(), color: None, description: None }, 1).unwrap();
         let r = add_repo(&c, &p.id, &NewRepo::default(), &f.repo_dir, 2).unwrap();
         let t = create_task(&mut c, &f.env, &new_task(&p, &r, "Importada"), 3).unwrap();
         let mut map = StateMap { confirmed_at: Some(1), ..Default::default() };
@@ -620,6 +701,9 @@ mod tests {
             state_map: map,
             auto_import: false,
             created_at: 1,
+            last_synced_at: None,
+            last_sync_error: None,
+            pending_state_changes: None,
         };
         rows::insert_source_link(&c, &link).unwrap();
         c.execute(
@@ -646,7 +730,7 @@ mod tests {
     fn settings_validation() {
         let db = open_in_memory().unwrap();
         let mut c = db.lock().unwrap();
-        let s = set_settings(&mut c, &Settings { concurrency: 2, editor: Some("cursor".into()), reviewer: "code-reviewer".into() }).unwrap();
+        let s = set_settings(&mut c, &Settings { concurrency: 2, editor: Some("cursor".into()), reviewer: "code-reviewer".into(), default_executor: None }).unwrap();
         assert_eq!((s.concurrency, s.editor.as_deref()), (2, Some("cursor")));
         assert!(set_settings(&mut c, &Settings { concurrency: 0, ..s.clone() }).is_err());
         assert!(set_settings(&mut c, &Settings { editor: Some("vim; rm".into()), ..s.clone() }).is_err());

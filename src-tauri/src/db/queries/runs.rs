@@ -17,12 +17,51 @@ pub fn get(conn: &Connection, id: &str) -> Result<Run, DbError> {
     get_run(conn, id)?.ok_or_else(|| not_found("run"))
 }
 
-/// Runs de la tarea (o los últimos de todas con `None`), más recientes primero.
-pub fn list(conn: &Connection, task_id: Option<&str>) -> Result<Vec<Run>, DbError> {
+/// Filtro por proyecto: el de la tarea, o el del repo si el run no tiene tarea.
+const IN_PROJECT: &str = "(?1 IS NULL OR t.project_id = ?1 OR (r.task_id IS NULL AND rp.project_id = ?1))";
+
+/// Runs del proyecto y/o de la tarea (`None`: sin filtrar), más recientes primero. Hasta
+/// `HISTORY_LIMIT`.
+pub fn list_filtered(conn: &Connection, project_id: Option<&str>, task_id: Option<&str>) -> Result<Vec<Run>, DbError> {
     query(
         conn,
-        "SELECT * FROM runs WHERE ?1 IS NULL OR task_id = ?1 ORDER BY queued_at DESC, id DESC LIMIT ?2",
-        rusqlite::params![task_id, HISTORY_LIMIT],
+        &format!(
+            "SELECT r.* FROM runs r
+             LEFT JOIN tasks t ON t.id = r.task_id
+             LEFT JOIN repos rp ON rp.id = r.repo_id
+             WHERE {IN_PROJECT} AND (?2 IS NULL OR r.task_id = ?2)
+             ORDER BY r.queued_at DESC, r.id DESC LIMIT ?3"
+        ),
+        rusqlite::params![project_id, task_id, HISTORY_LIMIT],
+    )
+}
+
+/// El último run (por `queued_at`) de cada tarea del proyecto (`None`: todas), sin límite
+/// de historial.
+pub fn latest_by_task(conn: &Connection, project_id: Option<&str>) -> Result<Vec<Run>, DbError> {
+    query(
+        conn,
+        "SELECT * FROM (
+             SELECT r.*, ROW_NUMBER() OVER (PARTITION BY r.task_id ORDER BY r.queued_at DESC, r.id DESC) AS rn
+             FROM runs r JOIN tasks t ON t.id = r.task_id
+             WHERE ?1 IS NULL OR t.project_id = ?1
+         ) WHERE rn = 1 ORDER BY queued_at DESC, id DESC",
+        rusqlite::params![project_id],
+    )
+}
+
+/// Como `pending`, del proyecto (`None`: todos).
+pub fn pending_of(conn: &Connection, project_id: Option<&str>) -> Result<Vec<Run>, DbError> {
+    query(
+        conn,
+        &format!(
+            "SELECT r.* FROM runs r
+             LEFT JOIN tasks t ON t.id = r.task_id
+             LEFT JOIN repos rp ON rp.id = r.repo_id
+             WHERE {IN_PROJECT} AND r.status IN ('queued', 'launching', 'launched')
+             ORDER BY r.queue_position, r.queued_at, r.id"
+        ),
+        rusqlite::params![project_id],
     )
 }
 
@@ -98,14 +137,14 @@ pub fn update(conn: &Connection, r: &Run) -> Result<(), DbError> {
                          claude_run_id = :claude_id, session_id = :session, launched_at = :launched,
                          finished_at = :finished, outcome = :outcome, summary = :summary, pr_url = :pr,
                          branch = :branch, error = :error, legacy_label = :legacy, prompt = :prompt,
-                         options_json = :options
+                         options_json = :options, tokens = :tokens
          WHERE id = :id",
         named_params! {
             ":id": r.id, ":cwd": r.cwd, ":status": r.status, ":qpos": r.queue_position,
             ":verdict": opt_json(&r.verdict)?, ":claude_id": r.claude_run_id, ":session": r.session_id,
             ":launched": r.launched_at, ":finished": r.finished_at, ":outcome": r.outcome,
             ":summary": r.summary, ":pr": r.pr_url, ":branch": r.branch, ":error": r.error,
-            ":legacy": r.legacy_label, ":prompt": r.prompt, ":options": to_json(&r.options)?,
+            ":legacy": r.legacy_label, ":prompt": r.prompt, ":options": to_json(&r.options)?, ":tokens": r.tokens,
         },
     )?;
     if n == 0 {

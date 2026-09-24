@@ -13,6 +13,7 @@ use crate::linear::LinearState;
 use super::import::{import_items, importable_rows, ImportRequest, ImportResult, ImportableItem, Skipped};
 use super::state_map::{self, SourceStatesReport};
 use super::sync::{run_for_app, SyncReport};
+use crate::events::{notify, Kind};
 use crate::secrets::Secrets;
 use crate::util::{new_id, now_ms};
 use super::{check_provider, require, resolve, store, ImportQuery, PResult, Provider, ProvidersState, TaskProvider};
@@ -39,12 +40,20 @@ pub struct ProviderStatus {
     /// Nombre del usuario si la key es válida.
     pub viewer: Option<String>,
     pub error: Option<String>,
+    /// Últimos 4 caracteres de la key guardada (nunca la key).
+    pub key_hint: Option<String>,
 }
 
 async fn status_of(app: &AppHandle, provider: &str) -> PResult<ProviderStatus> {
-    let p = resolve(app, provider).await?;
-    let mut out = ProviderStatus { provider: provider.into(), has_key: p.is_some(), viewer: None, error: None };
-    if let Some(p) = p {
+    let p = super::resolve_with_key(app, provider).await?;
+    let mut out = ProviderStatus {
+        provider: provider.into(),
+        has_key: p.is_some(),
+        viewer: None,
+        error: None,
+        key_hint: p.as_ref().and_then(|(_, k)| super::key_hint(k)),
+    };
+    if let Some((p, _)) = p {
         match p.status().await {
             Ok(v) => out.viewer = Some(v),
             Err(err) => out.error = Some(err.message),
@@ -72,14 +81,15 @@ pub async fn provider_set_key(app: AppHandle, provider: String, key: Option<Stri
     let p = Provider::Linear(super::linear::LinearProvider::new(linear.http().clone(), key.clone()));
     let viewer = p.status().await?;
     app.state::<Secrets>().set(&provider, &key).await?;
-    Ok(ProviderStatus { provider, has_key: true, viewer: Some(viewer), error: None })
+    let key_hint = super::key_hint(&key);
+    Ok(ProviderStatus { provider, has_key: true, viewer: Some(viewer), error: None, key_hint })
 }
 
 #[tauri::command]
 pub async fn provider_clear_key(app: AppHandle, provider: String) -> PResult<ProviderStatus> {
     check_provider(&provider)?;
     app.state::<Secrets>().delete(&provider).await?;
-    Ok(ProviderStatus { provider, has_key: false, viewer: None, error: None })
+    Ok(ProviderStatus { provider, has_key: false, viewer: None, error: None, key_hint: None })
 }
 
 #[tauri::command]
@@ -157,6 +167,9 @@ pub async fn create_source_link(app: AppHandle, db: State<'_, Db>, input: NewSou
         state_map: if states.is_empty() { StateMap::default() } else { state_map::propose(&states) },
         auto_import: input.auto_import,
         created_at: now,
+        last_synced_at: None,
+        last_sync_error: None,
+        pending_state_changes: None,
     };
     with_db(&db, move |c| {
         if !store::project_exists(c, &link.project_id)? {
@@ -168,10 +181,11 @@ pub async fn create_source_link(app: AppHandle, db: State<'_, Db>, input: NewSou
     })
     .await
     .map_err(e)
+    .inspect(|l| notify(&app, &[Kind::Sources], Some(&l.project_id)))
 }
 
 #[tauri::command]
-pub async fn update_source_link(db: State<'_, Db>, id: String, patch: SourceLinkPatch) -> PResult<SourceLink> {
+pub async fn update_source_link(app: AppHandle, db: State<'_, Db>, id: String, patch: SourceLinkPatch) -> PResult<SourceLink> {
     with_db(&db, move |c| {
         let mut link = store::get_link(c, &id)?;
         if let Some(r) = patch.default_repo_id {
@@ -189,17 +203,20 @@ pub async fn update_source_link(db: State<'_, Db>, id: String, patch: SourceLink
     })
     .await
     .map_err(e)
+    .inspect(|l| notify(&app, &[Kind::Sources], Some(&l.project_id)))
 }
 
 /// Disconnect: las tareas del link quedan locales y el link se borra (una transacción).
 #[tauri::command]
-pub async fn delete_source_link(db: State<'_, Db>, id: String) -> PResult<()> {
-    with_db(&db, move |c| store::disconnect_link(c, &id, now_ms()).map(|_| ())).await.map_err(e)
+pub async fn delete_source_link(app: AppHandle, db: State<'_, Db>, id: String) -> PResult<()> {
+    with_db(&db, move |c| store::disconnect_link(c, &id, now_ms()).map(|_| ())).await.map_err(e)?;
+    notify(&app, &[Kind::Sources, Kind::Tasks], None);
+    Ok(())
 }
 
 /// Unlink: la tarea pasa a ser local.
 #[tauri::command]
-pub async fn unlink_task(db: State<'_, Db>, task_id: String) -> PResult<Task> {
+pub async fn unlink_task(app: AppHandle, db: State<'_, Db>, task_id: String) -> PResult<Task> {
     with_db(&db, move |c| {
         let tx = c.transaction()?;
         let t = store::unlink_task(&tx, &task_id, now_ms())?;
@@ -208,6 +225,7 @@ pub async fn unlink_task(db: State<'_, Db>, task_id: String) -> PResult<Task> {
     })
     .await
     .map_err(e)
+    .inspect(|t| notify(&app, &[Kind::Tasks], Some(&t.project_id)))
 }
 
 // ---------- Mapeo de estados ----------
@@ -233,6 +251,7 @@ pub async fn save_state_map(app: AppHandle, db: State<'_, Db>, link_id: String, 
     })
     .await
     .map_err(e)
+    .inspect(|l| notify(&app, &[Kind::Sources], Some(&l.project_id)))
 }
 
 // ---------- Importación ----------
@@ -300,6 +319,7 @@ pub async fn import_tasks(
     let data_dir = app.state::<ProvidersState>().data_dir.clone();
     let mut result = with_db(&db, move |c| import_items(c, &data_dir, &link, pairs, now_ms())).await.map_err(e)?;
     result.skipped.extend(skipped);
+    notify(&app, &[Kind::Tasks], Some(&project_id));
     Ok(result)
 }
 
@@ -328,10 +348,25 @@ mod tests {
 
     #[test]
     fn provider_status_shape() {
-        let s = ProviderStatus { provider: "linear".into(), has_key: true, viewer: Some("Ana".into()), error: None };
+        let s = ProviderStatus {
+            provider: "linear".into(),
+            has_key: true,
+            viewer: Some("Ana".into()),
+            error: None,
+            key_hint: super::super::key_hint("lin_api_0000000000abcd"),
+        };
         let v = serde_json::to_value(s).unwrap();
         assert_eq!(v["hasKey"], true);
+        assert_eq!(v["keyHint"], "abcd");
         assert_eq!(v["viewer"], "Ana");
         assert!(v["error"].is_null());
+    }
+
+    #[test]
+    fn key_hint_never_reveals_the_key() {
+        use super::super::key_hint;
+        assert_eq!(key_hint("  lin_api_0123456789wxyz \n").as_deref(), Some("wxyz"));
+        assert_eq!(key_hint("short-key"), None, "keys cortas no dan pista");
+        assert_eq!(key_hint(""), None);
     }
 }

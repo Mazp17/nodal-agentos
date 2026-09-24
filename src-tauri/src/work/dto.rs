@@ -13,6 +13,8 @@ pub struct NewProject {
     pub key: String,
     #[serde(default)]
     pub color: Option<String>,
+    #[serde(default)]
+    pub description: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -21,6 +23,8 @@ pub struct ProjectPatch {
     pub name: Option<String>,
     pub key: Option<String>,
     pub color: Option<String>,
+    #[serde(default, deserialize_with = "double_option")]
+    pub description: Option<Option<String>>,
     #[serde(default, deserialize_with = "double_option")]
     pub default_executor: Option<Option<Executor>>,
     #[serde(default, deserialize_with = "double_option")]
