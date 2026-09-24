@@ -1,82 +1,97 @@
 /*
- * Design tokens de Agent Desk. Fuente: diseño "Agent Desk" de Claude Design (dark).
+ * Design tokens de Nodal. Fuente: diseño "Nodal" de Claude Design (dark, paleta cálida).
  * Todo color, radio, sombra o duración de la UI sale de acá; los componentes no
- * deberían tener literales de color.
+ * deberían tener literales de color. Los nombres se mantienen estables entre rediseños:
+ * cambian los valores.
  */
 
 :root {
   color-scheme: dark;
 
   /* ---- Paleta base ---- */
-  --accent: oklch(0.72 0.13 250);
-  --accent-hover: oklch(0.82 0.1 250);
-  --amber: oklch(0.8 0.13 80);
-  --amber-text: oklch(0.86 0.1 80);
-  --red: oklch(0.7 0.14 25);
+  --accent: oklch(0.74 0.15 55);
+  --accent-hover: oklch(0.82 0.12 60);
+  /* Amarillo de estado (In Review, "need you", warnings). */
+  --amber: oklch(0.82 0.13 88);
+  --amber-text: oklch(0.88 0.1 88);
+  --red: oklch(0.68 0.16 25);
   --red-text: oklch(0.8 0.1 25);
-  --green: oklch(0.74 0.13 155);
-  --gray: oklch(0.62 0.01 260);
+  --green: oklch(0.74 0.12 150);
+  --info: oklch(0.74 0.1 240);
+  --gray: #8a837a;
+  --gray-dim: #5f5850;
   /* Texto sobre rellenos de acento / ámbar. */
-  --on-accent: #0e1116;
-  --on-amber: #16130a;
+  --on-accent: #1a120a;
+  --on-amber: #1a1608;
 
   /* ---- Superficies (de más profunda a más elevada) ---- */
-  --bg-deep: #0c0d0f;
-  --bg-sidebar: #151619;
-  --bg-rail: #18191c;
-  --bg: #1a1b1e;
-  --surface-sheet: #1b1c20;
-  --surface-drawer: #1d1e22;
-  --surface-1: #1e1f23;
-  --surface-card: #202125;
-  --surface-2: #212226;
-  --surface-palette: #232428;
-  --surface-selected: #232631;
-  --surface-card-hover: #25262b;
-  --surface-menu: #26272c;
-  --surface-float: #2a2b31;
+  --bg-deep: #0c0a09;
+  --bg-sidebar: #141210;
+  --bg-rail: #171513;
+  --bg: #1b1917;
+  --surface-sheet: #1e1b19;
+  --surface-drawer: #1e1b19;
+  --surface-1: #231f1c;
+  --surface-card: #231f1c;
+  --surface-2: #26221f;
+  --surface-dialog: #201d1a;
+  --surface-palette: #221f1c;
+  --surface-selected: #2b2622;
+  --surface-card-hover: #28231f;
+  --surface-menu: #2a2622;
+  --surface-float: #2a2622;
 
-  /* Rellenos translúcidos para controles sobre cualquier superficie. */
-  --fill-1: rgb(255 255 255 / 0.03);
-  --fill-2: rgb(255 255 255 / 0.04);
-  --fill-3: rgb(255 255 255 / 0.05);
-  --fill-4: rgb(255 255 255 / 0.06);
-  --fill-5: rgb(255 255 255 / 0.08);
-  --fill-6: rgb(255 255 255 / 0.1);
-  --fill-7: rgb(255 255 255 / 0.14);
-  --fill-soft: rgb(255 255 255 / 0.07);
-  --fill-inset: rgb(0 0 0 / 0.25);
-  --scrim: rgb(0 0 0 / 0.3);
-  --scrim-strong: rgb(0 0 0 / 0.35);
+  /* Rellenos translúcidos (tinte cálido) para controles sobre cualquier superficie. */
+  --fill-1: rgb(255 236 214 / 0.03);
+  --fill-2: rgb(255 236 214 / 0.04);
+  --fill-3: rgb(255 236 214 / 0.05);
+  --fill-4: rgb(255 236 214 / 0.06);
+  --fill-5: rgb(255 236 214 / 0.07);
+  --fill-6: rgb(255 236 214 / 0.09);
+  --fill-7: rgb(255 236 214 / 0.12);
+  --fill-soft: rgb(255 236 214 / 0.07);
+  --fill-inset: rgb(0 0 0 / 0.22);
+  --scrim: rgb(8 6 5 / 0.3);
+  --scrim-strong: rgb(8 6 5 / 0.45);
 
   /* ---- Bordes ---- */
-  --border-faint: rgb(255 255 255 / 0.045);
-  --border: rgb(255 255 255 / 0.06);
-  --border-2: rgb(255 255 255 / 0.08);
-  --border-3: rgb(255 255 255 / 0.1);
-  --border-4: rgb(255 255 255 / 0.12);
-  --border-soft: rgb(255 255 255 / 0.07);
-  --border-strong: rgb(255 255 255 / 0.2);
+  --border-faint: rgb(255 236 214 / 0.035);
+  --border: rgb(255 236 214 / 0.07);
+  --border-2: rgb(255 236 214 / 0.09);
+  --border-3: rgb(255 236 214 / 0.11);
+  --border-4: rgb(255 236 214 / 0.14);
+  --border-soft: rgb(255 236 214 / 0.07);
+  --border-strong: rgb(255 236 214 / 0.2);
 
   /* Marca (logo). */
-  --brand-from: #30323a;
-  --brand-to: #17181b;
-  --brand-border: rgb(255 255 255 / 0.14);
+  --brand-from: #231f1c;
+  --brand-to: #141210;
+  --brand-border: rgb(255 236 214 / 0.11);
+  --brand-core: #ece7e1;
+  --brand-ring: rgb(255 236 214 / 0.28);
+  --brand-sat: var(--accent);
 
-  /* ---- Texto (de más a menos énfasis) ----
-   * Los dos últimos pasos están levemente aclarados respecto del diseño (#6e6f77 y
-   * #7c7d85) para no bajar de ~4:1 sobre --bg. */
-  --text-strong: #f2f2f4;
-  --text: #ececef;
-  --text-2: #dcdde2;
-  --text-3: #c9cad1;
-  --text-4: #b8b9c0;
-  --text-5: #a4a5ad;
-  --text-muted: #9a9ba3;
-  --text-subtle: #8d8e96;
-  --text-faint: #858690;
-  --text-dim: #7a7b84;
-  --text-disabled: #62636b;
+  /* ---- Texto (de más a menos énfasis) ---- */
+  --text-strong: #f5f1ec;
+  --text: #ece7e1;
+  --text-2: #e0d9d1;
+  --text-3: #d6cfc6;
+  --text-4: #cfc8bf;
+  --text-5: #b3aba2;
+  --text-muted: #9a938a;
+  --text-subtle: #9a938a;
+  --text-faint: #857e75;
+  --text-dim: #6d665e;
+  --text-disabled: #5f5850;
+
+  /* ---- Estados de tarea (Nodal) ---- */
+  --st-backlog: var(--gray-dim);
+  --st-todo: var(--gray);
+  --st-in-progress: var(--accent);
+  --st-in-review: var(--amber);
+  --st-blocked: var(--red);
+  --st-done: var(--green);
+  --st-canceled: var(--gray-dim);
 
   /* ---- Estados de run ---- */
   --run-running: var(--accent);
@@ -84,6 +99,16 @@
   --run-done: var(--green);
   --run-warn: var(--amber);
   --run-failed: var(--red);
+
+  /* ---- Colores de proyecto (misma paleta que el backend, `validate::PALETTE`) ---- */
+  --project-1: oklch(0.74 0.15 55);
+  --project-2: oklch(0.72 0.13 250);
+  --project-3: oklch(0.74 0.12 150);
+  --project-4: oklch(0.7 0.15 320);
+  --project-5: oklch(0.78 0.13 88);
+  --project-6: oklch(0.68 0.16 25);
+  --project-7: oklch(0.72 0.1 200);
+  --project-8: oklch(0.7 0.12 290);
 
   /* ---- Tipografía ---- */
   --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", Helvetica, Arial, sans-serif;
@@ -97,13 +122,14 @@
   --fs-xl: 14px;
   --fs-2xl: 15px;
   --fs-3xl: 16px;
-  --fs-4xl: 18px;
+  --fs-4xl: 20px;
   --fw-regular: 400;
   --fw-medium: 500;
   --fw-semibold: 600;
   --fw-bold: 700;
   --tracking-tight: -0.01em;
   --tracking-tighter: -0.015em;
+  --tracking-display: -0.02em;
   --lh-tight: 1.3;
   --lh-snug: 1.4;
   --lh-body: 1.5;
@@ -128,11 +154,15 @@
   --h-lg: 26px;
   --h-xl: 28px;
   --h-2xl: 30px;
-  --h-bar: 48px;
-  --w-sidebar: 212px;
+  --h-titlebar: 44px;
+  --h-bar: 46px;
+  --h-toolbar: 38px;
+  --w-sidebar: 224px;
   --w-column: 276px;
   --w-issue-panel: 470px;
   --w-agent-panel: 580px;
+  --w-dialog: 540px;
+  --w-palette: 600px;
 
   /* ---- Radios ---- */
   --r-xs: 3px;
@@ -147,10 +177,11 @@
   --r-pill: 999px;
 
   /* ---- Sombras ---- */
-  --shadow-menu: 0 12px 30px rgb(0 0 0 / 0.45);
-  --shadow-float: 0 14px 40px rgb(0 0 0 / 0.5);
+  --shadow-menu: 0 14px 34px rgb(0 0 0 / 0.5);
+  --shadow-float: 0 12px 30px rgb(0 0 0 / 0.45);
   --shadow-drawer: -24px 0 50px rgb(0 0 0 / 0.4);
   --shadow-palette: 0 30px 80px rgb(0 0 0 / 0.6);
+  --shadow-dialog: 0 30px 80px rgb(0 0 0 / 0.6);
 
   /* ---- Motion ---- */
   --ease-out: cubic-bezier(0.2, 0.7, 0.3, 1);
@@ -160,7 +191,7 @@
   --pulse: pulse 1.6s ease-in-out infinite;
   --pulse-skeleton: pulse 1.4s ease-in-out infinite;
 
-  /* ---- Foco ---- */
+  /* ---- Foco (WCAG 2.2: 2px con contraste) ---- */
   --focus-ring: 0 0 0 2px var(--accent);
 }
 
@@ -173,11 +204,13 @@
   --accent-tint-70: color-mix(in oklch, var(--accent) 70%, transparent);
   --amber-tint-10: color-mix(in oklch, var(--amber) 10%, transparent);
   --amber-tint-35: color-mix(in oklch, var(--amber) 35%, transparent);
+  --red-tint-7: color-mix(in oklch, var(--red) 7%, transparent);
   --red-tint-10: color-mix(in oklch, var(--red) 10%, transparent);
   --red-tint-14: color-mix(in oklch, var(--red) 14%, transparent);
   --red-tint-16: color-mix(in oklch, var(--red) 16%, transparent);
   --red-tint-35: color-mix(in oklch, var(--red) 35%, transparent);
   --green-tint-8: color-mix(in oklch, var(--green) 8%, transparent);
+  --green-tint-16: color-mix(in oklch, var(--green) 16%, transparent);
   --green-tint-18: color-mix(in oklch, var(--green) 18%, transparent);
   --green-tint-50: color-mix(in oklch, var(--green) 50%, transparent);
   --green-tint-60: color-mix(in oklch, var(--green) 60%, transparent);
@@ -188,7 +221,7 @@
   50% { opacity: 0.3; }
 }
 @keyframes slidein {
-  from { transform: translateX(28px); opacity: 0; }
+  from { transform: translateX(24px); opacity: 0; }
   to { transform: none; opacity: 1; }
 }
 @keyframes rise {
@@ -196,7 +229,7 @@
   to { transform: none; opacity: 1; }
 }
 @keyframes drop {
-  from { transform: translateY(-8px) scale(0.98); opacity: 0; }
+  from { transform: translateY(-6px); opacity: 0; }
   to { transform: none; opacity: 1; }
 }
 

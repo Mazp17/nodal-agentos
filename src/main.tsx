@@ -6,6 +6,10 @@ import "@fontsource/jetbrains-mono/latin-500.css";
 import "./styles/tokens.css";
 import "./styles/base.css";
 import App from "./App";
+import { migrateLegacyStorage } from "./shell/storage";
+
+// Antes del primer render: las preferencias viejas (`agent-desk.*`) pasan a `nodal.*`.
+migrateLegacyStorage();
 
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   <React.StrictMode>

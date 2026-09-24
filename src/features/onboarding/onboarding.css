@@ -1,0 +1,42 @@
+/* Onboarding a pantalla completa: columna de 520px con tres pasos. */
+
+.onboarding { position: fixed; inset: 0; z-index: 70; background: var(--bg-sidebar); display: flex; flex-direction: column; }
+.onboarding-scroll { flex: 1; overflow: auto; display: flex; justify-content: center; padding: 56px 24px 36px; }
+.onboarding-col { width: 100%; max-width: 520px; display: flex; flex-direction: column; gap: var(--sp-9); }
+
+.onboarding-hero { display: flex; align-items: center; gap: var(--sp-5); }
+.onboarding-hero-text { display: flex; flex-direction: column; gap: var(--sp-0); }
+.onboarding-title { font-size: var(--fs-4xl); font-weight: var(--fw-semibold); letter-spacing: var(--tracking-display); }
+.onboarding-sub { font-size: var(--fs-base); color: var(--text-muted); }
+
+.onboarding-steps { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--sp-3); }
+.onboarding-steps li { display: flex; flex-direction: column; gap: var(--sp-2); font-size: var(--fs-sm); color: var(--text-dim); }
+.onboarding-steps li.on { color: var(--text); }
+.onboarding-bar { height: 3px; border-radius: 2px; background: var(--fill-6); }
+.onboarding-steps li.on .onboarding-bar { background: var(--accent); }
+
+.onboarding-card { padding: var(--sp-8); display: flex; flex-direction: column; gap: var(--sp-6); }
+.onboarding-card-head { display: flex; flex-direction: column; gap: var(--sp-1); }
+.onboarding-card-title { display: flex; align-items: center; gap: var(--sp-3); font-size: var(--fs-2xl); font-weight: var(--fw-semibold); }
+.onboarding-card-text { font-size: var(--fs-base); color: var(--text-muted); line-height: var(--lh-body); }
+.onboarding-optional { font-weight: var(--fw-regular); color: var(--text-dim); }
+.onboarding-repos { display: flex; flex-direction: column; gap: var(--sp-2); }
+.onboarding-empty {
+  padding: var(--sp-6);
+  border-radius: var(--r-card);
+  border: 1px dashed var(--border-3);
+  font-size: var(--fs-md);
+  color: var(--text-dim);
+  text-align: center;
+}
+.onboarding-provider {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  padding: var(--sp-5);
+  border-radius: var(--r-xl);
+  border: 1px solid var(--border);
+}
+.onboarding-provider-head { display: flex; align-items: center; gap: var(--sp-3); }
+.onboarding-provider-name { font-size: var(--fs-lg); font-weight: var(--fw-medium); }
+.onboarding-actions { display: flex; align-items: center; gap: var(--sp-3); flex-wrap: wrap; font-size: var(--fs-md); }

@@ -4,7 +4,7 @@ import "./palette.css";
 
 export interface PaletteItem {
   id: string;
-  kind: "Action" | "Run" | "Issue" | "Task";
+  kind: "Action" | "Run" | "Task";
   label: string;
   sub?: string;
   /** Texto extra para el filtro (p. ej. identifier + título). */
@@ -15,12 +15,12 @@ export interface PaletteItem {
 interface Props {
   /** Acciones fijas; se filtran por texto. */
   actions: PaletteItem[];
-  /** Resultados según la búsqueda (issues y "Run X"). */
+  /** Resultados según la búsqueda (tareas y "Run X"). */
   search: (query: string) => PaletteItem[];
   onClose: () => void;
 }
 
-const MAX_ITEMS = 10;
+const MAX_ITEMS = 11;
 
 export function CommandPalette({ actions, search, onClose }: Props) {
   const ref = useFocusTrap<HTMLDivElement>(onClose);
@@ -61,7 +61,8 @@ export function CommandPalette({ actions, search, onClose }: Props) {
         <input
           data-autofocus
           className="palette-input"
-          placeholder="Search issues or type a command…"
+          placeholder="Search tasks or type a command…"
+          aria-label="Search tasks or type a command"
           value={query}
           onChange={(e) => {
             setQuery(e.target.value);
