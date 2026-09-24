@@ -242,6 +242,9 @@ export interface ProviderStatus {
   error: string | null;
   /** Últimos 4 caracteres de la key guardada (nunca la key); `null` sin key o si es corta. */
   keyHint: string | null;
+  /** Epoch ms hasta el que el sync está en pausa (rate limit o key rechazada); `null` si no. */
+  pausedUntil: number | null;
+  pauseReason: string | null;
 }
 
 export interface ImportableItem {

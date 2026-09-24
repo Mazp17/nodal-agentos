@@ -82,6 +82,12 @@ function LinearCard() {
               </span>
               <span className="pv-hint">macOS Keychain</span>
             </div>
+            {st.status?.pausedUntil && st.status.pausedUntil > Date.now() && (
+              <div className="pv-alert" role="status">
+                Sync paused until {new Date(st.status.pausedUntil).toLocaleTimeString()}
+                {st.status.pauseReason ? ` · ${st.status.pauseReason}` : ""}. Pending changes are kept and sent afterwards.
+              </div>
+            )}
             {st.connection === "error" && st.error && (
               <div className="pv-alert pv-alert-danger" role="alert">
                 {st.error}

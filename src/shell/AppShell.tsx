@@ -411,6 +411,11 @@ export function AppShell() {
               Couldn't refresh runs and tasks: {work.error}
             </div>
           )}
+          {queue.pumpError && (
+            <div className="banner banner-warn" role="status">
+              The run queue can't check Claude sessions: {queue.pumpError}. Queued runs won't start until this is fixed.
+            </div>
+          )}
           {work.cliError && (
             <div className="banner banner-warn" role="status">
               {work.cliError} — live session states may be out of date.
