@@ -120,10 +120,13 @@ fn is_regular_file(p: &Path) -> Option<bool> {
     fs::symlink_metadata(p).ok().map(|m| m.is_file())
 }
 
-/// Lo que se copia: los `LEGACY_JSON` presentes y `tasks/<id>/plan.md`, como (ruta relativa,
-/// ruta en el origen). Nada más de la carpeta (así elegir `~` no copia el disco). Sin
-/// ningún JSON conocido es un error. No sigue symlinks.
-fn legacy_files(src: &Path) -> Result<(Vec<(PathBuf, PathBuf)>, Vec<String>), String> {
+/// (ruta relativa en el backup, ruta en el origen).
+type LegacyFile = (PathBuf, PathBuf);
+
+/// Lo que se copia: los `LEGACY_JSON` presentes y `tasks/<id>/plan.md`. Nada más de la
+/// carpeta (así elegir `~` no copia el disco). Sin ningún JSON conocido es un error. No
+/// sigue symlinks.
+fn legacy_files(src: &Path) -> Result<(Vec<LegacyFile>, Vec<String>), String> {
     let mut files = Vec::new();
     let mut skipped = Vec::new();
     for name in LEGACY_JSON {
@@ -196,7 +199,7 @@ fn tree_files(root: &Path, dir: &Path, out: &mut Vec<PathBuf>) -> std::io::Resul
 }
 
 /// `backup` tiene exactamente estos archivos, con el mismo contenido.
-fn same_content(backup: &Path, files: &[(PathBuf, PathBuf)]) -> bool {
+fn same_content(backup: &Path, files: &[LegacyFile]) -> bool {
     let mut have = Vec::new();
     if tree_files(backup, backup, &mut have).is_err() {
         return false;
