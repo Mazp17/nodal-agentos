@@ -218,6 +218,15 @@ pub fn read_session(session_id: &str, cwd: &str) -> SessionReadout {
     }
 }
 
+/// Tokens del transcript principal de la sesión (bloqueante). `None` si no hay archivo o usage.
+pub fn session_tokens(session_id: &str, cwd: &str) -> Option<i64> {
+    if !claude_fs::is_valid_session_id(session_id) {
+        return None;
+    }
+    let projects = projects_dir().ok()?;
+    claude_fs::read_usage_tokens(&claude_fs::find_session_jsonl(&projects, cwd, session_id)?)
+}
+
 /// Detalle del workflow más reciente de la sesión. `None` si la sesión todavía no tiene
 /// carpeta en disco o no lanzó ningún workflow.
 #[tauri::command]

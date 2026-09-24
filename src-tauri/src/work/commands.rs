@@ -407,6 +407,13 @@ async fn cancel_run_inner(inner: &Arc<Inner>, run_id: String) -> Result<Run, Str
                 })
             };
             terminal::stop(&claude_id).await?;
+            let tokens = match (&run.executor, run.session_id.clone()) {
+                (Executor::Workflow { .. }, _) | (_, None) => None,
+                (_, Some(sid)) => {
+                    let cwd = run.cwd.clone();
+                    blocking(move || Ok(crate::runs::session_tokens(&sid, &cwd))).await.unwrap_or(None)
+                }
+            };
             let note = match &patch_path {
                 Some(p) => format!("{NOTE_STOPPED} Stopped by the user; partial changes saved to {}.", p.display()),
                 None => format!("{NOTE_STOPPED} Stopped by the user."),
@@ -420,6 +427,7 @@ async fn cancel_run_inner(inner: &Arc<Inner>, run_id: String) -> Result<Run, Str
                 verdict: None,
                 note: Some(note),
                 missing_report: false,
+                tokens,
             };
             let env = inner.env.clone();
             let id = run.id.clone();

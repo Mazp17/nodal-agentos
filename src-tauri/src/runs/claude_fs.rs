@@ -1072,6 +1072,45 @@ pub fn read_session_transcript(
     }))
 }
 
+/// Tokens de un transcript de sesión: `input + output + cache_creation + cache_read` de
+/// cada respuesta del asistente. Claude Code repite el `usage` en cada línea de un mismo
+/// mensaje (una por bloque), así que se cuenta una vez por `message.id`. Incluye los
+/// sidechains (subagentes de la sesión): también son gasto del run. `None` si no hay usage.
+pub fn usage_tokens_in<'a>(lines: impl IntoIterator<Item = &'a str>) -> Option<i64> {
+    let mut seen = std::collections::HashSet::new();
+    let mut total: Option<i64> = None;
+    for line in lines {
+        if !line.contains("\"usage\"") || !line.contains("\"assistant\"") {
+            continue;
+        }
+        let Ok(v) = serde_json::from_str::<Value>(line) else { continue };
+        if v.get("type").and_then(Value::as_str) != Some("assistant") {
+            continue;
+        }
+        let Some(msg) = v.get("message") else { continue };
+        let Some(usage) = msg.get("usage").filter(|u| u.is_object()) else { continue };
+        if let Some(id) = msg.get("id").and_then(Value::as_str) {
+            if !seen.insert(id.to_string()) {
+                continue;
+            }
+        }
+        let n: i64 = ["input_tokens", "output_tokens", "cache_creation_input_tokens", "cache_read_input_tokens"]
+            .iter()
+            .filter_map(|k| usage.get(*k).and_then(Value::as_i64))
+            .sum();
+        total = Some(total.unwrap_or(0) + n);
+    }
+    total
+}
+
+/// `usage_tokens_in` sobre el archivo entero, línea por línea (sin cargarlo en memoria).
+pub fn read_usage_tokens(path: &Path) -> Option<i64> {
+    use std::io::BufRead;
+    let file = fs::File::open(path).ok()?;
+    let lines: Vec<String> = std::io::BufReader::new(file).lines().map_while(Result::ok).filter(|l| l.contains("\"usage\"")).collect();
+    usage_tokens_in(lines.iter().map(String::as_str))
+}
+
 // ---------------------------------------------------------------------------
 // Motivo por el que una sesión en background no llegó a arrancar su workflow
 // ---------------------------------------------------------------------------
@@ -1586,6 +1625,26 @@ mod tests {
         assert_eq!(t.final_output.as_deref(), Some("Listo."));
         assert!(!t.items.iter().any(|i| matches!(i, TranscriptItem::Text { text, .. } if text == "subagente")));
         assert!(read_session_transcript(&dir.join("nope.jsonl"), "x", None, None, 10).unwrap().is_none());
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn usage_tokens_dedupe_by_message_id() {
+        let lines = [
+            r#"{"type":"assistant","message":{"id":"m1","content":[{"type":"text","text":"a"}],"usage":{"input_tokens":10,"output_tokens":5,"cache_creation_input_tokens":100,"cache_read_input_tokens":1000}}}"#,
+            r#"{"type":"assistant","message":{"id":"m1","content":[{"type":"tool_use","id":"t","name":"Bash","input":{}}],"usage":{"input_tokens":10,"output_tokens":5,"cache_creation_input_tokens":100,"cache_read_input_tokens":1000}}}"#,
+            r#"{"type":"user","message":{"content":"usage"}}"#,
+            r#"{"type":"assistant","isSidechain":true,"message":{"id":"m2","content":[],"usage":{"input_tokens":1,"output_tokens":2}}}"#,
+            "no es json \"usage\" \"assistant\"",
+        ];
+        assert_eq!(usage_tokens_in(lines), Some(1115 + 3));
+        assert_eq!(usage_tokens_in([r#"{"type":"assistant","message":{"content":[]}}"#]), None);
+        let dir = std::env::temp_dir().join(format!("nodal-usage-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("s.jsonl");
+        fs::write(&path, lines.join("\n")).unwrap();
+        assert_eq!(read_usage_tokens(&path), Some(1118));
+        assert_eq!(read_usage_tokens(&dir.join("nope.jsonl")), None);
         fs::remove_dir_all(&dir).ok();
     }
 }

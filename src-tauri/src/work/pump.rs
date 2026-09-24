@@ -93,6 +93,9 @@ pub fn apply_end(
     done.branch = end.branch.clone();
     done.verdict = end.verdict.clone();
     done.error = note.clone();
+    if end.tokens.is_some() {
+        done.tokens = end.tokens;
+    }
     qruns::update(&tx, &done)?;
     if let Some(t) = &task {
         let comment = match (decision.closing, decision.task_status) {
@@ -147,15 +150,21 @@ async fn finish_run(inner: &Arc<Inner>, run: Run, signal: EndSignal) -> Result<(
     };
     let (session, cwd) = (run.session_id.clone(), run.cwd.clone());
     let (executor, env2) = (run.executor.clone(), env.clone());
-    let (readout, (reviews, manages)) = blocking(move || {
+    let (readout, (reviews, manages), tokens) = blocking(move || {
+        // Los workflows reparten el trabajo en subagentes con su propio transcript: sin tokens.
+        let tokens = match (&executor, &session) {
+            (Executor::Workflow { .. }, _) | (_, None) => None,
+            (_, Some(sid)) => runs::session_tokens(sid, &cwd),
+        };
         let readout = match (signal, session) {
             (EndSignal::Done, Some(sid)) => runs::read_session(&sid, &cwd),
             _ => SessionReadout::default(),
         };
-        Ok((readout, workflow_meta(&env2, repo_path.as_deref(), &executor)))
+        Ok((readout, workflow_meta(&env2, repo_path.as_deref(), &executor), tokens))
     })
     .await?;
-    let end = read_end(&run, signal, &readout, reviews);
+    let mut end = read_end(&run, signal, &readout, reviews);
+    end.tokens = tokens;
     let now = now_ms();
     with_db(&inner.db, move |c| {
         apply_end(c, &env, &run, &end, RunStatus::Finished, manages.as_deref(), now)
@@ -317,7 +326,8 @@ mod tests {
         let agent = Executor::Agent { name: "frontend-developer".into(), source: AgentSource::User };
         let work = launched_run(&f, agent, RunKind::Work, true);
         tasks::set_status(&f.db.lock().unwrap(), &f.task.id, TaskStatus::InProgress, 3).unwrap();
-        let end = read_end(&work, EndSignal::Done, &done_readout("{\"status\":\"done\",\"summary\":\"listo\"}"), false);
+        let mut end = read_end(&work, EndSignal::Done, &done_readout("{\"status\":\"done\",\"summary\":\"listo\"}"), false);
+        end.tokens = Some(1234);
         let reviewer = apply_end(&mut f.db.lock().unwrap(), &f.env, &work, &end, RunStatus::Finished, None, 10).unwrap().unwrap();
         assert_eq!(reviewer.kind, RunKind::Review);
         assert_eq!(reviewer.parent_run_id.as_deref(), Some(work.id.as_str()));
@@ -326,6 +336,7 @@ mod tests {
         assert_eq!(task_status(&f), TaskStatus::InProgress, "sigue en In Progress mientras revisa");
         let saved = qruns::get(&f.db.lock().unwrap(), &work.id).unwrap();
         assert_eq!((saved.status, saved.outcome, saved.summary.as_deref()), (RunStatus::Finished, Some(RunOutcome::Green), Some("listo")));
+        assert_eq!(saved.tokens, Some(1234), "los tokens del transcript quedan en el run");
         // Aplicar dos veces no duplica (el run ya no está launched).
         assert!(apply_end(&mut f.db.lock().unwrap(), &f.env, &work, &end, RunStatus::Finished, None, 11).unwrap().is_none());
 
