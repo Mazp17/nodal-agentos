@@ -158,7 +158,8 @@ fn legacy_import_is_idempotent_and_maps_everything() {
     assert_eq!((r.finish, r.claude_run_id.as_deref()), (Finish::Commit, Some("a1b2c3d4")));
 
     let q = run_by_label(&conn, "Limpiar scripts de deploy");
-    assert_eq!((q.status, q.error.as_deref()), (RunStatus::Canceled, Some(QUEUED_ERROR)));
+    assert_eq!((q.status, q.error.as_deref()), (RunStatus::Queued, None));
+    assert!(crate::work::queue::awaiting_confirmation(&q), "no se lanza sin confirmar");
 
     let orphan = run_by_label(&conn, "t09zzzzzzzz");
     assert_eq!(orphan.task_id, None);
@@ -176,11 +177,14 @@ fn legacy_import_is_idempotent_and_maps_everything() {
     assert_eq!(eng1.options.model.as_deref(), Some("opus"));
     assert_eq!(eng1.finish, Finish::Commit, "el finish sale del repo mapeado");
     let eng2 = run_by_label(&conn, "ENG-2");
-    assert_eq!((eng2.repo_id, eng2.status), (None, RunStatus::Canceled));
+    assert_eq!((eng2.repo_id.as_deref(), eng2.status), (None, RunStatus::Queued));
 
-    // Nada queda en cola para que el pump lo relance solo.
-    let queued: i64 = conn.query_row("SELECT COUNT(*) FROM runs WHERE status = 'queued'", [], |r| r.get(0)).unwrap();
-    assert_eq!(queued, 0);
+    // Lo que quedó en cola espera confirmación: ninguno sin `legacy_label`.
+    let unconfirmed: i64 = conn
+        .query_row("SELECT COUNT(*) FROM runs WHERE status = 'queued' AND legacy_label IS NULL", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(unconfirmed, 0);
+    assert!(crate::work::queue::awaiting_confirmation(&eng2));
 
     assert_eq!(rows::load_settings(&conn).unwrap().concurrency, 5);
 }

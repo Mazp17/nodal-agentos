@@ -18,10 +18,9 @@
 //!   (con un repo nuevo para ese path). Quedan asignadas a `plan-task`, que era como corrían;
 //! - runs → tabla `runs` con `legacy_label` (identifier de la issue o título de la tarea) y
 //!   `task_id` NULL si no hay tarea. `launching` → Failed("migrated"); `launched` → Finished
-//!   sin outcome (no se reevalúa: no dispara transiciones); `queued` → **Canceled** con
-//!   error `"migrated: confirm to relaunch"`, para que la cola no los relance sola (el
-//!   modelo de Run no tiene un flag de "pendiente de confirmación"; relanzar es la
-//!   confirmación);
+//!   sin outcome (no se reevalúa: no dispara transiciones); `queued` → sigue **Queued**: con
+//!   `legacy_label` la cola no lo lanza solo (`work::queue::awaiting_confirmation`) hasta
+//!   que se confirma (`confirm_run`) o se cancela;
 //! - `concurrency` → settings (solo la primera vez: no pisa un cambio posterior);
 //! - un JSON corrupto (archivo o registro) se saltea con aviso en `skipped`.
 
@@ -43,7 +42,6 @@ use crate::domain::*;
 
 pub const BACKUP_PREFIX: &str = "legacy-backup-";
 pub const LOCAL_PROJECT: &str = "Local";
-pub const QUEUED_ERROR: &str = "migrated: confirm to relaunch";
 pub const LAUNCHING_ERROR: &str = "migrated";
 /// Nombre con el que los runs viejos lanzaban las tareas locales.
 const LEGACY_TASK_WORKFLOW: &str = "plan-task";
@@ -80,7 +78,7 @@ pub async fn import_legacy_data(
     folder: String,
 ) -> Result<LegacyImportReport, String> {
     let data_dir = app.path().app_data_dir().map_err(|e| format!("Couldn't find the app data folder: {e}"))?;
-    let now = now_ms();
+    let now = crate::util::now_ms();
     let src = PathBuf::from(folder.trim());
     let dd = data_dir.clone();
     // La copia no toma el lock de la base.
@@ -103,13 +101,6 @@ pub fn import_folder(conn: &mut Connection, src: &Path, data_dir: &Path, now: i6
     let mut report = import_backup(conn, &backup_dir, data_dir, now)?;
     report.skipped.splice(0..0, skipped);
     Ok(report)
-}
-
-pub fn now_ms() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_millis() as i64)
-        .unwrap_or(0)
 }
 
 // ---------- Backup ----------
@@ -308,7 +299,7 @@ fn executor_from_prompt(prompt: &str) -> Executor {
 /// Estado viejo → (estado, error, outcome). Ver las reglas en el doc del módulo.
 fn map_run_status(status: &str, error: Option<String>) -> Result<(RunStatus, Option<String>), String> {
     Ok(match status {
-        "queued" => (RunStatus::Canceled, Some(QUEUED_ERROR.into())),
+        "queued" => (RunStatus::Queued, None),
         "launching" => (RunStatus::Failed, Some(LAUNCHING_ERROR.into())),
         "launched" => (RunStatus::Finished, error),
         "failed" => (RunStatus::Failed, Some(error.unwrap_or_else(|| LAUNCHING_ERROR.into()))),
