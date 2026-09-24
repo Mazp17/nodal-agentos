@@ -65,10 +65,67 @@ pub struct FileDiff {
 #[serde(rename_all = "camelCase")]
 pub struct RunDiff {
     pub base: String,
+    /// Rama del run (la del worktree, la del workflow o la del checkout). `None` si HEAD
+    /// está desacoplado o no se pudo leer.
+    pub branch: Option<String>,
+    /// Commits de la rama que no están en `base`, del más nuevo al más viejo (hasta
+    /// `COMMITS_MAX`). Vacío sin base (in place).
+    pub commits: Vec<CommitInfo>,
+    /// El run sigue activo: el diff puede cambiar.
+    pub live: bool,
     pub cwd: String,
     pub includes_working_tree: bool,
     pub files: Vec<FileDiff>,
     pub patch: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CommitInfo {
+    pub sha: String,
+    pub short_sha: String,
+    pub subject: String,
+    pub author: String,
+    /// Fecha del autor, epoch ms.
+    pub at: i64,
+}
+
+pub const COMMITS_MAX: usize = 200;
+const SEP: char = '\u{1f}';
+
+/// Parsea `git log --format=%H%x1f%h%x1f%an%x1f%at%x1f%s`.
+pub fn parse_log(text: &str) -> Vec<CommitInfo> {
+    text.lines()
+        .filter_map(|l| {
+            let mut p = l.splitn(5, SEP);
+            let (sha, short_sha, author, at, subject) = (p.next()?, p.next()?, p.next()?, p.next()?, p.next()?);
+            Some(CommitInfo {
+                sha: sha.into(),
+                short_sha: short_sha.into(),
+                subject: subject.into(),
+                author: author.into(),
+                at: at.trim().parse::<i64>().ok()? * 1000,
+            })
+        })
+        .collect()
+}
+
+/// Commits de `head` que no están en `base` (`git log base..head`).
+pub fn commits(dir: &Path, base: &str, head: &str) -> Result<Vec<CommitInfo>, String> {
+    if base.starts_with('-') || head.starts_with('-') {
+        return Err("Invalid branch name.".into());
+    }
+    let range = format!("{base}..{head}");
+    let max = COMMITS_MAX.to_string();
+    let out = git::ok(dir, &["log", "--no-color", "--format=%H%x1f%h%x1f%an%x1f%at%x1f%s", "-n", &max, &range, "--"])?;
+    Ok(parse_log(&out))
+}
+
+/// Rama del checkout de `dir`; `None` con HEAD desacoplado.
+pub fn current_branch(dir: &Path) -> Option<String> {
+    let b = git::ok(dir, &["rev-parse", "--abbrev-ref", "HEAD"]).ok()?;
+    let b = b.trim();
+    (!b.is_empty() && b != "HEAD").then(|| b.to_string())
 }
 
 /// Patch crudo de `cwd` contra `base` (con `None`, contra HEAD: solo lo sin commitear).
@@ -371,6 +428,14 @@ Binary files /dev/null and b/logo.png differ
         git(&["commit", "-qam", "change"]);
         let (patch, dirty) = collect(&repo, Some("main")).unwrap();
         assert!(!dirty);
+        assert_eq!(current_branch(&repo).as_deref(), Some("feature"));
+        let log = commits(&repo, "main", "HEAD").unwrap();
+        assert_eq!(log.len(), 1);
+        assert_eq!((log[0].subject.as_str(), log[0].author.as_str()), ("change", "Test"));
+        assert!(log[0].sha.starts_with(&log[0].short_sha) && log[0].at > 0);
+        assert_eq!(commits(&repo, "main", "feature").unwrap(), log);
+        assert!(commits(&repo, "feature", "HEAD").unwrap().is_empty());
+        assert!(commits(&repo, "--all", "HEAD").is_err());
         let files = parse(&patch);
         assert_eq!(files.len(), 1);
         assert_eq!((files[0].additions, files[0].deletions), (1, 0));
@@ -390,5 +455,14 @@ Binary files /dev/null and b/logo.png differ
         let files = parse(&patch);
         assert_eq!(files[0].additions, 1);
         assert!(collect(&repo, Some("no-such-branch")).is_err());
+    }
+
+    #[test]
+    fn parse_log_tolerates_bad_lines() {
+        let text = "aaaa\u{1f}aa\u{1f}Ana\u{1f}1700000000\u{1f}fix: a\u{1f}b\nroto\nbbbb\u{1f}bb\u{1f}Ana\u{1f}x\u{1f}s\n";
+        let log = parse_log(text);
+        assert_eq!(log.len(), 1);
+        assert_eq!(log[0].subject, "fix: a\u{1f}b", "el asunto puede contener el separador");
+        assert_eq!(log[0].at, 1_700_000_000_000);
     }
 }

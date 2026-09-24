@@ -154,9 +154,24 @@ export interface FileDiff {
   hunks: DiffHunk[];
 }
 
+export interface CommitInfo {
+  sha: string;
+  shortSha: string;
+  subject: string;
+  author: string;
+  /** Fecha del autor, epoch ms. */
+  at: number;
+}
+
 export interface RunDiff {
   /** Ref base (`git diff <base>...HEAD`). */
   base: string;
+  /** Rama del run; `null` con HEAD desacoplado. */
+  branch: string | null;
+  /** Commits de la rama que no están en `base`, del más nuevo al más viejo (hasta 200). */
+  commits: CommitInfo[];
+  /** El run sigue activo: el diff puede cambiar. */
+  live: boolean;
   cwd: string;
   /** Incluye cambios sin commitear (el run sigue activo). */
   includesWorkingTree: boolean;

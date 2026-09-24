@@ -491,12 +491,18 @@ pub async fn run_diff(state: State<'_, WorkState>, run_id: String) -> Result<Run
         Ok((r, t, repo))
     })
     .await?;
+    let live = matches!(run.status, RunStatus::Launching | RunStatus::Launched);
     blocking(move || {
         // Un workflow trabaja en su propio worktree: se mira su rama desde el repo.
         if let (Executor::Workflow { .. }, Some(branch), Some(repo)) = (&run.executor, &run.branch, &repo) {
-            let base = worktree::current_base(Path::new(&repo.path))?;
-            let patch = diff::collect_branch(Path::new(&repo.path), &base, branch)?;
+            let repo_dir = Path::new(&repo.path);
+            let base = worktree::current_base(repo_dir)?;
+            let patch = diff::collect_branch(repo_dir, &base, branch)?;
+            let commits = diff::commits(repo_dir, &base, branch).unwrap_or_default();
             return Ok(RunDiff {
+                branch: Some(branch.clone()),
+                commits,
+                live,
                 base,
                 cwd: repo.path.clone(),
                 includes_working_tree: false,
@@ -510,7 +516,14 @@ pub async fn run_diff(state: State<'_, WorkState>, run_id: String) -> Result<Run
         }
         let base = diff_base(task.as_ref(), &run);
         let (patch, dirty) = diff::collect(cwd, base.as_deref())?;
+        let commits = match &base {
+            Some(b) => diff::commits(cwd, b, "HEAD").unwrap_or_default(),
+            None => Vec::new(),
+        };
         Ok(RunDiff {
+            branch: diff::current_branch(cwd),
+            commits,
+            live,
             base: base.unwrap_or_else(|| "HEAD".into()),
             cwd: run.cwd.clone(),
             includes_working_tree: dirty,
