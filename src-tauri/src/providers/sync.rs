@@ -9,8 +9,8 @@
 //! - Push: backoff exponencial por fila; los `set_state` con mapeo pendiente, "No
 //!   sincronizar", sin mapeo o hacia un estado desaparecido se descartan (los comentarios
 //!   se mandan igual). Errores permanentes o `MAX_ATTEMPTS` intentos descartan la fila; rate
-//!   limit o key inválida cortan el drenado del proveedor en esa pasada. Una fila fallida
-//!   frena las siguientes de su tarea (orden estado → comentario).
+//!   limit o key inválida no gastan intentos y cortan el drenado del proveedor en esa pasada.
+//!   Una fila fallida frena las siguientes de su tarea (orden estado → comentario).
 //! - Pull solo de tareas abiertas o cerradas hace menos de 7 días; un ítem desvinculado
 //!   (unlink) no vuelve por auto-import.
 //! - Auto-import: ítems abiertos del scope creados después del link, con repo por regla o
@@ -277,7 +277,7 @@ async fn drain_outbox(
             PushAction::SetState(state_id) => p.set_state(&src.external_id, state_id).await.map(Some),
             PushAction::Drop(_) => Ok(None),
         };
-        let (id, task_id, attempts) = (item.id, task.id.clone(), item.attempts + 1);
+        let (id, task_id) = (item.id, task.id.clone());
         let mut stop = false;
         let result = match (sent, action) {
             (Ok(_), PushAction::Drop(notice)) => {
@@ -308,16 +308,19 @@ async fn drain_outbox(
             (Err(e), _) => {
                 flagged.insert(task.id.clone());
                 failed.insert(task.id.clone());
-                // Sin key o con rate limit, el resto de las filas fallaría igual.
+                // Sin key o con rate limit, el resto de las filas fallaría igual. Esos errores
+                // no son de la fila: no gastan intentos (una key revocada no descarta cambios),
+                // solo corren el próximo intento (la espera larga es la pausa del proveedor).
                 stop = matches!(e.kind, ErrorKind::RateLimited | ErrorKind::Auth);
-                let give_up = e.kind == ErrorKind::Permanent || attempts >= MAX_ATTEMPTS;
+                let attempts = if stop { item.attempts } else { item.attempts + 1 };
+                let give_up = e.kind == ErrorKind::Permanent || (!stop && attempts >= MAX_ATTEMPTS);
                 let msg = if give_up {
                     format!("{e} (not retried after {attempts} attempt(s); the change was not pushed)")
                 } else {
                     e.message.clone()
                 };
                 report.errors.push(format!("{}: {msg}", src.identifier));
-                let next = now + backoff_ms(attempts);
+                let next = now + if stop { BACKOFF_BASE_MS } else { backoff_ms(attempts) };
                 with_db(db, move |c| {
                     if give_up {
                         store::outbox_done(c, id)?;
@@ -741,7 +744,28 @@ mod tests {
         let r = env.run(10);
         assert_eq!(r.errors.len(), 1, "{r:?}");
         let rows = env.outbox();
-        assert_eq!((rows[0].attempts, rows[1].attempts), (1, 0));
+        // El rate limit no gasta intentos: solo corre el próximo.
+        assert_eq!((rows[0].attempts, rows[1].attempts), (0, 0));
+        assert_eq!(rows[0].next_attempt_at, 10 + BACKOFF_BASE_MS);
+    }
+
+    #[test]
+    fn auth_errors_never_drop_changes() {
+        let env = Env::new();
+        let t = env.import(1, "s-todo");
+        env.enqueue_comment(&t.id, "hola", 1);
+        env.db.lock().unwrap().execute("UPDATE sync_outbox SET attempts = ?1", [MAX_ATTEMPTS - 1]).unwrap();
+        env.fake.data().fail_writes = Some(ProviderError::new(ErrorKind::Auth, "key revoked"));
+        let mut now = 10;
+        for _ in 0..20 {
+            env.run(now);
+            now += BACKOFF_MAX_MS;
+        }
+        let rows = env.outbox();
+        assert_eq!(rows.len(), 1, "a revoked key keeps the change queued");
+        assert_eq!(rows[0].attempts, MAX_ATTEMPTS - 1);
+        env.fake.data().fail_writes = None;
+        assert_eq!(env.run(now).pushed, 1);
     }
 
     #[test]
