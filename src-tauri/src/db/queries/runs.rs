@@ -17,19 +17,11 @@ pub fn get(conn: &Connection, id: &str) -> Result<Run, DbError> {
     get_run(conn, id)?.ok_or_else(|| not_found("run"))
 }
 
-/// Runs de la tarea (o los últimos de todas con `None`), más recientes primero.
-pub fn list(conn: &Connection, task_id: Option<&str>) -> Result<Vec<Run>, DbError> {
-    query(
-        conn,
-        "SELECT * FROM runs WHERE ?1 IS NULL OR task_id = ?1 ORDER BY queued_at DESC, id DESC LIMIT ?2",
-        rusqlite::params![task_id, HISTORY_LIMIT],
-    )
-}
-
 /// Filtro por proyecto: el de la tarea, o el del repo si el run no tiene tarea.
 const IN_PROJECT: &str = "(?1 IS NULL OR t.project_id = ?1 OR (r.task_id IS NULL AND rp.project_id = ?1))";
 
-/// Como `list`, pero también por proyecto (`None`: todos). Hasta `HISTORY_LIMIT`.
+/// Runs del proyecto y/o de la tarea (`None`: sin filtrar), más recientes primero. Hasta
+/// `HISTORY_LIMIT`.
 pub fn list_filtered(conn: &Connection, project_id: Option<&str>, task_id: Option<&str>) -> Result<Vec<Run>, DbError> {
     query(
         conn,

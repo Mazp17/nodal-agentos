@@ -55,7 +55,7 @@ fn queue_order_reorder_and_pending() {
     assert!(a.error.unwrap().contains("closed while"));
 
     assert_eq!(runs::last_finished(&c, "t1").unwrap().unwrap().id, "d");
-    assert_eq!(runs::list(&c, Some("t1")).unwrap().len(), 4);
+    assert_eq!(runs::list_filtered(&c, None, Some("t1")).unwrap().len(), 4);
     assert!(runs::launched_refs(&c).unwrap().is_empty());
     let mut b = runs::get(&c, "b").unwrap();
     b.claude_run_id = Some("abcd1234".into());

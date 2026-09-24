@@ -41,6 +41,23 @@ import type { Transcript } from "../features/runs/types";
 
 // ---------- DTOs ----------
 
+/** Sesiones vivas trabajando/esperando y subagentes activos (mismo criterio que `activity_summary`). */
+export interface RepoActivityCount {
+  repoId: string;
+  repoPath: string;
+  sessions: number;
+  agents: number;
+}
+
+/** Totales sin contar dos veces lo que cae en repos anidados. */
+export interface ProjectActivity {
+  projectId: string;
+  repos: RepoActivityCount[];
+  sessions: number;
+  agents: number;
+  generatedAt: number;
+}
+
 /** `exists`: la carpeta es un worktree vivo. `ahead`: commits fuera de la base; `unpushed`: además fuera de todo remoto. */
 export interface WorktreeStatus {
   exists: boolean;
@@ -316,6 +333,8 @@ export const removeTaskRelation = (taskId: string, otherId: string, kind: Relati
  */
 export const cleanupWorktree = (taskId: string, force = false) =>
   invoke<Task>("cleanup_worktree", { taskId, force });
+/** Actividad de Claude Code por repo del proyecto (un solo `claude agents`). */
+export const projectActivity = (projectId: string) => invoke<ProjectActivity>("project_activity", { projectId });
 /** Todo en cero/false/null si la tarea no tiene worktree. */
 export const worktreeStatus = (taskId: string) => invoke<WorktreeStatus>("worktree_status", { taskId });
 

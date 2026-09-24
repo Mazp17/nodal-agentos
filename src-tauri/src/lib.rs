@@ -126,6 +126,7 @@ pub fn run() {
             providers::commands::sync_now,
             activity::repo_activity,
             activity::activity_summary,
+            activity::project_activity,
             migrate::import_legacy_data,
         ])
         .run(tauri::generate_context!())
