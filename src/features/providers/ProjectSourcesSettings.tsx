@@ -409,7 +409,7 @@ function SourceCard({
             link={link}
             repos={repos}
             disabled={busy === "patch"}
-            onChange={(rules) => void patch({ repoRules: rules })}
+            keyOk={keyOk}
           />
         </Field>
 
@@ -556,14 +556,14 @@ function RepoChoice({
 function RoutingRules({
   link,
   repos,
-  onChange,
   disabled,
+  keyOk,
 }: {
   link: SourceLink;
   repos: Repo[];
-  /** Cambios de reglas de label (las de proyecto se guardan acá, con su backfill). */
-  onChange: (rules: RepoRule[]) => void;
   disabled?: boolean;
+  /** Sin key válida no se piden los proyectos del proveedor. */
+  keyOk: boolean;
 }) {
   const rules = link.repoRules;
   const saver = useRuleBackfill();
@@ -572,7 +572,7 @@ function RoutingRules({
   const [label, setLabel] = useState("");
   const [projectId, setProjectId] = useState("");
   const [repoId, setRepoId] = useState("");
-  const projects = useRuleProjects([link.id], form?.kind === "project");
+  const projects = useRuleProjects([link.id], keyOk && form?.kind === "project");
   const repoName = (id: string) => repos.find((r) => r.id === id)?.name ?? "Unknown repo";
   const target = repoId || repos[0]?.id || "";
   const off = disabled || saver.busy;
@@ -594,11 +594,16 @@ function RoutingRules({
     setRepoId(rule?.repoId ?? "");
   };
 
-  const addLabel = () => {
-    if (!label.trim() || !target || dup) return;
-    onChange([...rules, { id: "", kind: "label", value: label.trim(), name: label.trim(), repoId: target, createdAt: 0 }]);
-    setLabel("");
-    setForm(null);
+  const addLabel = async () => {
+    const value = label.trim();
+    if (!value || !target || dup) return;
+    const rule: RepoRule = { id: "", kind: "label", value, name: value, repoId: target, createdAt: 0 };
+    const same = (r: RepoRule) => r.kind === "label" && r.value.trim().toLowerCase() === value.toLowerCase();
+    const ok = await saver.save({ link, update: (rs) => (rs.some(same) ? rs : [...rs, rule]) });
+    if (ok) {
+      setLabel("");
+      setForm(null);
+    }
   };
 
   const saveProject = async () => {
@@ -610,17 +615,18 @@ function RoutingRules({
     }
     // Nueva o cambiada: `id: ""` (el backend la trata como nueva) y se reemplaza en su lugar.
     const rule = newProjectRule(project, target);
-    const next = prev ? rules.map((r) => (r === prev ? rule : r)) : [...rules, rule];
+    const editingId = form.editing;
+    const update = (rs: RepoRule[]) =>
+      editingId && rs.some((r) => r.id === editingId) ? rs.map((r) => (r.id === editingId ? rule : r)) : [...rs, rule];
     const backfill = { projectId: project.id, projectName: project.name, repoId: target, repoName: repoName(target) };
-    setForm(null);
-    await saver.save(link, next, backfill);
+    if (await saver.save({ link, update }, backfill)) setForm(null);
   };
 
-  const remove = (i: number) => {
-    const next = rules.filter((_, j) => j !== i);
-    if (rules[i]?.kind === "project") void saver.save(link, next);
-    else onChange(next);
-  };
+  const remove = (rule: RepoRule) =>
+    void saver.save({
+      link,
+      update: (rs) => rs.filter((r) => (rule.id ? r.id !== rule.id : !(r.kind === rule.kind && r.value === rule.value))),
+    });
 
   return (
     <div className="pv-rules">
@@ -650,7 +656,7 @@ function RoutingRules({
               className="icon-btn pv-rule-rm"
               aria-label={`Remove rule ${r.kind} ${r.kind === "project" ? r.name : r.value}`}
               disabled={off}
-              onClick={() => remove(i)}
+              onClick={() => remove(r)}
             >
               ✕
             </button>
@@ -669,7 +675,7 @@ function RoutingRules({
           className="pv-rule pv-rule-form"
           onSubmit={(e) => {
             e.preventDefault();
-            addLabel();
+            void addLabel();
           }}
         >
           <input
@@ -734,6 +740,7 @@ function RoutingRules({
               </button>
             </span>
           )}
+          {!keyOk && <span className="pv-hint pv-hint-warn">Linear isn't reachable with the saved key; projects can't be loaded.</span>}
           {options && options.length === 0 && (
             <span className="pv-hint">Every project in this team already has a rule.</span>
           )}

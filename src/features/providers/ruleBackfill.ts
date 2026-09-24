@@ -2,7 +2,7 @@
 // Lo usan Project settings → Repos (selector por repo) y → Sources (reglas del link).
 
 import { useCallback, useState } from "react";
-import { importRule, previewRuleImport, updateSourceLink, type ImportResult } from "../../domain/api";
+import { importRule, listSourceLinks, previewRuleImport, updateSourceLink, type ImportResult } from "../../domain/api";
 import { errorText, invalidateProviders } from "../../domain/hooks/providers";
 import type { RepoRule, ScopeRef, SourceLink } from "../../domain/types";
 import { useConfirm } from "../../ui/ConfirmDialog";
@@ -22,25 +22,53 @@ export interface BackfillTarget {
   repoName: string;
 }
 
+/** Cambio de reglas de un link: `update` recibe la lista recién leída del backend, no la renderizada. */
+export interface RuleEdit {
+  link: SourceLink;
+  update: (rules: RepoRule[]) => RepoRule[];
+}
+
 export interface RuleSaver {
   busy: boolean;
   /**
-   * Guarda la lista completa `rules` en `link`. Con `backfill`, después ofrece importar lo que
-   * ya existe en ese proyecto (preview → confirmación → `importRule` → toast).
-   * Devuelve false si no se pudo guardar (ya avisó con un toast).
+   * Aplica `edits` en orden. Si uno falla, deshace los anteriores (re-guarda su lista previa).
+   * Con `backfill`, después ofrece importar lo que ya existe en ese proyecto
+   * (preview → confirmación → `importRule` → toast). Devuelve false si no se guardó (ya avisó).
    */
-  save: (link: SourceLink, rules: RepoRule[], backfill?: BackfillTarget) => Promise<boolean>;
+  save: (edits: RuleEdit | RuleEdit[], backfill?: BackfillTarget) => Promise<boolean>;
+}
+
+/*
+ * Todas las escrituras de reglas (y sus confirmaciones) pasan por una sola cola: dos cards o
+ * dos clicks seguidos no se pisan, y cada una parte de la lista guardada, no de la que quedó
+ * renderizada antes de que `invalidateProviders("links")` recargue.
+ */
+let queue: Promise<unknown> = Promise.resolve();
+
+function enqueue<T>(job: () => Promise<T>): Promise<T> {
+  const run = queue.then(job, job);
+  queue = run.catch(() => undefined);
+  return run;
+}
+
+async function freshRules(link: SourceLink): Promise<RepoRule[]> {
+  const links = await listSourceLinks(link.projectId);
+  const found = links.find((l) => l.id === link.id);
+  if (!found) throw new Error("This source was disconnected.");
+  return found.repoRules;
 }
 
 export function useRuleBackfill(): RuleSaver {
   const ask = useConfirm();
   const toast = useToast();
-  const [busy, setBusy] = useState(false);
+  const [pending, setPending] = useState(0);
 
   const runBackfill = useCallback(
-    async (saved: SourceLink, t: BackfillTarget) => {
-      const rule = saved.repoRules.find((r) => r.kind === "project" && r.value === t.projectId && r.repoId === t.repoId);
-      if (!rule) return;
+    async (savedLinks: SourceLink[], t: BackfillTarget) => {
+      const match = (r: RepoRule) => r.kind === "project" && r.value === t.projectId && r.repoId === t.repoId;
+      const saved = savedLinks.find((l) => l.repoRules.some(match));
+      const rule = saved?.repoRules.find(match);
+      if (!saved || !rule) return;
       try {
         const p = await previewRuleImport(saved.id, rule.id);
         const elsewhere = p.inOtherRepos > 0 ? `${p.inOtherRepos} already imported elsewhere stay where they are` : null;
@@ -73,28 +101,52 @@ export function useRuleBackfill(): RuleSaver {
   );
 
   const save = useCallback(
-    async (link: SourceLink, rules: RepoRule[], backfill?: BackfillTarget) => {
-      setBusy(true);
-      try {
-        let saved: SourceLink;
+    (input: RuleEdit | RuleEdit[], backfill?: BackfillTarget) => {
+      const edits = Array.isArray(input) ? input : [input];
+      setPending((n) => n + 1);
+      return enqueue(async () => {
+        /** Lista previa de cada edit ya guardado, para deshacer. */
+        const done: { link: SourceLink; before: RepoRule[] }[] = [];
+        const saved: SourceLink[] = [];
         try {
-          saved = await updateSourceLink(link.id, { repoRules: rules });
+          for (const e of edits) {
+            const before = await freshRules(e.link);
+            saved.push(await updateSourceLink(e.link.id, { repoRules: e.update(before) }));
+            done.push({ link: e.link, before });
+          }
         } catch (err) {
-          toast("Couldn't save the rule", errorText(err), "danger");
+          const rollback = await undo(done);
+          toast("Couldn't save the rule", [errorText(err), rollback].filter(Boolean).join("\n"), "danger");
           return false;
         } finally {
           invalidateProviders("links");
         }
         if (backfill) await runBackfill(saved, backfill);
         return true;
-      } finally {
-        setBusy(false);
-      }
+      }).finally(() => setPending((n) => n - 1));
     },
     [runBackfill, toast],
   );
 
-  return { busy, save };
+  return { busy: pending > 0, save };
+}
+
+/** Re-guarda las listas previas (en orden inverso). Devuelve qué no se pudo restaurar, si algo. */
+async function undo(done: { link: SourceLink; before: RepoRule[] }[]): Promise<string | null> {
+  const lost: string[] = [];
+  for (const d of [...done].reverse()) {
+    try {
+      await updateSourceLink(d.link.id, { repoRules: d.before });
+    } catch {
+      const now = await freshRules(d.link).catch(() => [] as RepoRule[]);
+      const ids = new Set(now.map((r) => `${r.kind}:${r.value}:${r.repoId}`));
+      for (const r of d.before) if (!ids.has(`${r.kind}:${r.value}:${r.repoId}`)) lost.push(`${r.kind}: ${r.name || r.value}`);
+    }
+  }
+  if (!done.length) return null;
+  return lost.length
+    ? `These rules were removed and couldn't be restored: ${lost.join(", ")}.`
+    : "Earlier changes were undone.";
 }
 
 function importToast(r: ImportResult, repoName: string): [string, string | undefined, "ok" | "warn"] {

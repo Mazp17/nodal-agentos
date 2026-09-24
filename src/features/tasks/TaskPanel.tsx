@@ -377,7 +377,11 @@ export function TaskPanel({ taskId, onClose, onOpenRun, onOpenDiff, onOpenTask, 
             provider={providerLabel(src.provider)}
             from={src.moved.fromProject.name}
             to={src.moved.toProject?.name ?? "no project"}
-            suggested={projectRepos.find((r) => r.id === src.moved?.suggestedRepoId)?.name ?? null}
+            suggested={
+              src.moved.suggestedRepoId === task.repoId
+                ? null
+                : (projectRepos.find((r) => r.id === src.moved?.suggestedRepoId)?.name ?? null)
+            }
             current={repo?.name ?? null}
             busy={busy !== null}
             onMove={() =>

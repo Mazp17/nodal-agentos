@@ -2,8 +2,15 @@ import { useEffect, useId, useState, type ReactNode } from "react";
 import { useProjects } from "../../domain/hooks/projects";
 import type { Finish, Isolation, Project, Repo, RepoRule, SourceLink } from "../../domain/types";
 import { ProjectSourcesSettings } from "../providers";
-import { useRuleProjects, useSourceLinks, type Loaded, type RuleProject } from "../../domain/hooks/providers";
-import { newProjectRule, useRuleBackfill } from "../providers/ruleBackfill";
+import {
+  useProviderStatus,
+  useRuleProjects,
+  useSourceLinks,
+  type Loaded,
+  type ProviderConnection,
+  type RuleProject,
+} from "../../domain/hooks/providers";
+import { newProjectRule, useRuleBackfill, type RuleEdit } from "../providers/ruleBackfill";
 import { SectionHead } from "../settings/SettingsView";
 import type { ProjectSection } from "../../shell/useNav";
 import { useToast } from "../../ui/Toasts";
@@ -224,8 +231,12 @@ function ReposSection({ project, onOpenSources }: { project: Project; onOpenSour
   const [editing, setEditing] = useState<string | null>(null);
   const links = useSourceLinks(project.id);
   const linearLinks = (links.data ?? []).filter((l) => l.provider === "linear");
-  const ruleProjects = useRuleProjects(linearLinks.map((l) => l.id));
-  const linear: LinearCtx = { links, linearLinks, projects: ruleProjects, repos, onOpenSources };
+  const connection = useProviderStatus("linear").connection;
+  const ruleProjects = useRuleProjects(
+    linearLinks.map((l) => l.id),
+    connection === "connected",
+  );
+  const linear: LinearCtx = { links, linearLinks, projects: ruleProjects, connection, repos, onOpenSources };
 
   const picker = useRepoPicker({
     whereAdded: (root) => {
@@ -498,6 +509,8 @@ interface LinearCtx {
   links: Loaded<SourceLink[]>;
   linearLinks: SourceLink[];
   projects: Loaded<RuleProject[]>;
+  /** Sin key válida no se piden los proyectos. */
+  connection: ProviderConnection;
   repos: Repo[];
   onOpenSources: () => void;
 }
@@ -520,23 +533,35 @@ function LinearProjectRow({ repo, ctx }: { repo: Repo; ctx: LinearCtx }) {
       if (r.kind === "project" && r.repoId !== repo.id)
         takenBy.set(r.value, ctx.repos.find((x) => x.id === r.repoId)?.name ?? "another repo");
 
+  /** Proyectos que ya van a este repo (fuera del actual): no se ofrecen de nuevo. */
+  const ownedIds = new Set(owned.slice(1).map((o) => o.rule.value));
+  const without = (rule: RepoRule) => (rs: RepoRule[]) => rs.filter((r) => r.id !== rule.id);
+
   const pick = async (projectId: string) => {
     if (projectId === (current?.rule.value ?? "")) return;
     if (!projectId) {
-      if (!current) return;
-      const ok = await saver.save(current.link, current.link.repoRules.filter((r) => r !== current.rule));
+      // Con varias reglas se gestionan en Sources ("None" está deshabilitado).
+      if (!current || owned.length > 1) return;
+      const ok = await saver.save({ link: current.link, update: without(current.rule) });
       if (ok) toast("Linear project removed", `New issues in ${current.rule.name} no longer go to ${repo.name}.`, "ok");
       return;
     }
     const choice = projects.data?.find((p) => p.project.id === projectId);
     const link = linearLinks.find((l) => l.id === choice?.linkId);
     if (!choice || !link) return;
-    let base = link.repoRules;
-    if (current) {
-      if (current.link.id === link.id) base = base.filter((r) => r !== current.rule);
-      else if (!(await saver.save(current.link, current.link.repoRules.filter((r) => r !== current.rule)))) return;
-    }
-    await saver.save(link, [...base, newProjectRule(choice.project, repo.id)], {
+    const rule = newProjectRule(choice.project, repo.id);
+    const add = (rs: RepoRule[]) => [...rs, rule];
+    // Cambio entre links: primero se saca la vieja y después se agrega la nueva; si lo segundo
+    // falla, `save` restaura la vieja.
+    const edits: RuleEdit[] = !current
+      ? [{ link, update: add }]
+      : current.link.id === link.id
+        ? [{ link, update: (rs) => add(without(current.rule)(rs)) }]
+        : [
+            { link: current.link, update: without(current.rule) },
+            { link, update: add },
+          ];
+    await saver.save(edits, {
       projectId: choice.project.id,
       projectName: choice.project.name,
       repoId: repo.id,
@@ -587,10 +612,12 @@ function LinearProjectRow({ repo, ctx }: { repo: Repo; ctx: LinearCtx }) {
         disabled={saver.busy || (!projects.data && !current)}
         onChange={(e) => void pick(e.target.value)}
       >
-        <option value="">{projects.loading && !projects.data && !current ? "Loading projects…" : "None"}</option>
+        <option value="" disabled={owned.length > 1}>
+          {projects.loading && !projects.data && !current ? "Loading projects…" : "None"}
+        </option>
         {current && !hasCurrent && <option value={current.rule.value}>{current.rule.name || current.rule.value}</option>}
         {options.map((p) => {
-          const other = takenBy.get(p.id);
+          const other = takenBy.get(p.id) ?? (ownedIds.has(p.id) ? repo.name : undefined);
           return (
             <option key={p.id} value={p.id} disabled={!!other}>
               {other ? `${p.name} · in ${other}` : p.name}
@@ -598,7 +625,19 @@ function LinearProjectRow({ repo, ctx }: { repo: Repo; ctx: LinearCtx }) {
           );
         })}
       </select>
-      {projects.error ? (
+      {ctx.connection !== "connected" ? (
+        <span className="field-hint">
+          {ctx.connection === "loading" ? "Checking Linear…" : "Linear isn't reachable with the saved key."}
+          {ctx.connection !== "loading" && (
+            <>
+              {" "}
+              <button type="button" className="btn btn-ghost btn-sm" onClick={ctx.onOpenSources}>
+                Open Sources
+              </button>
+            </>
+          )}
+        </span>
+      ) : projects.error ? (
         <span className="field-hint">
           Couldn't load Linear projects.{" "}
           <button type="button" className="btn btn-ghost btn-sm" onClick={projects.reload}>
