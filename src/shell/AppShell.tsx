@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { launchTask } from "../domain/api";
 import { useProjects } from "../domain/hooks/projects";
 import { useProviderStatus, useSourceLinks } from "../domain/hooks/providers";
@@ -59,6 +60,15 @@ export function AppShell() {
       forgetProject(route.projectId);
     }
   }, [ctx.loaded, ctx.error, ctx.projectById, route.projectId, forgetProject]);
+
+  // Badge del Dock: lo que necesita al usuario (sin número si es 0).
+  const needYou = queue.needYou;
+  useEffect(() => {
+    if (!queue.loaded) return;
+    getCurrentWindow()
+      .setBadgeCount(needYou || undefined)
+      .catch((e: unknown) => console.error("setBadgeCount", e));
+  }, [needYou, queue.loaded]);
 
   // Último proyecto visitado: destino de ⌘2/⌘4 desde una vista global.
   const lastProjectId = useRef<string | null>(null);
@@ -185,11 +195,12 @@ export function AppShell() {
     for (const p of ctx.projects) {
       items.push({ id: `open-${p.id}`, kind: "Action", label: `Open ${p.name}`, keywords: p.key, run: () => go("board", p.id) });
     }
-    if (queue.needYou > 0 || work.blocked.length > 0) {
+    // `needYou` de `work_summary` ya incluye las tareas Blocked (sin contarlas dos veces).
+    if (queue.needYou > 0) {
       items.push({
         id: "need-you",
         kind: "Action",
-        label: `Review what needs you (${queue.needYou + work.blocked.length})`,
+        label: `Review what needs you (${queue.needYou})`,
         run: () => (work.blocked[0] ? openTask(work.blocked[0].id) : go("runs")),
       });
     }
@@ -391,6 +402,11 @@ export function AppShell() {
           {work.error && (
             <div className="banner banner-error" role="alert">
               Couldn't refresh runs and tasks: {work.error}
+            </div>
+          )}
+          {work.cliError && (
+            <div className="banner banner-warn" role="status">
+              {work.cliError} — live session states may be out of date.
             </div>
           )}
           <div className="content">{content}</div>

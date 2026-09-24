@@ -3,16 +3,18 @@
 // píldora del topbar usa `useQueueSummary` de runs.
 
 import { useMemo } from "react";
-import { isRunActive, useAllRuns } from "../domain/hooks/runs";
+import { isRunActive, useAllRuns, useRunsSnapshot } from "../domain/hooks/runs";
 import { useTaskList } from "../domain/hooks/store";
-import type { Run, Task } from "../domain/types";
+import type { RunLight, Task } from "../domain/types";
 
-const RUNNING: ReadonlySet<Run["status"]> = new Set(["launching", "launched"]);
+const RUNNING: ReadonlySet<RunLight["status"]> = new Set(["launching", "launched"]);
 const NONE: never[] = [];
 
 export interface WorkStatus {
-  /** Error de la última lectura de tareas o runs. */
+  /** Error de la última lectura de tareas o runs (base de datos). */
   error: string | null;
+  /** Error de `claude agents` (CLI), en un banner aparte. */
+  cliError: string | null;
   tasks: Task[];
   /** Tareas bloqueadas (revisión fallida, agente bloqueado, run detenido). */
   blocked: Task[];
@@ -31,6 +33,7 @@ export function useWorkStatus(): WorkStatus {
   const tasks = tasksQ.data ?? NONE;
   const runs = runsQ.data ?? NONE;
   const error = tasksQ.error ?? runsQ.error;
+  const cliError = useRunsSnapshot().liveError;
 
   return useMemo((): WorkStatus => {
     const taskById = new Map(tasks.map((t) => [t.id, t]));
@@ -49,6 +52,7 @@ export function useWorkStatus(): WorkStatus {
     }
     return {
       error,
+      cliError,
       tasks,
       blocked: tasks.filter((t) => t.status === "blocked"),
       openTotal,
@@ -56,5 +60,5 @@ export function useWorkStatus(): WorkStatus {
       activeByProject,
       activeTaskIds,
     };
-  }, [tasks, runs, error]);
+  }, [tasks, runs, error, cliError]);
 }

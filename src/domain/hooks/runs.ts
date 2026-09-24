@@ -42,8 +42,10 @@ export interface RunsSnapshot {
   full: Record<string, Run | null>;
   live: RunSummary[];
   details: Record<string, RunDetail | null>;
-  /** Errores de la última vuelta (en inglés, listos para mostrar). */
+  /** Errores de la base en la última vuelta (en inglés, listos para mostrar). */
   error: string | null;
+  /** Error de `claude agents` (CLI), aparte: no afecta a los datos de la base. */
+  liveError: string | null;
   /** La base respondió al menos una vez (`runs` vacío ya significa "no hay"). */
   loaded: boolean;
   /** `claude agents` respondió al menos una vez. */
@@ -58,6 +60,7 @@ const EMPTY: RunsSnapshot = {
   live: [],
   details: {},
   error: null,
+  liveError: null,
   loaded: false,
   liveLoaded: false,
   now: Date.now(),
@@ -112,7 +115,8 @@ async function pollOnce() {
   if (liveR.status === "fulfilled") {
     next.live = liveR.value;
     next.liveLoaded = true;
-  } else errors.push(`Couldn't read Claude sessions: ${String(liveR.reason)}`);
+    next.liveError = null;
+  } else next.liveError = `Couldn't read Claude Code sessions: ${String(liveR.reason)}`;
   if (fullR.status === "fulfilled") {
     const full: Record<string, Run | null> = {};
     for (const [id, r] of fullR.value) if (wanted.has(id)) full[id] = r;
@@ -266,6 +270,7 @@ export interface RunsState {
   tasks: Map<string, Task>;
   settings: Settings | null;
   error: string | null;
+  liveError: string | null;
   loaded: boolean;
   liveLoaded: boolean;
   now: number;
@@ -357,6 +362,7 @@ export function useRuns(filter: RunsFilter = {}): RunsState {
     tasks,
     settings,
     error: s.error,
+    liveError: s.liveError,
     loaded: s.loaded,
     liveLoaded: s.liveLoaded,
     now: s.now,

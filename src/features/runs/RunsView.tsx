@@ -60,6 +60,7 @@ export function RunsView({ projectId, onOpenRun }: RunsViewProps) {
           <span className="runs-scope">{scope}</span>
         </div>
         {state.error && <div className="banner banner-error runs-error">{state.error}</div>}
+        {state.liveError && <div className="banner banner-warn runs-error">{state.liveError}</div>}
         <div className="table-head runs-cols">
           <span>Project · repo</span>
           <span>Task</span>

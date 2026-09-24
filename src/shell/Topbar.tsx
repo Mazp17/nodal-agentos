@@ -18,7 +18,7 @@ export function Topbar(p: Props) {
   const runningLabel = p.concurrency != null ? `${p.running}/${p.concurrency} running` : `${p.running} running`;
   const pillLabel = [runningLabel, p.needYou ? `${p.needYou} need you` : "", p.queued ? `${p.queued} queued` : ""]
     .filter(Boolean)
-    .join(", ");
+    .join(" · ");
   return (
     <header className="topbar">
       <nav className="crumb" aria-label="Breadcrumb">
