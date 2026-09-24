@@ -22,6 +22,9 @@ use super::executors::{self, ExecutorInfo};
 use super::transitions::executor_label;
 use super::{diff, ops, validate, worktree, Cleaning, Env, CLEANING_ERR};
 
+/// Va en todo run (`--append-system-prompt`): una sesión que termina preguntando queda
+/// `idle` + `working` y la tarea no sale nunca de In Progress.
+pub const UNATTENDED_SYSTEM_PROMPT: &str = "You are running unattended, launched by Nodal. When done, report the result in one short message and stop. Don't ask questions or offer next steps: Nodal decides what happens next.";
 /// Tools que el revisor no puede usar (`--disallowedTools`).
 pub const REVIEW_DISALLOWED: [&str; 3] = ["Edit", "Write", "NotebookEdit"];
 /// Permission mode del revisor, sea cual sea el del repo: `dontAsk` niega sin preguntar
@@ -148,10 +151,12 @@ pub fn extra_flags(run: &Run, tests: &[String]) -> ExtraFlags {
         Executor::Agent { name, .. } => Some(name.clone()),
         _ => None,
     };
+    let append_system_prompt = Some(UNATTENDED_SYSTEM_PROMPT.to_string());
     match run.kind {
-        RunKind::Work => ExtraFlags { agent, ..Default::default() },
+        RunKind::Work => ExtraFlags { agent, append_system_prompt, ..Default::default() },
         RunKind::Review => ExtraFlags {
             agent,
+            append_system_prompt,
             allowed_tools: REVIEW_ALLOWED
                 .iter()
                 .map(|s| s.to_string())
@@ -984,7 +989,11 @@ mod tests {
         use crate::work::testutil::run_of;
         let agent = Executor::Agent { name: "frontend-developer".into(), source: AgentSource::User };
         let tests = vec!["npm test".to_string()];
-        assert_eq!(extra_flags(&run_of(agent.clone(), RunKind::Work, false), &tests).to_args(), ["--agent", "frontend-developer"]);
+        let sp = "--append-system-prompt";
+        assert_eq!(
+            extra_flags(&run_of(agent.clone(), RunKind::Work, false), &tests).to_args(),
+            ["--agent", "frontend-developer", sp, UNATTENDED_SYSTEM_PROMPT]
+        );
         let reviewer = Executor::Agent { name: "code-reviewer".into(), source: AgentSource::User };
         assert_eq!(
             extra_flags(&run_of(reviewer, RunKind::Review, false), &tests).to_args(),
@@ -1001,11 +1010,16 @@ mod tests {
                 "Bash(git show:*)",
                 "Bash(npm test:*)",
                 "--disallowedTools",
-                "Edit,Write,NotebookEdit"
+                "Edit,Write,NotebookEdit",
+                sp,
+                UNATTENDED_SYSTEM_PROMPT
             ]
         );
-        assert!(extra_flags(&run_of(Executor::Claude, RunKind::Work, false), &tests).to_args().is_empty());
-        assert!(extra_flags(&run_of(Executor::Workflow { name: "plan-task".into() }, RunKind::Work, false), &[]).to_args().is_empty());
+        assert_eq!(extra_flags(&run_of(Executor::Claude, RunKind::Work, false), &tests).to_args(), [sp, UNATTENDED_SYSTEM_PROMPT]);
+        assert_eq!(
+            extra_flags(&run_of(Executor::Workflow { name: "plan-task".into() }, RunKind::Work, false), &[]).to_args(),
+            [sp, UNATTENDED_SYSTEM_PROMPT]
+        );
     }
 
     #[test]
