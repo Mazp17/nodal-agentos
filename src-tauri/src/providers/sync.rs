@@ -694,6 +694,25 @@ mod tests {
     }
 
     #[test]
+    fn comment_waits_for_earlier_state_in_backoff() {
+        let env = Env::new();
+        let t = env.import(1, "s-todo");
+        env.enqueue_status(&t.id, TaskStatus::InReview, 100);
+        env.fake.data().fail_writes = Some(ProviderError::new(ErrorKind::Transient, "HTTP 502"));
+        env.run(100);
+        env.fake.data().fail_writes = None;
+        // El comentario llega mientras el cambio de estado espera su backoff: no se adelanta.
+        env.enqueue_comment(&t.id, "cierre", 200);
+        let r = env.run(1_000);
+        assert_eq!(r.pushed, 0, "{r:?}");
+        assert!(env.fake.data().comments.is_empty());
+        let r = env.run(100 + 30_000);
+        assert_eq!(r.pushed, 2, "{r:?}");
+        assert_eq!(env.fake.data().set_states.len(), 1);
+        assert_eq!(env.fake.data().comments.len(), 1);
+    }
+
+    #[test]
     fn permanent_errors_and_attempt_cap_drop_the_row() {
         let env = Env::new();
         let t = env.import(1, "s-todo");

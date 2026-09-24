@@ -378,10 +378,15 @@ fn insert(conn: &Connection, task_id: &str, provider: &str, payload: OutboxPaylo
 }
 
 /// Filas vencidas de un proveedor, en orden de creación (el comentario de cierre sale después
-/// del cambio de estado que lo acompaña).
+/// del cambio de estado que lo acompaña). Una fila no sale mientras haya una anterior de su
+/// misma tarea todavía en backoff: el orden por tarea se respeta entre pasadas.
 pub fn due_outbox(conn: &Connection, provider: &str, now: i64) -> Result<Vec<OutboxItem>, DbError> {
-    let mut stmt =
-        conn.prepare("SELECT * FROM sync_outbox WHERE provider = ?1 AND next_attempt_at <= ?2 ORDER BY id")?;
+    let mut stmt = conn.prepare(
+        "SELECT * FROM sync_outbox o WHERE provider = ?1 AND next_attempt_at <= ?2
+           AND NOT EXISTS (SELECT 1 FROM sync_outbox p
+                           WHERE p.task_id = o.task_id AND p.id < o.id AND p.next_attempt_at > ?2)
+         ORDER BY id",
+    )?;
     let out = stmt.query_map(params![provider, now], outbox_from_row)?.collect::<rusqlite::Result<_>>()?;
     Ok(out)
 }
