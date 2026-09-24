@@ -1,8 +1,9 @@
-import { useEffect, useState } from "react";
+import { useMemo, useState } from "react";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { getTask, listTasks, syncNow, unlinkTask } from "../../domain/api";
+import { getTask, syncNow, unlinkTask } from "../../domain/api";
 import type { Task, TaskSource } from "../../domain/types";
 import { errorText, useNow, useSourceLinks } from "../../domain/hooks/providers";
+import { useTasks } from "../../domain/hooks/store";
 import { useToast } from "../../ui/Toasts";
 import { IssueDetailCache, useIssueDetail } from "../linear/issueDetail";
 import { Comments, DetailSections } from "../linear/IssueDetailSections";
@@ -237,22 +238,10 @@ function LinearDetail({
 
 /** externalId → id de tarea, para navegar a sub-issues y relaciones ya importadas. */
 function useTasksByExternalId(projectId: string | null): Map<string, string> {
-  const [map, setMap] = useState<Map<string, string>>(new Map());
-  useEffect(() => {
-    if (!projectId) return;
-    let alive = true;
-    listTasks(projectId).then(
-      (tasks) => {
-        if (!alive) return;
-        const m = new Map<string, string>();
-        for (const t of tasks) if (t.source) m.set(t.source.externalId, t.id);
-        setMap(m);
-      },
-      (err) => console.error("listTasks", err),
-    );
-    return () => {
-      alive = false;
-    };
-  }, [projectId]);
-  return map;
+  const { data } = useTasks(projectId);
+  return useMemo(() => {
+    const m = new Map<string, string>();
+    if (projectId) for (const t of data ?? []) if (t.source) m.set(t.source.externalId, t.id);
+    return m;
+  }, [data, projectId]);
 }

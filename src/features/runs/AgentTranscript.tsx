@@ -36,7 +36,14 @@ function useTranscript(sessionId: string | null, cwd: string, wfId: string | nul
     let cancelled = false;
     let timer: ReturnType<typeof setTimeout>;
     let lastBytes = 0;
+    let first = true;
     const load = async () => {
+      // Ventana oculta: se saltea la consulta y se reintenta en la próxima vuelta.
+      if (!first && document.hidden) {
+        timer = setTimeout(load, POLL_MS);
+        return;
+      }
+      first = false;
       try {
         const t = await getAgentTranscript(sessionId, cwd, wfId, agentId, limit);
         lastBytes = t?.bytes ?? 0;

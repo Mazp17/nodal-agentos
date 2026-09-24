@@ -23,7 +23,14 @@ function useRunDiff(runId: string, live: boolean): Load {
   useEffect(() => {
     let cancelled = false;
     let timer: ReturnType<typeof setTimeout>;
+    let first = true;
     const load = async () => {
+      // Ventana oculta: se saltea la consulta y se reintenta en la próxima vuelta.
+      if (!first && document.hidden) {
+        timer = setTimeout(load, LIVE_POLL_MS);
+        return;
+      }
+      first = false;
       try {
         const diff = await runDiff(runId);
         if (!cancelled) setState({ id: runId, load: { status: "ok", diff } });

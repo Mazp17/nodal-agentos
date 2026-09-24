@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { useRuns } from "../../domain/hooks/runs";
+import { usePolled } from "../../domain/hooks/store";
 import type { Repo } from "../../domain/types";
 import { repoActivity } from "./api";
 import type { RepoActivity, SessionActivity, SubagentActivity } from "./types";
@@ -40,28 +41,14 @@ function sessionState(s: SessionActivity): { label: string; tone: Tone; live: bo
 }
 
 function useRepoActivity(repoPath: string | null): { data: RepoActivity | null; error: string | null } {
-  const [state, setState] = useState<{ path: string; data: RepoActivity | null; error: string | null } | null>(null);
-  useEffect(() => {
-    if (!repoPath) return;
-    let cancelled = false;
-    let timer: ReturnType<typeof setTimeout>;
-    const loop = async () => {
-      try {
-        const d = await repoActivity(repoPath);
-        if (!cancelled) setState({ path: repoPath, data: d, error: null });
-      } catch (e) {
-        if (!cancelled) setState((prev) => ({ path: repoPath, data: prev?.path === repoPath ? prev.data : null, error: String(e) }));
-      }
-      if (!cancelled) timer = setTimeout(loop, POLL_MS);
-    };
-    void loop();
-    return () => {
-      cancelled = true;
-      clearTimeout(timer);
-    };
-  }, [repoPath]);
-  if (!repoPath || state?.path !== repoPath) return { data: null, error: null };
-  return { data: state.data, error: state.error };
+  // Mismo motor que el resto de la capa de datos: un timer por repo, pausa con la ventana oculta.
+  const { data, error } = usePolled<RepoActivity>(
+    repoPath ? `activity:${repoPath}` : null,
+    () => repoActivity(repoPath as string),
+    [],
+    POLL_MS,
+  );
+  return { data: data ?? null, error };
 }
 
 interface SessionGroup {
