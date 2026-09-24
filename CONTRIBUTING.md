@@ -40,6 +40,7 @@ src-tauri/src/          Rust backend (Tauri commands)
   migrate/              import of data from earlier versions
   secrets.rs            API keys in the macOS Keychain
   events.rs             `nodal://changed` events for the frontend
+  mcp/                  MCP server for agents: Unix socket in the app, `nodal-mcp` stdio bridge (src/bin)
   updates.rs            in-app updates: "Check for Updates…" menu item, off in debug builds
 src/                    React + TypeScript frontend
   domain/               typed command wrappers (api.ts), shared types, data store and hooks
