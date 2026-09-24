@@ -1,82 +1,132 @@
-import type { Viewer } from "../features/linear/api";
-import type { RunView } from "../features/runs/status";
+import type { Project } from "../domain/types";
 import { BrandMark } from "../ui/BrandMark";
-import { Avatar } from "../features/linear/Board";
+import type { ProjectPage, Route } from "./useNav";
 
-export type NavView = "board" | "runs" | "tasks" | "activity" | "settings";
+const PROJECT_PAGES: { page: ProjectPage; label: string }[] = [
+  { page: "board", label: "Board" },
+  { page: "tasks", label: "Tasks" },
+  { page: "runs", label: "Runs" },
+  { page: "activity", label: "Activity" },
+  { page: "project-settings", label: "Settings" },
+];
+
+export interface ProviderFoot {
+  tone: "ok" | "danger" | "muted";
+  label: string;
+}
 
 interface Props {
-  current: NavView;
-  counts: Partial<Record<NavView, number>>;
-  /** Pulso en el item (p. ej. agentes trabajando en los repos) y su tooltip. */
-  live?: Partial<Record<NavView, string>>;
-  activeRuns: RunView[];
-  viewer: Viewer | null;
-  linear: { ok: boolean; label: string };
-  onNav: (v: NavView) => void;
-  onOpenRun: (key: string) => void;
+  /** Ruta "visible" (en un run, la de origen). */
+  current: Route;
+  projects: Project[];
+  expanded: ReadonlySet<string>;
+  openTotal: number;
+  activeTotal: number;
+  activeByProject: Map<string, number>;
+  provider: ProviderFoot;
+  onGo: (page: "board" | "runs" | "settings" | ProjectPage, projectId: string | null) => void;
+  onToggleProject: (projectId: string) => void;
+  onNewProject: () => void;
   onOpenPalette: () => void;
 }
 
-const NAV: { id: NavView; label: string; shortcut: string }[] = [
-  { id: "board", label: "Board", shortcut: "⌘1" },
-  { id: "runs", label: "Runs", shortcut: "⌘2" },
-  { id: "tasks", label: "Tasks", shortcut: "⌘3" },
-  { id: "activity", label: "Activity", shortcut: "⌘4" },
-  { id: "settings", label: "Settings", shortcut: "⌘," },
-];
-
 export function Sidebar(p: Props) {
+  const global = (page: "board" | "runs" | "settings") => p.current.projectId === null && p.current.page === page;
+  const top: { page: "board" | "runs" | "settings"; label: string; count?: number; live?: boolean; kbd?: string }[] = [
+    { page: "board", label: "All projects", count: p.openTotal || undefined },
+    { page: "runs", label: "Runs", count: p.activeTotal || undefined, live: p.activeTotal > 0 },
+    { page: "settings", label: "Settings", kbd: "⌘," },
+  ];
+
   return (
-    <aside className="sidebar">
+    <aside className="sidebar" aria-label="Sidebar">
       <div className="brand">
-        <BrandMark />
-        <span className="brand-name">Agent Desk</span>
+        <BrandMark size={22} />
+        <span className="brand-text">
+          <span className="brand-name">Nodal</span>
+          <span className="brand-tag">Agent OS for Claude</span>
+        </span>
       </div>
-      <div className="side-search-wrap">
-        <button type="button" className="side-search" onClick={p.onOpenPalette} aria-keyshortcuts="Meta+K">
-          <span>Search or run…</span>
-          <kbd>⌘K</kbd>
-        </button>
-      </div>
+      <button type="button" className="side-search" onClick={p.onOpenPalette} aria-keyshortcuts="Meta+K">
+        <span>Search or run…</span>
+        <kbd className="kbd">⌘K</kbd>
+      </button>
+
       <nav className="side-nav" aria-label="Main">
-        {NAV.map((n) => (
+        {top.map((n) => (
           <button
-            key={n.id}
+            key={n.page}
             type="button"
-            className={`side-nav-item ${p.current === n.id ? "on" : ""}`}
-            aria-current={p.current === n.id ? "page" : undefined}
-            title={p.live?.[n.id] ? `${n.label} (${n.shortcut}) · ${p.live[n.id]}` : `${n.label} (${n.shortcut})`}
-            onClick={() => p.onNav(n.id)}
+            className={`side-item ${global(n.page) ? "on" : ""}`}
+            aria-current={global(n.page) ? "page" : undefined}
+            title={n.kbd ? `${n.label} (${n.kbd})` : undefined}
+            onClick={() => p.onGo(n.page, null)}
           >
-            <span className="side-nav-label">{n.label}</span>
-            {p.live?.[n.id] && <span className="dot dot-sm pulse tone-accent" role="img" aria-label={p.live[n.id]} />}
-            {p.counts[n.id] != null && <span className="side-nav-count num">{p.counts[n.id]}</span>}
+            <span className="side-item-label">{n.label}</span>
+            {n.live && <span className="dot dot-sm pulse tone-accent" aria-hidden />}
+            {n.count != null && (
+              <span className="side-count num" aria-label={n.page === "runs" ? `${n.count} running` : `${n.count} open tasks`}>
+                {n.count}
+              </span>
+            )}
           </button>
         ))}
       </nav>
-      <h2 className="side-heading">Active runs</h2>
-      <div className="side-runs">
-        {p.activeRuns.map((r) => (
-          <button key={r.key} type="button" className={`side-run tone-${r.tone}`} onClick={() => p.onOpenRun(r.key)}>
-            <span className="dot pulse" aria-hidden />
-            <span className="side-run-text">
-              <span className="side-run-issue">{r.identifier ?? r.run?.name ?? r.runId}</span>
-              <span className="side-run-label ellipsis">{r.label}</span>
-            </span>
-          </button>
-        ))}
-        {p.activeRuns.length === 0 && <div className="side-runs-empty">Nothing running.</div>}
+
+      <div className="side-heading">
+        <h2 className="side-heading-label">Projects</h2>
+        <button type="button" className="icon-btn side-add" title="New project" aria-label="New project" onClick={p.onNewProject}>
+          +
+        </button>
       </div>
-      <div className="side-foot">
-        <Avatar name={p.viewer?.name} size="md" />
-        <span className="side-foot-text">
-          <span className="ellipsis">{p.viewer?.name ?? "Linear"}</span>
-          <span className={`side-foot-status tone-${p.linear.ok ? "ok" : "danger"}`}>
-            <span className="dot dot-sm" aria-hidden />
-            {p.linear.label}
-          </span>
-        </span>
+      <nav className="side-projects" aria-label="Projects">
+        {p.projects.map((proj) => {
+          const open = p.expanded.has(proj.id);
+          const cur = p.current.projectId === proj.id;
+          const running = p.activeByProject.get(proj.id) ?? 0;
+          return (
+            <div key={proj.id} className="side-project" role="group" aria-label={proj.name}>
+              <button
+                type="button"
+                className={`side-item side-project-head ${cur && !open ? "on-soft" : ""}`}
+                aria-expanded={open}
+                onClick={() => p.onToggleProject(proj.id)}
+              >
+                <span className="project-dot" style={{ ["--project-color" as string]: proj.color }} aria-hidden />
+                <span className="side-item-label ellipsis">{proj.name}</span>
+                {running > 0 && (
+                  <span className="side-count side-count-live num" aria-label={`${running} running`}>
+                    {running}
+                  </span>
+                )}
+                <span className="side-chev" aria-hidden>
+                  {open ? "▾" : "▸"}
+                </span>
+              </button>
+              {open &&
+                PROJECT_PAGES.map((sp) => {
+                  const on = cur && p.current.page === sp.page;
+                  return (
+                    <button
+                      key={sp.page}
+                      type="button"
+                      className={`side-item side-sub ${on ? "on" : ""}`}
+                      aria-current={on ? "page" : undefined}
+                      onClick={() => p.onGo(sp.page, proj.id)}
+                    >
+                      {sp.label}
+                    </button>
+                  );
+                })}
+            </div>
+          );
+        })}
+        {p.projects.length === 0 && <div className="side-empty">No projects yet.</div>}
+      </nav>
+
+      <div className="side-foot" role="status">
+        <span className={`dot dot-sm tone-${p.provider.tone}`} aria-hidden />
+        <span className="ellipsis">{p.provider.label}</span>
       </div>
     </aside>
   );

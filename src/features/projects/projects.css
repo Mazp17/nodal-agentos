@@ -1,0 +1,73 @@
+/* Proyectos: New project, repos en borrador, aviso del selector y tarjetas de repo. */
+
+.key-row { display: flex; align-items: center; gap: var(--sp-4); }
+.key-input { width: 96px; text-transform: uppercase; }
+
+.draft-repo {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-4);
+  padding: 7px var(--sp-4);
+  border-radius: var(--r-card);
+  border: 1px solid var(--border);
+  min-width: 0;
+}
+.draft-repo-name { font-size: var(--fs-base); font-weight: var(--fw-medium); flex: none; }
+.draft-repo-path { font-size: var(--fs-sm); color: var(--text-muted); flex: 1; }
+.draft-repo-remove { margin-left: auto; }
+
+.repo-notice {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-4);
+  padding: var(--sp-3) var(--sp-5);
+  border-radius: var(--r-xl);
+  font-size: var(--fs-md);
+  color: var(--text-3);
+  line-height: 1.45;
+  border: 1px solid var(--border);
+}
+.repo-notice-text { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.repo-notice-bad, .repo-notice-dup { background: var(--red-tint-7); border-color: color-mix(in oklch, var(--red) 28%, transparent); }
+.repo-notice-sub { background: var(--amber-tint-10); border-color: var(--amber-tint-35); }
+
+.connect-box {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  padding: var(--sp-4) var(--sp-5);
+  border-radius: var(--r-xl);
+  border: 1px solid var(--border);
+}
+.connect-box-head { display: flex; align-items: center; gap: var(--sp-4); font-size: var(--fs-base); }
+.linear-key-row { display: flex; gap: var(--sp-3); }
+.linear-key-row .input { flex: 1; }
+.linear-connected { display: flex; align-items: center; gap: var(--sp-2); font-size: var(--fs-md); color: var(--green); }
+.inline-field { display: flex; align-items: center; gap: var(--sp-4); flex-wrap: wrap; }
+.inline-field-label { font-size: var(--fs-md); color: var(--text-muted); }
+.provider-mark { width: 9px; height: 9px; flex: none; border-radius: 2.5px; background: var(--text-muted); opacity: 0.75; }
+
+/* Tarjetas de repo */
+.repo-card { padding: var(--sp-5) var(--sp-6); display: flex; flex-direction: column; gap: var(--sp-3); }
+.repo-card-head { display: flex; align-items: center; gap: var(--sp-4); flex-wrap: wrap; }
+.repo-card-name { font-size: 13.5px; font-weight: var(--fw-semibold); }
+.repo-card-status { display: flex; align-items: center; gap: var(--sp-2); font-size: var(--fs-sm); color: var(--tone); }
+.repo-card-confirm { font-size: var(--fs-md); }
+.repo-card-meta { display: flex; gap: var(--sp-5); flex-wrap: wrap; align-items: center; font-size: var(--fs-sm); }
+.repo-card-path { font-size: var(--fs-sm); color: var(--text-4); overflow-wrap: anywhere; }
+
+.repo-opts {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  padding: var(--sp-4) var(--sp-5);
+  margin-top: var(--sp-1);
+  border-radius: var(--r-card);
+  background: rgb(0 0 0 / 0.18);
+  border: 1px solid var(--border);
+}
+.repo-opt { display: flex; align-items: center; gap: var(--sp-5); }
+.repo-opt-label { width: 118px; flex: none; font-size: var(--fs-md); color: var(--text-muted); }
+.repo-opt-input { width: 220px; height: var(--h-lg); }
+.repo-opts-note { margin-top: var(--sp-1); }
+.executor-select { min-width: 220px; max-width: 100%; }

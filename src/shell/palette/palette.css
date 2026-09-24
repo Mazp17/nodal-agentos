@@ -1,9 +1,9 @@
 /* Command palette (⌘K). */
 
-.palette-scrim { position: absolute; inset: 0; z-index: 50; background: var(--scrim-strong); }
+.palette-scrim { position: fixed; inset: 0; z-index: 50; background: var(--scrim-strong); }
 .palette {
-  position: absolute;
-  top: 90px;
+  position: fixed;
+  top: 84px;
   left: 0;
   right: 0;
   margin-inline: auto;
@@ -11,21 +11,22 @@
   width: min(600px, calc(100% - 40px));
   border-radius: var(--r-3xl);
   background: var(--surface-palette);
-  border: 1px solid var(--border-4);
+  border: 1px solid var(--border-3);
   box-shadow: var(--shadow-palette);
   overflow: hidden;
   animation: drop var(--dur-fast) ease-out;
 }
 .palette-input {
   width: 100%;
-  height: var(--h-bar);
+  height: 48px;
   padding: 0 var(--sp-7);
   border: 0;
-  border-bottom: 1px solid var(--border-2);
+  border-bottom: 1px solid var(--border);
   background: transparent;
   font-size: var(--fs-2xl);
 }
 .palette-input:focus-visible { outline: none; }
+.palette:focus-within { box-shadow: var(--shadow-palette), 0 0 0 2px var(--accent-tint-50); }
 .palette-input::placeholder { color: var(--text-dim); }
 .palette-list { padding: var(--sp-2); max-height: 380px; overflow: auto; display: flex; flex-direction: column; gap: 1px; }
 .palette-item {
@@ -38,11 +39,10 @@
   font-size: var(--fs-lg);
 }
 .palette-item.on { background: var(--fill-5); }
-.palette-kind { width: 52px; flex: none; font-size: var(--fs-2xs); color: var(--text-dim); }
-.palette-kind-action { color: var(--text-muted); }
+.palette-kind { width: 48px; flex: none; font-size: var(--fs-2xs); color: var(--text-dim); }
 .palette-kind-run { color: var(--accent); }
 .palette-label { flex: 1; }
-.palette-sub { font-size: var(--fs-xs); color: var(--text-faint); flex: none; font-family: var(--font-mono); }
+.palette-sub { font-size: var(--fs-xs); color: var(--text-dim); flex: none; }
 .palette-empty { padding: var(--sp-8) var(--sp-4); font-size: var(--fs-base); color: var(--text-faint); }
 .palette-foot {
   display: flex;
