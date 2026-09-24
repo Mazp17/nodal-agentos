@@ -1,5 +1,5 @@
 //! API keys de los proveedores en el llavero de macOS (crate `keyring`), con caché en memoria.
-//! Servicio `com.nodal.app`, cuenta `<provider>-api-key` (p. ej. `linear-api-key`).
+//! Servicio `io.github.mazp17.nodal`, cuenta `<provider>-api-key` (p. ej. `linear-api-key`).
 //! Las keys nunca se serializan hacia el frontend ni se loguean.
 //!
 //! Hay una sola instancia (`Secrets::keychain()`, creada en `lib.rs`): se registra como
@@ -12,7 +12,7 @@ use std::sync::{Arc, Mutex};
 // Las llamadas al llavero son bloqueantes (y pueden esperar un diálogo del sistema).
 use crate::util::blocking;
 
-pub const SERVICE: &str = "com.nodal.app";
+pub const SERVICE: &str = "io.github.mazp17.nodal";
 
 /// Dónde se guardan de verdad las keys. En la app es el llavero; en tests, memoria.
 pub trait SecretBackend: Send + Sync + 'static {

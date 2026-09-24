@@ -1,5 +1,5 @@
 //! API key de Linear: fachada sobre `crate::secrets` (proveedor `linear`, cuenta
-//! `linear-api-key` en el servicio `com.nodal.app`), con los errores tipados de Linear.
+//! `linear-api-key` en el servicio `io.github.mazp17.nodal`), con los errores tipados de Linear.
 //! La key nunca se serializa hacia el frontend ni se loguea.
 
 use super::error::LinearError;

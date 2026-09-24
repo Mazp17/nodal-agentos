@@ -25,7 +25,7 @@ Knowing this helps decide whether something is a vulnerability:
 
 - **Processes.** Nodal spawns `claude`, `git`, `gh` and `osascript` with argument arrays, never through a shell. Task fields, branch names and paths are validated before they become arguments.
 - **Claude Code permissions.** Runs use the permission mode configured per repo, which can be as permissive as `bypassPermissions`. The automatic reviewer always runs with `dontAsk` and a read-only allowlist, whatever the repo is configured with.
-- **Secrets.** Task-manager API keys live in the macOS Keychain (service `com.nodal.app`). They are never sent to the frontend or written to logs; the UI only shows the last 4 characters.
+- **Secrets.** Task-manager API keys live in the macOS Keychain (service `io.github.mazp17.nodal`). They are never sent to the frontend or written to logs; the UI only shows the last 4 characters.
 - **Network.** The only outbound calls go to the task-manager APIs you connect (today, Linear). No server, no telemetry.
 - **Local data.** An SQLite database and plans in the app data folder, worktrees under `~/.nodal`. Nodal reads Claude Code's session files under `~/.claude` (or `CLAUDE_CONFIG_DIR`).
 - **Webview.** Content from task managers (issue descriptions, comments) is rendered as Markdown without raw HTML, under a strict CSP. External links open in the system browser.
