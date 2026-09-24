@@ -3,8 +3,8 @@
 // píldora del topbar usa `useQueueSummary` de runs.
 
 import { useMemo } from "react";
-import { isRunActive, useAllRuns, useRunsSnapshot } from "../domain/hooks/runs";
-import { useTaskList } from "../domain/hooks/store";
+import { isRunActive, projectIdOf, useAllRuns, useRunsSnapshot } from "../domain/hooks/runs";
+import { useRepoList, useTaskList } from "../domain/hooks/store";
 import type { RunLight, Task } from "../domain/types";
 
 const RUNNING: ReadonlySet<RunLight["status"]> = new Set(["launching", "launched"]);
@@ -29,6 +29,7 @@ export interface WorkStatus {
 
 export function useWorkStatus(): WorkStatus {
   const tasksQ = useTaskList();
+  const reposQ = useRepoList();
   const runsQ = useAllRuns();
   const tasks = tasksQ.data ?? NONE;
   const runs = runsQ.data ?? NONE;
@@ -37,6 +38,7 @@ export function useWorkStatus(): WorkStatus {
 
   return useMemo((): WorkStatus => {
     const taskById = new Map(tasks.map((t) => [t.id, t]));
+    const repoById = new Map((reposQ.data ?? []).map((r) => [r.id, r]));
     let openTotal = 0;
     for (const t of tasks) if (t.status !== "done" && t.status !== "canceled") openTotal++;
     const activeByProject = new Map<string, number>();
@@ -47,7 +49,8 @@ export function useWorkStatus(): WorkStatus {
       if (r.taskId) activeTaskIds.add(r.taskId);
       if (!RUNNING.has(r.status)) continue;
       activeTotal++;
-      const p = r.taskId ? taskById.get(r.taskId)?.projectId : undefined;
+      // Los runs sin tarea cuentan en el proyecto de su repo.
+      const p = projectIdOf(r, taskById, repoById);
       if (p) activeByProject.set(p, (activeByProject.get(p) ?? 0) + 1);
     }
     return {
@@ -60,5 +63,5 @@ export function useWorkStatus(): WorkStatus {
       activeByProject,
       activeTaskIds,
     };
-  }, [tasks, runs, error, cliError]);
+  }, [tasks, runs, reposQ.data, error, cliError]);
 }

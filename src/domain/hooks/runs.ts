@@ -102,7 +102,15 @@ async function pollOnce() {
     listRunsLight(null),
     latestRunsByTask(null),
     listRuns(),
-    Promise.all(wantedIds.map((id) => getRun(id).then((r) => [id, r] as const, () => [id, null] as const))),
+    // Solo "no existe" se guarda como `null`; un error pasajero conserva lo anterior.
+    Promise.all(
+      wantedIds.map((id) =>
+        getRun(id).then(
+          (r) => [id, r] as const,
+          (e: unknown) => [id, /no longer exists/i.test(String(e)) ? null : snapshot.full[id]] as const,
+        ),
+      ),
+    ),
   ]);
   const errors: string[] = [];
   const next: Partial<RunsSnapshot> = { now: Date.now() };
@@ -119,7 +127,7 @@ async function pollOnce() {
   } else next.liveError = `Couldn't read Claude Code sessions: ${String(liveR.reason)}`;
   if (fullR.status === "fulfilled") {
     const full: Record<string, Run | null> = {};
-    for (const [id, r] of fullR.value) if (wanted.has(id)) full[id] = r;
+    for (const [id, r] of fullR.value) if (wanted.has(id) && r !== undefined) full[id] = r;
     next.full = full;
   }
   next.error = errors.length ? errors.join("\n") : null;

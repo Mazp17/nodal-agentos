@@ -8,6 +8,7 @@ import {
   removeTaskRelation,
   unlinkTask,
   updateTask,
+  worktreeStatus,
   type TaskPatch,
   type WorktreeStatus,
 } from "../../domain/api";
@@ -195,10 +196,11 @@ export function TaskPanel({ taskId, onClose, onOpenRun, onOpenDiff, onOpenTask, 
     }
   };
 
-  const cleanUpAnyway = () => {
+  const cleanUpAnyway = async () => {
     const w = task.worktree;
     if (!w) return;
-    const s = wt.data;
+    // Estado fresco: el del polling puede tener hasta 20 s.
+    const s = await worktreeStatus(task.id).catch(() => wt.data);
     const losses = [
       s && s.unpushed > 0 ? `${s.unpushed} commit${s.unpushed === 1 ? "" : "s"} that exist nowhere else` : null,
       s?.dirty ? "uncommitted changes" : null,
@@ -433,7 +435,7 @@ export function TaskPanel({ taskId, onClose, onOpenRun, onOpenDiff, onOpenTask, 
                         type="button"
                         className="btn btn-sm btn-danger"
                         disabled={!!activeRun || busy !== null}
-                        onClick={cleanUpAnyway}
+                        onClick={() => void cleanUpAnyway()}
                       >
                         Clean up anyway
                       </button>

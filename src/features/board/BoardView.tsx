@@ -36,7 +36,9 @@ const NO_FILTERS: Filters = { q: "", repo: null, source: null, status: null, lab
 
 const DRAG_TYPE = "text/x-nodal-task";
 
-const byPosition = (a: Task, b: Task) => a.position - b.position || a.number - b.number;
+/** Mismo orden que el backend (`position, created_at, id`), para que `reorder_tasks` reciba lo que se ve. */
+const byPosition = (a: Task, b: Task) =>
+  a.position - b.position || a.createdAt - b.createdAt || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
 
 export function BoardView({ projectId, onOpenTask, onOpenRun, onNewProject, onOpenProjectSettings }: BoardViewProps) {
   const push = useToast();

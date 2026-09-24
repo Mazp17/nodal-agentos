@@ -371,11 +371,13 @@ function DiagnosticsSettings() {
           const row = trust?.find((t) => t.repo.id === repo.id);
           const t = row?.trust ?? null;
           const state: Check["state"] =
-            busy || !row ? "checking" : row.error ? "error" : t?.trusted === true ? "ok" : t?.trusted === false ? "warn" : "na";
+            busy || (!row && !trust) ? "checking" : !row ? "na" : row.error ? "error" : t?.trusted === true ? "ok" : t?.trusted === false ? "warn" : "na";
           const label =
             state === "checking"
               ? LABEL.checking
-              : row?.error
+              : !row
+                ? "Not checked"
+                : row.error
                 ? "Error"
                 : t?.trusted === true
                   ? "Trusted"

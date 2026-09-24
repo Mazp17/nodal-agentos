@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { openInEditor, openWorktree, runDiff, type DiffFileStatus, type FileDiff, type RunDiff } from "../../domain/api";
-import { projectIdOf, useRun } from "../../domain/hooks/runs";
+import { projectIdOf, useRuns } from "../../domain/hooks/runs";
 import { useToast } from "../../ui/Toasts";
 import { useFocusTrap } from "../../ui/useFocusTrap";
 import { runTaskRef } from "./status";
@@ -65,7 +65,9 @@ export interface RunDiffDrawerProps {
 export function RunDiffDrawer({ runId, onClose }: RunDiffDrawerProps) {
   const ref = useFocusTrap<HTMLDivElement>(onClose);
   const toast = useToast();
-  const { view, state } = useRun(runId);
+  // Sin `useRun`: el drawer no necesita el run completo (prompt) ni el detalle del workflow.
+  const state = useRuns();
+  const view = state.byId.get(runId);
   const live = view ? view.phase === "running" || view.phase === "waiting" || view.phase === "starting" : false;
   const load = useRunDiff(runId, live);
   const [selected, setSelected] = useState<string | null>(null);
@@ -124,7 +126,8 @@ export function RunDiffDrawer({ runId, onClose }: RunDiffDrawerProps) {
               {diff && (
                 <>
                   <span className="diff-ref">{diff.base}</span>
-                  <span aria-label="from">←</span>
+                  <span aria-hidden>←</span>
+                  <span className="sr-only">from</span>
                   <span className="diff-ref">{branch ?? "HEAD"}</span>
                   <span>·</span>
                   <span>

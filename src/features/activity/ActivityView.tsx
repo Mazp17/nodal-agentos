@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { projectActivity, type ProjectActivity } from "../../domain/api";
 import { useAllRuns } from "../../domain/hooks/runs";
-import { usePolled, useRepos } from "../../domain/hooks/store";
+import { POLL, usePolled, useRepos } from "../../domain/hooks/store";
 import type { Repo } from "../../domain/types";
 import { repoActivity } from "./api";
 import type { RepoActivity, SessionActivity, SubagentActivity } from "./types";
@@ -58,7 +58,7 @@ function useProjectActivity(projectId: string | null) {
     projectId ? `project-activity:${projectId}` : null,
     () => projectActivity(projectId as string),
     [],
-    POLL_MS * 2,
+    POLL.live * 2,
   ).data;
 }
 
@@ -173,7 +173,14 @@ export function ActivityView({ projectId, onOpenRun }: ActivityViewProps) {
                 onClick={() => setPicked(r.id)}
               >
                 {r.name}
-                {n > 0 && <span className="act-repo-cnt">{n}</span>}
+                {n > 0 && (
+                  <>
+                    <span className="act-repo-cnt" aria-hidden>
+                      {n}
+                    </span>
+                    <span className="sr-only">, {n} active session{n === 1 ? "" : "s"}</span>
+                  </>
+                )}
               </button>
             );
           })}

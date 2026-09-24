@@ -175,7 +175,10 @@ if (typeof document !== "undefined") {
 }
 
 if (typeof window !== "undefined" && "__TAURI_INTERNALS__" in window) {
-  onChanged((e) => onBackendChange(e.kind)).catch((err: unknown) => console.error("nodal://changed", err));
+  const unlisten = onChanged((e) => onBackendChange(e.kind));
+  unlisten.catch((err: unknown) => console.error("nodal://changed", err));
+  // En dev, HMR recarga el módulo: sin esto los listeners se acumulan.
+  import.meta.hot?.dispose(() => void unlisten.then((u) => u(), () => {}));
 }
 
 function entry(key: string, fetcher: () => Promise<unknown>, resources: Resource[], interval: number): Entry {
