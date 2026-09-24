@@ -1,11 +1,10 @@
-// Espejo de src-tauri/src/runs/types.rs (serde rename_all = camelCase).
+// Espejo de src-tauri/src/runs/types.rs (serde rename_all = camelCase): lo que Claude Code
+// dice de una sesión en background (`claude agents`), su workflow y sus subagentes. El run
+// de Nodal (`Run`) vive en `src/domain/types.ts`.
 
-export interface RunRef {
-  id: string;
-  cwd: string;
-}
-
+/** Una sesión en background según `claude agents --json --all`. */
 export interface RunSummary {
+  /** Id corto de `claude --bg` (`Run.claudeRunId`). */
   id: string;
   sessionId: string;
   cwd: string | null;
@@ -22,16 +21,9 @@ export interface RunSummary {
 }
 
 /** Trabajando o bloqueada esperando al usuario: la sesión sigue viva. */
-export const isInProgress = (r: RunSummary | undefined) => r?.state === "working" || r?.state === "blocked";
+export const isInProgress = (r: RunSummary | null | undefined) => r?.state === "working" || r?.state === "blocked";
 
-/** Flags de `claude --bg` por repo. */
-export interface LaunchOptions {
-  model?: string;
-  effort?: string;
-  permissionMode?: string;
-}
-
-/** Campos conocidos del `result` del workflow (forma de linear-issue); todos opcionales. */
+/** Campos conocidos del `result` del workflow; todos opcionales. */
 export interface RunResult {
   issue: string | null;
   /** URL http(s) del PR. */
@@ -123,36 +115,6 @@ export interface RunDetail {
   /** Solo en modo final. */
   result: RunResult | null;
   workflowCount: number;
-}
-
-export interface WorkflowInfo {
-  name: string;
-  description: string | null;
-  whenToUse: string | null;
-  source: "user" | "repo";
-  path: string;
-}
-
-export type IssueRunStatus = "queued" | "launching" | "launched" | "failed";
-
-export interface IssueRun {
-  issueId: string;
-  identifier: string;
-  workflow: string;
-  /** Id corto de `claude --bg`; `null` mientras está en cola. */
-  runId: string | null;
-  /** Se completa recién cuando la sesión aparece en `list_runs`. */
-  sessionId: string | null;
-  cwd: string;
-  /** Epoch en ms. */
-  queuedAt: number;
-  /** Epoch en ms. */
-  launchedAt: number | null;
-  status: IssueRunStatus;
-  /** Motivo si `status === "failed"`. */
-  error: string | null;
-  /** Flags del repo fijados al encolar (ausente si no hay ninguno). */
-  options?: LaunchOptions;
 }
 
 /** Por qué una sesión en background terminó sin correr su workflow (`get_launch_blocker`). */

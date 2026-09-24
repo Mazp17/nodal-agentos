@@ -1,17 +1,34 @@
-// STUB(F2-D): replaced by G
-export function RunsView(_props: {
-  /** `null`: cola y runs de todos los proyectos. */
-  projectId: string | null;
-  onOpenRun: (runId: string) => void;
-  onOpenTask: (taskId: string) => void;
-}): null {
-  return null;
-}
+// API pública de runs para el shell (D) y el board/tareas (E).
 
-export function RunDetailView(_props: { runId: string; onBack: () => void; onOpenTask?: (taskId: string) => void }): null {
-  return null;
-}
-
-export function ActivityView(_props: { projectId: string }): null {
-  return null;
-}
+export { RunsView, type RunsViewProps } from "./RunsView";
+export { RunDetailView, type RunDetailViewProps } from "./RunDetailView";
+export { RunDiffDrawer, type RunDiffDrawerProps } from "./RunDiffDrawer";
+export { AgentTranscript } from "./AgentTranscript";
+export { ActivityView, type ActivityViewProps } from "../activity/ActivityView";
+export { LaunchBlockerNotice, launchErrorHint, useLaunchBlocker } from "./LaunchBlockerNotice";
+export { PhaseSegments, RunBadge, useRunView } from "./RunBadge";
+export { useRunActions, type RunActions } from "./actions";
+export {
+  awaitingConfirmation,
+  executorKindLabel,
+  executorLabel,
+  isActive,
+  prNumber,
+  runName,
+  runStatusLabel,
+  runTaskRef,
+  type BadgeTone,
+  type RunPhase,
+  type RunsTab,
+  type RunView,
+} from "./status";
+export {
+  projectIdOf,
+  refreshRuns,
+  useQueueSummary,
+  useRun,
+  useRuns,
+  type QueueSummary,
+  type RunsFilter,
+  type RunsState,
+} from "../../domain/hooks/runs";

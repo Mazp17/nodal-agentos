@@ -1,0 +1,54 @@
+/* Pantalla "Diff" (hoja lateral ancha). */
+
+.diff-panel { width: min(820px, 92%); background: var(--surface-sheet); }
+.diff-head { display: flex; align-items: center; gap: var(--sp-5); padding: var(--sp-5) var(--sp-7); border-bottom: 1px solid var(--border); }
+.diff-head-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.diff-title-row { display: flex; align-items: center; gap: var(--sp-3); min-width: 0; font-size: var(--fs-lg); }
+.diff-title { font-size: var(--fs-lg); font-weight: var(--fw-semibold); }
+.diff-key { flex: none; font-family: var(--font-mono); font-size: var(--fs-sm); color: var(--text-muted); }
+.diff-task { font-size: var(--fs-md); color: var(--text-muted); }
+.diff-sub { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-3); font-size: var(--fs-sm); color: var(--text-dim); }
+.diff-ref { font-family: var(--font-mono); font-size: var(--fs-xs); color: var(--text-3); }
+.diff-note { padding: var(--sp-8) var(--sp-7); font-size: var(--fs-base); color: var(--text-dim); }
+.diff-error { color: var(--red); overflow-wrap: anywhere; }
+
+.diff-body { flex: 1; min-height: 0; display: grid; grid-template-columns: 220px minmax(0, 1fr); }
+.diff-files { border-right: 1px solid var(--border); overflow: auto; padding: var(--sp-3) var(--sp-2); display: flex; flex-direction: column; gap: 1px; }
+.diff-file {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-2) var(--sp-3);
+  border: 0;
+  border-radius: var(--r-lg);
+  background: transparent;
+  text-align: left;
+  color: var(--text-muted);
+  min-width: 0;
+}
+.diff-file:hover { background: var(--fill-3); }
+.diff-file.on { background: var(--fill-soft); color: var(--text); }
+.df-badge { width: 14px; flex: none; font-size: 10px; font-weight: var(--fw-bold); }
+.df-added { color: var(--green); }
+.df-modified { color: var(--amber); }
+.df-deleted { color: var(--red); }
+.df-renamed { color: var(--accent); }
+.diff-file-name { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; font-family: var(--font-mono); font-size: var(--fs-sm); }
+.diff-file-dir { font-size: 10px; color: var(--text-dim); }
+.diff-add, .diff-del { flex: none; font-family: var(--font-mono); font-size: var(--fs-2xs); }
+.diff-add { color: var(--green); }
+.diff-del { color: var(--red); }
+
+.diff-view { min-width: 0; display: flex; flex-direction: column; }
+.diff-view-head { display: flex; align-items: center; gap: var(--sp-4); padding: var(--sp-3) var(--sp-6); border-bottom: 1px solid var(--border); }
+.diff-view-path { font-family: var(--font-mono); font-size: var(--fs-md); color: var(--text-3); }
+.diff-lines { flex: 1; overflow: auto; padding: var(--sp-2) 0 var(--sp-10); font-family: var(--font-mono); font-size: var(--fs-sm); line-height: 1.7; }
+.diff-hunk { margin: var(--sp-2) 0 var(--sp-0); padding: var(--sp-0) var(--sp-6); background: var(--fill-2); color: var(--accent); font-size: var(--fs-xs); white-space: pre; }
+.diff-line { display: grid; grid-template-columns: 40px 40px 16px minmax(0, 1fr); color: var(--text-4); }
+.dl-no { text-align: right; padding-right: var(--sp-3); color: var(--text-dim); user-select: none; }
+.dl-sign { user-select: none; }
+.dl-text { white-space: pre; overflow: hidden; text-overflow: ellipsis; padding-right: var(--sp-6); }
+.dl-add { background: var(--green-tint-8); box-shadow: inset 2px 0 0 var(--green); color: var(--text-2); }
+.dl-del { background: var(--red-tint-10); box-shadow: inset 2px 0 0 var(--red); color: var(--text-2); }
+.dl-add .dl-sign { color: var(--green); }
+.dl-del .dl-sign { color: var(--red); }
