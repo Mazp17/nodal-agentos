@@ -23,6 +23,8 @@ interface Props {
   openTotal: number;
   activeTotal: number;
   activeByProject: Map<string, number>;
+  /** Proyectos con fuentes cuyos estados cambiaron en el proveedor (mapeo por revisar). */
+  mappingDrift: ReadonlySet<string>;
   provider: ProviderFoot;
   onGo: (page: "board" | "runs" | "settings" | ProjectPage, projectId: string | null) => void;
   onToggleProject: (projectId: string) => void;
@@ -84,6 +86,7 @@ export function Sidebar(p: Props) {
           const open = p.expanded.has(proj.id);
           const cur = p.current.projectId === proj.id;
           const running = p.activeByProject.get(proj.id) ?? 0;
+          const drift = p.mappingDrift.has(proj.id);
           return (
             <div key={proj.id} className="side-project" role="group" aria-label={proj.name}>
               <button
@@ -94,6 +97,14 @@ export function Sidebar(p: Props) {
               >
                 <span className="project-dot" style={{ ["--project-color" as string]: proj.color }} aria-hidden />
                 <span className="side-item-label ellipsis">{proj.name}</span>
+                {drift && (
+                  <span
+                    className="dot dot-sm tone-warn"
+                    role="img"
+                    aria-label="Source states changed: review the mapping"
+                    title="Source states changed: review the mapping in Settings → Sources"
+                  />
+                )}
                 {running > 0 && (
                   <span className="side-count side-count-live num" aria-label={`${running} running`}>
                     {running}
@@ -115,6 +126,9 @@ export function Sidebar(p: Props) {
                       onClick={() => p.onGo(sp.page, proj.id)}
                     >
                       {sp.label}
+                      {sp.page === "project-settings" && drift && (
+                        <span className="dot dot-sm tone-warn side-sub-dot" aria-label="Mapping to review" />
+                      )}
                     </button>
                   );
                 })}

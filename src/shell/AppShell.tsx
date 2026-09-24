@@ -80,6 +80,12 @@ export function AppShell() {
   const projectId = project?.id ?? null;
   const links = useSourceLinks(projectId);
   const canImport = projectId !== null && provider.connection === "connected" && (links.data?.length ?? 0) > 0;
+  // Sin red: `pendingStateChanges` lo deja el último sync en cada fuente.
+  const allLinks = useSourceLinks(null);
+  const mappingDrift = useMemo(
+    () => new Set((allLinks.data ?? []).filter((l) => l.pendingStateChanges).map((l) => l.projectId)),
+    [allLinks.data],
+  );
 
   const overlayOpen = paletteOpen || createProject || newTask !== null || importFor !== null || diffRunId !== null;
 
@@ -370,6 +376,7 @@ export function AppShell() {
         openTotal={work.openTotal}
         activeTotal={work.activeTotal}
         activeByProject={work.activeByProject}
+        mappingDrift={mappingDrift}
         provider={foot}
         onGo={(page, pid) => go(page, pid)}
         onToggleProject={(pid) => {

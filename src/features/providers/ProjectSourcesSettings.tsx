@@ -1,12 +1,13 @@
 import { useState } from "react";
 import { useRepos } from "../../domain/hooks/store";
 import { createSourceLink, deleteSourceLink, syncNow, updateSourceLink, type SourceLinkPatch } from "../../domain/api";
-import type { Repo, RepoRule, SourceLink } from "../../domain/types";
+import type { ExternalState, Repo, RepoRule, SourceLink } from "../../domain/types";
 import {
   errorText,
   invalidateProviders,
   useProviderScopes,
   useProviderStatus,
+  useNow,
   useSourceLinks,
   useSourceStates,
 } from "../../domain/hooks/providers";
@@ -221,19 +222,20 @@ function SourceCard({
   const prov = providerName(link.provider);
   const st = useProviderStatus(link.provider);
   const keyOk = st.connection === "connected";
-  const states = useSourceStates(keyOk ? link.id : null);
   const [mapOpen, setMapOpen] = useState(openMapInitially);
+  // `source_states` va a la red: solo con el editor de mapeo abierto.
+  const states = useSourceStates(keyOk && mapOpen ? link.id : null);
   const [confirmDisconnect, setConfirmDisconnect] = useState(false);
   const [busy, setBusy] = useState<"patch" | "disconnect" | "sync" | null>(null);
-  const [syncedAt, setSyncedAt] = useState<number | null>(null);
+  const now = useNow();
 
   const pending = link.stateMap.confirmedAt === null;
   const report = states.data;
-  const drift = report ? report.added.length + report.removed.length : 0;
-  const unmappedCount = report
-    ? Object.values(report.pullOrigin).filter((o) => o === "unmapped").length +
-      Object.values(report.pushOrigin).filter((o) => o === "unmapped").length
-    : 0;
+  // Altas/bajas de estados que detectó el último sync (se limpian al guardar el mapeo).
+  const changes = link.pendingStateChanges;
+  const added = changes?.added.length ?? 0;
+  const removed = changes?.removed.length ?? 0;
+  const drift = added + removed;
 
   const patch = async (p: SourceLinkPatch) => {
     setBusy("patch");
@@ -263,8 +265,8 @@ function SourceCard({
     setBusy("sync");
     try {
       const r = await syncNow(link.id);
-      setSyncedAt(Date.now());
-      states.reload();
+      invalidateProviders("links");
+      if (mapOpen) states.reload();
       const parts = [
         r.pulled ? `${r.pulled} pulled` : null,
         r.pushed ? `${r.pushed} pushed` : null,
@@ -295,7 +297,15 @@ function SourceCard({
             {link.scope.name}
             <span className="pv-kind">{link.scope.kind}</span>
           </span>
-          <SourceStatus keyOk={keyOk} keyLoading={st.connection === "loading"} pending={pending} drift={drift} syncedAt={syncedAt} />
+          <SourceStatus
+            keyOk={keyOk}
+            keyLoading={st.connection === "loading"}
+            pending={pending}
+            drift={drift}
+            syncedAt={link.lastSyncedAt}
+            syncFailed={!!link.lastSyncError}
+            now={now}
+          />
           <span className="pv-spacer" />
           <button type="button" className="btn btn-sm" disabled={!keyOk || busy !== null} onClick={() => void sync()}>
             {busy === "sync" ? "Syncing…" : "Sync now"}
@@ -335,19 +345,28 @@ function SourceCard({
           </div>
         )}
 
-        {keyOk && !mapOpen && (drift > 0 || unmappedCount > 0) && report && (
+        {keyOk && link.lastSyncError && (
+          <div className="pv-alert pv-alert-danger" role="alert">
+            <span className="pv-alert-text">
+              Last sync failed{link.lastSyncedAt ? ` (last success ${formatAgo(link.lastSyncedAt, now)})` : ""}: {link.lastSyncError}
+            </span>
+            <button type="button" className="btn btn-sm" disabled={busy !== null} onClick={() => void sync()}>
+              Retry
+            </button>
+          </div>
+        )}
+
+        {!mapOpen && drift > 0 && changes && (
           <div className="pv-alert pv-alert-warn" role="status">
             <span className="pv-alert-text">
-              {report.added.length > 0
-                ? `${plural(report.added.length, "new state")} in ${prov}`
-                : report.removed.length > 0
-                  ? `${plural(report.removed.length, "state")} removed in ${prov}`
-                  : `${plural(unmappedCount, "row")} unmapped`}
-              {report.added.length > 0 && report.removed.length > 0
-                ? ` · ${plural(report.removed.length, "state")} removed`
-                : ""}
+              {[
+                added ? `${plural(added, "new state")} in ${prov}${stateNames(changes.added)}` : null,
+                removed ? `${plural(removed, "state")} removed${stateNames(changes.removed)}` : null,
+              ]
+                .filter(Boolean)
+                .join(" · ")}
             </span>
-            <button type="button" className="btn btn-sm" onClick={() => setMapOpen(true)}>
+            <button type="button" className="btn btn-sm" disabled={!keyOk} onClick={() => setMapOpen(true)}>
               Review mapping
             </button>
           </div>
@@ -439,18 +458,29 @@ function SourceCard({
   );
 }
 
+/** `: "QA", "Staging"` (hasta 3 nombres). */
+function stateNames(states: ExternalState[]): string {
+  if (!states.length) return "";
+  const names = states.slice(0, 3).map((s) => `"${s.name}"`);
+  return `: ${names.join(", ")}${states.length > 3 ? "…" : ""}`;
+}
+
 function SourceStatus({
   keyOk,
   keyLoading,
   pending,
   drift,
   syncedAt,
+  syncFailed,
+  now,
 }: {
   keyOk: boolean;
   keyLoading: boolean;
   pending: boolean;
   drift: number;
   syncedAt: number | null;
+  syncFailed: boolean;
+  now: number;
 }) {
   if (keyLoading) return <span className="pv-conn pv-conn-muted">Checking…</span>;
   if (!keyOk)
@@ -462,10 +492,17 @@ function SourceStatus({
     );
   return (
     <>
-      <span className="pv-conn pv-conn-ok">
-        <span className="dot dot-sm" aria-hidden />
-        {syncedAt ? `Connected · synced ${formatAgo(syncedAt)}` : "Connected"}
-      </span>
+      {syncFailed ? (
+        <span className="pv-conn pv-conn-danger">
+          <span className="dot dot-sm" aria-hidden />
+          Sync failed
+        </span>
+      ) : (
+        <span className="pv-conn pv-conn-ok">
+          <span className="dot dot-sm" aria-hidden />
+          {syncedAt ? `Synced ${formatAgo(syncedAt, now)}` : "Not synced yet"}
+        </span>
+      )}
       {pending && <span className="pv-tag pv-tag-warn">Mapping pending</span>}
       {!pending && drift > 0 && <span className="pv-tag pv-tag-warn">Review mapping</span>}
     </>

@@ -74,8 +74,11 @@ function LinearCard() {
         {hasKey && (
           <>
             <div className="pv-keybox">
-              <span className="mono pv-keymask" aria-label="Stored API key, hidden">
-                lin_api_••••••••••••••••
+              <span
+                className="mono pv-keymask"
+                aria-label={st.status?.keyHint ? `Stored API key ending in ${st.status.keyHint}` : "Stored API key, hidden"}
+              >
+                {st.status?.keyHint ? `lin_api_…${st.status.keyHint}` : "lin_api_••••••••••••••••"}
               </span>
               <span className="pv-hint">macOS Keychain</span>
             </div>

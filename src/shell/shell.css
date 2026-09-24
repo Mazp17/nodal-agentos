@@ -131,3 +131,4 @@
 .status-pill-att { display: flex; align-items: center; gap: var(--sp-2); color: var(--amber); }
 .status-pill-queued { color: var(--text-dim); }
 .topbar-btn { height: var(--h-lg); padding: 0 var(--sp-5); font-size: var(--fs-md); }
+.side-sub-dot { margin-left: var(--sp-2); }

@@ -9,7 +9,7 @@ import { IssueDetailCache, useIssueDetail } from "../linear/issueDetail";
 import { Comments, DetailSections } from "../linear/IssueDetailSections";
 import { InlineConfirm, ProviderMark } from "./parts";
 import { ExtStateLabel } from "./StateMapEditor";
-import { formatAgo, isUnmappedError, providerName, unmappedStateName } from "./meta";
+import { formatAgo, providerName, unmappedStateName } from "./meta";
 
 export interface SourceTabProps {
   task: Task;
@@ -59,12 +59,13 @@ function LinkedSource({
   const [confirmUnlink, setConfirmUnlink] = useState(false);
   const [unlinking, setUnlinking] = useState(false);
 
-  const unmappedByError = isUnmappedError(src.syncError);
+  // El backend lo marca (`unmapped`); el nombre del estado nuevo solo viene en `syncError`.
+  const unmappedByPull = src.unmapped;
   // Estado registrado que dejó de estar en el mapeo confirmado (p. ej. se editó el mapeo).
   const unmappedByMap =
     !!link && link.stateMap.confirmedAt !== null && !!src.externalState && !(src.externalState.id in link.stateMap.pull);
-  const unmapped = unmappedByError || unmappedByMap;
-  const failed = !!src.syncError && !unmappedByError;
+  const unmapped = unmappedByPull || unmappedByMap;
+  const failed = !!src.syncError && !unmappedByPull;
 
   const syncLabel = syncing
     ? "Syncing…"
@@ -129,7 +130,7 @@ function LinkedSource({
         <div className="pv-alert pv-alert-warn" role="status">
           <span className="pv-alert-text">
             External state not mapped
-            {unmappedByError && src.syncError && unmappedStateName(src.syncError)
+            {unmappedByPull && src.syncError && unmappedStateName(src.syncError)
               ? `: "${unmappedStateName(src.syncError)}"`
               : ""}
             . The task keeps its current status until the state is mapped.

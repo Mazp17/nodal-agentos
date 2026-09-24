@@ -13,4 +13,4 @@ export {
   type ProviderStatusView,
   type ProviderConnection,
 } from "../../domain/hooks/providers";
-export { PROVIDERS, providerName, isUnmappedError } from "./meta";
+export { PROVIDERS, providerName } from "./meta";

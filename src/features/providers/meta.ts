@@ -79,14 +79,9 @@ export function plural(n: number, one: string, many = `${one}s`): string {
 }
 
 /**
- * El pull no registra un estado externo sin mapear: la tarea conserva el anterior y el
- * motivo llega en `syncError` (`External state "X" is not mapped…`).
+ * Nombre del estado sin mapear, sacado del `syncError` (`External state "X" is not mapped…`).
+ * Si está sin mapear lo dice `TaskSource.unmapped`; esto es solo para mostrar el nombre.
  */
-export function isUnmappedError(syncError: string | null | undefined): boolean {
-  return !!syncError && /\bis not mapped\b/i.test(syncError);
-}
-
-/** Nombre del estado sin mapear, sacado del `syncError`. */
 export function unmappedStateName(syncError: string): string | null {
   return /"([^"]+)"/.exec(syncError)?.[1] ?? null;
 }
