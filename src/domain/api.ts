@@ -481,6 +481,11 @@ export const importLegacyData = (folder: string) => invoke<LegacyImportReport>("
 /** Salida de `claude --version` (p. ej. `2.1.0 (Claude Code)`); rechaza si no se encuentra el CLI. */
 export const claudeVersion = () => invoke<string>("claude_version");
 
+/** `false` in debug builds ("Nodal Dev"): they never check for updates. */
+export const updatesEnabled = () => invoke<boolean>("updates_enabled");
+/** Relaunch after an update was installed. */
+export const restartApp = () => invoke<void>("restart_app");
+
 export const getSettings = () => invoke<Settings>("get_settings");
 export const setSettings = (settings: Settings) => invoke<Settings>("set_settings", { settings });
 
@@ -500,3 +505,6 @@ export interface ChangedEvent {
  */
 export const onChanged = (cb: (e: ChangedEvent) => void): Promise<UnlistenFn> =>
   listen<ChangedEvent>("nodal://changed", (ev) => cb(ev.payload));
+
+/** "Check for Updates…" in the app menu (release builds only). Returns the unlisten. */
+export const onCheckForUpdates = (cb: () => void): Promise<UnlistenFn> => listen("nodal://check-updates", () => cb());

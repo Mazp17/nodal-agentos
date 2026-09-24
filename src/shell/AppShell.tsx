@@ -15,6 +15,7 @@ import { ActivityView, RunDetailView, RunDiffDrawer, RunsView } from "../feature
 import { useLegacyImport } from "../features/settings/legacyImport";
 import { SettingsView } from "../features/settings/SettingsView";
 import { NewTaskDialog, TaskPanel, TasksView } from "../features/tasks";
+import { useUpdates } from "../features/updates/useUpdates";
 import { useToast } from "../ui/Toasts";
 import { CommandPalette, type PaletteItem } from "./palette/CommandPalette";
 import { Sidebar, type ProviderFoot } from "./Sidebar";
@@ -38,6 +39,7 @@ export function AppShell() {
   const queue = useQueueSummary();
   const toast = useToast();
   const legacy = useLegacyImport();
+  useUpdates();
 
   const [forceOnboarding, setForceOnboarding] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
