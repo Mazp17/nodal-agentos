@@ -72,6 +72,7 @@ Tests that hit real services or real local data are `#[ignore]`. Linear live tes
 - Short commit messages; the subject line is usually enough (`feat(board): reorder tasks in one call`).
 - Pull request descriptions should be brief: what changed, why, and how you tested it. Long reasoning belongs in code comments or the changelog.
 - Include screenshots for UI changes.
+- Add user-visible changes to [CHANGELOG.md](CHANGELOG.md) under `[Unreleased]`.
 
 ## Reporting bugs
 
