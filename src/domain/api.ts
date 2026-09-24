@@ -298,6 +298,12 @@ export const deleteTask = (id: string) => invoke<void>("delete_task", { id });
 /** Arrastre en el board: cambia de columna y/o posición. */
 export const moveTask = (id: string, status: TaskStatus, position: number) =>
   invoke<Task>("move_task", { id, status, position });
+/**
+ * Nuevo orden de una columna: renumera posiciones en una transacción. Todas las tareas deben
+ * estar en `status` y en el mismo proyecto; las de la columna que falten quedan detrás.
+ */
+export const reorderTasks = (status: TaskStatus, orderedIds: string[]) =>
+  invoke<void>("reorder_tasks", { status, orderedIds });
 export const readTaskPlan = (id: string) => invoke<string>("read_task_plan", { id });
 export const listTaskRelations = (taskId: string) => invoke<TaskRelation[]>("list_task_relations", { taskId });
 export const addTaskRelation = (taskId: string, otherId: string, kind: RelationKind) =>

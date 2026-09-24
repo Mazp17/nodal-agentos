@@ -170,6 +170,19 @@ pub async fn move_task(state: State<'_, WorkState>, id: String, status: TaskStat
     Ok(t)
 }
 
+/// Nuevo orden de una columna del board (ids de un mismo proyecto, todos con `status`).
+#[tauri::command]
+pub async fn reorder_tasks(state: State<'_, WorkState>, status: TaskStatus, ordered_ids: Vec<String>) -> Result<(), String> {
+    for id in &ordered_ids {
+        check_id(id, "task")?;
+    }
+    let project = db(&state.0, move |c| ops::reorder_tasks(c, status, &ordered_ids, now_ms())).await?;
+    if let Some(p) = project {
+        state.0.events.notify(Kind::Tasks, Some(&p));
+    }
+    Ok(())
+}
+
 #[tauri::command]
 pub async fn read_task_plan(state: State<'_, WorkState>, id: String) -> Result<String, String> {
     check_id(&id, "task")?;

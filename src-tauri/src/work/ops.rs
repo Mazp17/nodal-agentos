@@ -394,6 +394,49 @@ pub fn move_task(conn: &mut Connection, id: &str, status: TaskStatus, position: 
     Ok(t)
 }
 
+/// Orden nuevo de la columna `status`: renumera las posiciones (1, 2, ...) en una
+/// transacción. Todas las tareas tienen que estar en esa columna y en el mismo proyecto; las
+/// de la columna que no vienen en la lista quedan detrás, en su orden actual. Devuelve el
+/// proyecto.
+pub fn reorder_tasks(conn: &mut Connection, status: TaskStatus, ids: &[String], now: i64) -> Result<Option<String>, String> {
+    let mut seen = std::collections::HashSet::new();
+    if let Some(dup) = ids.iter().find(|id| !seen.insert(id.as_str())) {
+        return Err(format!("Task {dup} appears twice in the new order."));
+    }
+    let tx = conn.transaction().map_err(|e| e.to_string())?;
+    let mut project: Option<String> = None;
+    for id in ids {
+        let t = tasks::get(&tx, id)?;
+        if t.status != status {
+            return Err(format!("{} isn't in that column anymore: refresh and try again.", t.title));
+        }
+        match &project {
+            Some(p) if *p != t.project_id => return Err("All tasks must belong to the same project.".into()),
+            _ => project = Some(t.project_id),
+        }
+    }
+    let Some(project_id) = project else { return Ok(None) };
+    let rest: Vec<String> = {
+        let mut stmt = tx
+            .prepare("SELECT id FROM tasks WHERE project_id = ?1 AND status = ?2 ORDER BY position, created_at, id")
+            .map_err(|e| e.to_string())?;
+        let rows = stmt
+            .query_map(rusqlite::params![project_id, status], |r| r.get::<_, String>(0))
+            .map_err(|e| e.to_string())?;
+        rows.collect::<rusqlite::Result<Vec<_>>>().map_err(|e| e.to_string())?
+    };
+    let order = ids.iter().cloned().chain(rest.into_iter().filter(|id| !seen.contains(id.as_str())));
+    for (i, id) in order.enumerate() {
+        tx.execute(
+            "UPDATE tasks SET position = ?1, updated_at = ?2 WHERE id = ?3",
+            rusqlite::params![(i + 1) as f64, now, id],
+        )
+        .map_err(|e| e.to_string())?;
+    }
+    tx.commit().map_err(|e| e.to_string())?;
+    Ok(Some(project_id))
+}
+
 /// Cambia el estado de la tarea por una transición de la cola (respeta Done/Canceled) y
 /// deja las filas del outbox en la misma transacción. Devuelve el estado nuevo si cambió.
 pub fn apply_task_transition(
@@ -600,6 +643,21 @@ mod tests {
         let t = move_task(&mut c, &t1.id, TaskStatus::Todo, 2.0, 12).unwrap();
         assert_eq!(t.closed_at, None);
         assert!(move_task(&mut c, &t1.id, TaskStatus::Todo, f64::NAN, 13).is_err());
+
+        // Reordenar la columna: renumera y deja detrás a las no listadas.
+        let t3 = create_task(&mut c, &f.env, &new_task(&p, &r, "Tercera"), 14).unwrap();
+        let pos = |c: &Connection, id: &str| tasks::get(c, id).unwrap().position;
+        let got = reorder_tasks(&mut c, TaskStatus::Todo, &[t3.id.clone(), t1.id.clone()], 15).unwrap();
+        assert_eq!(got.as_deref(), Some(p.id.as_str()));
+        assert_eq!((pos(&c, &t3.id), pos(&c, &t1.id), pos(&c, &t2.id)), (1.0, 2.0, 3.0));
+        assert!(reorder_tasks(&mut c, TaskStatus::Todo, &[t1.id.clone(), t1.id.clone()], 16).unwrap_err().contains("twice"));
+        assert!(reorder_tasks(&mut c, TaskStatus::Done, &[t1.id.clone()], 16).unwrap_err().contains("column"));
+        assert!(reorder_tasks(&mut c, TaskStatus::Todo, &["t-no".into()], 16).is_err());
+        // Un error no deja nada a medias.
+        assert!(reorder_tasks(&mut c, TaskStatus::Todo, &[t2.id.clone(), "t-no".into()], 16).is_err());
+        assert_eq!(pos(&c, &t2.id), 3.0);
+        assert_eq!(reorder_tasks(&mut c, TaskStatus::Todo, &[], 16).unwrap(), None);
+        delete_task(&c, &f.env, &t3.id).unwrap();
 
         // Relaciones.
         add_relation(&c, &t1.id, &t2.id, RelationKind::Related).unwrap();

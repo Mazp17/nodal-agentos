@@ -85,6 +85,7 @@ pub fn run() {
             work::commands::update_task,
             work::commands::delete_task,
             work::commands::move_task,
+            work::commands::reorder_tasks,
             work::commands::read_task_plan,
             work::commands::list_task_relations,
             work::commands::add_task_relation,
