@@ -139,6 +139,13 @@ function fetchStatus(provider: string): Promise<void> {
   return p;
 }
 
+function subscribeStatus(fn: () => void) {
+  statusSubs.add(fn);
+  return () => {
+    statusSubs.delete(fn);
+  };
+}
+
 /** Fija el estado sin consultar (p. ej. con la respuesta de `providerSetKey`). */
 export function setProviderStatus(status: ProviderStatus) {
   statusFetchedAt.set(status.provider, Date.now());
@@ -163,13 +170,7 @@ export interface ProviderStatusView {
  * usan: el sidebar, la píldora global, Settings → Integrations y el onboarding.
  */
 export function useProviderStatus(provider = "linear"): ProviderStatusView {
-  const snap = useSyncExternalStore(
-    (fn) => {
-      statusSubs.add(fn);
-      return () => statusSubs.delete(fn);
-    },
-    () => statusCache.get(provider) ?? EMPTY_SNAP,
-  );
+  const snap = useSyncExternalStore(subscribeStatus, () => statusCache.get(provider) ?? EMPTY_SNAP);
 
   useEffect(() => {
     const stale = () => Date.now() - (statusFetchedAt.get(provider) ?? 0) > STATUS_TTL_MS;

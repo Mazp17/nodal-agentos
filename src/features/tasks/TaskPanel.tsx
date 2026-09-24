@@ -13,6 +13,8 @@ import {
 import { isRunActive, useAllRuns, useTaskRuns } from "../../domain/hooks/runs";
 import {
   invalidate,
+  KEYS,
+  setData,
   useProjectList,
   useRepos,
   useSettings,
@@ -43,6 +45,8 @@ export interface TaskPanelProps {
   onOpenDiff: (runId: string) => void;
   /** Navegar a una tarea relacionada; sin él, las relaciones no son clickeables. */
   onOpenTask?: (taskId: string) => void;
+  /** "Review mapping" de la pestaña Source: Project settings → Sources. */
+  onOpenSources?: (projectId: string) => void;
 }
 
 function useOutside(open: boolean, close: () => void) {
@@ -59,7 +63,7 @@ function useOutside(open: boolean, close: () => void) {
 }
 
 /** Detalle de tarea (drawer): estado, repo, plan, criterios, relaciones, cadena de pasos y lanzamiento. */
-export function TaskPanel({ taskId, onClose, onOpenRun, onOpenDiff, onOpenTask }: TaskPanelProps) {
+export function TaskPanel({ taskId, onClose, onOpenRun, onOpenDiff, onOpenTask, onOpenSources }: TaskPanelProps) {
   const ref = useFocusTrap<HTMLElement>(onClose);
   const headingId = useId();
   const push = useToast();
@@ -327,7 +331,15 @@ export function TaskPanel({ taskId, onClose, onOpenRun, onOpenDiff, onOpenTask }
 
       <div className="tp-body">
         {tab === "source" && src ? (
-          <SourceTab task={task} />
+          <SourceTab
+            task={task}
+            onTaskChange={(t) => {
+              setData<Task[]>(KEYS.tasks, (ts) => ts.map((x) => (x.id === t.id ? t : x)));
+              void invalidate("tasks");
+            }}
+            onOpenTask={onOpenTask}
+            onReviewMapping={onOpenSources ? () => onOpenSources(task.projectId) : undefined}
+          />
         ) : (
           <>
             <PlanSection task={task} />

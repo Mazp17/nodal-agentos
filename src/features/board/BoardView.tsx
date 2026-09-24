@@ -67,6 +67,7 @@ export function BoardView({ projectId, onOpenTask, onOpenRun, onNewProject, onOp
   useEffect(() => {
     setFilters(NO_FILTERS);
     setShowHidden({});
+    setPatched(new Map());
   }, [projectId]);
 
   const projectById = useMemo(() => new Map((projects.data ?? []).map((p) => [p.id, p])), [projects.data]);
@@ -86,7 +87,7 @@ export function BoardView({ projectId, onOpenTask, onOpenRun, onNewProject, onOp
     if (!patched.size || !tasks.data) return;
     const stale = tasks.data.filter((t) => {
       const p = patched.get(t.id);
-      return p && t.updatedAt > p.updatedAt;
+      return p && t.updatedAt >= p.updatedAt && t.status === p.status && t.position === p.position;
     });
     if (stale.length) {
       setPatched((m) => {

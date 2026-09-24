@@ -115,6 +115,8 @@ export function invalidate(...resources: Resource[]): Promise<void> {
 export function setData<T>(key: string, update: (prev: T) => T) {
   const e = store.get(key);
   if (!e || !e.snap.hasValue) return;
+  // Descarta la respuesta de una lectura ya en curso (traería el valor anterior al cambio).
+  e.seq++;
   e.snap = { ...e.snap, value: update(e.snap.value as T) };
   notify(e);
 }

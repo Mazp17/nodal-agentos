@@ -403,6 +403,10 @@ export function AppShell() {
               onOpenRun={openRun}
               onOpenDiff={setDiffRunId}
               onOpenTask={openTask}
+              onOpenSources={(pid) => {
+                nav.setProjectSection("sources");
+                go("project-settings", pid);
+              }}
             />
           )}
         </main>

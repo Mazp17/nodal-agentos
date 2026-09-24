@@ -1,7 +1,7 @@
 // Alta de un proyecto con sus repos y, opcionalmente, una fuente de Linear. La usan el
 // onboarding y el diálogo "New project".
 
-import { addRepo, createSourceLink } from "../../domain/api";
+import { addRepo, createProject, createSourceLink } from "../../domain/api";
 import { invalidateProviders } from "../../domain/hooks/providers";
 import { suggestProjectKey, type ProjectsState } from "../../domain/hooks/projects";
 import type { Project, ScopeRef } from "../../domain/types";
@@ -49,7 +49,9 @@ export async function createProjectWithRepos(ctx: ProjectsState, d: ProjectDraft
   let project: Project;
   for (;;) {
     try {
-      project = await ctx.createProject({ name: d.name.trim(), key, color: d.color });
+      // Directo a la API: relee una sola vez al final. Releer ya haría que el shell viera
+      // un proyecto y desmontara el onboarding con los repos todavía por agregar.
+      project = await createProject({ name: d.name.trim(), key, color: d.color });
       break;
     } catch (e) {
       if (!d.autoKey || !String(e).includes("already used") || tried.length >= 20) throw e;

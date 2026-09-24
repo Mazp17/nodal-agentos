@@ -274,7 +274,8 @@ export function NewTaskDialog({ projectId, taskId, defaultRepoId, onClose, onSav
         if (run) await launch(saved.id, key, { kind: "run" });
         else push("Task created", `${key} · ${saved.title}`, "ok");
       }
-      invalidate("tasks");
+      // Esperar la relectura: el panel que se abre busca la tarea en la lista compartida.
+      await invalidate("tasks");
       onSaved(saved);
     } catch (e) {
       setError(String(e));
