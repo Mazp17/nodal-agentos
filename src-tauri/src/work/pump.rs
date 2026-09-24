@@ -254,7 +254,15 @@ async fn pump_pass(inner: &Arc<Inner>, touched: &mut bool) -> Result<(), String>
         };
         let Some(run) = claimed else { continue };
         *touched = true;
-        let result = runs::launch_with(run.cwd.clone(), run.prompt.clone(), &run.options, &launch::extra_flags(&run)).await;
+        let tests = match run.kind {
+            RunKind::Review => {
+                let cwd = run.cwd.clone();
+                blocking(move || Ok(launch::test_commands(Path::new(&cwd)))).await.unwrap_or_default()
+            }
+            RunKind::Work => Vec::new(),
+        };
+        let flags = launch::extra_flags(&run, &tests);
+        let result = runs::launch_with(run.cwd.clone(), run.prompt.clone(), &launch::launch_options(&run), &flags).await;
         let root = inner.env.worktrees_root.clone();
         with_db(&inner.db, move |c| {
             let mut r = qruns::get(c, &run.id)?;

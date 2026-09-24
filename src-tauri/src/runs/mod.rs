@@ -41,6 +41,9 @@ fn forward_lines<R: AsyncRead + Unpin + Send + 'static>(stream: R, tx: mpsc::Unb
 pub struct ExtraFlags {
     /// `--agent <name>`.
     pub agent: Option<String>,
+    /// `--allowedTools A,B,C` (mismo formato que `disallowed_tools`; un `Bash(npm test:*)`
+    /// con espacio adentro va entre paréntesis y no parte la lista).
+    pub allowed_tools: Vec<String>,
     /// `--disallowedTools A,B,C` (separadas por coma: la opción es variádica y, con
     /// espacios, se come el prompt; verificado en el spike con 2.1.281).
     pub disallowed_tools: Vec<String>,
@@ -52,6 +55,10 @@ impl ExtraFlags {
         if let Some(a) = &self.agent {
             out.push("--agent".into());
             out.push(a.clone());
+        }
+        if !self.allowed_tools.is_empty() {
+            out.push("--allowedTools".into());
+            out.push(self.allowed_tools.join(","));
         }
         if !self.disallowed_tools.is_empty() {
             out.push("--disallowedTools".into());

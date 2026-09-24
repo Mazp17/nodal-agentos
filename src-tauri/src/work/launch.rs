@@ -24,6 +24,64 @@ use super::{diff, ops, validate, worktree, Cleaning, Env, CLEANING_ERR};
 
 /// Tools que el revisor no puede usar (`--disallowedTools`).
 pub const REVIEW_DISALLOWED: [&str; 3] = ["Edit", "Write", "NotebookEdit"];
+/// Permission mode del revisor, sea cual sea el del repo: `dontAsk` niega sin preguntar
+/// todo lo que no esté en `--allowedTools` (una sesión en background no queda esperando un
+/// permiso). `plan` no sirve: no deja correr los tests y termina pidiendo aprobar un plan.
+pub const REVIEW_PERMISSION_MODE: &str = "dontAsk";
+/// Lo único que puede usar el revisor (`--allowedTools`), más los comandos de test del repo
+/// (`test_commands`): leer y git de consulta.
+pub const REVIEW_ALLOWED: [&str; 7] =
+    ["Read", "Grep", "Glob", "Bash(git diff:*)", "Bash(git status:*)", "Bash(git log:*)", "Bash(git show:*)"];
+
+/// Comandos de test del repo en `cwd`, detectados por sus archivos (lista fija: nunca texto
+/// del repo). Van como `Bash(<cmd>:*)` en los permitidos del revisor.
+pub fn test_commands(cwd: &Path) -> Vec<String> {
+    let has = |f: &str| cwd.join(f).is_file();
+    let mut out: Vec<&str> = Vec::new();
+    let npm_test = std::fs::read_to_string(cwd.join("package.json"))
+        .ok()
+        .and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok())
+        .is_some_and(|v| v["scripts"]["test"].is_string());
+    if npm_test {
+        out.push(if has("pnpm-lock.yaml") {
+            "pnpm test"
+        } else if has("yarn.lock") {
+            "yarn test"
+        } else if has("bun.lockb") || has("bun.lock") {
+            "bun run test"
+        } else {
+            "npm test"
+        });
+    }
+    if has("Cargo.toml") {
+        out.push("cargo test");
+    }
+    if has("go.mod") {
+        out.push("go test");
+    }
+    if has("pytest.ini") || has("pyproject.toml") || has("setup.cfg") || has("tox.ini") {
+        out.extend(["pytest", "python -m pytest"]);
+    }
+    if has("mix.exs") {
+        out.push("mix test");
+    }
+    let make_test = std::fs::read_to_string(cwd.join("Makefile"))
+        .is_ok_and(|t| t.lines().any(|l| l.starts_with("test:")));
+    if make_test {
+        out.push("make test");
+    }
+    out.into_iter().map(String::from).collect()
+}
+
+/// Opciones con las que se lanza el run: las guardadas, salvo el revisor, que siempre va
+/// con `REVIEW_PERMISSION_MODE` (aunque el repo pida `bypassPermissions`/`acceptEdits`).
+pub fn launch_options(run: &Run) -> LaunchOptions {
+    let mut o = run.options.clone();
+    if run.kind == RunKind::Review {
+        o.permission_mode = Some(REVIEW_PERMISSION_MODE.into());
+    }
+    o
+}
 /// Tope del diff que se pega en el prompt de un traspaso.
 pub const DIFF_PROMPT_MAX: usize = 30 * 1024;
 /// Tope del plan que se pega en el prompt.
@@ -81,19 +139,24 @@ pub fn reviewer_name(repo: &Repo, project: &Project, settings: &Settings) -> Str
     repo.reviewer.clone().or_else(|| project.reviewer.clone()).unwrap_or_else(|| settings.reviewer.clone())
 }
 
-/// Flags de `claude --bg` según el ejecutor y el tipo de run.
-pub fn extra_flags(run: &Run) -> ExtraFlags {
-    match (&run.executor, run.kind) {
-        (Executor::Agent { name, .. }, RunKind::Review) => ExtraFlags {
-            agent: Some(name.clone()),
+/// Flags de `claude --bg` según el ejecutor y el tipo de run. `tests`: los comandos de test
+/// del cwd (`test_commands`), que el revisor puede correr.
+pub fn extra_flags(run: &Run, tests: &[String]) -> ExtraFlags {
+    let agent = match &run.executor {
+        Executor::Agent { name, .. } => Some(name.clone()),
+        _ => None,
+    };
+    match run.kind {
+        RunKind::Work => ExtraFlags { agent, ..Default::default() },
+        RunKind::Review => ExtraFlags {
+            agent,
+            allowed_tools: REVIEW_ALLOWED
+                .iter()
+                .map(|s| s.to_string())
+                .chain(tests.iter().map(|t| format!("Bash({t}:*)")))
+                .collect(),
             disallowed_tools: REVIEW_DISALLOWED.iter().map(|s| s.to_string()).collect(),
         },
-        (Executor::Agent { name, .. }, RunKind::Work) => ExtraFlags { agent: Some(name.clone()), ..Default::default() },
-        (_, RunKind::Review) => ExtraFlags {
-            disallowed_tools: REVIEW_DISALLOWED.iter().map(|s| s.to_string()).collect(),
-            ..Default::default()
-        },
-        _ => ExtraFlags::default(),
     }
 }
 
@@ -680,6 +743,7 @@ pub fn build_review(
     run.prompt = prompt;
     run.extra_instructions = extra.map(String::from);
     run.finish = parent.map(|p| p.finish).unwrap_or(task.finish.unwrap_or(repo.default_finish));
+    run.options.permission_mode = Some(REVIEW_PERMISSION_MODE.into());
     Ok(run)
 }
 
@@ -912,13 +976,47 @@ mod tests {
     fn flags_per_executor() {
         use crate::work::testutil::run_of;
         let agent = Executor::Agent { name: "frontend-developer".into(), source: AgentSource::User };
-        assert_eq!(extra_flags(&run_of(agent.clone(), RunKind::Work, false)).to_args(), ["--agent", "frontend-developer"]);
+        let tests = vec!["npm test".to_string()];
+        assert_eq!(extra_flags(&run_of(agent.clone(), RunKind::Work, false), &tests).to_args(), ["--agent", "frontend-developer"]);
         let reviewer = Executor::Agent { name: "code-reviewer".into(), source: AgentSource::User };
         assert_eq!(
-            extra_flags(&run_of(reviewer, RunKind::Review, false)).to_args(),
-            ["--agent", "code-reviewer", "--disallowedTools", "Edit,Write,NotebookEdit"]
+            extra_flags(&run_of(reviewer, RunKind::Review, false), &tests).to_args(),
+            [
+                "--agent",
+                "code-reviewer",
+                "--allowedTools",
+                "Read,Grep,Glob,Bash(git diff:*),Bash(git status:*),Bash(git log:*),Bash(git show:*),Bash(npm test:*)",
+                "--disallowedTools",
+                "Edit,Write,NotebookEdit"
+            ]
         );
-        assert!(extra_flags(&run_of(Executor::Claude, RunKind::Work, false)).to_args().is_empty());
-        assert!(extra_flags(&run_of(Executor::Workflow { name: "plan-task".into() }, RunKind::Work, false)).to_args().is_empty());
+        assert!(extra_flags(&run_of(Executor::Claude, RunKind::Work, false), &tests).to_args().is_empty());
+        assert!(extra_flags(&run_of(Executor::Workflow { name: "plan-task".into() }, RunKind::Work, false), &[]).to_args().is_empty());
+    }
+
+    #[test]
+    fn reviewer_ignores_the_repo_permission_mode() {
+        use crate::work::testutil::run_of;
+        let mut review = run_of(Executor::Claude, RunKind::Review, false);
+        review.options.permission_mode = Some("bypassPermissions".into());
+        review.options.model = Some("opus".into());
+        let o = launch_options(&review);
+        assert_eq!((o.permission_mode.as_deref(), o.model.as_deref()), (Some("dontAsk"), Some("opus")));
+        let mut work = run_of(Executor::Claude, RunKind::Work, false);
+        work.options.permission_mode = Some("acceptEdits".into());
+        assert_eq!(launch_options(&work).permission_mode.as_deref(), Some("acceptEdits"));
+    }
+
+    #[test]
+    fn detects_test_commands() {
+        let t = crate::util::paths::tests::TempDir::new("test-cmds");
+        assert!(test_commands(&t.0).is_empty());
+        std::fs::write(t.0.join("package.json"), r#"{"scripts":{"test":"vitest"}}"#).unwrap();
+        std::fs::write(t.0.join("pnpm-lock.yaml"), "").unwrap();
+        std::fs::write(t.0.join("Cargo.toml"), "").unwrap();
+        std::fs::write(t.0.join("Makefile"), "build:\n\tx\ntest:\n\ty\n").unwrap();
+        assert_eq!(test_commands(&t.0), ["pnpm test", "cargo test", "make test"]);
+        std::fs::write(t.0.join("package.json"), r#"{"scripts":{"build":"x"}}"#).unwrap();
+        assert_eq!(test_commands(&t.0), ["cargo test", "make test"]);
     }
 }
