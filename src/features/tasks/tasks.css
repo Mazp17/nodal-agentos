@@ -326,6 +326,9 @@ details > summary.tp-step-sub { cursor: pointer; }
   border-top: 1px solid var(--border);
 }
 
+/* Right-hand actions stay together and right-aligned, also when the footer wraps. */
+.tp-foot-end { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: var(--sp-2); margin-left: auto; }
+
 /* ---- Lista (Tasks) ---- */
 .tv-root { flex: 1; min-height: 0; display: flex; flex-direction: column; position: relative; }
 .tv-bar { display: flex; align-items: center; gap: var(--sp-4); padding: var(--sp-4) var(--sp-7); border-bottom: 1px solid var(--border); font-size: var(--fs-md); }
