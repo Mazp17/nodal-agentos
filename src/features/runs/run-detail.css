@@ -52,8 +52,9 @@
 /* ---- Timeline de fases ---- */
 .rd-timeline { padding: var(--sp-6) var(--sp-7) var(--sp-5); overflow-x: auto; }
 .tl { list-style: none; margin: 0; padding: 0; display: grid; min-width: min-content; }
-.tl-step { display: flex; flex-direction: column; gap: var(--sp-3); min-width: 64px; }
-.tl-mark-row { display: flex; align-items: center; }
+/* Each step is centered in its column; the line runs from its mark to the next one. */
+.tl-step { position: relative; display: flex; flex-direction: column; align-items: center; gap: var(--sp-3); min-width: 72px; }
+.tl-mark-row { display: flex; justify-content: center; }
 .tl-mark {
   width: 22px;
   height: 22px;
@@ -66,8 +67,16 @@
   font-size: var(--fs-2xs);
   font-weight: var(--fw-semibold);
 }
-.tl-line { flex: 1; height: 2px; margin: 0 var(--sp-1); border-radius: 1px; background: var(--fill-5); }
-.tl-name { font-size: var(--fs-sm); color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding-right: var(--sp-1); }
+.tl-line {
+  position: absolute;
+  top: 10px; /* middle of the 22px mark */
+  left: calc(50% + 11px + var(--sp-1));
+  width: calc(100% - 22px - 2 * var(--sp-1));
+  height: 2px;
+  border-radius: 1px;
+  background: var(--fill-5);
+}
+.tl-name { max-width: 100%; padding: 0 var(--sp-1); text-align: center; font-size: var(--fs-sm); color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tl-done .tl-mark { background: var(--green-tint-18); border-color: var(--green-tint-60); color: var(--green); }
 .tl-done .tl-line { background: var(--green-tint-50); }
 .tl-done .tl-name { color: var(--text-4); }

@@ -368,7 +368,7 @@ function Timeline({ view, detail }: { view: RunView; detail: RunDetail }) {
   const stopped = view.tab === "failed";
   return (
     <div className="panel rd-timeline">
-      <ol className="tl" style={{ gridTemplateColumns: `repeat(${phases.length}, minmax(0, 1fr))` }}>
+      <ol className="tl" style={{ gridTemplateColumns: `repeat(${phases.length}, minmax(72px, 1fr))` }}>
         {phases.map((ph, i) => {
           const num = i + 1;
           const done = finished || (cur != null && num < cur);
