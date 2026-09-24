@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
-import { useRuns } from "../../domain/hooks/runs";
-import { usePolled } from "../../domain/hooks/store";
+import { projectActivity, type ProjectActivity } from "../../domain/api";
+import { useAllRuns } from "../../domain/hooks/runs";
+import { usePolled, useRepos } from "../../domain/hooks/store";
 import type { Repo } from "../../domain/types";
 import { repoActivity } from "./api";
 import type { RepoActivity, SessionActivity, SubagentActivity } from "./types";
@@ -49,6 +50,16 @@ function useRepoActivity(repoPath: string | null): { data: RepoActivity | null; 
     POLL_MS,
   );
   return { data: data ?? null, error };
+}
+
+/** Conteos por repo del proyecto (un solo `claude agents`), para las pestañas. */
+function useProjectActivity(projectId: string | null) {
+  return usePolled<ProjectActivity>(
+    projectId ? `project-activity:${projectId}` : null,
+    () => projectActivity(projectId as string),
+    [],
+    POLL_MS * 2,
+  ).data;
 }
 
 interface SessionGroup {
@@ -105,25 +116,23 @@ export interface ActivityViewProps {
  * Nodal o no.
  */
 export function ActivityView({ projectId, onOpenRun }: ActivityViewProps) {
-  const runs = useRuns({ projectId });
-  const repos = useMemo(
-    () =>
-      [...runs.repos.values()]
-        .filter((r) => !projectId || r.projectId === projectId)
-        .sort((a, b) => a.position - b.position || a.name.localeCompare(b.name)),
-    [runs.repos, projectId],
-  );
+  // Ya vienen ordenados por posición.
+  const reposQ = useRepos(projectId);
+  const repos = reposQ.data ?? [];
+  const runs = useAllRuns();
+  const counts = useProjectActivity(projectId);
+  const countByRepo = useMemo(() => new Map((counts?.repos ?? []).map((c) => [c.repoId, c])), [counts]);
   const [picked, setPicked] = useState<string | null>(null);
   const repo: Repo | undefined = repos.find((r) => r.id === picked) ?? repos[0];
   const { data, error } = useRepoActivity(repo?.path ?? null);
 
   const runBySession = useMemo(() => {
     const m = new Map<string, string>();
-    for (const v of runs.byId.values()) if (v.run.sessionId) m.set(v.run.sessionId, v.run.id);
+    for (const r of runs.data ?? []) if (r.sessionId && !m.has(r.sessionId)) m.set(r.sessionId, r.id);
     return m;
-  }, [runs.byId]);
+  }, [runs.data]);
 
-  if (runs.loaded && repos.length === 0) {
+  if (reposQ.data && repos.length === 0) {
     return (
       <div className="activity-view">
         <div className="center-state">
@@ -149,6 +158,10 @@ export function ActivityView({ projectId, onOpenRun }: ActivityViewProps) {
         <div className="segmented act-repos" role="tablist" aria-label="Repos">
           {repos.map((r) => {
             const on = r.id === repo?.id;
+            // Sesiones trabajando/esperando y subagentes activos (criterio de `project_activity`).
+            const c = countByRepo.get(r.id);
+            const n = c?.sessions ?? 0;
+            const agents = c?.agents ?? 0;
             return (
               <button
                 key={r.id}
@@ -156,11 +169,11 @@ export function ActivityView({ projectId, onOpenRun }: ActivityViewProps) {
                 role="tab"
                 aria-selected={on}
                 className={`act-repo ${on ? "on" : ""}`}
-                title={r.path}
+                title={`${r.path}${n || agents ? ` · ${n} session${n === 1 ? "" : "s"}, ${agents} agent${agents === 1 ? "" : "s"}` : ""}`}
                 onClick={() => setPicked(r.id)}
               >
                 {r.name}
-                {on && liveSessions > 0 && <span className="act-repo-cnt">{liveSessions}</span>}
+                {n > 0 && <span className="act-repo-cnt">{n}</span>}
               </button>
             );
           })}
