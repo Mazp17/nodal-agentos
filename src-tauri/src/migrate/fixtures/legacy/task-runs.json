@@ -1,0 +1,38 @@
+{
+  "runs": [
+    {
+      "taskId": "t01aaaaaaaa",
+      "prompt": "/plan-task {\"plan\":\"/Users/me/plans/t01.md\",\"finish\":\"branch\"}",
+      "finish": "branch",
+      "runId": "a1b2c3d4",
+      "sessionId": "11111111-1111-4111-8111-111111111111",
+      "cwd": "/Users/me/Code/acme-api",
+      "queuedAt": 1700000010000,
+      "launchedAt": 1700000011000,
+      "status": "launched"
+    },
+    {
+      "taskId": "t02bbbbbbbb",
+      "prompt": "/plan-task {}",
+      "finish": "pr",
+      "cwd": "/Users/me/Code/acme-scripts",
+      "queuedAt": 1700000020000,
+      "status": "queued"
+    },
+    {
+      "taskId": "t09zzzzzzzz",
+      "prompt": "Arreglar el build",
+      "cwd": "/Users/me/Code/acme-api",
+      "queuedAt": 1700000030000,
+      "status": "failed",
+      "error": "claude exited with code 1"
+    },
+    {
+      "taskId": "t03cccccccc",
+      "prompt": "/plan-task {}",
+      "cwd": "/Users/me/Code/acme-web",
+      "queuedAt": 1700000040000,
+      "status": "launching"
+    }
+  ]
+}

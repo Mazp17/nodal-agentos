@@ -4,7 +4,9 @@ mod db;
 mod domain;
 mod issue_runs;
 mod linear;
+mod migrate;
 mod runs;
+mod secrets;
 mod tasks;
 
 use std::time::Duration;
@@ -28,6 +30,7 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .manage(linear::LinearState::new())
+        .manage(secrets::Secrets::default())
         .setup(|app| {
             use tauri::Manager;
             // Todavía no la usa nadie (llega en F1): si falla, se avisa y la app sigue.
@@ -78,6 +81,7 @@ pub fn run() {
             tasks::cancel_task_run,
             activity::repo_activity,
             activity::activity_summary,
+            migrate::import_legacy_data,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

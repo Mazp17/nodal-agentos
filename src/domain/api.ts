@@ -363,7 +363,6 @@ export const saveStateMap = (linkId: string, map: StateMap) => invoke<SourceLink
 // ---------- Migración ----------
 
 /** Copia `folder` a `legacy-backup-<ts>/` y la importa en una transacción. Idempotente. */
-// TODO(F1-A)
 export const importLegacyData = (folder: string) => invoke<LegacyImportReport>("import_legacy_data", { folder });
 
 // ---------- Settings ----------

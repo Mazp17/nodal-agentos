@@ -1,0 +1,14 @@
+{
+  "repos": [
+    {
+      "path": "/Users/me/Code/acme-pay",
+      "name": "acme-pay",
+      "finish": "pr",
+      "links": [
+        { "provider": "linear", "kind": "team", "id": "team-pay", "name": "Payments" },
+        { "kind": "project", "id": "proj-checkout", "name": "Checkout" }
+      ]
+    }
+  ],
+  "concurrency": 2
+}

@@ -1,0 +1,29 @@
+{
+  "tasks": [
+    {
+      "id": "t02bbbbbbbb",
+      "repoPath": "/Users/me/Code/acme-scripts",
+      "title": "Limpiar scripts de deploy",
+      "plan": { "kind": "text" },
+      "status": "done",
+      "createdAt": 1700000002000,
+      "doneAt": 1700000009000
+    },
+    {
+      "id": "t01aaaaaaaa",
+      "repoPath": "/Users/me/Code/acme-api",
+      "title": "Agregar endpoint de salud",
+      "plan": { "kind": "text" },
+      "status": "todo",
+      "createdAt": 1700000001000
+    },
+    {
+      "id": "t03cccccccc",
+      "repoPath": "/Users/me/Code/acme-web",
+      "title": "Rebrand del header",
+      "plan": { "kind": "file", "path": "/Users/me/Code/acme-web/docs/plan.md" },
+      "status": "todo",
+      "createdAt": 1700000003000
+    }
+  ]
+}
