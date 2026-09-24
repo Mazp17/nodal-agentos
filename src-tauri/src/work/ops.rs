@@ -13,7 +13,7 @@ use crate::runs::options;
 use crate::util::{new_id, write_atomic};
 
 use super::dto::*;
-use super::transitions::{apply_status, outbox_ops, outbox_ops_for, OutboxOp, QUEUE_PUSHED_STATUSES};
+use super::transitions::{apply_status, outbox_ops, OutboxOp};
 use super::{validate, Env};
 
 // ---------- Proyectos ----------
@@ -469,7 +469,7 @@ pub fn apply_task_transition(
         tasks::set_status(conn, &task.id, s, now)?;
     }
     if status.is_some() || comment.is_some() {
-        push_ops(conn, task, outbox_ops_for(task, status, comment, manages_source, &QUEUE_PUSHED_STATUSES), now)?;
+        push_status(conn, task, status, comment, manages_source, now)?;
     }
     Ok(status)
 }
