@@ -185,10 +185,11 @@ pub fn prepare_rules(old: &[RepoRule], incoming: Vec<RepoRule>, now: i64) -> Res
     for mut r in incoming {
         r.value = r.value.trim().to_string();
         r.name = r.name.trim().to_string();
-        if r.value.is_empty() {
+        if r.value.is_empty() || r.kind == RuleKind::Unknown {
             return Err(DbError::Invalid(match r.kind {
                 RuleKind::Label => "Routing rules need a label.".into(),
                 RuleKind::Project => "Project rules need a project.".into(),
+                RuleKind::Unknown => "Unknown routing rule type.".into(),
             }));
         }
         if r.name.is_empty() {
@@ -459,6 +460,8 @@ async fn backfill_items(app: &AppHandle, link: &SourceLink, rule: &RepoRule) -> 
 async fn backfill_plan(app: &AppHandle, db: &Db, link_id: &str, rule_id: &str) -> PResult<(SourceLink, RepoRule, Provider, BackfillPlan)> {
     let link = load_link(db, link_id).await?;
     let rule = find_rule(&link, rule_id)?;
+    let (repo, project) = (rule.repo_id.clone(), link.project_id.clone());
+    with_db(db, move |c| store::check_repo_in_project(c, &repo, &project)).await.map_err(e)?;
     let (p, items) = backfill_items(app, &link, &rule).await?;
     let (l, r) = (link.clone(), rule.clone());
     let plan = with_db(db, move |c| plan_backfill(c, &l, &r, &items)).await.map_err(e)?;
@@ -500,9 +503,15 @@ pub async fn import_rule(app: AppHandle, db: State<'_, Db>, link_id: String, rul
     }));
     let pairs = full.into_iter().map(|i| (i, rule.repo_id.clone())).collect();
     let data_dir = state.data_dir.clone();
-    let (l, here, rule_id) = (link.clone(), plan.here, rule.id.clone());
+    let (here, rule_id, repo_id) = (plan.here, rule.id.clone(), rule.repo_id.clone());
     let mut result = with_db(&db, move |c| {
-        store::tag_rule(c, &l.id, &rule_id, &here)?;
+        // `update_source_link` no toma el lock del sync: si la regla cambió mientras se iba
+        // a la red, no se importa al repo viejo.
+        let l = store::get_link(c, &link_id)?;
+        if !l.repo_rules.iter().any(|r| r.id == rule_id && r.repo_id == repo_id) {
+            return Err(DbError::Invalid("The rule changed while importing. Try again.".into()));
+        }
+        store::tag_rule(c, &l.id, &rule_id, &repo_id, &here)?;
         import_items(c, &data_dir, &l, pairs, now_ms())
     })
     .await

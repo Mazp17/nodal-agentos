@@ -485,6 +485,10 @@ pub enum RuleKind {
     Label,
     /// El proyecto del proveedor (proyecto de Linear) al que pertenece el ítem.
     Project,
+    /// Tipo que esta versión no conoce: la regla no rutea nada, pero leerla no rompe el link
+    /// (ni el sync entero).
+    #[serde(other)]
+    Unknown,
 }
 
 /// Al importar, un ítem con este label (o de este proyecto del proveedor) va a este repo.

@@ -413,6 +413,16 @@ pub mod tests {
             conn.query_row("SELECT repo_rules_json FROM source_links WHERE id = ?1", [&link.id], |r| r.get(0)).unwrap();
         assert!(json.contains(r#""kind":"label""#) && json.contains(r#""value":"api""#), "{json}");
         assert_eq!(store::get_link(&conn, &link.id).unwrap().repo_rules, a.repo_rules);
+
+        // Un tipo desconocido (versión futura) no rompe la lectura ni rutea.
+        conn.execute(
+            r#"UPDATE source_links SET repo_rules_json = '[{"kind":"milestone","value":"m1","repoId":"r-docs"}]' WHERE id = ?1"#,
+            [&link.id],
+        )
+        .unwrap();
+        let l = store::get_link(&conn, &link.id).unwrap();
+        assert_eq!(l.repo_rules[0].kind, RuleKind::Unknown);
+        assert_eq!(suggest_repo(&l, Some("m1"), &["m1".into()]), None);
     }
 
     #[test]

@@ -716,8 +716,15 @@ async fn auto_import_link(
     };
     let pairs: Vec<(ExternalItem, String)> =
         routed.into_iter().filter_map(|(id, repo)| full.get(&id).cloned().map(|i| (i, repo))).collect();
-    let (l, dir) = (link.clone(), data_dir.to_path_buf());
-    match with_db(db, move |c| import_items(c, &dir, &l, pairs, now)).await {
+    let (link_id, dir) = (link.id.clone(), data_dir.to_path_buf());
+    let res = with_db(db, move |c| {
+        // `update_source_link` no toma el lock del sync: con el link releído, un ítem cuyo
+        // ruteo cambió mientras se iba a la red espera a la pasada siguiente.
+        let l = store::get_link(c, &link_id)?;
+        let pairs = pairs.into_iter().filter(|(i, repo)| suggest_repo_for(&l, i).as_deref() == Some(repo.as_str())).collect();
+        import_items(c, &dir, &l, pairs, now)
+    });
+    match res.await {
         Ok(r) => {
             report.imported += r.imported.len();
             report.errors.extend(r.skipped.into_iter().map(|s| format!("Auto-import {}: {}", s.external_id, s.reason)));

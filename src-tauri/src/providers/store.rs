@@ -293,11 +293,12 @@ pub fn set_src_project(
 
 /// El backfill de una regla encontró estas tareas ya en su repo: pasan a "llegadas por la
 /// regla" (avisan si la issue cambia de proyecto). Solo las de ese link y sin aviso pendiente.
-pub fn tag_rule(conn: &Connection, link_id: &str, rule_id: &str, task_ids: &[String]) -> Result<(), DbError> {
+pub fn tag_rule(conn: &Connection, link_id: &str, rule_id: &str, repo_id: &str, task_ids: &[String]) -> Result<(), DbError> {
     for id in task_ids {
         conn.execute(
-            "UPDATE tasks SET src_rule_id = ?3 WHERE id = ?1 AND src_link_id = ?2 AND src_moved IS NULL",
-            params![id, link_id, rule_id],
+            "UPDATE tasks SET src_rule_id = ?3
+             WHERE id = ?1 AND src_link_id = ?2 AND repo_id = ?4 AND src_moved IS NULL",
+            params![id, link_id, rule_id, repo_id],
         )?;
     }
     Ok(())
