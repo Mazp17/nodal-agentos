@@ -30,7 +30,8 @@ pub const REVIEW_DISALLOWED: [&str; 3] = ["Edit", "Write", "NotebookEdit"];
 /// la sesión queda en "Needs input".
 pub const REVIEW_PERMISSION_MODE: &str = "dontAsk";
 /// Lo único que puede usar el revisor (`--allowedTools`), más los comandos de test del repo
-/// (`test_commands`): leer y git de consulta.
+/// (`test_commands`): leer y git de consulta. No es solo lectura estricta: los tests corren
+/// código del repo y `git diff/log/show --output=<f>` escribe un archivo.
 pub const REVIEW_ALLOWED: [&str; 7] =
     ["Read", "Grep", "Glob", "Bash(git diff:*)", "Bash(git status:*)", "Bash(git log:*)", "Bash(git show:*)"];
 
@@ -598,6 +599,11 @@ fn enqueue_work_replacing(
     let res = resolve(&task, &repo, input, &executor, reviews);
     let options = crate::runs::options::normalize(&res.options).map_err(|e| e.join("\n"))?;
     let (cwd, wt) = if res.isolation == Some(Isolation::Worktree) {
+        // Se vuelve a mirar justo antes de tocar el worktree: si empezó una limpieza, no se lo
+        // recrea (la transacción igual rechazaría, pero quedaría en disco).
+        if cleaning.contains(task_id) {
+            return Err(CLEANING_ERR.into());
+        }
         let slug = worktree::task_slug(&project.key, task.number, &task.title);
         let dir = worktree::dir_for(&env.worktrees_root, &repo.name, &slug);
         let wt = worktree::ensure(Path::new(&repo.path), &dir, &worktree::branch_for(&slug), task.worktree.as_ref())?;
