@@ -4,6 +4,8 @@
 
 use std::path::{Path, PathBuf};
 
+use serde::Serialize;
+
 use crate::domain::WorktreeRef;
 use crate::util::git;
 
@@ -137,6 +139,69 @@ pub fn cleanup(repo: &Path, wt: &WorktreeRef) -> Result<(), String> {
     Ok(())
 }
 
+/// Estado del worktree de una tarea, para decidir si limpiarlo es seguro.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorktreeStatus {
+    /// La carpeta existe y es un worktree vivo.
+    pub exists: bool,
+    pub branch: Option<String>,
+    pub base: Option<String>,
+    /// Commits de la rama que no están en la base.
+    pub ahead: u32,
+    /// Commits de la rama que no están ni en la base ni en ningún remoto: se perderían.
+    pub unpushed: u32,
+    /// Cambios sin commitear (incluidos archivos nuevos no ignorados).
+    pub dirty: bool,
+}
+
+fn count(repo: &Path, args: &[&str]) -> u32 {
+    git::ok(repo, args).ok().and_then(|s| s.trim().parse().ok()).unwrap_or(0)
+}
+
+/// Estado de `wt` (`None`: la tarea no tiene worktree).
+pub fn status(repo: &Path, wt: Option<&WorktreeRef>) -> Result<WorktreeStatus, String> {
+    let Some(wt) = wt else { return Ok(WorktreeStatus::default()) };
+    let exists = is_live_worktree(Path::new(&wt.path));
+    let mut st = WorktreeStatus {
+        exists,
+        branch: Some(wt.branch.clone()),
+        base: Some(wt.base.clone()),
+        ..Default::default()
+    };
+    if branch_exists(repo, &wt.branch)? {
+        let branch = format!("refs/heads/{}", wt.branch);
+        let base_ok = git::run(repo, &["rev-parse", "--verify", "--quiet", &format!("{}^{{commit}}", wt.base)])?.ok;
+        if base_ok {
+            st.ahead = count(repo, &["rev-list", "--count", &branch, "--not", &wt.base]);
+            st.unpushed = count(repo, &["rev-list", "--count", &branch, "--not", &wt.base, "--remotes"]);
+        } else {
+            // Sin base (borrada): todo lo que no esté en un remoto se perdería.
+            st.unpushed = count(repo, &["rev-list", "--count", &branch, "--not", "--remotes"]);
+            st.ahead = st.unpushed;
+        }
+    }
+    if exists {
+        st.dirty = !git::ok(Path::new(&wt.path), &["status", "--porcelain"])?.trim().is_empty();
+    }
+    Ok(st)
+}
+
+/// Por qué no se puede limpiar sin `force` (`None`: es seguro).
+pub fn cleanup_blocker(st: &WorktreeStatus) -> Option<String> {
+    let mut why = Vec::new();
+    if st.unpushed > 0 {
+        let s = if st.unpushed == 1 { "" } else { "s" };
+        why.push(format!("{} unpushed commit{s}", st.unpushed));
+    }
+    if st.dirty {
+        why.push("uncommitted changes".to_string());
+    }
+    (!why.is_empty()).then(|| {
+        format!("The worktree has {}: push or commit them first, or clean up with force to discard them.", why.join(" and "))
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -188,8 +253,39 @@ mod tests {
         std::fs::write(foreign.join("f"), "x").unwrap();
         assert!(ensure(&repo, &foreign, "nodal/other", None).unwrap_err().contains("not a worktree"));
 
+        // Status: carpeta ajena borrada; el worktree está limpio y sin commits propios.
+        std::fs::remove_dir_all(&foreign).unwrap();
+        let st = status(&repo, Some(&recreated)).unwrap();
+        assert!(st.exists && !st.dirty);
+        assert_eq!((st.ahead, st.unpushed), (0, 0));
+        assert_eq!(cleanup_blocker(&st), None);
+        assert_eq!(status(&repo, None).unwrap(), WorktreeStatus::default());
+
+        let wtp = Path::new(&recreated.path);
+        std::fs::write(wtp.join("new.txt"), "x").unwrap();
+        let st = status(&repo, Some(&recreated)).unwrap();
+        assert!(st.dirty);
+        assert!(cleanup_blocker(&st).unwrap().contains("uncommitted changes"));
+        git::ok(wtp, &["add", "."]).unwrap();
+        git::ok(wtp, &["commit", "-q", "-m", "wip"]).unwrap();
+        let st = status(&repo, Some(&recreated)).unwrap();
+        assert!(!st.dirty);
+        assert_eq!((st.ahead, st.unpushed), (1, 1));
+        let msg = cleanup_blocker(&st).unwrap();
+        assert!(msg.contains("1 unpushed commit:") && msg.contains("force"), "{msg}");
+
+        // Con la rama publicada en un remoto ya no hay nada que perder.
+        let remote = t.0.join("remote.git");
+        git::ok(&t.0, &["init", "-q", "--bare", remote.to_str().unwrap()]).unwrap();
+        git::ok(&repo, &["remote", "add", "origin", remote.to_str().unwrap()]).unwrap();
+        git::ok(&repo, &["push", "-q", "origin", "nodal/pay-1-logo"]).unwrap();
+        let st = status(&repo, Some(&recreated)).unwrap();
+        assert_eq!((st.ahead, st.unpushed), (1, 0));
+        assert_eq!(cleanup_blocker(&st), None);
+
         cleanup(&repo, &recreated).unwrap();
         assert!(!Path::new(&recreated.path).exists());
+        assert!(!status(&repo, Some(&recreated)).unwrap().exists);
         assert!(!branch_exists(&repo, "nodal/pay-1-logo").unwrap());
         // Idempotente.
         cleanup(&repo, &recreated).unwrap();

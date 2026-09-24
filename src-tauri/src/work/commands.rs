@@ -211,10 +211,24 @@ pub async fn remove_task_relation(
     Ok(())
 }
 
-/// "Clean up": borra el worktree y la rama de la tarea. Rechaza con runs en curso.
 #[tauri::command]
-pub async fn cleanup_worktree(state: State<'_, WorkState>, task_id: String) -> Result<Task, String> {
+pub async fn worktree_status(state: State<'_, WorkState>, task_id: String) -> Result<worktree::WorktreeStatus, String> {
     check_id(&task_id, "task")?;
+    let (task, repo) = db(&state.0, move |c| {
+        let t = tasks::get(c, &task_id)?;
+        let r = repos::get(c, &t.repo_id)?;
+        Ok((t, r))
+    })
+    .await?;
+    blocking(move || worktree::status(Path::new(&repo.path), task.worktree.as_ref())).await
+}
+
+/// "Clean up": borra el worktree y la rama de la tarea. Rechaza con runs en curso y, sin
+/// `force`, si hay commits sin publicar o cambios sin commitear.
+#[tauri::command]
+pub async fn cleanup_worktree(state: State<'_, WorkState>, task_id: String, force: Option<bool>) -> Result<Task, String> {
+    check_id(&task_id, "task")?;
+    let force = force.unwrap_or(false);
     let id = task_id.clone();
     let (task, repo) = db(&state.0, move |c| {
         let t = tasks::get(c, &id)?;
@@ -226,7 +240,16 @@ pub async fn cleanup_worktree(state: State<'_, WorkState>, task_id: String) -> R
     })
     .await?;
     let Some(wt) = task.worktree.clone() else { return Ok(task) };
-    blocking(move || worktree::cleanup(Path::new(&repo.path), &wt)).await?;
+    blocking(move || {
+        let repo = Path::new(&repo.path);
+        if !force {
+            if let Some(why) = worktree::cleanup_blocker(&worktree::status(repo, Some(&wt))?) {
+                return Err(why);
+            }
+        }
+        worktree::cleanup(repo, &wt)
+    })
+    .await?;
     let t = db(&state.0, move |c| {
         let mut t = tasks::get(c, &task_id)?;
         t.worktree = None;

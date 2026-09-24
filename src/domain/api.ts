@@ -40,6 +40,16 @@ import type { Transcript } from "../features/runs/types";
 
 // ---------- DTOs ----------
 
+/** `exists`: la carpeta es un worktree vivo. `ahead`: commits fuera de la base; `unpushed`: además fuera de todo remoto. */
+export interface WorktreeStatus {
+  exists: boolean;
+  branch: string | null;
+  base: string | null;
+  ahead: number;
+  unpushed: number;
+  dirty: boolean;
+}
+
 /**
  * `key`: 2-6 mayúsculas/dígitos, único. `color`: si falta, se asigna uno de la paleta.
  * Cambiar la key renumera los ids visibles (`PAY-1` → `WEB-1`) pero no renombra ramas ni
@@ -293,8 +303,14 @@ export const addTaskRelation = (taskId: string, otherId: string, kind: RelationK
   invoke<void>("add_task_relation", { taskId, otherId, kind });
 export const removeTaskRelation = (taskId: string, otherId: string, kind: RelationKind) =>
   invoke<void>("remove_task_relation", { taskId, otherId, kind });
-/** Borra el worktree y la rama de la tarea ("Clean up"). */
-export const cleanupWorktree = (taskId: string) => invoke<Task>("cleanup_worktree", { taskId });
+/**
+ * Borra el worktree y la rama de la tarea ("Clean up"). Sin `force` rechaza si hay commits
+ * sin publicar (`unpushed`) o cambios sin commitear (`dirty`).
+ */
+export const cleanupWorktree = (taskId: string, force = false) =>
+  invoke<Task>("cleanup_worktree", { taskId, force });
+/** Todo en cero/false/null si la tarea no tiene worktree. */
+export const worktreeStatus = (taskId: string) => invoke<WorktreeStatus>("worktree_status", { taskId });
 
 // ---------- Ejecutores y runs ----------
 
