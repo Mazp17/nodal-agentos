@@ -4,11 +4,10 @@
 import { useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { importLegacyData, type LegacyImportReport } from "../../domain/api";
-import { useProjects } from "../../domain/hooks/projects";
+import { invalidate } from "../../domain/hooks/store";
 import { useToast } from "../../ui/Toasts";
 
 export function useLegacyImport() {
-  const { refresh } = useProjects();
   const toast = useToast();
   const [busy, setBusy] = useState(false);
   const [report, setReport] = useState<LegacyImportReport | null>(null);
@@ -29,7 +28,7 @@ export function useLegacyImport() {
     try {
       const r = await importLegacyData(folder);
       setReport(r);
-      await refresh();
+      await invalidate("projects", "repos", "tasks", "runs", "settings");
       toast("Data imported", summarize(r), "ok");
       return r;
     } catch (e) {

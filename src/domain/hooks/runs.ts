@@ -1,15 +1,17 @@
-// Store compartido de runs: UN solo polling para toda la app. Cada vista se suscribe con
-// `useRuns`/`useRun`/`useQueueSummary`; el polling corre mientras haya al menos un
-// suscriptor y se detiene con el último. Las mutaciones llaman a `refreshRuns()`.
+// Recurso "runs" de la capa de datos (ver `store.ts`): UN solo polling para toda la app.
+// Cada vista se suscribe con `useRuns`/`useRun`/`useQueueSummary`/`useAllRuns`; el polling
+// corre mientras haya al menos un suscriptor, se pausa con la ventana oculta y se detiene
+// con el último. Las mutaciones llaman a `invalidate("runs")` (o `refreshRuns()`).
 //
-// En cada vuelta se leen de la base los runs (`list_task_runs`), proyectos, repos, tareas y
-// settings, y de Claude Code las sesiones en background (`claude agents`). El detalle del
-// workflow (`get_run_detail`) se pide solo para runs de workflow: los activos en cada
-// vuelta, los terminados hasta que se asienta (y después nunca más).
+// En cada vuelta se leen de la base los runs (`list_task_runs`) y de Claude Code las
+// sesiones en background (`claude agents`). Proyectos, repos, tareas y settings vienen de
+// sus propios stores. El detalle del workflow (`get_run_detail`) se pide solo para runs de
+// workflow: los activos en cada vuelta, los terminados hasta que se asienta.
 
 import { useEffect, useMemo, useSyncExternalStore } from "react";
-import { getSettings, listProjects, listRepos, listTaskRuns, listTasks } from "../api";
+import { listTaskRuns } from "../api";
 import type { Project, Repo, Run, Settings, Task } from "../types";
+import { registerResource, useProjectList, useRepoList, useSettings, useTaskList, type Loadable } from "./store";
 import { getRunDetail, listRuns } from "../../features/runs/api";
 import { deriveRunView, LAUNCH_GRACE_MS, type RunView } from "../../features/runs/status";
 import { isInProgress, type RunDetail, type RunSummary } from "../../features/runs/types";
@@ -24,10 +26,6 @@ export interface RunsSnapshot {
   runs: Run[];
   live: RunSummary[];
   details: Record<string, RunDetail | null>;
-  projects: Project[];
-  repos: Repo[];
-  tasks: Task[];
-  settings: Settings | null;
   /** Errores de la última vuelta (en inglés, listos para mostrar). */
   error: string | null;
   /** La base respondió al menos una vez (`runs` vacío ya significa "no hay"). */
@@ -41,10 +39,6 @@ const EMPTY: RunsSnapshot = {
   runs: [],
   live: [],
   details: {},
-  projects: [],
-  repos: [],
-  tasks: [],
-  settings: null,
   error: null,
   loaded: false,
   liveLoaded: false,
@@ -77,14 +71,7 @@ function needsDetail(run: Run, live: RunSummary | null, historyIds: Set<string>)
 }
 
 async function pollOnce() {
-  const [runsR, liveR, projR, repoR, taskR, setR] = await Promise.allSettled([
-    listTaskRuns(null),
-    listRuns(),
-    listProjects(),
-    listRepos(null),
-    listTasks(null),
-    getSettings(),
-  ]);
+  const [runsR, liveR] = await Promise.allSettled([listTaskRuns(null), listRuns()]);
   const errors: string[] = [];
   const next: Partial<RunsSnapshot> = { now: Date.now() };
   if (runsR.status === "fulfilled") {
@@ -95,10 +82,6 @@ async function pollOnce() {
     next.live = liveR.value;
     next.liveLoaded = true;
   } else errors.push(`Couldn't read Claude sessions: ${String(liveR.reason)}`);
-  if (projR.status === "fulfilled") next.projects = projR.value;
-  if (repoR.status === "fulfilled") next.repos = repoR.value;
-  if (taskR.status === "fulfilled") next.tasks = taskR.value;
-  if (setR.status === "fulfilled") next.settings = setR.value;
   next.error = errors.length ? errors.join("\n") : null;
   emit(next);
 
@@ -155,11 +138,22 @@ export function refreshRuns(): Promise<void> {
   return p;
 }
 
+registerResource("runs", refreshRuns);
+
 function loop() {
   timer = null;
-  void refreshRuns().finally(() => {
+  const next = () => {
     if (listeners.size) timer = setTimeout(loop, POLL_MS);
     else looping = false;
+  };
+  // Ventana oculta: no se consulta; al volver, `visibilitychange` relee al instante.
+  if (typeof document !== "undefined" && document.hidden) next();
+  else void refreshRuns().finally(next);
+}
+
+if (typeof document !== "undefined") {
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden && listeners.size) void refreshRuns();
   });
 }
 
@@ -223,9 +217,6 @@ export interface RunsState {
 }
 
 interface Derived {
-  projects: Map<string, Project>;
-  repos: Map<string, Repo>;
-  tasks: Map<string, Task>;
   all: RunView[];
   byId: Map<string, RunView>;
   latestByTask: Map<string, RunView>;
@@ -239,9 +230,6 @@ let derived: Derived | null = null;
 function derive(s: RunsSnapshot): Derived {
   if (derivedFor === s && derived) return derived;
   derived = (() => {
-    const projects = new Map(s.projects.map((p) => [p.id, p]));
-    const repos = new Map(s.repos.map((r) => [r.id, r]));
-    const tasks = new Map(s.tasks.map((t) => [t.id, t]));
     const queued = s.runs
       .filter((r) => r.status === "queued")
       .sort((a, b) => a.queuePosition - b.queuePosition || a.queuedAt - b.queuedAt || a.id.localeCompare(b.id));
@@ -262,10 +250,23 @@ function derive(s: RunsSnapshot): Derived {
       if (!prev || v.run.queuedAt > prev.run.queuedAt) latestByTask.set(v.run.taskId, v);
     }
     const queue = queued.map((r) => byId.get(r.id)!);
-    return { projects, repos, tasks, all, byId, latestByTask, queue };
+    return { all, byId, latestByTask, queue };
   })();
   derivedFor = s;
   return derived;
+}
+
+/** Mapa por id de una lista del store, cacheado por identidad (una vez por respuesta). */
+const mapCache = new WeakMap<object, Map<string, unknown>>();
+const EMPTY_LIST: never[] = [];
+function byIdOf<T extends { id: string }>(list: T[] | undefined): Map<string, T> {
+  const l = list ?? EMPTY_LIST;
+  let m = mapCache.get(l) as Map<string, T> | undefined;
+  if (!m) {
+    m = new Map(l.map((x) => [x.id, x]));
+    mapCache.set(l, m);
+  }
+  return m;
 }
 
 /**
@@ -275,31 +276,65 @@ function derive(s: RunsSnapshot): Derived {
 export function useRuns(filter: RunsFilter = {}): RunsState {
   const s = useRunsSnapshot();
   const d = derive(s);
+  const projects = byIdOf(useProjectList().data);
+  const repos = byIdOf(useRepoList().data);
+  const tasks = byIdOf(useTaskList().data);
+  const settings = useSettings().data ?? null;
   const { projectId = null, taskId = null } = filter;
   const views = useMemo(
     () =>
       d.all.filter((v) => {
         if (taskId && v.run.taskId !== taskId) return false;
-        if (projectId && projectIdOf(v.run, d.tasks, d.repos) !== projectId) return false;
+        if (projectId && projectIdOf(v.run, tasks, repos) !== projectId) return false;
         return true;
       }),
-    [d, projectId, taskId],
+    [d, projectId, taskId, tasks, repos],
   );
   return {
     views,
     byId: d.byId,
     latestByTask: d.latestByTask,
     queue: d.queue,
-    projects: d.projects,
-    repos: d.repos,
-    tasks: d.tasks,
-    settings: s.settings,
+    projects,
+    repos,
+    tasks,
+    settings,
     error: s.error,
     loaded: s.loaded,
     liveLoaded: s.liveLoaded,
     now: s.now,
     refresh: refreshRuns,
   };
+}
+
+/** Lista cruda de runs (más recientes primero) con el contrato `Loadable` del store. */
+export function useAllRuns(): Loadable<Run[]> {
+  const s = useRunsSnapshot();
+  return useMemo(
+    () => ({ data: s.loaded ? s.runs : undefined, error: s.error, loading: !s.loaded && !s.error, refresh: refreshRuns }),
+    [s.loaded, s.runs, s.error],
+  );
+}
+
+/** Runs de una tarea (más recientes primero). */
+export function useTaskRuns(taskId: string | null): Loadable<Run[]> {
+  const all = useAllRuns();
+  const data = useMemo(
+    () => (taskId && all.data ? all.data.filter((r) => r.taskId === taskId) : undefined),
+    [all.data, taskId],
+  );
+  return useMemo(() => ({ ...all, data }), [all, data]);
+}
+
+export const isRunActive = (r: Run) => r.status === "queued" || r.status === "launching" || r.status === "launched";
+
+/** Último run de cada tarea (la lista viene de más reciente a más viejo). */
+export function latestRunByTask(runs: Run[] | undefined): Map<string, Run> {
+  const map = new Map<string, Run>();
+  for (const r of runs ?? []) {
+    if (r.taskId && !map.has(r.taskId)) map.set(r.taskId, r);
+  }
+  return map;
 }
 
 /** Un run por id (con su detalle de workflow pedido aunque sea viejo). */
@@ -332,6 +367,7 @@ export interface QueueSummary {
  */
 export function useQueueSummary(): QueueSummary {
   const s = useRunsSnapshot();
+  const concurrency = useSettings().data?.concurrency ?? 0;
   return useMemo(() => {
     const working = s.live.filter((l) => l.state === "working").length;
     let starting = 0;
@@ -354,10 +390,10 @@ export function useQueueSummary(): QueueSummary {
       } else if (live.state === "blocked") needYou++;
     }
     const running = working + starting;
-    const capacity = s.settings?.concurrency ?? 0;
+    const capacity = concurrency;
     const parts = [`${running}/${capacity || "?"} running`];
     if (needYou) parts.push(`${needYou} need you`);
     if (queued) parts.push(`${queued} queued`);
     return { running, capacity, needYou, queued, label: parts.join(" · ") };
-  }, [s]);
+  }, [s, concurrency]);
 }

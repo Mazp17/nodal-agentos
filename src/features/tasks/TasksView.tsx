@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
-import { latestRunByTask, useAllRuns, useProjects, useRepos, useTasks } from "../../domain/hooks/tasks";
+import { latestRunByTask, useAllRuns } from "../../domain/hooks/runs";
+import { useProjectList, useRepos, useTasks } from "../../domain/hooks/store";
 import { taskKey, type Task } from "../../domain/types";
 import { RunBadge } from "../runs";
 import { NewTaskDialog } from "./NewTaskDialog";
@@ -27,7 +28,7 @@ export function TasksView({ projectId, onOpenTask }: TasksViewProps) {
   const [newTask, setNewTask] = useState(false);
   const tasks = useTasks(projectId);
   const repos = useRepos(projectId);
-  const projects = useProjects();
+  const projects = useProjectList();
   const runs = useAllRuns();
 
   const latest = useMemo(() => latestRunByTask(runs.data), [runs.data]);

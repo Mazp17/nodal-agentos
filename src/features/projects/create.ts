@@ -4,7 +4,7 @@
 import { addRepo, createSourceLink } from "../../domain/api";
 import { suggestProjectKey, type ProjectsState } from "../../domain/hooks/projects";
 import type { Project, ScopeRef } from "../../domain/types";
-import { LINEAR } from "../../shell/providerStatus";
+const LINEAR = "linear";
 
 /** Misma paleta que el backend (`validate::PALETTE`), en el mismo orden. */
 export const PROJECT_COLORS = [

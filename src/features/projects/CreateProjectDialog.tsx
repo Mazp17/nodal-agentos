@@ -4,7 +4,7 @@ import type { Project, ScopeRef } from "../../domain/types";
 import { useToast } from "../../ui/Toasts";
 import { useFocusTrap } from "../../ui/useFocusTrap";
 import { createdSummary, createProjectWithRepos, PROJECT_COLORS } from "./create";
-import { ColorSwatches, LinearTeamPicker } from "./fields";
+import { ColorSwatches, LinearScopeField } from "./fields";
 import { DraftRepoRow, RepoNoticeBar, useRepoPicker } from "./repoPicker";
 import "./projects.css";
 
@@ -165,7 +165,7 @@ export function CreateProjectDialog({ onClose, onCreated }: Props) {
               <span>Connect a Linear team</span>
               <span className="faint">optional</span>
             </div>
-            {connect && <LinearTeamPicker value={scope} onChange={setScope} allowKey={false} />}
+            {connect && <LinearScopeField value={scope} onChange={setScope} />}
           </div>
           {error && (
             <span className="field-error" role="alert">

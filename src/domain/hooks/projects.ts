@@ -1,10 +1,11 @@
-// Proyectos y repos compartidos por toda la app (sidebar, settings, diálogos, vistas).
-// Un solo `list_projects` + `list_repos` por refresh; las mutaciones de este módulo
-// refrescan solas. Otras features pueden llamar `refresh()` tras cambiar algo.
+// Proyectos y repos para toda la app (sidebar, settings, diálogos, vistas), sobre los
+// stores compartidos de `store.ts`: sin consultas propias. Las mutaciones de este módulo
+// invalidan solas; otras features pueden llamar `refresh()` tras cambiar algo.
 
-import { createContext, createElement, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useMemo } from "react";
 import * as api from "../api";
 import type { Project, Repo } from "../types";
+import { invalidate, KEYS, setData, useProjectList, useRepoList } from "./store";
 
 export interface ProjectsState {
   projects: Project[];
@@ -24,94 +25,61 @@ export interface ProjectsState {
   deleteRepo: (id: string) => Promise<void>;
 }
 
-const Ctx = createContext<ProjectsState | null>(null);
+const refresh = () => invalidate("projects", "repos");
 
-/** Refresco periódico: los imports y la migración pueden crear proyectos por fuera. */
-const POLL_MS = 30_000;
+/** Espera la relectura: quien crea algo ve el estado ya actualizado al seguir. */
+const after = <T,>(p: Promise<T>): Promise<T> =>
+  p.then(
+    async (v) => {
+      await refresh();
+      return v;
+    },
+    async (e: unknown) => {
+      await refresh();
+      throw e;
+    },
+  );
 
-export function ProjectsProvider({ children }: { children: ReactNode }) {
-  const [projects, setProjects] = useState<Project[]>([]);
-  const [repos, setRepos] = useState<Repo[]>([]);
-  const [loaded, setLoaded] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  // En serie: cada refresh aplica su resultado en orden y quien lo espera (p. ej. tras
-  // crear un proyecto) ve el estado ya actualizado, sin que una respuesta vieja lo pise.
-  const chain = useRef<Promise<void>>(Promise.resolve());
+const MUTATIONS = {
+  refresh,
+  createProject: (input: api.NewProject) => after(api.createProject(input)),
+  // Optimista: segmentados y colores responden al instante; la relectura corrige si falló.
+  updateProject: (id: string, patch: api.ProjectPatch) => {
+    setData<Project[]>(KEYS.projects, (ps) => ps.map((p) => (p.id === id ? ({ ...p, ...patch } as Project) : p)));
+    return after(api.updateProject(id, patch));
+  },
+  deleteProject: (id: string) => after(api.deleteProject(id)),
+  addRepo: (projectId: string, input: api.NewRepo) => after(api.addRepo(projectId, input)),
+  updateRepo: (id: string, patch: api.RepoPatch) => {
+    setData<Repo[]>(KEYS.repos, (rs) => rs.map((r) => (r.id === id ? ({ ...r, ...patch } as Repo) : r)));
+    return after(api.updateRepo(id, patch));
+  },
+  deleteRepo: (id: string) => after(api.deleteRepo(id)),
+};
 
-  const refresh = useCallback(() => {
-    const run = async () => {
-      try {
-        const [ps, rs] = await Promise.all([api.listProjects(), api.listRepos(null)]);
-        setProjects(ps);
-        setRepos(rs);
-        setError(null);
-      } catch (e) {
-        setError(String(e));
-      } finally {
-        setLoaded(true);
-      }
-    };
-    chain.current = chain.current.then(run);
-    return chain.current;
-  }, []);
-
-  useEffect(() => {
-    void refresh();
-    const t = setInterval(() => void refresh(), POLL_MS);
-    const onFocus = () => void refresh();
-    window.addEventListener("focus", onFocus);
-    return () => {
-      clearInterval(t);
-      window.removeEventListener("focus", onFocus);
-    };
-  }, [refresh]);
-
-  const value = useMemo((): ProjectsState => {
-    const after = <T,>(p: Promise<T>) =>
-      p.then(
-        (v) => {
-          void refresh();
-          return v;
-        },
-        (e: unknown) => {
-          void refresh();
-          throw e;
-        },
-      );
-    const sorted = [...repos].sort((a, b) => a.position - b.position || a.name.localeCompare(b.name));
-    return {
-      projects,
-      repos: sorted,
-      loaded,
-      error,
-      projectById: new Map(projects.map((p) => [p.id, p])),
-      repoById: new Map(repos.map((r) => [r.id, r])),
-      reposOf: (projectId) => sorted.filter((r) => r.projectId === projectId),
-      refresh,
-      createProject: (input) => after(api.createProject(input)),
-      // Optimista: segmentados y colores responden al instante (y con teclado avanzan de a
-      // uno sin esperar al backend); el refresh posterior corrige si falló.
-      updateProject: (id, patch) => {
-        setProjects((ps) => ps.map((p) => (p.id === id ? ({ ...p, ...patch } as Project) : p)));
-        return after(api.updateProject(id, patch));
-      },
-      deleteProject: (id) => after(api.deleteProject(id)),
-      addRepo: (projectId, input) => after(api.addRepo(projectId, input)),
-      updateRepo: (id, patch) => {
-        setRepos((rs) => rs.map((r) => (r.id === id ? ({ ...r, ...patch } as Repo) : r)));
-        return after(api.updateRepo(id, patch));
-      },
-      deleteRepo: (id) => after(api.deleteRepo(id)),
-    };
-  }, [projects, repos, loaded, error, refresh]);
-
-  return createElement(Ctx.Provider, { value }, children);
-}
+const NONE: never[] = [];
 
 export function useProjects(): ProjectsState {
-  const v = useContext(Ctx);
-  if (!v) throw new Error("useProjects must be used inside <ProjectsProvider>");
-  return v;
+  const p = useProjectList();
+  const r = useRepoList();
+  const loaded = (p.data !== undefined || p.error !== null) && (r.data !== undefined || r.error !== null);
+  const error = p.error ?? r.error;
+  const projects = p.data ?? NONE;
+  const repos = r.data ?? NONE;
+  return useMemo((): ProjectsState => {
+    const byProject = new Map<string, Repo[]>();
+    for (const x of repos) byProject.set(x.projectId, [...(byProject.get(x.projectId) ?? []), x]);
+    return {
+      projects,
+      repos,
+      loaded,
+      error,
+      projectById: new Map(projects.map((x) => [x.id, x])),
+      repoById: new Map(repos.map((x) => [x.id, x])),
+      reposOf: (projectId) => byProject.get(projectId) ?? NONE,
+      ...MUTATIONS,
+    };
+  }, [projects, repos, loaded, error]);
 }
 
 /** Última carpeta del path (`/a/b/repo` → `repo`). */

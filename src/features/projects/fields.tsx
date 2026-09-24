@@ -1,9 +1,10 @@
 // Controles compartidos por el onboarding, New project y Project settings.
 
-import { useEffect, useId, useState, type KeyboardEvent } from "react";
-import { providerScopes, providerSetKey } from "../../domain/api";
+import { useId, type KeyboardEvent } from "react";
+import { useProviderScopes, useProviderStatus } from "../../domain/hooks/providers";
 import type { ScopeRef } from "../../domain/types";
-import { isConnected, LINEAR, useProviderStatus } from "../../shell/providerStatus";
+import { ScopePicker } from "../providers/ScopePicker";
+import "../providers/providers.css";
 import { PROJECT_COLORS } from "./create";
 import "./projects.css";
 
@@ -104,136 +105,41 @@ export function Segmented<T>({
   );
 }
 
-/** Teams de Linear (si la key está conectada) para elegir el scope de una fuente. */
-export function useLinearTeams(enabled: boolean) {
-  const [teams, setTeams] = useState<ScopeRef[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  useEffect(() => {
-    if (!enabled) return;
-    let alive = true;
-    setError(null);
-    providerScopes(LINEAR)
-      .then((s) => alive && setTeams(s.filter((x) => x.kind === "team")))
-      .catch((e) => alive && setError(String(e)));
-    return () => {
-      alive = false;
-    };
-  }, [enabled]);
-  return { teams, error };
-}
-
 /**
- * Bloque "Linear" del onboarding y de New project: si no hay key, la pide (o remite a
- * Settings con `allowKey=false`); si hay, deja elegir el team.
+ * Team o proyecto de Linear para la fuente de un proyecto nuevo (diálogo "New project").
+ * Sin key conectada remite a Settings → Integrations; la key se carga en el onboarding
+ * (ConnectProviderStep) o en Settings.
  */
-export function LinearTeamPicker({
-  value,
-  onChange,
-  allowKey,
-}: {
-  value: ScopeRef | null;
-  onChange: (s: ScopeRef | null) => void;
-  allowKey: boolean;
-}) {
-  const status = useProviderStatus();
-  const connected = isConnected(status.linear);
-  const { teams, error } = useLinearTeams(connected);
-  const [key, setKey] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [msg, setMsg] = useState<{ text: string; error: boolean } | null>(null);
-  const keyId = useId();
-
-  // Primer team por defecto al conectar.
-  useEffect(() => {
-    if (teams && teams.length && !value) onChange(teams[0]!);
-  }, [teams, value, onChange]);
-
-  const saveKey = async () => {
-    const k = key.trim();
-    if (!k) return;
-    setBusy(true);
-    setMsg({ text: "Testing against api.linear.app…", error: false });
-    try {
-      const s = await providerSetKey(LINEAR, k);
-      status.set(s);
-      if (s.error) {
-        setMsg({ text: s.error, error: true });
-      } else {
-        setKey("");
-        setMsg(null);
-      }
-    } catch (e) {
-      setMsg({ text: String(e), error: true });
-    } finally {
-      setBusy(false);
-    }
-  };
+export function LinearScopeField({ value, onChange }: { value: ScopeRef | null; onChange: (s: ScopeRef | null) => void }) {
+  const st = useProviderStatus("linear");
+  const connected = st.connection === "connected";
+  const scopes = useProviderScopes("linear", connected);
+  const id = useId();
 
   if (!connected) {
-    if (!allowKey) {
-      return (
-        <span className="field-hint">
-          {status.linear?.hasKey && status.linear.error
-            ? `Linear can't be reached: ${status.linear.error}. You can add a source later.`
-            : "Connect Linear in Settings → Integrations first. You can add a source later."}
-        </span>
-      );
-    }
     return (
-      <div className="field">
-        <label className="sr-only" htmlFor={keyId}>
-          Linear API key
-        </label>
-        <div className="linear-key-row">
-          <input
-            id={keyId}
-            className="input input-mono"
-            type="password"
-            autoComplete="off"
-            spellCheck={false}
-            placeholder="lin_api_…"
-            value={key}
-            onChange={(e) => {
-              setKey(e.target.value);
-              setMsg(null);
-            }}
-            onKeyDown={(e) => e.key === "Enter" && void saveKey()}
-          />
-          <button type="button" className="btn btn-lg" disabled={busy || !key.trim()} onClick={() => void saveKey()}>
-            {busy ? "Testing…" : "Connect"}
-          </button>
-        </div>
-        <span className={msg?.error ? "field-error" : "field-hint"} role={msg?.error ? "alert" : undefined}>
-          {msg?.text ?? "Personal API key from Linear → Settings → API. Stored in the macOS Keychain."}
-        </span>
-      </div>
+      <span className="field-hint">
+        {st.connection === "loading"
+          ? "Checking Linear…"
+          : st.status?.hasKey && st.error
+            ? `Linear can't be reached: ${st.error}. You can add a source later.`
+            : "Connect Linear in Settings → Integrations first. You can add a source later."}
+      </span>
     );
   }
-
   return (
     <div className="field">
-      <span className="linear-connected">
-        <span className="dot dot-sm tone-ok" aria-hidden />
-        Connected{status.linear?.viewer ? ` as ${status.linear.viewer}` : ""}
-      </span>
-      {error && (
-        <span className="field-error" role="alert">
-          {error}
-        </span>
-      )}
-      {!error && teams === null && <span className="field-hint">Loading teams…</span>}
-      {teams && teams.length === 0 && <span className="field-hint">No teams in this workspace.</span>}
-      {teams && teams.length > 0 && (
-        <div className="inline-field">
-          <span className="inline-field-label">Team</span>
-          <Segmented
-            label="Linear team"
-            value={value?.id ?? null}
-            options={teams.map((t) => ({ value: t.id as string | null, label: t.name }))}
-            onChange={(id) => onChange(teams.find((t) => t.id === id) ?? null)}
-          />
-        </div>
-      )}
+      <label className="field-label" htmlFor={id}>
+        Team or project{st.viewer ? ` · connected as ${st.viewer}` : ""}
+      </label>
+      <ScopePicker
+        id={id}
+        scopes={scopes.data}
+        loading={scopes.loading}
+        error={scopes.error}
+        value={value?.id ?? null}
+        onChange={(sid) => onChange(scopes.data?.find((s) => s.id === sid) ?? null)}
+      />
     </div>
   );
 }

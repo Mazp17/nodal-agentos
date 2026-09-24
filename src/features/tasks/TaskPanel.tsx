@@ -10,19 +10,17 @@ import {
   updateTask,
   type TaskPatch,
 } from "../../domain/api";
+import { isRunActive, useAllRuns, useTaskRuns } from "../../domain/hooks/runs";
 import {
   invalidate,
-  isRunActive,
-  useAllRuns,
-  useProjects,
+  useProjectList,
   useRepos,
   useSettings,
   useTask,
   useTaskPlan,
   useTaskRelations,
-  useTaskRuns,
   useTasks,
-} from "../../domain/hooks/tasks";
+} from "../../domain/hooks/store";
 import { taskKey, TASK_STATUSES, type Executor, type RelationKind, type Run, type Task, type TaskStatus } from "../../domain/types";
 import { formatDateTime, formatDuration } from "../../lib/format";
 import { SafeMarkdown } from "../../ui/Markdown";
@@ -69,7 +67,7 @@ export function TaskPanel({ taskId, onClose, onOpenRun, onOpenDiff, onOpenTask }
 
   const taskQ = useTask(taskId);
   const task = taskQ.data;
-  const projects = useProjects();
+  const projects = useProjectList();
   const repos = useRepos(task?.projectId ?? null);
   const runsQ = useTaskRuns(taskId);
   const allRuns = useAllRuns();
@@ -663,7 +661,7 @@ function RelationsSection({ task, onOpenTask }: { task: Task; onOpenTask?: (id: 
   const push = useToast();
   const rels = useTaskRelations(task.id);
   const tasks = useTasks(task.projectId);
-  const projects = useProjects();
+  const projects = useProjectList();
   const project = projects.data?.find((p) => p.id === task.projectId);
   const [adding, setAdding] = useState(false);
   const [kind, setKind] = useState<RelChoice>("related");

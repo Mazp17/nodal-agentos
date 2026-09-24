@@ -21,9 +21,11 @@ interface Props {
   section: ProjectSection;
   onSection: (s: ProjectSection) => void;
   onDeleted: () => void;
+  /** Sources sin key de Linear: ir a Settings → Integrations. */
+  onOpenIntegrations?: () => void;
 }
 
-export function ProjectSettings({ project, section, onSection, onDeleted }: Props) {
+export function ProjectSettings({ project, section, onSection, onDeleted, onOpenIntegrations }: Props) {
   return (
     <div className="settings">
       <nav className="settings-nav" aria-label="Project settings sections">
@@ -43,7 +45,7 @@ export function ProjectSettings({ project, section, onSection, onDeleted }: Prop
         <div className="settings-col">
           {section === "general" && <GeneralSection key={project.id} project={project} onDeleted={onDeleted} />}
           {section === "repos" && <ReposSection key={project.id} project={project} />}
-          {section === "sources" && <ProjectSourcesSettings projectId={project.id} />}
+          {section === "sources" && <ProjectSourcesSettings projectId={project.id} onOpenIntegrations={onOpenIntegrations} />}
         </div>
       </div>
     </div>

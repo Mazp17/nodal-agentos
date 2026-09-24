@@ -1,19 +1,21 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { launchTask, listSourceLinks } from "../domain/api";
+import { launchTask } from "../domain/api";
 import { useProjects } from "../domain/hooks/projects";
+import { useProviderStatus, useSourceLinks } from "../domain/hooks/providers";
+import { useQueueSummary } from "../domain/hooks/runs";
+import { invalidate } from "../domain/hooks/store";
 import { taskKey, type Project } from "../domain/types";
 import { BoardView } from "../features/board";
 import { Onboarding } from "../features/onboarding/Onboarding";
 import { CreateProjectDialog } from "../features/projects/CreateProjectDialog";
 import { ProjectSettings } from "../features/projects/ProjectSettings";
 import { ImportDialog } from "../features/providers";
-import { ActivityView, RunDetailView, RunsView } from "../features/runs";
+import { ActivityView, RunDetailView, RunDiffDrawer, RunsView } from "../features/runs";
 import { useLegacyImport } from "../features/settings/legacyImport";
 import { SettingsView } from "../features/settings/SettingsView";
 import { NewTaskDialog, TaskPanel, TasksView } from "../features/tasks";
 import { useToast } from "../ui/Toasts";
 import { CommandPalette, type PaletteItem } from "./palette/CommandPalette";
-import { isConnected, useProviderStatus } from "./providerStatus";
 import { Sidebar, type ProviderFoot } from "./Sidebar";
 import { Topbar } from "./Topbar";
 import { PAGE_TITLE, useNav, type Page, type ProjectPage } from "./useNav";
@@ -29,9 +31,10 @@ const PROJECT_PAGES: ReadonlySet<Page> = new Set(["board", "tasks", "runs", "act
 
 export function AppShell() {
   const ctx = useProjects();
-  const provider = useProviderStatus();
+  const provider = useProviderStatus("linear");
   const nav = useNav();
   const work = useWorkStatus();
+  const queue = useQueueSummary();
   const toast = useToast();
   const legacy = useLegacyImport();
 
@@ -41,7 +44,7 @@ export function AppShell() {
   const [newTask, setNewTask] = useState<{ projectId: string | null } | null>(null);
   const [importFor, setImportFor] = useState<string | null>(null);
   const [taskId, setTaskId] = useState<string | null>(null);
-  const [sourceCount, setSourceCount] = useState(0);
+  const [diffRunId, setDiffRunId] = useState<string | null>(null);
 
   const { route } = nav;
   const project = route.projectId ? (ctx.projectById.get(route.projectId) ?? null) : null;
@@ -63,34 +66,12 @@ export function AppShell() {
     if (route.projectId) lastProjectId.current = route.projectId;
   }, [route.projectId]);
 
-  // Fuentes del proyecto actual: habilitan "Import".
+  // Fuentes del proyecto actual con Linear conectado: habilitan "Import".
   const projectId = project?.id ?? null;
-  useEffect(() => {
-    if (!projectId) {
-      setSourceCount(0);
-      return;
-    }
-    let alive = true;
-    listSourceLinks(projectId).then(
-      (l) => alive && setSourceCount(l.length),
-      () => alive && setSourceCount(0),
-    );
-    return () => {
-      alive = false;
-    };
-    // También al cambiar de página (p. ej. volver de Sources con una fuente nueva).
-  }, [projectId, route.page]);
+  const links = useSourceLinks(projectId);
+  const canImport = projectId !== null && provider.connection === "connected" && (links.data?.length ?? 0) > 0;
 
-  // El estado de Linear puede cambiar en Settings → Integrations: se relee al salir.
-  const inSettings = route.page === "settings";
-  const wasInSettings = useRef(inSettings);
-  const refreshProvider = provider.refresh;
-  useEffect(() => {
-    if (wasInSettings.current && !inSettings) void refreshProvider();
-    wasInSettings.current = inSettings;
-  }, [inSettings, refreshProvider]);
-
-  const overlayOpen = paletteOpen || createProject || newTask !== null || importFor !== null;
+  const overlayOpen = paletteOpen || createProject || newTask !== null || importFor !== null || diffRunId !== null;
 
   const openTask = useCallback((id: string) => {
     setPaletteOpen(false);
@@ -100,6 +81,7 @@ export function AppShell() {
   const openRun = useCallback(
     (id: string) => {
       setTaskId(null);
+      setDiffRunId(null);
       setPaletteOpen(false);
       navOpenRun(id);
     },
@@ -108,6 +90,7 @@ export function AppShell() {
   const go = useCallback(
     (page: Page, pid: string | null = null) => {
       setTaskId(null);
+      setDiffRunId(null);
       setPaletteOpen(false);
       navGo(page, pid);
     },
@@ -117,6 +100,19 @@ export function AppShell() {
     setPaletteOpen(false);
     setNewTask({ projectId: project?.id ?? null });
   }, [project]);
+
+  const { setProjectSection, setSettingsSection } = nav;
+  const openRepoSettings = useCallback(
+    (pid: string) => {
+      setProjectSection("repos");
+      go("project-settings", pid);
+    },
+    [setProjectSection, go],
+  );
+  const openIntegrations = useCallback(() => {
+    setSettingsSection("integrations");
+    go("settings");
+  }, [setSettingsSection, go]);
 
   /** Proyecto para ⌘2/⌘4 desde una vista global: el actual, el último visitado o el primero. */
   const fallbackProject = (): Project | null =>
@@ -137,7 +133,7 @@ export function AppShell() {
       const mod = e.metaKey || e.ctrlKey;
       if (mod && e.key.toLowerCase() === "k") {
         e.preventDefault();
-        if (createProject || newTask || importFor) return;
+        if (createProject || newTask || importFor || diffRunId) return;
         setPaletteOpen((o) => !o);
         return;
       }
@@ -180,7 +176,7 @@ export function AppShell() {
     const canNewTask = project ? projectRepos.length > 0 : ctx.repos.length > 0;
     if (canNewTask) items.push({ id: "new-task", kind: "Action", label: "New task", run: openNewTask });
     items.push({ id: "new-project", kind: "Action", label: "New project", run: () => setCreateProject(true) });
-    if (project && sourceCount > 0) {
+    if (project && canImport) {
       items.push({ id: "import", kind: "Action", label: "Import from Linear", run: () => setImportFor(project.id) });
     }
     items.push({ id: "go-runs", kind: "Action", label: "Go to Runs", run: () => go("runs") });
@@ -189,16 +185,16 @@ export function AppShell() {
     for (const p of ctx.projects) {
       items.push({ id: `open-${p.id}`, kind: "Action", label: `Open ${p.name}`, keywords: p.key, run: () => go("board", p.id) });
     }
-    if (work.needYou > 0) {
+    if (queue.needYou > 0 || work.blocked.length > 0) {
       items.push({
         id: "need-you",
         kind: "Action",
-        label: `Review what needs you (${work.needYou})`,
+        label: `Review what needs you (${queue.needYou + work.blocked.length})`,
         run: () => (work.blocked[0] ? openTask(work.blocked[0].id) : go("runs")),
       });
     }
     return items;
-  }, [project, projectRepos.length, ctx.repos.length, ctx.projects, sourceCount, work.needYou, work.blocked, openNewTask, go, openTask]);
+  }, [project, projectRepos.length, ctx.repos.length, ctx.projects, canImport, queue.needYou, work.blocked, openNewTask, go, openTask]);
 
   const paletteSearch = (q: string): PaletteItem[] => {
     const keyOf = (pid: string, n: number) => taskKey(ctx.projectById.get(pid)?.key ?? "", n);
@@ -219,7 +215,7 @@ export function AppShell() {
               launchTask(t.id).then(
                 (r) => {
                   toast(r.status === "queued" ? "Queued" : "Launching", `${keyOf(t.projectId, t.number)} · ${t.title}`, "accent");
-                  void work.refresh();
+                  void invalidate("runs", "tasks");
                 },
                 (err) => toast("Couldn't launch", String(err), "danger"),
               );
@@ -273,7 +269,8 @@ export function AppShell() {
   }
 
   // ---- Contenido ----
-  const noRepos = project !== null && projectRepos.length === 0 && (route.page === "board" || route.page === "tasks");
+  // El board resuelve su propio estado "sin repos"; Tasks lo delega acá.
+  const noRepos = project !== null && projectRepos.length === 0 && route.page === "tasks";
   let content: ReactNode;
   if (noRepos && project) {
     content = (
@@ -287,8 +284,7 @@ export function AppShell() {
               type="button"
               className="btn btn-primary"
               onClick={() => {
-                nav.setProjectSection("repos");
-                go("project-settings", project.id);
+                openRepoSettings(project.id);
               }}
             >
               Add repo…
@@ -300,16 +296,24 @@ export function AppShell() {
   } else {
     switch (route.page) {
       case "board":
-        content = <BoardView projectId={route.projectId} onOpenTask={openTask} onOpenRun={openRun} />;
+        content = (
+          <BoardView
+            projectId={route.projectId}
+            onOpenTask={openTask}
+            onOpenRun={openRun}
+            onNewProject={() => setCreateProject(true)}
+            onOpenProjectSettings={openRepoSettings}
+          />
+        );
         break;
       case "tasks":
-        content = project && <TasksView projectId={project.id} onOpenTask={openTask} onOpenRun={openRun} />;
+        content = project && <TasksView projectId={project.id} onOpenTask={openTask} />;
         break;
       case "runs":
-        content = <RunsView projectId={route.projectId} onOpenRun={openRun} onOpenTask={openTask} />;
+        content = <RunsView projectId={route.projectId} onOpenRun={openRun} />;
         break;
       case "activity":
-        content = project && <ActivityView projectId={project.id} />;
+        content = project && <ActivityView projectId={project.id} onOpenRun={openRun} />;
         break;
       case "project-settings":
         content = project && (
@@ -318,20 +322,19 @@ export function AppShell() {
             section={nav.projectSection}
             onSection={nav.setProjectSection}
             onDeleted={() => go("board")}
+            onOpenIntegrations={openIntegrations}
           />
         );
         break;
       case "settings":
         content = (
-          <SettingsView
-            section={nav.settingsSection}
-            onSection={nav.setSettingsSection}
-            onSettingsSaved={() => void work.refreshSettings()}
-          />
+<SettingsView section={nav.settingsSection} onSection={nav.setSettingsSection} />
         );
         break;
       case "run":
-        content = route.runId ? <RunDetailView key={route.runId} runId={route.runId} onBack={nav.back} onOpenTask={openTask} /> : null;
+        content = route.runId ? (
+          <RunDetailView key={route.runId} runId={route.runId} onBack={nav.back} onOpenTask={openTask} onOpenRun={openRun} />
+        ) : null;
         break;
     }
   }
@@ -342,12 +345,12 @@ export function AppShell() {
   const showNewTask =
     (route.page === "board" || route.page === "tasks") && (project ? projectRepos.length > 0 : ctx.repos.length > 0);
 
-  const lin = provider.linear;
-  const foot: ProviderFoot = isConnected(lin)
-    ? { tone: "ok", label: "Linear connected" }
-    : lin?.hasKey
-      ? { tone: "danger", label: "Linear unreachable" }
-      : { tone: "muted", label: "No task manager" };
+  const foot: ProviderFoot =
+    provider.connection === "connected"
+      ? { tone: "ok", label: "Linear connected" }
+      : provider.status?.hasKey
+        ? { tone: "danger", label: "Linear unreachable" }
+        : { tone: "muted", label: "No task manager" };
 
   return (
     <div className="desk">
@@ -356,7 +359,7 @@ export function AppShell() {
         projects={ctx.projects}
         expanded={nav.expanded}
         openTotal={work.openTotal}
-        activeTotal={work.active.length}
+        activeTotal={work.activeTotal}
         activeByProject={work.activeByProject}
         provider={foot}
         onGo={(page, pid) => go(page, pid)}
@@ -377,11 +380,11 @@ export function AppShell() {
           <Topbar
             project={route.page === "run" ? crumbProject : project}
             page={pageTitle}
-            running={work.active.length}
-            concurrency={work.settings?.concurrency ?? null}
-            needYou={work.needYou}
-            queued={work.queued.length + work.awaitingConfirm.length}
-            showImport={route.page === "board" && project !== null && sourceCount > 0}
+            running={queue.running}
+            concurrency={queue.capacity || null}
+            needYou={queue.needYou}
+            queued={queue.queued}
+            showImport={route.page === "board" && canImport}
             showNewTask={showNewTask}
             onOpenRuns={() => go("runs")}
             onImport={() => project && setImportFor(project.id)}
@@ -395,7 +398,14 @@ export function AppShell() {
           <div className="content">{content}</div>
 
           {taskId && (
-            <TaskPanel key={taskId} taskId={taskId} onClose={() => setTaskId(null)} onOpenRun={openRun} onOpenTask={openTask} />
+            <TaskPanel
+              key={taskId}
+              taskId={taskId}
+              onClose={() => setTaskId(null)}
+              onOpenRun={openRun}
+              onOpenDiff={setDiffRunId}
+              onOpenTask={openTask}
+            />
           )}
         </main>
       </div>
@@ -404,22 +414,31 @@ export function AppShell() {
         <NewTaskDialog
           projectId={newTask.projectId}
           onClose={() => setNewTask(null)}
-          onCreated={(t) => {
+          onSaved={(t) => {
             setNewTask(null);
-            void work.refresh();
             openTask(t.id);
+          }}
+          onAddRepo={(pid) => {
+            setNewTask(null);
+            openRepoSettings(pid);
           }}
         />
       )}
       {importFor && (
         <ImportDialog
           projectId={importFor}
-          onClose={() => {
+          projectName={ctx.projectById.get(importFor)?.name}
+          onClose={() => setImportFor(null)}
+          onImported={() => void invalidate("tasks", "runs")}
+          onOpenSources={() => {
+            const pid = importFor;
             setImportFor(null);
-            void work.refresh();
+            nav.setProjectSection("sources");
+            go("project-settings", pid);
           }}
         />
       )}
+      {diffRunId && <RunDiffDrawer key={diffRunId} runId={diffRunId} onClose={() => setDiffRunId(null)} />}
       {createProject && (
         <CreateProjectDialog
           onClose={() => setCreateProject(false)}

@@ -1,6 +1,6 @@
 import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import type { ExecutorInfo } from "../../domain/api";
-import { useExecutors } from "../../domain/hooks/tasks";
+import { useExecutors } from "../../domain/hooks/store";
 import type { Executor } from "../../domain/types";
 import { ExecutorAvatar } from "./ExecutorAvatar";
 import { CLAUDE, executorKey, executorLabel, sameExecutor } from "./executors";

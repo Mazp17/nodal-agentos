@@ -1,11 +1,11 @@
 import { useId, useState } from "react";
+import { useRepos } from "../../domain/hooks/store";
 import { importTasks, type ImportResult, type ImportableItem } from "../../domain/api";
 import type { Repo, SourceLink } from "../../domain/types";
 import {
   errorText,
   useDebounced,
   useImportable,
-  useProjectRepos,
   useProviderStatus,
   useSourceLinks,
 } from "../../domain/hooks/providers";
@@ -30,7 +30,7 @@ export function ImportDialog({ projectId, projectName, onClose, onImported, onOp
   const ref = useFocusTrap<HTMLDivElement>(onClose);
   const titleId = useId();
   const links = useSourceLinks(projectId);
-  const repos = useProjectRepos(projectId);
+  const repos = useRepos(projectId);
   const [linkId, setLinkId] = useState<string | null>(null);
   const link = links.data?.find((l) => l.id === linkId) ?? links.data?.[0] ?? null;
 

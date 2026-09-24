@@ -5,7 +5,6 @@
 
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import {
-  listRepos,
   listSourceLinks,
   providerListImportable,
   providerScopes,
@@ -15,7 +14,7 @@ import {
   type ProviderStatus,
   type SourceStatesReport,
 } from "../api";
-import type { Repo, ScopeRef, SourceLink } from "../types";
+import type { ScopeRef, SourceLink } from "../types";
 
 /** Los comandos rechazan con un string listo para mostrar; cualquier otra cosa se normaliza. */
 export function errorText(err: unknown): string {
@@ -226,11 +225,6 @@ export function useImportable(linkId: string | null, query: string): Loaded<Impo
   return useLoad(linkId ? `importable:${linkId}:${q}` : null, () =>
     providerListImportable(linkId ?? "", q ? q : null),
   );
-}
-
-/** Repos de un proyecto, para los selectores de repo. */
-export function useProjectRepos(projectId: string | null): Loaded<Repo[]> {
-  return useLoad(projectId ? `repos:${projectId}` : null, () => listRepos(projectId));
 }
 
 /** `value` después de `ms` sin cambios. */

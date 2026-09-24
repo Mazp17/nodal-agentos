@@ -1,5 +1,5 @@
 import type { DragEvent, MouseEvent } from "react";
-import { isRunActive } from "../../domain/hooks/tasks";
+import { isRunActive } from "../../domain/hooks/runs";
 import { taskKey, type Executor, type Project, type Repo, type Run, type Task } from "../../domain/types";
 import { ExecutorAvatar, executorLabel } from "../executors";
 import { RunBadge } from "../runs";

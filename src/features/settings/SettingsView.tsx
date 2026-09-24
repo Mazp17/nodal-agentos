@@ -6,7 +6,7 @@ import type { Settings } from "../../domain/types";
 import { IntegrationsSettings } from "../providers";
 import { resolveGitRoot } from "../projects/repoPicker";
 import { Segmented } from "../projects/fields";
-import { LINEAR } from "../../shell/providerStatus";
+import { invalidate, KEYS, setData } from "../../domain/hooks/store";
 import type { SettingsSection } from "../../shell/useNav";
 import { useToast } from "../../ui/Toasts";
 import { summarize, useLegacyImport } from "./legacyImport";
@@ -21,11 +21,15 @@ const SECTIONS: { id: SettingsSection; label: string }[] = [
 interface Props {
   section: SettingsSection;
   onSection: (s: SettingsSection) => void;
-  /** Tras guardar Execution (la píldora usa la concurrencia). */
-  onSettingsSaved: (s: Settings) => void;
 }
 
-export function SettingsView({ section, onSection, onSettingsSaved }: Props) {
+/** La píldora y los diálogos leen la concurrencia del store compartido. */
+function onSettingsSaved(s: Settings) {
+  setData<Settings>(KEYS.settings, () => s);
+  void invalidate("settings");
+}
+
+export function SettingsView({ section, onSection }: Props) {
   return (
     <div className="settings">
       <nav className="settings-nav" aria-label="Settings sections">
@@ -227,7 +231,7 @@ function DiagnosticsSettings() {
       (v): Check => ({ name: "Claude Code CLI", value: v, state: "ok" }),
       (e): Check => ({ name: "Claude Code CLI", value: String(e), state: "error" }),
     );
-    const linear = providerStatus(LINEAR).then(
+    const linear = providerStatus("linear").then(
       (s: ProviderStatus): [Check, Check] => [
         {
           name: "Keychain",

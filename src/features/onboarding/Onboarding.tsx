@@ -1,10 +1,10 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { isValidProjectKey, suggestProjectKey, useProjects } from "../../domain/hooks/projects";
 import type { Project, ScopeRef } from "../../domain/types";
+import { ConnectProviderStep } from "../providers";
 import { createdSummary, createProjectWithRepos, PROJECT_COLORS } from "../projects/create";
-import { ColorSwatches, LinearTeamPicker } from "../projects/fields";
+import { ColorSwatches } from "../projects/fields";
 import { DraftRepoRow, RepoNoticeBar, useRepoPicker } from "../projects/repoPicker";
-import { isConnected, useProviderStatus } from "../../shell/providerStatus";
 import { BrandMark } from "../../ui/BrandMark";
 import { useToast } from "../../ui/Toasts";
 import "./onboarding.css";
@@ -28,13 +28,11 @@ interface Props {
 export function Onboarding({ onDone, onCancel, onImportLegacy, importingLegacy }: Props) {
   const ctx = useProjects();
   const toast = useToast();
-  const provider = useProviderStatus();
   const nameId = useId();
   const [step, setStep] = useState<Step>("project");
   const [name, setName] = useState("");
   const [color, setColor] = useState<string>(PROJECT_COLORS[ctx.projects.length % PROJECT_COLORS.length]!);
   const [repos, setRepos] = useState<string[]>([]);
-  const [scope, setScope] = useState<ScopeRef | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
@@ -57,9 +55,15 @@ export function Onboarding({ onDone, onCancel, onImportLegacy, importingLegacy }
       firstStep.current = false;
       return;
     }
-    headingRef.current?.focus();
+    // El paso de proveedor (ConnectProviderStep) trae su propio título; si ya enfocó su
+    // campo de key (autoFocus), no se le quita.
+    if (headingRef.current) headingRef.current.focus();
+    else if (!document.activeElement || document.activeElement === document.body) {
+      const h = document.getElementById("pv-step-title");
+      h?.setAttribute("tabindex", "-1");
+      h?.focus();
+    }
   }, [step]);
-  const linearOk = isConnected(provider.linear);
 
   const next1 = () => {
     if (!name.trim()) {
@@ -70,7 +74,7 @@ export function Onboarding({ onDone, onCancel, onImportLegacy, importingLegacy }
     setStep("repos");
   };
 
-  const finish = async (withSource: boolean) => {
+  const finish = async (scope: ScopeRef | null) => {
     const key = suggestProjectKey(name, ctx.projects.map((p) => p.key));
     if (!isValidProjectKey(key)) return;
     setSaving(true);
@@ -80,7 +84,7 @@ export function Onboarding({ onDone, onCancel, onImportLegacy, importingLegacy }
         key,
         color,
         repos,
-        scope: withSource && linearOk ? scope : null,
+        scope,
         autoKey: true,
       });
       toast("Project created", createdSummary(out.project.name, out.reposAdded, out.sourceConnected), "ok");
@@ -207,43 +211,13 @@ export function Onboarding({ onDone, onCancel, onImportLegacy, importingLegacy }
           )}
 
           {step === "source" && (
-            <div className="panel onboarding-card">
-              <div className="onboarding-card-head">
-                <h2 ref={headingRef} tabIndex={-1} className="onboarding-card-title">
-                  Connect a task manager <span className="onboarding-optional">· optional</span>
-                </h2>
-                <p className="onboarding-card-text">
-                  Import issues as tasks and keep their state in sync. Nodal works fully without one.
-                </p>
-              </div>
-              <div className="onboarding-provider">
-                <div className="onboarding-provider-head">
-                  <span className="provider-mark" aria-hidden />
-                  <span className="onboarding-provider-name">Linear</span>
-                </div>
-                <LinearTeamPicker value={scope} onChange={setScope} allowKey />
-              </div>
-              <div className="onboarding-actions">
-                <span className="faint">Asana, Azure DevOps · coming soon</span>
-                <span className="spacer" />
-                <button type="button" className="btn btn-ghost" disabled={saving} onClick={() => setStep("repos")}>
-                  Back
-                </button>
-                <button type="button" className="btn" disabled={saving} onClick={() => void finish(false)}>
-                  Skip
-                </button>
-                {linearOk && (
-                  <button
-                    type="button"
-                    className="btn btn-primary"
-                    disabled={saving || !scope}
-                    onClick={() => void finish(true)}
-                  >
-                    {saving ? "Creating…" : "Create project"}
-                  </button>
-                )}
-              </div>
-            </div>
+            <ConnectProviderStep
+              busy={saving}
+              submitLabel={saving ? "Creating…" : "Create project"}
+              onBack={() => setStep("repos")}
+              onSkip={() => void finish(null)}
+              onConnected={({ scope }) => void finish(scope)}
+            />
           )}
         </div>
       </div>

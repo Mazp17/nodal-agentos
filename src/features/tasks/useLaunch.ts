@@ -1,6 +1,6 @@
 import { useCallback } from "react";
 import { handOff, launchTask, reviewNow, type LaunchInput } from "../../domain/api";
-import { invalidate } from "../../domain/hooks/tasks";
+import { invalidate } from "../../domain/hooks/store";
 import type { Executor, Run } from "../../domain/types";
 import { useToast } from "../../ui/Toasts";
 import { executorLabel } from "../executors";

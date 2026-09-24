@@ -1,134 +1,60 @@
-// Estado global de trabajo para el shell: píldora "N/M running · K need you · Q queued",
-// contadores del sidebar y búsqueda de la paleta. Sondea mientras la ventana está visible.
+// Estado global de trabajo para el shell: contadores del sidebar y búsqueda de la paleta.
+// Solo deriva de los stores compartidos (tareas y runs): no consulta nada por su cuenta. La
+// píldora del topbar usa `useQueueSummary` de runs.
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { getSettings, listTaskRuns, listTasks } from "../domain/api";
-import type { Run, Settings, Task } from "../domain/types";
+import { useMemo } from "react";
+import { isRunActive, useAllRuns } from "../domain/hooks/runs";
+import { useTaskList } from "../domain/hooks/store";
+import type { Run, Task } from "../domain/types";
 
-const POLL_MS = 4000;
-const ACTIVE: ReadonlySet<Run["status"]> = new Set(["launching", "launched"]);
+const RUNNING: ReadonlySet<Run["status"]> = new Set(["launching", "launched"]);
+const NONE: never[] = [];
 
 export interface WorkStatus {
-  loaded: boolean;
+  /** Error de la última lectura de tareas o runs. */
   error: string | null;
   tasks: Task[];
-  settings: Settings | null;
-  /** Runs `launching`/`launched` (trabajo y revisión). */
-  active: Run[];
-  /** En cola, en orden de salida (sin los migrados que esperan confirmación). */
-  queued: Run[];
-  /** Runs migrados en cola: no salen hasta confirmarlos. */
-  awaitingConfirm: Run[];
   /** Tareas bloqueadas (revisión fallida, agente bloqueado, run detenido). */
   blocked: Task[];
-  /** Blocked + migrados por confirmar. */
-  needYou: number;
-  /** Tareas abiertas (ni Done ni Canceled) por proyecto y total. */
-  openByProject: Map<string, number>;
+  /** Tareas abiertas (ni Done ni Canceled). */
   openTotal: number;
+  /** Runs `launching`/`launched` en total y por proyecto. */
+  activeTotal: number;
   activeByProject: Map<string, number>;
-  /** Tarea → run activo, para la paleta ("Run X" solo si no corre). */
+  /** Tareas con un run en cola o en marcha (la paleta no ofrece "Run X" para ellas). */
   activeTaskIds: ReadonlySet<string>;
-  refresh: () => Promise<void>;
-  refreshSettings: () => Promise<void>;
 }
 
 export function useWorkStatus(): WorkStatus {
-  const [runs, setRuns] = useState<Run[]>([]);
-  const [tasks, setTasks] = useState<Task[]>([]);
-  const [settings, setSettings] = useState<Settings | null>(null);
-  const [loaded, setLoaded] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const seq = useRef(0);
-
-  const refresh = useCallback(async () => {
-    const id = ++seq.current;
-    try {
-      const [rs, ts] = await Promise.all([listTaskRuns(null), listTasks(null)]);
-      if (id !== seq.current) return;
-      setRuns(rs);
-      setTasks(ts);
-      setError(null);
-    } catch (e) {
-      if (id === seq.current) setError(String(e));
-    } finally {
-      if (id === seq.current) setLoaded(true);
-    }
-  }, []);
-
-  const refreshSettings = useCallback(async () => {
-    try {
-      setSettings(await getSettings());
-    } catch {
-      /* se reintenta en el próximo refresh de Settings */
-    }
-  }, []);
-
-  useEffect(() => {
-    void refresh();
-    void refreshSettings();
-    let timer: ReturnType<typeof setInterval> | null = null;
-    const start = () => {
-      if (timer === null) timer = setInterval(() => void refresh(), POLL_MS);
-    };
-    const stop = () => {
-      if (timer !== null) clearInterval(timer);
-      timer = null;
-    };
-    const onVis = () => {
-      if (document.hidden) stop();
-      else {
-        void refresh();
-        start();
-      }
-    };
-    if (!document.hidden) start();
-    document.addEventListener("visibilitychange", onVis);
-    return () => {
-      stop();
-      document.removeEventListener("visibilitychange", onVis);
-    };
-  }, [refresh, refreshSettings]);
+  const tasksQ = useTaskList();
+  const runsQ = useAllRuns();
+  const tasks = tasksQ.data ?? NONE;
+  const runs = runsQ.data ?? NONE;
+  const error = tasksQ.error ?? runsQ.error;
 
   return useMemo((): WorkStatus => {
     const taskById = new Map(tasks.map((t) => [t.id, t]));
-    const active = runs.filter((r) => ACTIVE.has(r.status));
-    const queuedAll = runs.filter((r) => r.status === "queued").sort((a, b) => a.queuePosition - b.queuePosition);
-    const queued = queuedAll.filter((r) => !r.legacyLabel);
-    const awaitingConfirm = queuedAll.filter((r) => r.legacyLabel);
-    const blocked = tasks.filter((t) => t.status === "blocked");
-    const openByProject = new Map<string, number>();
     let openTotal = 0;
-    for (const t of tasks) {
-      if (t.status === "done" || t.status === "canceled") continue;
-      openTotal++;
-      openByProject.set(t.projectId, (openByProject.get(t.projectId) ?? 0) + 1);
-    }
+    for (const t of tasks) if (t.status !== "done" && t.status !== "canceled") openTotal++;
     const activeByProject = new Map<string, number>();
     const activeTaskIds = new Set<string>();
-    for (const r of [...active, ...queuedAll]) {
+    let activeTotal = 0;
+    for (const r of runs) {
+      if (!isRunActive(r)) continue;
       if (r.taskId) activeTaskIds.add(r.taskId);
-    }
-    for (const r of active) {
+      if (!RUNNING.has(r.status)) continue;
+      activeTotal++;
       const p = r.taskId ? taskById.get(r.taskId)?.projectId : undefined;
       if (p) activeByProject.set(p, (activeByProject.get(p) ?? 0) + 1);
     }
     return {
-      loaded,
       error,
       tasks,
-      settings,
-      active,
-      queued,
-      awaitingConfirm,
-      blocked,
-      needYou: blocked.length + awaitingConfirm.length,
-      openByProject,
+      blocked: tasks.filter((t) => t.status === "blocked"),
       openTotal,
+      activeTotal,
       activeByProject,
       activeTaskIds,
-      refresh,
-      refreshSettings,
     };
-  }, [runs, tasks, settings, loaded, error, refresh, refreshSettings]);
+  }, [tasks, runs, error]);
 }

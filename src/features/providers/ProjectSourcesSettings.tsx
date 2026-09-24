@@ -1,10 +1,10 @@
 import { useState } from "react";
+import { useRepos } from "../../domain/hooks/store";
 import { createSourceLink, deleteSourceLink, syncNow, updateSourceLink, type SourceLinkPatch } from "../../domain/api";
 import type { Repo, RepoRule, SourceLink } from "../../domain/types";
 import {
   errorText,
   invalidateProviders,
-  useProjectRepos,
   useProviderScopes,
   useProviderStatus,
   useSourceLinks,
@@ -25,7 +25,7 @@ export interface ProjectSourcesSettingsProps {
 /** Project settings → Sources. */
 export function ProjectSourcesSettings({ projectId, onOpenIntegrations }: ProjectSourcesSettingsProps) {
   const links = useSourceLinks(projectId);
-  const repos = useProjectRepos(projectId);
+  const repos = useRepos(projectId);
   const [connecting, setConnecting] = useState(false);
   /** Link recién conectado: abre su mapeo. */
   const [justConnected, setJustConnected] = useState<string | null>(null);

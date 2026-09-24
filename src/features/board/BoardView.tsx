@@ -1,13 +1,7 @@
 import { useEffect, useMemo, useState, type DragEvent, type ReactNode } from "react";
 import { moveTask } from "../../domain/api";
-import {
-  invalidate,
-  latestRunByTask,
-  useAllRuns,
-  useProjects,
-  useRepos,
-  useTasks,
-} from "../../domain/hooks/tasks";
+import { latestRunByTask, useAllRuns } from "../../domain/hooks/runs";
+import { invalidate, useProjectList, useRepos, useTasks } from "../../domain/hooks/store";
 import { taskKey, type Task, type TaskStatus } from "../../domain/types";
 import { useToast } from "../../ui/Toasts";
 import { resolveExecutor } from "../executors";
@@ -57,7 +51,7 @@ function positionAt(column: Task[], index: number): number {
 export function BoardView({ projectId, onOpenTask, onOpenRun, onNewProject, onOpenProjectSettings }: BoardViewProps) {
   const push = useToast();
   const launch = useLaunch();
-  const projects = useProjects();
+  const projects = useProjectList();
   const repos = useRepos(projectId);
   const tasks = useTasks(projectId);
   const runs = useAllRuns();

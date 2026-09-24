@@ -1,7 +1,7 @@
 import { useEffect, useId, useMemo, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { createTask, getTask, readTaskPlan, updateTask, type NewTask, type PlanInput, type TaskPatch } from "../../domain/api";
-import { invalidate, useProjects, useRepos, useSettings } from "../../domain/hooks/tasks";
+import { invalidate, useProjectList, useRepos, useSettings } from "../../domain/hooks/store";
 import { taskKey, type Executor, type Finish, type Isolation, type Priority, type Task } from "../../domain/types";
 import { useFocusTrap } from "../../ui/useFocusTrap";
 import { useToast } from "../../ui/Toasts";
@@ -46,7 +46,7 @@ export function NewTaskDialog({ projectId, taskId, defaultRepoId, onClose, onSav
   const titleId = useId();
   const push = useToast();
   const launch = useLaunch();
-  const projects = useProjects();
+  const projects = useProjectList();
   const allRepos = useRepos(null);
   const settings = useSettings();
   const titleRef = useRef<HTMLInputElement>(null);
