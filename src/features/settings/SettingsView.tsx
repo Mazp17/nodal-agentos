@@ -218,13 +218,15 @@ function ExecutionSettings({ onSaved }: { onSaved: (s: Settings) => void }) {
         <div className="settings-row settings-row-top">
           <div className="settings-row-text">
             <span className="settings-row-title">Editor</span>
-            <span className="settings-row-hint">Used by "Open in editor" in run diffs.</span>
+            <span className="settings-row-hint">
+              Used by "Open in editor" in run diffs. Auto picks the first one installed, or the system text editor.
+            </span>
           </div>
           <Segmented
             label="Editor"
             value={s.editor}
             options={[
-              { value: null as string | null, label: "System default" },
+              { value: null as string | null, label: "Auto" },
               ...EDITORS.map((e) => ({ value: e as string | null, label: EDITOR_LABEL[e] ?? e })),
             ]}
             disabled={saving}

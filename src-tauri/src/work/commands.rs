@@ -692,8 +692,8 @@ pub async fn open_worktree(state: State<'_, WorkState>, run_id: String) -> Resul
     spawn_open(cmd, "open").await
 }
 
-/// Abre la carpeta del run (o `file` dentro de ella) en el editor de Settings; sin editor,
-/// con la app por defecto del sistema.
+/// Abre la carpeta del run (o `file` dentro de ella) en el editor de Settings. Without one set,
+/// uses the first known editor whose CLI is installed, and only then the system text editor.
 #[tauri::command]
 pub async fn open_in_editor(state: State<'_, WorkState>, run_id: String, file: Option<String>) -> Result<(), String> {
     let dir = run_cwd(&state.0, run_id).await?;
@@ -714,10 +714,12 @@ pub async fn open_in_editor(state: State<'_, WorkState>, run_id: String, file: O
         }
         None => None,
     };
-    let editor = db(&state.0, |c| Ok(rows::load_settings(c)?.editor)).await?;
+    let editor = match db(&state.0, |c| Ok(rows::load_settings(c)?.editor)).await? {
+        Some(e) => Some(validate::editor(&e)?),
+        None => detect_editor(),
+    };
     let mut cmd = match editor {
         Some(e) => {
-            let e = validate::editor(&e)?;
             let bin = claude_bin::resolve_bin(&e).ok_or_else(|| format!("Couldn't find `{e}` in PATH."))?;
             let mut cmd = tokio::process::Command::new(bin);
             cmd.env("PATH", claude_bin::augmented_path());
@@ -745,6 +747,11 @@ pub async fn open_in_editor(state: State<'_, WorkState>, run_id: String, file: O
         cmd.arg(t);
     }
     spawn_open(cmd, "the editor").await
+}
+
+/// First editor in `validate::EDITORS` with its CLI installed (`code`, `cursor`, `zed`…).
+fn detect_editor() -> Option<String> {
+    validate::EDITORS.iter().find(|e| claude_bin::resolve_bin(e).is_some()).map(|e| e.to_string())
 }
 
 // ---------- Settings ----------
