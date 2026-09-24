@@ -7,6 +7,7 @@ All notable changes to Nodal are documented here. The format follows [Keep a Cha
 ### Changed
 
 - Every run is launched with `--append-system-prompt` telling it it's unattended, so it reports and stops instead of ending on a question and leaving the task In Progress.
+- Redesigned New task dialog: repo picker in the header, Write/Preview for the plan, "Done when" criteria with suggestions from the plan, and a collapsible Execution section. Save with ⌘↵.
 
 ## [0.2.0] - 2026-09-24
 
