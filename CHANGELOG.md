@@ -4,6 +4,10 @@ All notable changes to Nodal are documented here. The format follows [Keep a Cha
 
 ## [Unreleased]
 
+### Added
+
+- In-app updates: Nodal checks for a new version on launch and from Nodal → Check for Updates…, shows the release notes and installs and restarts only if you choose Update. Debug builds don't check. Coming from 0.1.0, download this version by hand one last time.
+
 ### Changed
 
 - The task panel opens with the latest run (status, phases, result and its actions) and a highlighted launch card; the plan and step history follow.

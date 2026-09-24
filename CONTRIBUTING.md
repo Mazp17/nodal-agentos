@@ -19,7 +19,13 @@ pnpm install
 pnpm tauri dev        # run the app with hot reload
 ```
 
-Debug builds run as "Nodal Dev" with their own data: the database in `io.github.mazp17.nodal.dev`, worktrees in `~/.nodal-dev` and separate keychain entries. You can keep an installed Nodal open next to it without them sharing anything. (A bundle made with `pnpm tauri build --debug` still shares UI preferences with the installed app.)
+Debug builds run as "Nodal Dev" with their own data: the database in `io.github.mazp17.nodal.dev`, worktrees in `~/.nodal-dev` and separate keychain entries. You can keep an installed Nodal open next to it without them sharing anything. (A bundle made with `pnpm tauri build --debug` still shares UI preferences with the installed app.) Debug builds never check for updates.
+
+`pnpm tauri build` also makes the signed update bundle, so it fails without the release signing key. Build without it:
+
+```bash
+pnpm tauri build --config '{"bundle":{"createUpdaterArtifacts":false}}'
+```
 
 ## Project layout
 
@@ -34,10 +40,11 @@ src-tauri/src/          Rust backend (Tauri commands)
   migrate/              import of data from earlier versions
   secrets.rs            API keys in the macOS Keychain
   events.rs             `nodal://changed` events for the frontend
+  updates.rs            in-app updates: "Check for Updates…" menu item, off in debug builds
 src/                    React + TypeScript frontend
   domain/               typed command wrappers (api.ts), shared types, data store and hooks
   shell/                app shell, sidebar, topbar, navigation, command palette
-  features/             board, tasks, executors, runs, activity, projects, providers, settings, onboarding
+  features/             board, tasks, executors, runs, activity, projects, providers, settings, onboarding, updates
   ui/                   shared components (dialogs, markdown, links…)
   styles/               design tokens and base styles
 ```

@@ -22,6 +22,8 @@
    xattr -dr com.apple.quarantine /Applications/Nodal.app
    ```
 
+After that, Nodal updates itself: it checks for a new version on launch (and from Nodal → Check for Updates…), shows the release notes and installs it only if you choose Update. Updates don't need the `xattr` step again. Nodal 0.1.0 predates in-app updates, so from 0.1.0 download the next version by hand one last time.
+
 You need [Claude Code](https://docs.claude.com/en/docs/claude-code) installed and logged in, and `git`. `gh` is optional, for tasks that open pull requests. Open `claude` once in each repo and accept the trust dialog before running tasks there.
 
 ## What it does
