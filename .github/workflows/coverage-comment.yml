@@ -1,0 +1,54 @@
+name: Coverage comment
+
+# Runs in the base repo's context after CI, so it can comment on PRs from forks too.
+# It never checks out or runs PR code: it only reads the coverage artifact.
+# Accepted risk: a fork PR can edit ci.yml and so controls the comment text (e.g. @mentions);
+# the token here can only comment on PRs.
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+
+# Serialize runs for the same branch so two runs don't both create a comment.
+concurrency:
+  group: coverage-comment-${{ github.event.workflow_run.head_repository.full_name }}-${{ github.event.workflow_run.head_branch }}
+  cancel-in-progress: false
+
+permissions:
+  actions: read
+  pull-requests: write
+
+jobs:
+  comment:
+    if: github.event.workflow_run.event == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        id: download
+        continue-on-error: true # no artifact when the tests failed before coverage
+        with:
+          name: coverage
+          path: coverage
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ github.token }}
+
+      - name: Post or update the comment
+        if: steps.download.outcome == 'success'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          pr=$(head -c 12 coverage/pr-number | tr -d '[:space:]')
+          [[ "$pr" =~ ^[0-9]+$ ]] || { echo "::error::Invalid PR number in the artifact"; exit 1; }
+          # The artifact comes from PR code: only trust the number if that PR is at the commit CI ran on.
+          [ "$(gh api "repos/$REPO/pulls/$pr" --jq .head.sha)" = "$HEAD_SHA" ] \
+            || { echo "PR #$pr is no longer at $HEAD_SHA; skipping"; exit 0; }
+          id=$(gh api "repos/$REPO/issues/$pr/comments" --paginate \
+            --jq '.[] | select(.user.login == "github-actions[bot]" and (.body | startswith("<!-- nodal-coverage -->"))) | .id' | head -n1)
+          if [ -n "$id" ]; then
+            gh api -X PATCH "repos/$REPO/issues/comments/$id" -F body=@coverage/coverage.md > /dev/null
+          else
+            gh api -X POST "repos/$REPO/issues/$pr/comments" -F body=@coverage/coverage.md > /dev/null
+          fi
