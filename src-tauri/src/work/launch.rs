@@ -409,9 +409,13 @@ fn lookup(env: &Env, repo: &Repo, executor: &Executor) -> Result<Option<Executor
 
 fn check_no_pending(conn: &Connection, task_id: &str) -> Result<(), String> {
     let pending = qruns::pending_for_task(conn, task_id)?;
-    match pending.first().map(|r| r.status) {
+    match pending.first() {
         None => Ok(()),
-        Some(RunStatus::Queued) => Err("This task already has a queued run.".into()),
+        Some(r) if super::queue::awaiting_confirmation(r) => Err(
+            "This task has a run migrated from a previous version waiting for confirmation: confirm or cancel it first."
+                .into(),
+        ),
+        Some(r) if r.status == RunStatus::Queued => Err("This task already has a queued run.".into()),
         Some(_) => Err("This task already has a run in progress.".into()),
     }
 }
@@ -608,23 +612,43 @@ pub fn enqueue_review(conn: &mut Connection, env: &Env, task_id: &str, reviewer:
     Ok(run)
 }
 
-/// Confirma un run migrado que quedó en cola: lo reemplaza por uno nuevo (sin
-/// `legacy_label`, al final de la cola) y deja el viejo cancelado como historial.
-pub fn confirm_legacy(conn: &mut Connection, run_id: &str, now: i64) -> Result<Run, String> {
+/// Confirma un run migrado que quedó en cola. El viejo queda cancelado como historial.
+/// - Con tarea: se encola de nuevo con `enqueue_work` (mismo ejecutor), así el prompt, el
+///   worktree y la transición a In Progress salen de la tarea migrada y no del prompt viejo.
+///   Si eso falla, el viejo vuelve a quedar en espera de confirmación.
+/// - Sin tarea (issue run viejo): se clona tal cual al final de la cola.
+pub fn confirm_legacy(conn: &mut Connection, env: &Env, run_id: &str, now: i64) -> Result<Run, String> {
     let old = qruns::get(conn, run_id)?;
     if !super::queue::awaiting_confirmation(&old) {
         return Err("That run isn't waiting for confirmation.".into());
     }
+    let mut closed = old.clone();
+    closed.status = RunStatus::Canceled;
+    closed.finished_at = Some(now);
+
+    if let Some(task_id) = old.task_id.clone() {
+        closed.error = Some("Confirmed and re-queued.".into());
+        qruns::update(conn, &closed)?;
+        let input = LaunchInput { executor: Some(old.executor.clone()), ..Default::default() };
+        return match enqueue_work(conn, env, &task_id, &input, false, now) {
+            Ok(run) => {
+                closed.error = Some(format!("Confirmed and re-queued as {}.", run.id));
+                qruns::update(conn, &closed)?;
+                Ok(run)
+            }
+            Err(e) => {
+                qruns::update(conn, &old)?;
+                Err(e)
+            }
+        };
+    }
+
     let tx = conn.transaction().map_err(|e| e.to_string())?;
     let mut run = old.clone();
     run.id = new_id('u', now);
     run.legacy_label = None;
     run.queued_at = now;
     run.queue_position = qruns::next_queue_position(&tx)?;
-    run.parent_run_id = old.parent_run_id.clone();
-    let mut closed = old;
-    closed.status = RunStatus::Canceled;
-    closed.finished_at = Some(now);
     closed.error = Some(format!("Confirmed and re-queued as {}.", run.id));
     qruns::update(&tx, &closed)?;
     qruns::insert(&tx, &run)?;

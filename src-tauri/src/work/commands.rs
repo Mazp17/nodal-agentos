@@ -272,7 +272,8 @@ pub async fn review_now(state: State<'_, WorkState>, task_id: String, reviewer: 
 #[tauri::command]
 pub async fn confirm_run(state: State<'_, WorkState>, run_id: String) -> Result<Run, String> {
     check_id(&run_id, "run")?;
-    let run = db(&state.0, move |c| launch::confirm_legacy(c, &run_id, now_ms())).await?;
+    let env = state.0.env.clone();
+    let run = db(&state.0, move |c| launch::confirm_legacy(c, &env, &run_id, now_ms())).await?;
     kick(&state.0);
     Ok(run)
 }

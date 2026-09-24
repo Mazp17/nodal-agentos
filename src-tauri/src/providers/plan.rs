@@ -176,7 +176,7 @@ pub fn extract_acceptance(md: &str) -> Vec<String> {
 #[derive(Debug, Clone, Default)]
 pub struct ClosingInfo<'a> {
     pub status: Option<TaskStatus>,
-    /// Ejecutor legible ("frontend-developer", "plan-task", "Claude").
+    /// Ejecutor legible ("frontend-developer", "/plan-task", "Claude").
     pub executor: Option<&'a str>,
     pub summary: Option<&'a str>,
     pub pr_url: Option<&'a str>,

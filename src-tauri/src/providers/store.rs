@@ -294,7 +294,7 @@ pub fn disconnect_link(conn: &mut Connection, link_id: &str, now: i64) -> Result
 }
 
 // ---------- Outbox ----------
-// `enqueue_*` los llama la cola (F1-B); hasta la integración solo los usan los tests.
+// `enqueue_*` los llama la cola (`work::ops::push_status`), en la transacción del cambio.
 
 fn task_provider(conn: &Connection, task_id: &str) -> Result<Option<String>, DbError> {
     Ok(conn

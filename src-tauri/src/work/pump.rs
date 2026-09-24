@@ -446,4 +446,31 @@ mod tests {
             "**Nodal** · Blocked · code-reviewer\n\nBranch: `nodal/pay-1-x`\n\nfalta c1\n\n**Unmet criteria**\n- c1\n\n**Nits**\n- n1"
         );
     }
+
+    #[test]
+    fn confirming_a_migrated_queued_run_requeues_it_from_the_task() {
+        let f = fx("confirm-legacy");
+        let legacy = {
+            let c = f.db.lock().unwrap();
+            let mut r = crate::work::testutil::run_of(Executor::Claude, RunKind::Work, false);
+            r.id = "lrun_1".into();
+            r.task_id = Some(f.task.id.clone());
+            r.repo_id = Some(f.task.repo_id.clone());
+            r.status = RunStatus::Queued;
+            r.prompt = "/plan-task viejo".into();
+            r.legacy_label = Some("Logo".into());
+            qruns::insert(&c, &r).unwrap();
+            r
+        };
+        let mut c = f.db.lock().unwrap();
+        let run = launch::confirm_legacy(&mut c, &f.env, &legacy.id, 10).unwrap();
+        assert_eq!((run.status, run.legacy_label.as_deref()), (RunStatus::Queued, None));
+        assert_ne!(run.prompt, legacy.prompt, "el prompt se arma de nuevo desde la tarea");
+        let old = qruns::get(&c, &legacy.id).unwrap();
+        assert_eq!(old.status, RunStatus::Canceled);
+        assert!(old.error.unwrap().contains(&run.id));
+        assert_eq!(tasks::get(&c, &f.task.id).unwrap().status, TaskStatus::InProgress);
+        // Ya no espera confirmación: confirmar de nuevo falla.
+        assert!(launch::confirm_legacy(&mut c, &f.env, &legacy.id, 11).is_err());
+    }
 }
