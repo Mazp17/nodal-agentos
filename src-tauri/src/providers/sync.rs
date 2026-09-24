@@ -74,19 +74,26 @@ pub struct PullDecision {
     pub title: Option<String>,
     pub status: Option<TaskStatus>,
     /// Guardar el estado externo como visto. No se guarda uno sin mapear: cuando el usuario
-    /// lo mapee, el pull siguiente lo verá como cambio y lo aplicará.
+    /// lo mapee, el pull siguiente lo verá como cambio y lo aplicará. Tampoco mientras hay un
+    /// push de estado pendiente: si ese push se descarta, el pull siguiente aplica el externo.
     pub record_state: bool,
+    /// El estado externo no está en el mapeo pull.
+    pub unmapped: bool,
     pub sync_error: Option<String>,
 }
 
-pub fn decide_pull(task: &Task, item: &ExternalItem, map: &StateMap, active_run: bool) -> PullDecision {
+/// `pending_push`: la tarea tiene un `set_state` en el outbox (cambio local sin empujar), que
+/// gana sobre el estado externo igual que un run activo.
+pub fn decide_pull(task: &Task, item: &ExternalItem, map: &StateMap, active_run: bool, pending_push: bool) -> PullDecision {
     let prev = task.source.as_ref().and_then(|s| s.external_state.as_ref()).map(|s| s.id.as_str());
     let changed = prev != Some(item.state.id.as_str());
     let mapped = pull_status(map, &item.state);
+    let apply = changed && !active_run && !pending_push;
     PullDecision {
         title: (item.title != task.title).then(|| item.title.clone()),
-        status: if changed && !active_run { mapped.filter(|s| *s != task.status) } else { None },
-        record_state: mapped.is_some(),
+        status: if apply { mapped.filter(|s| *s != task.status) } else { None },
+        record_state: mapped.is_some() && !pending_push,
+        unmapped: mapped.is_none(),
         sync_error: mapped.is_none().then(|| {
             format!("External state \"{}\" is not mapped to a Nodal status. Review the mapping.", item.state.name)
         }),
@@ -374,7 +381,8 @@ fn apply_pull_task(
         return Ok(false);
     };
     let active = store::has_active_run(conn, &task.id)?;
-    let d = decide_pull(task, item, map, active);
+    let pending = store::has_pending_state_push(conn, &task.id)?;
+    let d = decide_pull(task, item, map, active, pending);
     store::apply_pull(
         conn,
         &store::PullUpdate {
@@ -384,7 +392,7 @@ fn apply_pull_task(
             external_state: d.record_state.then_some(&item.state),
             sync_error: d.sync_error.as_deref(),
             keep_error,
-            unmapped: !d.record_state,
+            unmapped: d.unmapped,
             now,
         },
     )?;
@@ -863,6 +871,21 @@ mod tests {
     }
 
     #[test]
+    fn pull_does_not_overwrite_a_pending_local_status() {
+        let env = Env::new();
+        let t = env.import(1, "s-todo");
+        env.enqueue_status(&t.id, TaskStatus::InReview, 1);
+        env.db.lock().unwrap().execute("UPDATE tasks SET status = 'in_review' WHERE id = ?1", [&t.id]).unwrap();
+        env.fake.data().fail_writes = Some(ProviderError::new(ErrorKind::Transient, "HTTP 502"));
+        // Mientras el push espera, alguien mueve el ítem en el proveedor.
+        env.fake.data().items.get_mut("uuid-1").unwrap().state = state("s-done");
+        env.run(10);
+        let t2 = env.task(&t.id);
+        assert_eq!(t2.status, TaskStatus::InReview);
+        assert_eq!(t2.source.unwrap().external_state.unwrap().id, "s-todo", "no se da por visto");
+    }
+
+    #[test]
     fn pull_respects_overridden_plan() {
         let env = Env::new();
         let t = env.import(1, "s-todo");
@@ -1012,11 +1035,13 @@ mod tests {
         let t = env.import(1, "s-todo");
         let mut it = item(1, None);
         it.state = state("s-review");
-        let d = decide_pull(&t, &it, &env.link.state_map, false);
+        let d = decide_pull(&t, &it, &env.link.state_map, false, false);
         assert_eq!(d.status, Some(TaskStatus::InReview));
         assert_eq!(d.title, None);
-        assert_eq!(decide_pull(&t, &it, &env.link.state_map, true).status, None);
+        assert_eq!(decide_pull(&t, &it, &env.link.state_map, true, false).status, None);
+        let pending = decide_pull(&t, &it, &env.link.state_map, false, true);
+        assert_eq!((pending.status, pending.record_state, pending.unmapped), (None, false, false));
         it.state = state("s-todo");
-        assert_eq!(decide_pull(&t, &it, &env.link.state_map, false).status, None);
+        assert_eq!(decide_pull(&t, &it, &env.link.state_map, false, false).status, None);
     }
 }

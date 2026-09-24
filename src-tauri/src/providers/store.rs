@@ -391,6 +391,14 @@ pub fn due_outbox(conn: &Connection, provider: &str, now: i64) -> Result<Vec<Out
     Ok(out)
 }
 
+/// Un cambio de estado de Nodal todavía sin empujar: el pull no lo pisa.
+pub fn has_pending_state_push(conn: &Connection, task_id: &str) -> Result<bool, DbError> {
+    Ok(conn
+        .query_row("SELECT 1 FROM sync_outbox WHERE task_id = ?1 AND kind = 'set_state' LIMIT 1", [task_id], |_| Ok(()))
+        .optional()?
+        .is_some())
+}
+
 pub fn outbox_done(conn: &Connection, id: i64) -> Result<(), DbError> {
     conn.execute("DELETE FROM sync_outbox WHERE id = ?1", [id])?;
     Ok(())
