@@ -1,12 +1,16 @@
-// STUB(F2-D): replaced by F
-export function IntegrationsSettings(): null {
-  return null;
-}
+// API pública de la feature de proveedores (fuentes externas de tareas).
 
-export function ProjectSourcesSettings(_props: { projectId: string }): null {
-  return null;
-}
-
-export function ImportDialog(_props: { projectId: string; onClose: () => void }): null {
-  return null;
-}
+export { IntegrationsSettings } from "./IntegrationsSettings";
+export { ConnectProviderStep, type ConnectProviderStepProps, type ConnectedProvider } from "./ConnectProviderStep";
+export { ProjectSourcesSettings, type ProjectSourcesSettingsProps } from "./ProjectSourcesSettings";
+export { ImportDialog, type ImportDialogProps } from "./ImportDialog";
+export { SourceTab, type SourceTabProps } from "./SourceTab";
+export { StateMapEditor } from "./StateMapEditor";
+export {
+  useProviderStatus,
+  useSourceLinks,
+  invalidateProviders,
+  type ProviderStatusView,
+  type ProviderConnection,
+} from "../../domain/hooks/providers";
+export { PROVIDERS, providerName, isUnmappedError } from "./meta";
