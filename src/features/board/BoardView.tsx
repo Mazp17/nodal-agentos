@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type DragEvent, type ReactNode } from "react";
-import { moveTask } from "../../domain/api";
+import { moveTask, reorderTasks } from "../../domain/api";
 import { useAllRuns, useLatestRunByTask } from "../../domain/hooks/runs";
 import { invalidate, useProjectList, useRepos, useTasks } from "../../domain/hooks/store";
 import { taskKey, type Task, type TaskStatus } from "../../domain/types";
@@ -37,16 +37,6 @@ const NO_FILTERS: Filters = { q: "", repo: null, source: null, status: null, lab
 const DRAG_TYPE = "text/x-nodal-task";
 
 const byPosition = (a: Task, b: Task) => a.position - b.position || a.number - b.number;
-
-/** Posición entre vecinos de la columna destino (sin la tarea arrastrada). */
-function positionAt(column: Task[], index: number): number {
-  const before = column[index - 1];
-  const after = column[index];
-  if (before && after) return (before.position + after.position) / 2;
-  if (before) return before.position + 1;
-  if (after) return after.position - 1;
-  return 1;
-}
 
 export function BoardView({ projectId, onOpenTask, onOpenRun, onNewProject, onOpenProjectSettings }: BoardViewProps) {
   const push = useToast();
@@ -203,33 +193,31 @@ export function BoardView({ projectId, onOpenTask, onOpenRun, onNewProject, onOp
     });
 
   /**
-   * Coloca `task` en `status`, en el índice `index` de `others` (la columna destino ordenada,
-   * sin la tarea). Si el hueco entre vecinos se agotó, renumera la columna antes.
+   * Coloca `task` en `status`, antes de `others[index]` (la columna visible ordenada, sin la
+   * tarea). Manda el orden completo de la columna del proyecto (`reorder_tasks`, una sola
+   * transacción); las tareas ocultas por filtros conservan su lugar relativo.
    */
   const place = async (task: Task, status: TaskStatus, others: Task[], index: number) => {
     const from = byColumn(task.status).findIndex((t) => t.id === task.id);
     if (task.status === status && from === index) return;
+    // `reorder_tasks` exige un solo proyecto: en "All projects" se ordena el de la tarea.
+    const column = allTasks
+      .filter((t) => t.status === status && t.projectId === task.projectId && t.id !== task.id)
+      .sort(byPosition);
+    const anchor = others.slice(index).find((t) => t.projectId === task.projectId);
+    const at = anchor ? column.findIndex((t) => t.id === anchor.id) : column.length;
+    const cut = at === -1 ? column.length : at;
+    const ordered = [...column.slice(0, cut), task, ...column.slice(cut)];
+    const ids = ordered.map((t) => t.id);
+    ordered.forEach((t, k) => setPatch({ ...t, status, position: k + 1 }));
     try {
-      let column = others;
-      const before = column[index - 1];
-      const after = column[index];
-      if (before && after && after.position - before.position < 1e-6) {
-        const renumbered: Task[] = [];
-        for (const [k, t] of column.entries()) {
-          const saved = await moveTask(t.id, t.status, k + 1);
-          setPatch(saved);
-          renumbered.push(saved);
-        }
-        column = renumbered;
-      }
-      const position = positionAt(column, index);
-      setPatch({ ...task, status, position });
-      const saved = await moveTask(task.id, status, position);
-      setPatch(saved);
-      if (task.status !== status) invalidate("tasks");
+      if (task.status !== status) await moveTask(task.id, status, cut + 1);
+      await reorderTasks(status, ids);
     } catch (err) {
-      dropPatch(task.id);
+      for (const t of ordered) dropPatch(t.id);
       push("Couldn't move the task", String(err), "danger");
+    } finally {
+      void invalidate("tasks");
     }
   };
 
