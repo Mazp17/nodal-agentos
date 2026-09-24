@@ -1040,6 +1040,28 @@ mod tests {
     }
 
     #[test]
+    fn todo_is_pushed_when_mapped_and_silently_skipped_otherwise() {
+        let mut env = Env::new();
+        let t = env.import(1, "s-progress");
+        env.enqueue_status(&t.id, TaskStatus::Todo, 1);
+        let r = env.run(10);
+        assert_eq!((r.pushed, r.errors.len(), r.notices.len()), (1, 0, 0), "{r:?}");
+        assert_eq!(env.fake.data().set_states, vec![("uuid-1".to_string(), "s-todo".to_string())]);
+
+        // Mapeo confirmado antes de que existiera la fila de Todo: no se sincroniza, sin aviso.
+        env.set_link(|l| {
+            l.state_map.push.remove(&TaskStatus::Todo);
+        });
+        env.fake.data().items.get_mut("uuid-1").unwrap().state = state("s-progress");
+        env.run_forced(20);
+        env.enqueue_status(&t.id, TaskStatus::Todo, 30);
+        let r = env.run(40);
+        assert_eq!((r.pushed, r.errors.len(), r.notices.len()), (0, 0, 0), "{r:?}");
+        assert!(env.outbox().is_empty());
+        assert_eq!(env.fake.data().set_states.len(), 1);
+    }
+
+    #[test]
     fn enqueue_status_keeps_only_latest_and_ignores_local_tasks() {
         let env = Env::new();
         let t = env.import(1, "s-todo");
