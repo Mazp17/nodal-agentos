@@ -289,7 +289,6 @@
 }
 
 /* ---- Resultado ---- */
-.rd-result-text { font-size: var(--fs-base); color: var(--text-3); line-height: var(--lh-body); overflow-wrap: anywhere; white-space: pre-line; }
 .rd-res-row { display: flex; justify-content: space-between; gap: var(--sp-4); min-width: 0; font-size: var(--fs-md); }
 .rd-raw { border-radius: var(--r-card); border: 1px solid var(--border); overflow: hidden; }
 .rd-raw-toggle {

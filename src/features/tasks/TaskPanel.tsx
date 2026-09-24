@@ -908,14 +908,16 @@ function StepRow({
       {(run.summary || v || run.error) && (
         <div className="tp-step-detail">
           {run.error && <div className="tp-step-err">{run.error}</div>}
-          {v?.summary && <div>{v.summary}</div>}
-          {!v && run.summary && <div>{run.summary}</div>}
+          {v?.summary && <SafeMarkdown text={v.summary} className="md-compact" />}
+          {!v && run.summary && <SafeMarkdown text={run.summary} className="md-compact" />}
           {v && v.unmet.length > 0 && (
             <div>
               <span className="tp-step-sub">Unmet</span>
               <ul>
                 {v.unmet.map((u, i) => (
-                  <li key={i}>{u}</li>
+                  <li key={i}>
+                    <SafeMarkdown text={u} className="md-compact" />
+                  </li>
                 ))}
               </ul>
             </div>
@@ -925,7 +927,9 @@ function StepRow({
               <summary className="tp-step-sub">{v.nits.length} nit{v.nits.length === 1 ? "" : "s"}</summary>
               <ul>
                 {v.nits.map((u, i) => (
-                  <li key={i}>{u}</li>
+                  <li key={i}>
+                    <SafeMarkdown text={u} className="md-compact" />
+                  </li>
                 ))}
               </ul>
             </details>

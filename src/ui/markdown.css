@@ -1,4 +1,4 @@
-/* Markdown de Linear (descripciones, comentarios). */
+/* Markdown from Linear (descriptions, comments) and from agents (summaries, review findings). */
 
 .md {
   font-size: var(--fs-base);
@@ -7,6 +7,9 @@
   overflow-wrap: anywhere;
   min-width: 0;
 }
+/* Inside a list item or a card line: take the surrounding text size and color. */
+.md-compact { font-size: inherit; line-height: inherit; color: inherit; }
+.md-compact p { margin: 0 0 var(--sp-1); }
 .md > :first-child { margin-top: 0; }
 .md > :last-child { margin-bottom: 0; }
 .md p, .md ul, .md ol, .md pre, .md blockquote, .md table { margin: 0 0 var(--sp-3); }

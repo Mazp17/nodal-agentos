@@ -3,6 +3,7 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 import { projectIdOf, useRun, type RunsState } from "../../domain/hooks/runs";
 import type { Run, RunLight, Verdict } from "../../domain/types";
 import { formatDateTime, formatDuration, formatTokens } from "../../lib/format";
+import { SafeMarkdown } from "../../ui/Markdown";
 import { useRunActions } from "./actions";
 import {
   AGENT_STATUS,
@@ -621,7 +622,7 @@ function CriteriaList({ unmet, label = "Acceptance criteria" }: { unmet: string[
               <span className="rd-res-mark tone-danger" aria-hidden>
                 ✕
               </span>
-              <span>{u}</span>
+              <SafeMarkdown text={u} className="md-compact" />
             </li>
           ))}
         </ul>
@@ -641,7 +642,7 @@ function NitsList({ nits }: { nits: string[] }) {
             <span className="rd-res-mark tone-muted" aria-hidden>
               ·
             </span>
-            <span>{n}</span>
+            <SafeMarkdown text={n} className="md-compact" />
           </li>
         ))}
       </ul>
@@ -653,7 +654,7 @@ function VerdictBody({ verdict }: { verdict: Verdict }) {
   return (
     <>
       <StatusLine tone={verdict.pass ? "ok" : "danger"} label={verdict.pass ? "Review passed" : "Review failed"} />
-      {verdict.summary && <p className="rd-result-text">{verdict.summary}</p>}
+      {verdict.summary && <SafeMarkdown text={verdict.summary} />}
       <CriteriaList unmet={verdict.unmet} />
       <NitsList nits={verdict.nits} />
     </>
@@ -713,7 +714,7 @@ function ResultCard({
               tone={view.tab === "failed" && !run.outcome ? "danger" : OUTCOME_TONE[outcome]}
               label={view.tab === "failed" && !run.outcome ? view.label : OUTCOME_LABEL[outcome]}
             />
-            {run.summary && <p className="rd-result-text">{run.summary}</p>}
+            {run.summary && <SafeMarkdown text={run.summary} />}
           </>
         )}
         {run.error && view.phase !== "failed" && <p className="rd-result-note">{run.error}</p>}
