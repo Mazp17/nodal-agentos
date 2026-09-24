@@ -36,10 +36,15 @@ pub fn run() {
         .setup(|app| {
             use tauri::Manager;
             app.manage(events::Events::new(app.handle().clone()));
+            if util::paths::DEV {
+                if let Some(w) = app.get_webview_window("main") {
+                    let _ = w.set_title("Nodal Dev");
+                }
+            }
             // Único lugar que arranca los workers de fondo: el pump de la cola (`work::init`)
             // y el sync de proveedores (`providers::init`). Sin base la app abre igual (para
             // mostrar el error): no hay pump, el sync no hace nada y los comandos fallan.
-            match db::open(&app.path().app_data_dir()?.join(db::DB_FILE)) {
+            match db::open(&util::paths::data_dir(app.handle())?.join(db::DB_FILE)) {
                 Ok(db) => {
                     app.manage(db.clone());
                     if let Err(e) = work::init(app.handle(), db) {

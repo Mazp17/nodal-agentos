@@ -12,7 +12,8 @@ use std::sync::{Arc, Mutex};
 // Las llamadas al llavero son bloqueantes (y pueden esperar un diálogo del sistema).
 use crate::util::blocking;
 
-pub const SERVICE: &str = "io.github.mazp17.nodal";
+/// Debug builds use their own service so they don't read or overwrite the installed app's keys.
+pub const SERVICE: &str = if crate::util::paths::DEV { "io.github.mazp17.nodal.dev" } else { "io.github.mazp17.nodal" };
 
 /// Dónde se guardan de verdad las keys. En la app es el llavero; en tests, memoria.
 pub trait SecretBackend: Send + Sync + 'static {

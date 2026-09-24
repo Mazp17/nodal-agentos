@@ -41,7 +41,7 @@ export const FINISH_HINT: Record<Finish, string> = {
 };
 export const ISOLATION_LABEL: Record<Isolation, string> = { worktree: "Worktree", in_place: "In place" };
 export const ISOLATION_HINT: Record<Isolation, string> = {
-  worktree: "Own branch and folder under ~/.nodal/worktrees",
+  worktree: "Own branch and worktree folder",
   in_place: "Works in the repo folder; one in-place run per repo at a time",
 };
 

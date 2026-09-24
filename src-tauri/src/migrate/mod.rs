@@ -38,7 +38,7 @@ use std::path::{Path, PathBuf};
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::Serialize;
 use serde_json::Value;
-use tauri::{AppHandle, Manager, State};
+use tauri::{AppHandle, State};
 
 use crate::db::{self, rows, Db, DbError};
 use crate::domain::*;
@@ -80,7 +80,7 @@ pub async fn import_legacy_data(
     db: State<'_, Db>,
     folder: String,
 ) -> Result<LegacyImportReport, String> {
-    let data_dir = app.path().app_data_dir().map_err(|e| format!("Couldn't find the app data folder: {e}"))?;
+    let data_dir = crate::util::paths::data_dir(&app)?;
     let now = crate::util::now_ms();
     let src = PathBuf::from(folder.trim());
     let dd = data_dir.clone();

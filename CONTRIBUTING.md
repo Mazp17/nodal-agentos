@@ -19,6 +19,8 @@ pnpm install
 pnpm tauri dev        # run the app with hot reload
 ```
 
+Debug builds run as "Nodal Dev" with their own data: the database in `io.github.mazp17.nodal.dev`, worktrees in `~/.nodal-dev` and separate keychain entries. You can keep an installed Nodal open next to it without them sharing anything. (A bundle made with `pnpm tauri build --debug` still shares UI preferences with the installed app.)
+
 ## Project layout
 
 ```
