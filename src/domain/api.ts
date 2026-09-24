@@ -89,8 +89,13 @@ export interface NewTask {
   review?: boolean | null;
 }
 
-/** En las importadas solo se acepta `plan` (queda `planOverridden`), `status` y las opciones de ejecución. */
-export type TaskPatch = Partial<Omit<NewTask, "projectId" | "repoId">>;
+/**
+ * `repoId` mueve la tarea a otro repo del mismo proyecto (sin runs en curso ni worktree; un
+ * plan `.md` del repo viejo exige mandar otro `plan`).
+ * En las importadas solo se acepta `repoId`, `plan` (queda `planOverridden`), `status`,
+ * `acceptance` y las opciones de ejecución.
+ */
+export type TaskPatch = Partial<Omit<NewTask, "projectId">>;
 
 export interface ExecutorInfo {
   executor: Executor;
@@ -228,97 +233,72 @@ export interface LegacyImportReport {
 
 // ---------- Proyectos ----------
 
-// TODO(F1-B)
 export const listProjects = (includeArchived = false) => invoke<Project[]>("list_projects", { includeArchived });
-// TODO(F1-B)
 export const createProject = (input: NewProject) => invoke<Project>("create_project", { input });
-// TODO(F1-B)
 export const updateProject = (id: string, patch: ProjectPatch) => invoke<Project>("update_project", { id, patch });
 /** Borra en cascada repos, tareas y fuentes. */
-// TODO(F1-B)
 export const deleteProject = (id: string) => invoke<void>("delete_project", { id });
 
 // ---------- Repos ----------
 
 /** `null`: todos los proyectos. */
-// TODO(F1-B)
 export const listRepos = (projectId: string | null) => invoke<Repo[]>("list_repos", { projectId });
 /** Rechaza si no está en un repo git o si ya está en otro proyecto. */
-// TODO(F1-B)
 export const addRepo = (projectId: string, input: NewRepo) => invoke<Repo>("add_repo", { projectId, input });
-// TODO(F1-B)
 export const updateRepo = (id: string, patch: RepoPatch) => invoke<Repo>("update_repo", { id, patch });
 /** Rechaza si el repo tiene tareas. */
-// TODO(F1-B)
 export const deleteRepo = (id: string) => invoke<void>("delete_repo", { id });
 
 // ---------- Tareas ----------
 
 /** `null`: todas. */
-// TODO(F1-B)
 export const listTasks = (projectId: string | null) => invoke<Task[]>("list_tasks", { projectId });
-// TODO(F1-B)
 export const getTask = (id: string) => invoke<Task>("get_task", { id });
-// TODO(F1-B)
 export const createTask = (input: NewTask) => invoke<Task>("create_task", { input });
-// TODO(F1-B)
 export const updateTask = (id: string, patch: TaskPatch) => invoke<Task>("update_task", { id, patch });
-// TODO(F1-B)
 export const deleteTask = (id: string) => invoke<void>("delete_task", { id });
 /** Arrastre en el board: cambia de columna y/o posición. */
-// TODO(F1-B)
 export const moveTask = (id: string, status: TaskStatus, position: number) =>
   invoke<Task>("move_task", { id, status, position });
-// TODO(F1-B)
 export const readTaskPlan = (id: string) => invoke<string>("read_task_plan", { id });
-// TODO(F1-B)
 export const listTaskRelations = (taskId: string) => invoke<TaskRelation[]>("list_task_relations", { taskId });
-// TODO(F1-B)
 export const addTaskRelation = (taskId: string, otherId: string, kind: RelationKind) =>
   invoke<void>("add_task_relation", { taskId, otherId, kind });
-// TODO(F1-B)
 export const removeTaskRelation = (taskId: string, otherId: string, kind: RelationKind) =>
   invoke<void>("remove_task_relation", { taskId, otherId, kind });
 /** Borra el worktree y la rama de la tarea ("Clean up"). */
-// TODO(F1-B)
 export const cleanupWorktree = (taskId: string) => invoke<Task>("cleanup_worktree", { taskId });
 
 // ---------- Ejecutores y runs ----------
 
 /** Agentes, workflows y Claude; con `repoId` suma los del repo. */
-// TODO(F1-B)
 export const listExecutors = (repoId: string | null) => invoke<ExecutorInfo[]>("list_executors", { repoId });
 /** Runs de la tarea (o todos con `null`), más recientes primero. */
-// TODO(F1-B)
 export const listTaskRuns = (taskId: string | null) => invoke<Run[]>("list_task_runs", { taskId });
 /** Cola global: runs `queued`, en orden de salida. */
-// TODO(F1-B)
 export const listQueue = () => invoke<Run[]>("list_queue");
 /** Encola un run de trabajo (o lo lanza si hay slot). */
-// TODO(F1-B)
 export const launchTask = (taskId: string, input: LaunchInput = {}) => invoke<Run>("launch_task", { taskId, input });
 /** Siguiente paso de la cadena con otro ejecutor, sobre la misma rama/worktree. */
-// TODO(F1-B)
 export const handOff = (taskId: string, executor: Executor, extraInstructions: string | null = null) =>
   invoke<Run>("hand_off", { taskId, executor, extraInstructions });
 /** Lanza el revisor ahora. `reviewer` null → el configurado. */
-// TODO(F1-B)
 export const reviewNow = (taskId: string, reviewer: string | null = null) =>
   invoke<Run>("review_now", { taskId, reviewer });
 /** Saca de la cola un run `queued`, o detiene uno lanzado (guarda el patch a medias). */
-// TODO(F1-B)
 export const cancelRun = (runId: string) => invoke<Run>("cancel_run", { runId });
+/**
+ * Un run migrado que quedó en cola (`status: "queued"` con `legacyLabel`) no se lanza solo:
+ * esto lo re-encola como run nuevo (el viejo queda cancelado). Para descartarlo, `cancelRun`.
+ */
+export const confirmRun = (runId: string) => invoke<Run>("confirm_run", { runId });
 /** Nuevo orden de la cola: ids de todos los runs `queued`. */
-// TODO(F1-B)
 export const reorderQueue = (runIds: string[]) => invoke<void>("reorder_queue", { runIds });
-// TODO(F1-B)
 export const runDiff = (runId: string) => invoke<RunDiff>("run_diff", { runId });
 /** Abre la carpeta del run (o `file` dentro de ella) en el editor de Settings. */
-// TODO(F1-B)
 export const openInEditor = (runId: string, file: string | null = null) =>
   invoke<void>("open_in_editor", { runId, file });
 /** Abre la carpeta del run en Finder. */
-// TODO(F1-B)
 export const openWorktree = (runId: string) => invoke<void>("open_worktree", { runId });
 
 // ---------- Proveedores ----------
@@ -368,7 +348,5 @@ export const importLegacyData = (folder: string) => invoke<LegacyImportReport>("
 
 // ---------- Settings ----------
 
-// TODO(F1-B)
 export const getSettings = () => invoke<Settings>("get_settings");
-// TODO(F1-B)
 export const setSettings = (settings: Settings) => invoke<Settings>("set_settings", { settings });
