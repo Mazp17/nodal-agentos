@@ -1,5 +1,10 @@
 # Nodal
 
+[![CI](https://github.com/Mazp17/nodal-agentos/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Mazp17/nodal-agentos/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/Mazp17/nodal-agentos?include_prereleases&sort=semver&label=release)](https://github.com/Mazp17/nodal-agentos/releases)
+[![Platform: macOS](https://img.shields.io/badge/platform-macOS-lightgrey?logo=apple)](#requisitos)
+[![License: MIT](https://img.shields.io/github/license/Mazp17/nodal-agentos)](LICENSE.md)
+
 **Agent OS for Claude.** Una app de escritorio para planificar trabajo, delegarlo a agentes de Claude Code y ver cómo corren en todos tus proyectos.
 
 [English](README.md)
