@@ -2,7 +2,6 @@ import { useEffect, useState } from "react";
 import { useToast } from "../../ui/Toasts";
 import { getLaunchBlocker, openTerminalAt } from "./api";
 import type { RunView } from "./status";
-import { isInProgress } from "./types";
 import "./launch-blocker.css";
 
 /**
@@ -47,17 +46,21 @@ export function launchErrorHint(text: string | null | undefined, dir: string | n
 // Una sesión terminada no cambia: el resultado de `get_launch_blocker` se cachea.
 const blockerCache = new Map<string, Blocker | null>();
 
-/** Terminó sin resultado del workflow: candidato a haber sido frenado por la aprobación. */
+/** Run de workflow que terminó sin resultado: candidato a haber sido frenado por la aprobación. */
 function endedWithoutResult(v: RunView): boolean {
-  if (!v.run || isInProgress(v.run) || v.run.state === "stopped") return false;
-  if (v.kind === "failed") return true;
-  return v.kind === "done" && !v.detail?.resultStatus;
+  if (v.run.executor.kind !== "workflow" || !v.run.sessionId) return false;
+  if (v.phase === "failed") return true;
+  if (v.phase !== "finished") return false;
+  return v.run.outcome == null || v.run.outcome === "unknown" || v.detail === null;
 }
 
+const workflowOf = (v: RunView) => (v.run.executor.kind === "workflow" ? v.run.executor.name : null);
+
 export function useLaunchBlocker(view: RunView | undefined): Blocker | null {
-  const fromError = view ? classifyLaunchError(view.launchError, view.cwd) : null;
-  const sid = view && !fromError && endedWithoutResult(view) ? view.run!.sessionId : null;
-  const cwd = view?.run?.cwd ?? view?.cwd ?? "";
+  const fromError = view ? classifyLaunchError(view.run.error, view.run.cwd) : null;
+  const sid = view && !fromError && endedWithoutResult(view) ? view.run.sessionId : null;
+  const cwd = view?.run.cwd ?? "";
+  const wf = view ? workflowOf(view) : null;
   const [fetched, setFetched] = useState<{ sid: string; blocker: Blocker | null } | null>(null);
 
   useEffect(() => {
@@ -69,7 +72,7 @@ export function useLaunchBlocker(view: RunView | undefined): Blocker | null {
     let alive = true;
     getLaunchBlocker(sid, cwd)
       .then((b) => {
-        const blocker: Blocker | null = b ? { kind: "workflowReview", workflow: b.workflow ?? view?.workflow ?? null } : null;
+        const blocker: Blocker | null = b ? { kind: "workflowReview", workflow: b.workflow ?? wf } : null;
         blockerCache.set(sid, blocker);
         if (alive) setFetched({ sid, blocker });
       })
@@ -77,18 +80,27 @@ export function useLaunchBlocker(view: RunView | undefined): Blocker | null {
     return () => {
       alive = false;
     };
-    // `view.workflow` solo completa el nombre; no hace falta repetir la consulta.
-  }, [sid, cwd]);
+  }, [sid, cwd, wf]);
 
-  if (fromError) return fromError.kind === "workflowReview" ? { ...fromError, workflow: view?.workflow ?? null } : fromError;
+  if (fromError) return fromError.kind === "workflowReview" ? { ...fromError, workflow: wf } : fromError;
   return sid && fetched?.sid === sid ? fetched.blocker : null;
 }
 
 const basename = (p: string) => p.replace(/\/+$/, "").split("/").pop() || p;
 
 /** Aviso accionable para un run frenado por confianza del workspace o aprobación del workflow. */
-export function LaunchBlockerNotice({ view, compact }: { view: RunView | undefined; compact?: boolean }) {
-  const blocker = useLaunchBlocker(view);
+export function LaunchBlockerNotice({
+  view,
+  compact,
+  blocker: given,
+}: {
+  view: RunView | undefined;
+  compact?: boolean;
+  /** Si ya se calculó con `useLaunchBlocker`, para no repetir la consulta. */
+  blocker?: Blocker | null;
+}) {
+  const own = useLaunchBlocker(given === undefined ? view : undefined);
+  const blocker = given === undefined ? own : given;
   const toast = useToast();
   const [opening, setOpening] = useState(false);
   if (!blocker) return null;

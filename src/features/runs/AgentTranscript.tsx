@@ -4,6 +4,8 @@ import { useFocusTrap } from "../../ui/useFocusTrap";
 import { getAgentTranscript } from "./api";
 import type { RunView } from "./status";
 import type { AgentInfo, AgentState, Transcript, TranscriptItem } from "./types";
+import "./run-detail.css";
+import "./transcript.css";
 
 const POLL_MS = 3000;
 const DEFAULT_LIMIT = 200;
@@ -117,46 +119,49 @@ function Item({ item }: { item: TranscriptItem }) {
   }
 }
 
-/** Pantalla "Subagent transcript": prompt, conversación y salida final de un subagente. */
+/**
+ * Pantalla "Subagent transcript" (drawer): prompt, conversación y salida final de un
+ * subagente de workflow. Se repite cada 3 s mientras el agente sigue corriendo.
+ */
 export function AgentTranscript({
   agent,
   phaseNum,
   view,
   workflowId,
+  taskRef,
   onClose,
 }: {
   agent: AgentInfo;
   phaseNum: number | null;
   view: RunView;
+  /** `RunDetail.workflowId` (`wf_...`). */
   workflowId: string | null;
+  /** Id visible de la tarea (`PAY-12`), para el subtítulo. */
+  taskRef?: string | null;
   onClose: () => void;
 }) {
   const ref = useFocusTrap<HTMLDivElement>(onClose);
   const [limit, setLimit] = useState(DEFAULT_LIMIT);
   const st = AGENT_STATUS[agent.state];
-  const live = agent.state === "running" && (view.run?.state === "working" || view.run?.state === "blocked");
-  const load = useTranscript(view.run?.sessionId ?? null, view.run?.cwd ?? view.cwd ?? "", workflowId, agent.agentId, live, limit);
+  const sessionLive = view.phase === "running" || view.phase === "waiting";
+  const live = agent.state === "running" && sessionLive;
+  const load = useTranscript(view.run.sessionId, view.run.cwd, workflowId, agent.agentId, live, limit);
   const t = load.status === "ok" ? load.transcript : null;
 
   const sub = [
     modelName(agent.model ?? t?.model ?? null),
     agent.phase ? `Phase${phaseNum ? ` ${phaseNum}` : ""} ${agent.phase}` : null,
-    view.identifier,
-    view.runId,
+    taskRef,
+    view.run.claudeRunId,
   ]
     .filter(Boolean)
     .join(" · ");
+  const waiting = agent.state === "running" && view.phase === "waiting";
   const output =
     // Mientras corre, el "último texto" es charla intermedia, no la salida final.
     (agent.state === "running" ? null : t?.finalOutput) ??
     agent.resultPreview ??
-    (agent.state === "running"
-      ? view.waitingFor === "permission prompt"
-        ? "Paused: the run is waiting for permission."
-        : "Still running…"
-      : agent.state === "queued"
-        ? "Not started."
-        : "No output recorded.");
+    (agent.state === "running" ? "No final output yet." : agent.state === "queued" ? "Not started." : "No output recorded.");
   const outTone = agent.state === "done" ? "ok" : agent.state === "failed" ? "danger" : "none";
 
   return (
@@ -173,6 +178,12 @@ export function AgentTranscript({
                 <span className={`dot dot-sm ${agent.state === "running" ? "pulse" : ""}`} aria-hidden />
                 {st.label}
               </span>
+              {live && (
+                <span className="tr-live">
+                  <span className="dot dot-sm pulse" aria-hidden />
+                  Live
+                </span>
+              )}
             </div>
             <span className="ap-sub">{sub}</span>
           </div>
@@ -196,7 +207,7 @@ export function AgentTranscript({
             </div>
           </dl>
 
-          {!agent.agentId || !workflowId || !view.run ? (
+          {!agent.agentId || !workflowId || !view.run.sessionId ? (
             <p className="rd-result-note">No transcript available for this agent.</p>
           ) : load.status === "loading" ? (
             <p className="rd-result-note">Loading transcript…</p>
@@ -215,7 +226,7 @@ export function AgentTranscript({
                 <div className="tr-prompt">{t.prompt ?? "—"}</div>
               </section>
               <section className="ap-section tr-conv" aria-live={live ? "polite" : undefined}>
-                <h3 className="section-label">Conversation</h3>
+                <h3 className="section-label">Transcript</h3>
                 {(t.omitted > 0 || t.partial) && (
                   <div className="tr-omitted">
                     {t.omitted > 0 && `${t.omitted} earlier item${t.omitted === 1 ? "" : "s"} hidden. `}
@@ -231,6 +242,19 @@ export function AgentTranscript({
                 {t.items.map((it, i) => (
                   <Item key={`${t.omitted + i}`} item={it} />
                 ))}
+                {live && !waiting && (
+                  <div className="tr-next">
+                    <span className="dot dot-sm pulse tone-accent" aria-hidden />
+                    Waiting for the next event…
+                  </div>
+                )}
+                {waiting && (
+                  <div className="tr-wait">
+                    {view.waitingFor === "permission prompt"
+                      ? "Waiting on a permission prompt. Attach to the session to answer it."
+                      : "Waiting for your input. Attach to respond."}
+                  </div>
+                )}
               </section>
             </>
           )}

@@ -5,13 +5,13 @@
   gap: var(--sp-5);
   padding: var(--sp-4) var(--sp-5);
   border-radius: var(--r-xl);
-  background: var(--amber-tint-10);
-  border: 1px solid var(--amber-tint-35);
-  color: var(--amber);
+  background: var(--red-tint-10);
+  border: 1px solid var(--red-tint-35);
+  color: var(--red);
 }
 .lb-compact { gap: var(--sp-3); padding: var(--sp-3) var(--sp-4); border-radius: var(--r-lg); }
 .lb-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
-.lb-title { font-size: var(--fs-base); font-weight: var(--fw-semibold); color: var(--amber-text); }
-.lb-text { font-size: var(--fs-md); color: var(--text-2); line-height: var(--lh-snug); overflow-wrap: anywhere; }
+.lb-title { font-size: var(--fs-base); font-weight: var(--fw-semibold); color: var(--red-text); }
+.lb-text { font-size: var(--fs-base); color: var(--text-2); line-height: var(--lh-body); overflow-wrap: anywhere; }
 .lb-text .mono { font-size: var(--fs-sm); }
 .lb > .btn { flex: none; }

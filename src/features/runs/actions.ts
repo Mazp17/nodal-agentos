@@ -1,110 +1,37 @@
 import { useCallback, useState } from "react";
-import { resolveRepo, type AppConfig, type Issue } from "../linear/api";
+import { cancelRun, confirmRun, launchTask, reorderQueue } from "../../domain/api";
+import { refreshRuns } from "../../domain/hooks/runs";
+import type { Task } from "../../domain/types";
 import { useToast } from "../../ui/Toasts";
-import { attachRun, cancelQueued, launchIssueRun, stopRun } from "./api";
+import { attachRun } from "./api";
 import { launchErrorHint } from "./LaunchBlockerNotice";
 import type { RunView } from "./status";
-import type { RunsState } from "./useRuns";
-import { pickWorkflow, type WorkflowCatalogs } from "./useWorkflows";
-import type { WorkflowInfo } from "./types";
-
-/** Un workflow para todas, o uno por issue (p. ej. el elegido en cada card). */
-export type WorkflowChoice = string | null | ((issue: Issue) => string | null | undefined);
-
-export interface Launcher {
-  /** Issues con un lanzamiento en vuelo (para deshabilitar botones). */
-  pending: Set<string>;
-  catalogFor: (issue: Issue) => WorkflowInfo[];
-  workflowFor: (issue: Issue, wanted?: string | null) => string;
-  /** Lanza (o encola) cada issue con su workflow; avisa con toasts. */
-  launch: (issues: Issue[], workflow?: WorkflowChoice) => Promise<void>;
-}
-
-export function useLauncher(
-  config: AppConfig,
-  catalogs: WorkflowCatalogs,
-  lastWorkflow: string,
-  runs: RunsState,
-): Launcher {
-  const toast = useToast();
-  const [pending, setPending] = useState<Set<string>>(new Set());
-
-  const catalogFor = useCallback(
-    (issue: Issue) => {
-      const repo = resolveRepo(config, issue.team.id, issue.project?.id);
-      return (repo && catalogs[repo]) || catalogs[""] || [];
-    },
-    [config, catalogs],
-  );
-  const workflowFor = useCallback(
-    (issue: Issue, wanted?: string | null) => pickWorkflow(catalogFor(issue), wanted ?? lastWorkflow),
-    [catalogFor, lastWorkflow],
-  );
-
-  const launch = useCallback(
-    async (issues: Issue[], workflow?: WorkflowChoice) => {
-      const ids = issues.map((i) => i.id);
-      setPending((p) => new Set([...p, ...ids]));
-      const started: string[] = [];
-      const queued: string[] = [];
-      try {
-        // En serie: el backend decide slot o cola en orden de llegada.
-        for (const issue of issues) {
-          try {
-            const ir = await launchIssueRun({
-              issueId: issue.id,
-              identifier: issue.identifier,
-              teamId: issue.team.id,
-              projectId: issue.project?.id ?? null,
-              workflow: workflowFor(issue, typeof workflow === "function" ? workflow(issue) : workflow),
-            });
-            if (ir.status === "failed") {
-              toast(`Couldn't launch ${issue.identifier}`, launchErrorHint(ir.error, ir.cwd), "danger");
-              continue;
-            }
-            (ir.status === "queued" ? queued : started).push(issue.identifier);
-          } catch (e) {
-            toast(`Couldn't launch ${issue.identifier}`, String(e), "danger");
-          }
-        }
-      } finally {
-        setPending((p) => new Set([...p].filter((id) => !ids.includes(id))));
-        void runs.refresh();
-      }
-      if (started.length === 1) toast(`${started[0]} launched`, "Starting the workflow.", "ok");
-      else if (started.length > 1) toast(`Launched ${started.length} runs`, started.join(", "), "ok");
-      if (queued.length) {
-        toast(
-          queued.length === 1 ? `${queued[0]} queued` : `${queued.length} queued`,
-          `${queued.length > 1 ? queued.join(", ") + " start" : "Starts"} when a slot frees up (limit ${config.concurrency}).`,
-          "muted",
-        );
-      }
-    },
-    [workflowFor, toast, runs, config.concurrency],
-  );
-
-  return { pending, catalogFor, workflowFor, launch };
-}
 
 export interface RunActions {
+  /** Hay una acción en vuelo (para deshabilitar botones). */
   busy: boolean;
-  stop: (v: RunView) => Promise<void>;
+  /** Detiene un run lanzado (pide confirmación). */
+  stop: (v: RunView, name: string) => Promise<boolean>;
+  /** Saca de la cola un run `queued`. */
+  remove: (v: RunView, name: string) => Promise<boolean>;
+  confirm: (v: RunView, name: string) => Promise<boolean>;
   attach: (v: RunView) => Promise<void>;
-  cancel: (v: RunView) => Promise<boolean>;
+  /** Encola otro run de la tarea con el mismo ejecutor. */
+  runAgain: (v: RunView, task: Task | undefined, name: string) => Promise<boolean>;
+  /** Nuevo orden de la cola global: ids de todos los runs `queued`. */
+  reorder: (ids: string[]) => Promise<void>;
 }
 
-export function useRunActions(runs: RunsState): RunActions {
+export function useRunActions(): RunActions {
   const toast = useToast();
   const [busy, setBusy] = useState(false);
-  const name = (v: RunView) => v.identifier ?? v.run?.name ?? v.runId ?? "Run";
 
   const wrap = useCallback(
-    async (fn: () => Promise<void>, fail: string, refresh = true): Promise<boolean> => {
+    async (fn: () => Promise<unknown>, fail: string): Promise<boolean> => {
       setBusy(true);
       try {
         await fn();
-        if (refresh) await runs.refresh();
+        void refreshRuns();
         return true;
       } catch (e) {
         toast(fail, String(e), "danger");
@@ -113,41 +40,83 @@ export function useRunActions(runs: RunsState): RunActions {
         setBusy(false);
       }
     },
-    [runs, toast],
+    [toast],
   );
 
   const stop = useCallback(
-    async (v: RunView) => {
-      if (!v.runId) return;
-      if (!window.confirm(`Stop ${name(v)}? The agent is interrupted mid-task.`)) return;
-      const ok = await wrap(() => stopRun(v.runId!), `Couldn't stop ${name(v)}`);
-      if (ok) toast(`${name(v)} stopped`, `claude stop ${v.runId}`, "danger");
+    async (v: RunView, name: string) => {
+      if (!window.confirm(`Stop ${name}? The agent is interrupted mid-task; its unfinished changes are saved as a patch.`)) {
+        return false;
+      }
+      const ok = await wrap(() => cancelRun(v.run.id), `Couldn't stop ${name}`);
+      if (ok) toast(`${name} stopped`, "The task moves to Blocked. The worktree is kept so you can inspect it.", "danger");
+      return ok;
+    },
+    [wrap, toast],
+  );
+
+  const remove = useCallback(
+    async (v: RunView, name: string) => {
+      const ok = await wrap(() => cancelRun(v.run.id), `Couldn't remove ${name} from the queue`);
+      if (ok) toast(`${name} removed from queue`, "It will not run.", "muted");
+      return ok;
+    },
+    [wrap, toast],
+  );
+
+  const confirm = useCallback(
+    async (v: RunView, name: string) => {
+      const ok = await wrap(() => confirmRun(v.run.id), `Couldn't confirm ${name}`);
+      if (ok) toast(`${name} confirmed`, "It is back in the queue and starts when a slot frees up.", "ok");
+      return ok;
     },
     [wrap, toast],
   );
 
   const attach = useCallback(
     async (v: RunView) => {
-      if (!v.runId) return;
-      const ok = await wrap(() => attachRun(v.runId!), `Couldn't attach to ${name(v)}`, false);
-      if (ok) toast("Attached in Terminal", `claude attach ${v.runId}`);
+      const id = v.run.claudeRunId;
+      if (!id) return;
+      const ok = await wrap(() => attachRun(id), "Couldn't attach to the session");
+      if (ok) toast("Attached in Terminal", `claude attach ${id}`);
     },
     [wrap, toast],
   );
 
-  const cancel = useCallback(
-    async (v: RunView) => {
-      if (!v.issueId) return false;
-      // Sin esperar el refresh: quien llama puede navegar antes de que el run desaparezca.
-      const ok = await wrap(() => cancelQueued(v.issueId!), `Couldn't remove ${name(v)} from the queue`, false);
-      if (ok) {
-        toast(`${name(v)} removed from queue`, "It will not run.", "muted");
-        void runs.refresh();
+  const runAgain = useCallback(
+    async (v: RunView, task: Task | undefined, name: string) => {
+      const taskId = v.run.taskId;
+      if (!taskId) return false;
+      setBusy(true);
+      try {
+        const run = await launchTask(taskId, { executor: v.run.executor });
+        void refreshRuns();
+        if (run.status === "failed") {
+          toast(`Couldn't launch ${name}`, launchErrorHint(run.error, run.cwd), "danger");
+          return false;
+        }
+        toast(
+          run.status === "queued" ? `${name} queued` : `${name} launched`,
+          run.status === "queued" ? "It starts when a slot frees up." : task?.title,
+          run.status === "queued" ? "muted" : "ok",
+        );
+        return true;
+      } catch (e) {
+        toast(`Couldn't launch ${name}`, String(e), "danger");
+        return false;
+      } finally {
+        setBusy(false);
       }
-      return ok;
     },
-    [wrap, toast, runs],
+    [toast],
   );
 
-  return { busy, stop, attach, cancel };
+  const reorder = useCallback(
+    async (ids: string[]) => {
+      await wrap(() => reorderQueue(ids), "Couldn't reorder the queue");
+    },
+    [wrap],
+  );
+
+  return { busy, stop, remove, confirm, attach, runAgain, reorder };
 }
