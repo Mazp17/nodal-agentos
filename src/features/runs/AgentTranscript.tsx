@@ -247,7 +247,7 @@ export function AgentTranscript({
               <h2 id="agent-title" className="ap-title">
                 {agent.label}
               </h2>
-              <span className={`rd-agent-st tone-${st.tone}`}>
+              <span className={`ap-status tone-${st.tone}`}>
                 <span className={`dot dot-sm ${agent.state === "running" ? "pulse" : ""}`} aria-hidden />
                 {st.label}
               </span>

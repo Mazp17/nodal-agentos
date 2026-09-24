@@ -3,6 +3,7 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 import { projectIdOf, useRun, type RunsState } from "../../domain/hooks/runs";
 import type { Run, RunLight, Verdict } from "../../domain/types";
 import { formatDateTime, formatDuration, formatTokens } from "../../lib/format";
+import { SafeMarkdown } from "../../ui/Markdown";
 import { useRunActions } from "./actions";
 import {
   AGENT_STATUS,
@@ -368,7 +369,7 @@ function Timeline({ view, detail }: { view: RunView; detail: RunDetail }) {
   const stopped = view.tab === "failed";
   return (
     <div className="panel rd-timeline">
-      <ol className="tl" style={{ gridTemplateColumns: `repeat(${phases.length}, minmax(0, 1fr))` }}>
+      <ol className="tl" style={{ gridTemplateColumns: `repeat(${phases.length}, minmax(72px, 1fr))` }}>
         {phases.map((ph, i) => {
           const num = i + 1;
           const done = finished || (cur != null && num < cur);
@@ -403,6 +404,9 @@ function SubagentsPanel({
   const phases = detail?.phases ?? [];
   const cur = detail?.currentPhaseIndex ?? null;
   const finished = view.phase === "finished";
+  // The run is waiting on a permission prompt: the agent that is still running is the one asking.
+  const waiting = view.phase === "waiting";
+  const stopped = view.tab === "failed";
 
   // Subagentes por fase (en el orden del workflow); los que no tienen fase van al final.
   const groups: { title: string; num: number | null; agents: [AgentInfo, number][] }[] = phases.map((ph, i) => ({
@@ -416,8 +420,12 @@ function SubagentsPanel({
     (g ? g.agents : extra).push([a, i]);
   });
   if (extra.length) groups.push({ title: phases.length ? "Other" : "Agents", num: null, agents: extra });
-  const active = detail?.agents.filter((a) => a.state === "running").length ?? 0;
-  const summary = detail ? `${detail.agentCount} agent${detail.agentCount === 1 ? "" : "s"}${active ? ` · ${active} active` : ""}` : "";
+  const all = detail?.agents ?? [];
+  const done = all.filter((a) => a.state === "done").length;
+  const active = all.filter((a) => a.state === "running").length;
+  const summary = detail
+    ? `${plural(detail.agentCount, "agent")} · ${done} done${active ? ` · ${active} active` : ""}`
+    : "";
 
   let empty: string | null = null;
   if (!view.run.sessionId) empty = view.tab === "queued" ? "Agents appear once the run starts." : "No agent data for this run.";
@@ -425,6 +433,7 @@ function SubagentsPanel({
   else if (detail === null) empty = "This session didn't launch a workflow.";
   else if (detail.agents.length === 0) empty = "No subagents yet.";
 
+  const shown = groups.filter((g) => g.agents.length > 0 || g.num !== null);
   return (
     <div className="panel rd-agents">
       <div className="rd-panel-head">
@@ -435,39 +444,78 @@ function SubagentsPanel({
       {empty ? (
         <div className="rd-agents-empty">{empty}</div>
       ) : (
-        groups
-          .filter((g) => g.agents.length > 0 || g.num !== null)
-          .map((g) => {
-            const isCur = !finished && g.num != null && g.num === cur;
-            const past = finished || (g.num != null && cur != null && g.num < cur);
+        <div className="rd-phases">
+          {shown.map((g, gi) => {
+            // Agents with no phase ("Other") count as done once the run ends, else as current.
+            const running = g.agents.filter(([a]) => a.state === "running").length;
+            // A phase with running agents is current even if the workflow didn't report its index.
+            const st: "done" | "current" | "pending" =
+              finished || (g.num != null && cur != null && g.num < cur)
+                ? "done"
+                : g.num == null || g.num === cur || running > 0
+                  ? "current"
+                  : "pending";
+            const took = g.agents.reduce((t, [a]) => t + (a.durationMs ?? 0), 0);
+            const count = plural(g.agents.length, "agent");
+            const meta =
+              g.agents.length === 0
+                ? st === "pending"
+                  ? "Pending"
+                  : ""
+                : st === "done"
+                  ? `${count} · ${formatDuration(took)}`
+                  : st === "pending"
+                    ? count
+                    : stopped
+                      ? `${count} · Stopped`
+                      : `${count} · ${running ? `${running} active` : "wrapping up"}`;
             return (
-              <div key={g.title + (g.num ?? "x")} className="rd-group">
-                <div className={`rd-group-head ${isCur ? "current" : past ? "past" : ""}`}>
-                  {g.num != null && <span className="rd-group-num">{String(g.num).padStart(2, "0")}</span>}
-                  <span className="rd-group-name">{g.title}</span>
-                  <span className="rd-group-note">
-                    {isCur ? "current" : g.agents.length ? `${g.agents.length} agent${g.agents.length === 1 ? "" : "s"}` : past ? "" : "Pending"}
-                  </span>
+              <div key={g.title + (g.num ?? "x")} className={`rd-phase rd-phase-${st} tone-${view.tone}`}>
+                <div className="rd-phase-rail" aria-hidden>
+                  <span className="rd-phase-mark">{st === "done" ? "✓" : st === "current" && stopped ? "✕" : ""}</span>
+                  {gi < shown.length - 1 && <span className="rd-phase-line" />}
                 </div>
-                {g.agents.map(([a, idx]) => {
-                  const st = AGENT_STATUS[a.state];
-                  return (
-                    <button key={a.agentId ?? `${a.label}-${idx}`} type="button" className="rd-cols rd-agent" onClick={() => onOpen(idx)}>
-                      <span className="rd-agent-label ellipsis">{a.label}</span>
-                      <span className="rd-agent-model ellipsis">{modelName(a.model)}</span>
-                      <span className={`rd-agent-st tone-${st.tone}`}>
-                        <span className={`dot dot-sm ${a.state === "running" ? "pulse" : ""}`} aria-hidden />
-                        {st.label}
-                      </span>
-                      <span className="text-right num rd-agent-num">{formatTokens(a.tokens)}</span>
-                      <span className="text-right num rd-agent-num">{formatDuration(a.durationMs)}</span>
-                      <span className="rd-agent-last ellipsis">{lastAction(a)}</span>
-                    </button>
-                  );
-                })}
+                <div className="rd-phase-body">
+                  <div className="rd-phase-head">
+                    <span className="rd-phase-name">{g.title}</span>
+                    {meta && <span className="rd-phase-meta">{meta}</span>}
+                  </div>
+                  {g.agents.length > 0 && (
+                    <div className="rd-phase-agents">
+                      {g.agents.map(([a, idx]) => {
+                        const perm = waiting && a.state === "running";
+                        const status = perm ? { label: "Needs permission", tone: "warn" } : AGENT_STATUS[a.state];
+                        const showStatus = perm || !(a.state === "done" || a.state === "queued");
+                        return (
+                          <button
+                            key={a.agentId ?? `${a.label}-${idx}`}
+                            type="button"
+                            className={`rd-agent tone-${status.tone}`}
+                            onClick={() => onOpen(idx)}
+                          >
+                            <span className={`rd-agent-dot ${a.state === "running" && !perm ? "pulse" : ""}`} aria-hidden />
+                            {!showStatus && <span className="sr-only">{status.label}</span>}
+                            <span className="rd-agent-label ellipsis">{a.label}</span>
+                            <span className="rd-agent-model ellipsis">{modelName(a.model)}</span>
+                            <span className="rd-agent-last">
+                              {showStatus && <span className="rd-agent-st">{status.label}</span>}
+                              <span className="ellipsis">{lastAction(a)}</span>
+                            </span>
+                            <span className="text-right num rd-agent-num">{formatTokens(a.tokens)}</span>
+                            <span className="text-right num rd-agent-num">{formatDuration(a.durationMs)}</span>
+                            <span className="rd-agent-chev" aria-hidden>
+                              ›
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
               </div>
             );
-          })
+          })}
+        </div>
       )}
       {detail && detail.workflowCount > 1 && (
         <p className="rd-agents-empty">This session ran {detail.workflowCount} workflows; showing the latest.</p>
@@ -475,6 +523,8 @@ function SubagentsPanel({
     </div>
   );
 }
+
+const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
 
 /**
  * Runs de agente, de Claude o del revisor: no hay fases ni subagentes que leer. Se muestra el
@@ -572,7 +622,7 @@ function CriteriaList({ unmet, label = "Acceptance criteria" }: { unmet: string[
               <span className="rd-res-mark tone-danger" aria-hidden>
                 ✕
               </span>
-              <span>{u}</span>
+              <SafeMarkdown text={u} className="md-compact" breaks />
             </li>
           ))}
         </ul>
@@ -592,7 +642,7 @@ function NitsList({ nits }: { nits: string[] }) {
             <span className="rd-res-mark tone-muted" aria-hidden>
               ·
             </span>
-            <span>{n}</span>
+            <SafeMarkdown text={n} className="md-compact" breaks />
           </li>
         ))}
       </ul>
@@ -604,7 +654,7 @@ function VerdictBody({ verdict }: { verdict: Verdict }) {
   return (
     <>
       <StatusLine tone={verdict.pass ? "ok" : "danger"} label={verdict.pass ? "Review passed" : "Review failed"} />
-      {verdict.summary && <p className="rd-result-text">{verdict.summary}</p>}
+      {verdict.summary && <SafeMarkdown text={verdict.summary} breaks />}
       <CriteriaList unmet={verdict.unmet} />
       <NitsList nits={verdict.nits} />
     </>
@@ -664,7 +714,7 @@ function ResultCard({
               tone={view.tab === "failed" && !run.outcome ? "danger" : OUTCOME_TONE[outcome]}
               label={view.tab === "failed" && !run.outcome ? view.label : OUTCOME_LABEL[outcome]}
             />
-            {run.summary && <p className="rd-result-text">{run.summary}</p>}
+            {run.summary && <SafeMarkdown text={run.summary} breaks />}
           </>
         )}
         {run.error && view.phase !== "failed" && <p className="rd-result-note">{run.error}</p>}

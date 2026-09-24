@@ -9,6 +9,9 @@
   flex-direction: column;
   gap: var(--sp-7);
 }
+/* .rd scrolls, so its sections keep their height. Without this, a section with overflow
+   (the phase timeline) shrinks to almost nothing when the window is short. */
+.rd > * { flex-shrink: 0; }
 
 .rd-head { display: flex; align-items: flex-start; gap: var(--sp-7); }
 .rd-head-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: var(--sp-2); }
@@ -49,8 +52,9 @@
 /* ---- Timeline de fases ---- */
 .rd-timeline { padding: var(--sp-6) var(--sp-7) var(--sp-5); overflow-x: auto; }
 .tl { list-style: none; margin: 0; padding: 0; display: grid; min-width: min-content; }
-.tl-step { display: flex; flex-direction: column; gap: var(--sp-3); min-width: 64px; }
-.tl-mark-row { display: flex; align-items: center; }
+/* Each step is centered in its column; the line runs from its mark to the next one. */
+.tl-step { position: relative; display: flex; flex-direction: column; align-items: center; gap: var(--sp-3); min-width: 72px; }
+.tl-mark-row { display: flex; justify-content: center; }
 .tl-mark {
   width: 22px;
   height: 22px;
@@ -63,8 +67,16 @@
   font-size: var(--fs-2xs);
   font-weight: var(--fw-semibold);
 }
-.tl-line { flex: 1; height: 2px; margin: 0 var(--sp-1); border-radius: 1px; background: var(--fill-5); }
-.tl-name { font-size: var(--fs-sm); color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding-right: var(--sp-1); }
+.tl-line {
+  position: absolute;
+  top: 10px; /* middle of the 22px mark */
+  left: calc(50% + 11px + var(--sp-1));
+  width: calc(100% - 22px - 2 * var(--sp-1));
+  height: 2px;
+  border-radius: 1px;
+  background: var(--fill-5);
+}
+.tl-name { max-width: 100%; padding: 0 var(--sp-1); text-align: center; font-size: var(--fs-sm); color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tl-done .tl-mark { background: var(--green-tint-18); border-color: var(--green-tint-60); color: var(--green); }
 .tl-done .tl-line { background: var(--green-tint-50); }
 .tl-done .tl-name { color: var(--text-4); }
@@ -79,35 +91,65 @@
 /* ---- Subagentes + resultado ---- */
 .rd-grid { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: var(--sp-7); align-items: start; }
 .rd-agents { overflow: hidden; }
-.rd-cols {
+.rd-agents-empty { padding: var(--sp-8) var(--sp-6); font-size: var(--fs-base); color: var(--text-faint); }
+
+/* Phases on a vertical rail: a mark per phase, a line down to the next one, agents as rows. */
+.rd-phases { padding: var(--sp-1) 0 var(--sp-3); }
+.rd-phase { display: grid; grid-template-columns: 26px minmax(0, 1fr); padding: 0 var(--sp-5) 0 var(--sp-4); }
+.rd-phase-rail { display: flex; flex-direction: column; align-items: center; }
+.rd-phase-mark {
+  width: 16px;
+  height: 16px;
+  margin-top: 9px;
+  flex: none;
   display: grid;
-  grid-template-columns: minmax(0, 1.3fr) 92px 118px 56px 52px minmax(0, 1.8fr);
+  place-items: center;
+  border-radius: 50%;
+  border: 1.5px solid var(--fill-7);
+  color: var(--green);
+  font-size: 8.5px;
+  font-weight: 700;
+}
+.rd-phase-line { flex: 1; width: 1.5px; min-height: 6px; margin-top: 3px; background: var(--fill-5); }
+.rd-phase-done .rd-phase-mark { background: var(--green-tint-16); border-color: color-mix(in oklch, var(--green) 55%, transparent); }
+.rd-phase-done .rd-phase-line { background: color-mix(in oklch, var(--green) 35%, transparent); }
+.rd-phase-current .rd-phase-mark {
+  background: color-mix(in oklch, var(--tone) 20%, transparent);
+  border-color: var(--tone);
+  box-shadow: 0 0 0 4px color-mix(in oklch, var(--tone) 12%, transparent);
+  color: var(--tone);
+}
+.rd-phase-body { min-width: 0; padding-bottom: var(--sp-1); }
+.rd-phase-head { height: 34px; display: flex; align-items: center; gap: var(--sp-3); }
+.rd-phase-name { font-size: var(--fs-md); font-weight: var(--fw-medium); color: var(--text); }
+.rd-phase-current .rd-phase-name { font-weight: var(--fw-semibold); }
+.rd-phase-pending .rd-phase-name { color: var(--text-faint); }
+.rd-phase-meta { font-size: var(--fs-xs); color: var(--text-dim); }
+.rd-phase-agents { display: flex; flex-direction: column; gap: 2px; margin-bottom: var(--sp-1); }
+
+.rd-agent {
+  display: grid;
+  grid-template-columns: 7px minmax(96px, 0.9fr) 74px minmax(0, 1.7fr) 44px 42px 8px;
   gap: var(--sp-4);
   align-items: center;
-}
-.rd-agents-empty { padding: var(--sp-8) var(--sp-6); font-size: var(--fs-base); color: var(--text-faint); }
-.rd-group { border-bottom: 1px solid var(--border-faint); }
-.rd-group:last-child { border-bottom: 0; }
-.rd-group-head { display: flex; align-items: center; gap: var(--sp-3); padding: 7px var(--sp-6) 5px; }
-.rd-group-num { font-family: var(--font-mono); font-size: var(--fs-2xs); color: var(--text-dim); }
-.rd-group-name { font-size: var(--fs-md); font-weight: var(--fw-semibold); color: var(--text-dim); }
-.rd-group-head.past .rd-group-name { color: var(--text-4); }
-.rd-group-head.current .rd-group-name { color: var(--text-strong); }
-.rd-group-note { font-size: var(--fs-xs); color: var(--text-dim); }
-.rd-agent {
   width: 100%;
-  padding: var(--sp-2) var(--sp-6);
-  border: 0;
-  background: transparent;
+  height: 30px;
+  padding: 0 var(--sp-4);
+  border-radius: var(--r-lg);
+  border: 1px solid transparent;
+  background: var(--fill-1);
   text-align: left;
   font-size: var(--fs-md);
 }
-.rd-agent:hover { background: var(--fill-1); }
-.rd-agent-label { font-family: var(--font-mono); font-size: var(--fs-sm); color: var(--text-2); }
-.rd-agent-model { font-size: var(--fs-sm); color: var(--text-muted); }
-.rd-agent-st { display: flex; align-items: center; gap: var(--sp-2); font-size: var(--fs-sm); color: var(--tone); }
-.rd-agent-num { color: var(--text-4); }
-.rd-agent-last { font-size: var(--fs-sm); color: var(--text-subtle); }
+.rd-agent:hover { background: var(--fill-3); border-color: var(--border); }
+.rd-agent-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--tone); }
+.rd-agent-label { font-family: var(--font-mono); font-size: var(--fs-sm); color: var(--text); }
+.rd-agent-model { font-size: var(--fs-xs); color: var(--text-dim); }
+.rd-agent-last { display: flex; gap: var(--sp-2); min-width: 0; font-size: var(--fs-sm); color: var(--text-muted); }
+.rd-agent-st { flex: none; white-space: nowrap; color: var(--tone); }
+.rd-agent-num { font-size: var(--fs-xs); color: var(--text-muted); }
+.ap-status { display: flex; align-items: center; gap: var(--sp-2); font-size: var(--fs-sm); color: var(--tone); }
+.rd-agent-chev { font-size: var(--fs-md); color: var(--text-dim); }
 
 .rd-result { padding: var(--sp-6); display: flex; flex-direction: column; gap: var(--sp-5); }
 .rd-result-label { font-size: var(--fs-md); font-weight: var(--fw-semibold); color: var(--text-muted); }
@@ -247,7 +289,6 @@
 }
 
 /* ---- Resultado ---- */
-.rd-result-text { font-size: var(--fs-base); color: var(--text-3); line-height: var(--lh-body); overflow-wrap: anywhere; white-space: pre-line; }
 .rd-res-row { display: flex; justify-content: space-between; gap: var(--sp-4); min-width: 0; font-size: var(--fs-md); }
 .rd-raw { border-radius: var(--r-card); border: 1px solid var(--border); overflow: hidden; }
 .rd-raw-toggle {
