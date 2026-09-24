@@ -48,8 +48,16 @@ fn snapshot(root: &Path) -> BTreeMap<String, Vec<u8>> {
 }
 
 fn copy_tree(from: &Path, to: &Path) {
-    let none = Path::new("/nonexistent");
-    copy_dir(from, to, &Skip { dest: none, data_dir: none }, &mut Vec::new()).unwrap();
+    for e in fs::read_dir(from).unwrap() {
+        let p = e.unwrap().path();
+        let target = to.join(p.file_name().unwrap());
+        if p.is_dir() {
+            fs::create_dir_all(&target).unwrap();
+            copy_tree(&p, &target);
+        } else {
+            fs::copy(&p, &target).unwrap();
+        }
+    }
 }
 
 fn count(conn: &Connection, table: &str) -> i64 {
@@ -91,7 +99,7 @@ fn legacy_import_is_idempotent_and_maps_everything() {
     // 3 repos + 3 links + concurrency + 3 tareas + 6 runs.
     assert_eq!(r2.already_imported, 16);
     assert_eq!(counts(&conn), after_first);
-    assert_ne!(r1.backup_dir, r2.backup_dir);
+    assert_eq!(r1.backup_dir, r2.backup_dir, "same content: the backup is reused");
 
     // Proyectos: uno por repo mapeado (nombre de carpeta: el legacy no guarda nombres) + Local.
     let mut names: Vec<(String, String)> = conn
@@ -414,14 +422,62 @@ fn first_import_keeps_a_configured_concurrency() {
 }
 
 #[test]
-fn nested_data_dir_is_filtered_at_any_level() {
-    let src = TempDir::new("nested");
-    let data = src.0.join("app/data");
-    fs::create_dir_all(data.join("legacy-backup-1")).unwrap();
-    fs::write(data.join("nodal.db"), b"x").unwrap();
-    fs::write(data.join("tasks.json"), b"{\"tasks\":[]}").unwrap();
+fn folder_without_legacy_files_is_rejected_and_nothing_is_copied() {
+    // Como elegir `~`: mucho de todo, nada del formato viejo (lo anidado no cuenta).
+    let src = TempDir::new("home");
+    let data = TempDir::new("home-data");
+    fs::create_dir_all(src.0.join("Code/app/data")).unwrap();
+    fs::write(src.0.join("Code/app/data/tasks.json"), b"{\"tasks\":[]}").unwrap();
+    fs::write(src.0.join("notes.txt"), b"hola").unwrap();
     let db = open_in_memory().unwrap();
-    let r = import_folder(&mut db.lock().unwrap(), &src.0, &data, T0).unwrap();
+    let e = import_folder(&mut db.lock().unwrap(), &src.0, &data.0, T0).unwrap_err();
+    assert!(e.contains("doesn't look like a data folder") && e.contains("Nothing was copied"), "{e}");
+    assert_eq!(fs::read_dir(&data.0).unwrap().count(), 0, "no backup folder");
+}
+
+#[test]
+fn only_known_files_are_copied() {
+    let src = TempDir::new("mixed");
+    let data = TempDir::new("mixed-data");
+    fs::write(src.0.join("tasks.json"), b"{\"tasks\":[]}").unwrap();
+    fs::write(src.0.join("nodal.db"), b"sqlite").unwrap();
+    fs::write(src.0.join("big.bin"), vec![0u8; 1024]).unwrap();
+    fs::create_dir_all(src.0.join("tasks/t1")).unwrap();
+    fs::write(src.0.join("tasks/t1/plan.md"), b"plan").unwrap();
+    fs::write(src.0.join("tasks/t1/notes.txt"), b"x").unwrap();
+    fs::create_dir_all(src.0.join("legacy-backup-1")).unwrap();
+    fs::write(src.0.join("legacy-backup-1/tasks.json"), b"{}").unwrap();
+    let db = open_in_memory().unwrap();
+    let r = import_folder(&mut db.lock().unwrap(), &src.0, &data.0, T0).unwrap();
     let copied = snapshot(Path::new(&r.backup_dir));
-    assert_eq!(copied.keys().collect::<Vec<_>>(), ["app/data/tasks.json"]);
+    assert_eq!(copied.keys().collect::<Vec<_>>(), ["tasks.json", "tasks/t1/plan.md"]);
+}
+
+#[test]
+fn oversized_data_is_rejected_before_copying() {
+    let src = TempDir::new("huge");
+    let data = TempDir::new("huge-data");
+    // Archivo disperso: ocupa `len` sin escribir 64 MB.
+    let f = fs::File::create(src.0.join("tasks.json")).unwrap();
+    f.set_len(MAX_BACKUP_BYTES + 1).unwrap();
+    let e = backup(&src.0, &data.0, T0).unwrap_err();
+    assert!(e.contains("more than the 64 MB"), "{e}");
+    assert_eq!(fs::read_dir(&data.0).unwrap().count(), 0);
+}
+
+#[test]
+fn backup_is_reused_only_while_content_is_identical() {
+    let src = TempDir::new("reuse");
+    let data = TempDir::new("reuse-data");
+    fs::write(src.0.join("tasks.json"), b"{\"tasks\":[]}").unwrap();
+    let (b1, _) = backup(&src.0, &data.0, T0).unwrap();
+    let (b2, _) = backup(&src.0, &data.0, T0 + 1).unwrap();
+    assert_eq!(b1, b2);
+    fs::write(src.0.join("config.json"), b"{}").unwrap();
+    let (b3, _) = backup(&src.0, &data.0, T0 + 2).unwrap();
+    assert_ne!(b3, b1, "a new file means a new backup");
+    fs::write(src.0.join("config.json"), b"{\"repos\":[]}").unwrap();
+    let (b4, _) = backup(&src.0, &data.0, T0 + 3).unwrap();
+    assert_ne!(b4, b3, "changed bytes mean a new backup");
+    assert_eq!(fs::read_dir(&data.0).unwrap().count(), 3);
 }
