@@ -52,7 +52,7 @@ To build from source you also need Node.js 20+, pnpm 10 and a stable Rust toolch
 ## Getting started
 
 ```bash
-git clone <this repo> nodal
+git clone https://github.com/Mazp17/nodal-agentos.git nodal
 cd nodal
 pnpm install
 pnpm tauri dev

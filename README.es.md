@@ -52,7 +52,7 @@ Para compilar desde el código fuente también necesitas Node.js 20+, pnpm 10 y 
 ## Cómo empezar
 
 ```bash
-git clone <este repo> nodal
+git clone https://github.com/Mazp17/nodal-agentos.git nodal
 cd nodal
 pnpm install
 pnpm tauri dev
