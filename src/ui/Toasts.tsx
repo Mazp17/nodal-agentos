@@ -31,8 +31,8 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     (title, body, tone = "info") => {
       const id = ++seq.current;
       setToasts((t) => [...t.slice(-(MAX_TOASTS - 1)), { id, title, body, tone }]);
-      // Los errores quedan más tiempo: suelen traer texto para leer.
-      setTimeout(() => dismiss(id), tone === "danger" ? 9000 : 5000);
+      // Los errores quedan hasta cerrarlos: suelen traer texto para leer (WCAG 2.2.1).
+      if (tone !== "danger") setTimeout(() => dismiss(id), 5000);
     },
     [dismiss],
   );
@@ -42,7 +42,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
       {children}
       <div className="toasts" aria-live="polite">
         {toasts.map((t) => (
-          <div key={t.id} className={`toast tone-${t.tone}`} role={t.tone === "danger" ? "alert" : "status"}>
+          <div key={t.id} className={`toast tone-${t.tone}`}>
             <span className="dot" aria-hidden />
             <div className="toast-body">
               <span className="toast-title">{t.title}</span>

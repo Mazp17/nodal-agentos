@@ -1,4 +1,4 @@
-import { useId, useState, type KeyboardEvent } from "react";
+import { useEffect, useId, useState, type KeyboardEvent } from "react";
 import { useFocusTrap } from "../../ui/useFocusTrap";
 import "./palette.css";
 
@@ -34,6 +34,11 @@ export function CommandPalette({ actions, search, onClose }: Props) {
     ...search(q),
   ].slice(0, MAX_ITEMS);
   const active = Math.min(index, Math.max(0, items.length - 1));
+
+  // Con las flechas, la opción activa queda a la vista.
+  useEffect(() => {
+    document.getElementById(`${listId}-${active}`)?.scrollIntoView({ block: "nearest" });
+  }, [active, listId]);
 
   const run = (item: PaletteItem | undefined) => {
     if (!item) return;

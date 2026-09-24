@@ -26,6 +26,7 @@
   font-size: var(--fs-2xl);
 }
 .palette-input:focus-visible { outline: none; }
+.palette:focus-within { box-shadow: var(--shadow-palette), 0 0 0 2px var(--accent-tint-50); }
 .palette-input::placeholder { color: var(--text-dim); }
 .palette-list { padding: var(--sp-2); max-height: 380px; overflow: auto; display: flex; flex-direction: column; gap: 1px; }
 .palette-item {

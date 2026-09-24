@@ -34,21 +34,25 @@ export function ProjectsProvider({ children }: { children: ReactNode }) {
   const [repos, setRepos] = useState<Repo[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const seq = useRef(0);
+  // En serie: cada refresh aplica su resultado en orden y quien lo espera (p. ej. tras
+  // crear un proyecto) ve el estado ya actualizado, sin que una respuesta vieja lo pise.
+  const chain = useRef<Promise<void>>(Promise.resolve());
 
-  const refresh = useCallback(async () => {
-    const id = ++seq.current;
-    try {
-      const [ps, rs] = await Promise.all([api.listProjects(), api.listRepos(null)]);
-      if (id !== seq.current) return;
-      setProjects(ps);
-      setRepos(rs);
-      setError(null);
-    } catch (e) {
-      if (id === seq.current) setError(String(e));
-    } finally {
-      if (id === seq.current) setLoaded(true);
-    }
+  const refresh = useCallback(() => {
+    const run = async () => {
+      try {
+        const [ps, rs] = await Promise.all([api.listProjects(), api.listRepos(null)]);
+        setProjects(ps);
+        setRepos(rs);
+        setError(null);
+      } catch (e) {
+        setError(String(e));
+      } finally {
+        setLoaded(true);
+      }
+    };
+    chain.current = chain.current.then(run);
+    return chain.current;
   }, []);
 
   useEffect(() => {
@@ -85,10 +89,18 @@ export function ProjectsProvider({ children }: { children: ReactNode }) {
       reposOf: (projectId) => sorted.filter((r) => r.projectId === projectId),
       refresh,
       createProject: (input) => after(api.createProject(input)),
-      updateProject: (id, patch) => after(api.updateProject(id, patch)),
+      // Optimista: segmentados y colores responden al instante (y con teclado avanzan de a
+      // uno sin esperar al backend); el refresh posterior corrige si falló.
+      updateProject: (id, patch) => {
+        setProjects((ps) => ps.map((p) => (p.id === id ? ({ ...p, ...patch } as Project) : p)));
+        return after(api.updateProject(id, patch));
+      },
       deleteProject: (id) => after(api.deleteProject(id)),
       addRepo: (projectId, input) => after(api.addRepo(projectId, input)),
-      updateRepo: (id, patch) => after(api.updateRepo(id, patch)),
+      updateRepo: (id, patch) => {
+        setRepos((rs) => rs.map((r) => (r.id === id ? ({ ...r, ...patch } as Repo) : r)));
+        return after(api.updateRepo(id, patch));
+      },
       deleteRepo: (id) => after(api.deleteRepo(id)),
     };
   }, [projects, repos, loaded, error, refresh]);

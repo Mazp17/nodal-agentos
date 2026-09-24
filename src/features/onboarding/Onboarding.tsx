@@ -1,4 +1,4 @@
-import { useId, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { isValidProjectKey, suggestProjectKey, useProjects } from "../../domain/hooks/projects";
 import type { Project, ScopeRef } from "../../domain/types";
 import { createdSummary, createProjectWithRepos, PROJECT_COLORS } from "../projects/create";
@@ -22,9 +22,10 @@ interface Props {
   onCancel?: () => void;
   /** "Import data from a previous version…" (Settings → Diagnostics). */
   onImportLegacy: () => void;
+  importingLegacy?: boolean;
 }
 
-export function Onboarding({ onDone, onCancel, onImportLegacy }: Props) {
+export function Onboarding({ onDone, onCancel, onImportLegacy, importingLegacy }: Props) {
   const ctx = useProjects();
   const toast = useToast();
   const provider = useProviderStatus();
@@ -47,6 +48,17 @@ export function Onboarding({ onDone, onCancel, onImportLegacy }: Props) {
   });
 
   const idx = STEPS.findIndex((s) => s.id === step);
+
+  // Al cambiar de paso el botón con foco se desmonta: el foco va al título del paso nuevo.
+  const headingRef = useRef<HTMLHeadingElement>(null);
+  const firstStep = useRef(true);
+  useEffect(() => {
+    if (firstStep.current) {
+      firstStep.current = false;
+      return;
+    }
+    headingRef.current?.focus();
+  }, [step]);
   const linearOk = isConnected(provider.linear);
 
   const next1 = () => {
@@ -69,6 +81,7 @@ export function Onboarding({ onDone, onCancel, onImportLegacy }: Props) {
         color,
         repos,
         scope: withSource && linearOk ? scope : null,
+        autoKey: true,
       });
       toast("Project created", createdSummary(out.project.name, out.reposAdded, out.sourceConnected), "ok");
       if (out.failures.length) toast("Some steps failed", out.failures.join("\n"), "danger");
@@ -109,7 +122,9 @@ export function Onboarding({ onDone, onCancel, onImportLegacy }: Props) {
               }}
             >
               <div className="onboarding-card-head">
-                <h2 className="onboarding-card-title">Create your first project</h2>
+                <h2 ref={headingRef} tabIndex={-1} className="onboarding-card-title">
+                  Create your first project
+                </h2>
                 <p className="onboarding-card-text">
                   A project groups the repos and tasks for one product or area. You can add more later.
                 </p>
@@ -140,8 +155,8 @@ export function Onboarding({ onDone, onCancel, onImportLegacy }: Props) {
                 </span>
               )}
               <div className="onboarding-actions">
-                <button type="button" className="btn btn-ghost" onClick={onImportLegacy}>
-                  Import data from a previous version…
+                <button type="button" className="btn btn-ghost" disabled={importingLegacy} onClick={onImportLegacy}>
+                  {importingLegacy ? "Importing…" : "Import data from a previous version…"}
                 </button>
                 <span className="spacer" />
                 {onCancel && (
@@ -159,7 +174,7 @@ export function Onboarding({ onDone, onCancel, onImportLegacy }: Props) {
           {step === "repos" && (
             <div className="panel onboarding-card">
               <div className="onboarding-card-head">
-                <h2 className="onboarding-card-title">
+                <h2 ref={headingRef} tabIndex={-1} className="onboarding-card-title">
                   <span className="project-dot" style={{ ["--project-color" as string]: color }} aria-hidden />
                   Add repos to {name.trim() || "Untitled project"}
                 </h2>
@@ -194,7 +209,7 @@ export function Onboarding({ onDone, onCancel, onImportLegacy }: Props) {
           {step === "source" && (
             <div className="panel onboarding-card">
               <div className="onboarding-card-head">
-                <h2 className="onboarding-card-title">
+                <h2 ref={headingRef} tabIndex={-1} className="onboarding-card-title">
                   Connect a task manager <span className="onboarding-optional">· optional</span>
                 </h2>
                 <p className="onboarding-card-text">

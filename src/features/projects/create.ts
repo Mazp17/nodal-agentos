@@ -2,7 +2,7 @@
 // onboarding y el diálogo "New project".
 
 import { addRepo, createSourceLink } from "../../domain/api";
-import type { ProjectsState } from "../../domain/hooks/projects";
+import { suggestProjectKey, type ProjectsState } from "../../domain/hooks/projects";
 import type { Project, ScopeRef } from "../../domain/types";
 import { LINEAR } from "../../shell/providerStatus";
 
@@ -26,6 +26,8 @@ export interface ProjectDraft {
   repos: string[];
   /** Team o project de Linear a conectar, si hay. */
   scope: ScopeRef | null;
+  /** La key la sugirió Nodal: si choca (p. ej. con un proyecto archivado), prueba otra. */
+  autoKey?: boolean;
 }
 
 export interface CreateOutcome {
@@ -41,7 +43,19 @@ export interface CreateOutcome {
  * proyecto queda creado y el error se devuelve para mostrarlo (se agregan desde Settings).
  */
 export async function createProjectWithRepos(ctx: ProjectsState, d: ProjectDraft): Promise<CreateOutcome> {
-  const project = await ctx.createProject({ name: d.name.trim(), key: d.key.trim().toUpperCase(), color: d.color });
+  let key = d.key.trim().toUpperCase();
+  const tried = [key];
+  let project: Project;
+  for (;;) {
+    try {
+      project = await ctx.createProject({ name: d.name.trim(), key, color: d.color });
+      break;
+    } catch (e) {
+      if (!d.autoKey || !String(e).includes("already used") || tried.length >= 20) throw e;
+      key = suggestProjectKey(d.name, [...ctx.projects.map((p) => p.key), ...tried]);
+      tried.push(key);
+    }
+  }
   const failures: string[] = [];
   const repoIds: string[] = [];
   for (const path of d.repos) {

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useId, useState, type ReactNode } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { getSettings, providerStatus, setSettings, type ProviderStatus } from "../../domain/api";
 import { useProjects } from "../../domain/hooks/projects";
@@ -86,6 +86,9 @@ function ExecutionSettings({ onSaved }: { onSaved: (s: Settings) => void }) {
   const [s, setS] = useState<Settings | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [reviewer, setReviewer] = useState("");
+  const [saving, setSaving] = useState(false);
+  const parId = useId();
+  const reviewerId = useId();
 
   useEffect(() => {
     getSettings()
@@ -96,9 +99,11 @@ function ExecutionSettings({ onSaved }: { onSaved: (s: Settings) => void }) {
       .catch((e) => setError(String(e)));
   }, []);
 
+  // Un guardado a la vez (el stepper se deshabilita): sin respuestas desordenadas.
   const save = async (next: Settings) => {
     const prev = s;
     setS(next);
+    setSaving(true);
     try {
       const saved = await setSettings(next);
       setS(saved);
@@ -108,6 +113,8 @@ function ExecutionSettings({ onSaved }: { onSaved: (s: Settings) => void }) {
       setS(prev);
       if (prev) setReviewer(prev.reviewer);
       toast("Couldn't save settings", String(e), "danger");
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -135,16 +142,16 @@ function ExecutionSettings({ onSaved }: { onSaved: (s: Settings) => void }) {
       <div className="panel settings-card">
         <div className="settings-row">
           <div className="settings-row-text">
-            <span className="settings-row-title" id="par-label">
+            <span className="settings-row-title" id={parId}>
               Parallel runs
             </span>
             <span className="settings-row-hint">Extra launches wait in the queue.</span>
           </div>
-          <div className="stepper" role="group" aria-labelledby="par-label">
+          <div className="stepper" role="group" aria-labelledby={parId}>
             <button
               type="button"
               aria-label="Fewer parallel runs"
-              disabled={s.concurrency <= 1}
+              disabled={saving || s.concurrency <= 1}
               onClick={() => void save({ ...s, concurrency: s.concurrency - 1 })}
             >
               −
@@ -155,7 +162,7 @@ function ExecutionSettings({ onSaved }: { onSaved: (s: Settings) => void }) {
             <button
               type="button"
               aria-label="More parallel runs"
-              disabled={s.concurrency >= MAX_CONCURRENCY}
+              disabled={saving || s.concurrency >= MAX_CONCURRENCY}
               onClick={() => void save({ ...s, concurrency: s.concurrency + 1 })}
             >
               +
@@ -164,7 +171,7 @@ function ExecutionSettings({ onSaved }: { onSaved: (s: Settings) => void }) {
         </div>
         <div className="settings-row">
           <div className="settings-row-text">
-            <label className="settings-row-title" htmlFor="reviewer-input">
+            <label className="settings-row-title" htmlFor={reviewerId}>
               Default reviewer
             </label>
             <span className="settings-row-hint">
@@ -172,13 +179,13 @@ function ExecutionSettings({ onSaved }: { onSaved: (s: Settings) => void }) {
             </span>
           </div>
           <input
-            id="reviewer-input"
+            id={reviewerId}
             className="input input-mono settings-input"
             value={reviewer}
             spellCheck={false}
             onChange={(e) => setReviewer(e.target.value)}
             onBlur={commitReviewer}
-            onKeyDown={(e) => e.key === "Enter" && commitReviewer()}
+            onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()}
           />
         </div>
         <div className="settings-row settings-row-top">

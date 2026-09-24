@@ -114,7 +114,7 @@ function GeneralSection({ project, onDeleted }: { project: Project; onDeleted: (
             value={name}
             onChange={(e) => setName(e.target.value)}
             onBlur={commitName}
-            onKeyDown={(e) => e.key === "Enter" && commitName()}
+            onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()}
           />
         </div>
         <div className="field">
@@ -150,7 +150,7 @@ function GeneralSection({ project, onDeleted }: { project: Project; onDeleted: (
             value={reviewer}
             onChange={(e) => setReviewer(e.target.value)}
             onBlur={commitReviewer}
-            onKeyDown={(e) => e.key === "Enter" && commitReviewer()}
+            onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()}
           />
           <span className="field-hint">Agent that reviews finished runs. Empty uses the one in Settings → Execution.</span>
         </div>
@@ -299,6 +299,7 @@ function RepoCard({ repo, editing, onEdit }: { repo: Repo; editing: boolean; onE
   const [git, setGit] = useState<"checking" | "ok" | "missing">("checking");
   const [reviewer, setReviewer] = useState(repo.reviewer ?? "");
   const [confirmRemove, setConfirmRemove] = useState(false);
+  const [removing, setRemoving] = useState(false);
 
   useEffect(() => {
     let alive = true;
@@ -325,12 +326,14 @@ function RepoCard({ repo, editing, onEdit }: { repo: Repo; editing: boolean; onE
   };
 
   const remove = async () => {
+    setRemoving(true);
     try {
       await ctx.deleteRepo(repo.id);
       toast("Repo removed", `${repo.name} · the folder stays on disk`, "ok");
     } catch (e) {
       toast("Couldn't remove the repo", String(e), "danger");
       setConfirmRemove(false);
+      setRemoving(false);
     }
   };
 
@@ -349,11 +352,11 @@ function RepoCard({ repo, editing, onEdit }: { repo: Repo; editing: boolean; onE
         {confirmRemove ? (
           <>
             <span className="faint repo-card-confirm">Remove from {ctx.projectById.get(repo.projectId)?.name ?? "project"}?</span>
-            <button type="button" className="btn btn-ghost btn-sm" onClick={() => setConfirmRemove(false)}>
+            <button type="button" className="btn btn-ghost btn-sm" disabled={removing} onClick={() => setConfirmRemove(false)}>
               Cancel
             </button>
-            <button type="button" className="btn btn-danger btn-sm" onClick={() => void remove()}>
-              Remove
+            <button type="button" className="btn btn-danger btn-sm" disabled={removing} autoFocus onClick={() => void remove()}>
+              {removing ? "Removing…" : "Remove"}
             </button>
           </>
         ) : (
@@ -431,7 +434,7 @@ function RepoCard({ repo, editing, onEdit }: { repo: Repo; editing: boolean; onE
               value={reviewer}
               onChange={(e) => setReviewer(e.target.value)}
               onBlur={commitReviewer}
-              onKeyDown={(e) => e.key === "Enter" && commitReviewer()}
+              onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()}
             />
           </OptRow>
           <p className="field-hint repo-opts-note">

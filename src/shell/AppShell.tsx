@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { launchTask, listSourceLinks } from "../domain/api";
 import { useProjects } from "../domain/hooks/projects";
 import { taskKey, type Project } from "../domain/types";
@@ -19,6 +19,9 @@ import { Topbar } from "./Topbar";
 import { PAGE_TITLE, useNav, type Page, type ProjectPage } from "./useNav";
 import { useWorkStatus } from "./useWorkStatus";
 import "./shell.css";
+
+const isEditable = (t: EventTarget | null) =>
+  t instanceof HTMLElement && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName));
 
 /** ⌘1–4, como en el diseño. */
 const SHORTCUT_PAGES: Record<string, ProjectPage> = { "1": "board", "2": "tasks", "3": "runs", "4": "activity" };
@@ -54,22 +57,29 @@ export function AppShell() {
     }
   }, [ctx.loaded, ctx.error, ctx.projectById, route.projectId, forgetProject]);
 
-  // Fuentes del proyecto actual: habilitan "Import".
+  // Último proyecto visitado: destino de ⌘2/⌘4 desde una vista global.
+  const lastProjectId = useRef<string | null>(null);
   useEffect(() => {
-    if (!project) {
+    if (route.projectId) lastProjectId.current = route.projectId;
+  }, [route.projectId]);
+
+  // Fuentes del proyecto actual: habilitan "Import".
+  const projectId = project?.id ?? null;
+  useEffect(() => {
+    if (!projectId) {
       setSourceCount(0);
       return;
     }
     let alive = true;
-    listSourceLinks(project.id).then(
+    listSourceLinks(projectId).then(
       (l) => alive && setSourceCount(l.length),
       () => alive && setSourceCount(0),
     );
     return () => {
       alive = false;
     };
-    // También al volver de Settings del proyecto (se pudo conectar una fuente).
-  }, [project, route.page]);
+    // También al cambiar de página (p. ej. volver de Sources con una fuente nueva).
+  }, [projectId, route.page]);
 
   // El estado de Linear puede cambiar en Settings → Integrations: se relee al salir.
   const inSettings = route.page === "settings";
@@ -86,34 +96,44 @@ export function AppShell() {
     setPaletteOpen(false);
     setTaskId(id);
   }, []);
+  const { openRun: navOpenRun, go: navGo } = nav;
   const openRun = useCallback(
     (id: string) => {
       setTaskId(null);
       setPaletteOpen(false);
-      nav.openRun(id);
+      navOpenRun(id);
     },
-    [nav],
+    [navOpenRun],
   );
   const go = useCallback(
-    (page: Page, projectId: string | null = null) => {
+    (page: Page, pid: string | null = null) => {
       setTaskId(null);
       setPaletteOpen(false);
-      nav.go(page, projectId);
+      navGo(page, pid);
     },
-    [nav],
+    [navGo],
   );
   const openNewTask = useCallback(() => {
     setPaletteOpen(false);
     setNewTask({ projectId: project?.id ?? null });
   }, [project]);
 
-  /** Proyecto para ⌘2/⌘4 desde una vista global: el último visitado o el primero. */
+  /** Proyecto para ⌘2/⌘4 desde una vista global: el actual, el último visitado o el primero. */
   const fallbackProject = (): Project | null =>
-    project ?? ctx.projects.find((p) => nav.expanded.has(p.id)) ?? ctx.projects[0] ?? null;
+    project ??
+    (lastProjectId.current ? ctx.projectById.get(lastProjectId.current) : undefined) ??
+    ctx.projects[0] ??
+    null;
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.defaultPrevented) return;
+  const showOnboarding = ctx.loaded && (ctx.projects.length === 0 || forceOnboarding) && !(ctx.error && ctx.projects.length === 0);
+
+  // El handler cambia en cada render; el listener se registra una vez y llama al último.
+  const onKeyRef = useRef<(e: KeyboardEvent) => void>(() => {});
+  useLayoutEffect(() => {
+    onKeyRef.current = (e: KeyboardEvent) => {
+      if (e.defaultPrevented || e.isComposing) return;
+      // Fuera del shell (carga, error, onboarding) no hay atajos.
+      if (!ctx.loaded || showOnboarding || (ctx.error && ctx.projects.length === 0)) return;
       const mod = e.metaKey || e.ctrlKey;
       if (mod && e.key.toLowerCase() === "k") {
         e.preventDefault();
@@ -141,15 +161,18 @@ export function AppShell() {
         if (taskId) {
           e.preventDefault();
           setTaskId(null);
-        } else if (route.page === "run") {
+        } else if (route.page === "run" && !isEditable(e.target)) {
           e.preventDefault();
           nav.back();
         }
       }
     };
+  });
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => onKeyRef.current(e);
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  });
+  }, []);
 
   // ---- Paleta ----
   const paletteActions = useMemo((): PaletteItem[] => {
@@ -231,7 +254,7 @@ export function AppShell() {
       </div>
     );
   }
-  if (ctx.projects.length === 0 || forceOnboarding) {
+  if (showOnboarding) {
     return (
       <Onboarding
         onDone={(p) => {
@@ -239,6 +262,7 @@ export function AppShell() {
           go("board", p.id);
         }}
         onCancel={ctx.projects.length > 0 ? () => setForceOnboarding(false) : undefined}
+        importingLegacy={legacy.busy}
         onImportLegacy={() =>
           void legacy.run().then((r) => {
             if (r && r.projects > 0) setForceOnboarding(false);

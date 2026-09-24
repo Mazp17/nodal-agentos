@@ -52,6 +52,7 @@ export function ExecutorSelect({
   const workflows = items.filter((i) => i.executor.kind === "workflow");
 
   return (
+    <>
     <select
       id={id}
       className="select executor-select"
@@ -88,5 +89,11 @@ export function ExecutorSelect({
         </optgroup>
       )}
     </select>
+    {error && (
+      <span className="field-error" role="alert">
+        Couldn't list agents and workflows: {error}
+      </span>
+    )}
+    </>
   );
 }

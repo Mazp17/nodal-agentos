@@ -7,6 +7,9 @@ import { isConnected, LINEAR, useProviderStatus } from "../../shell/providerStat
 import { PROJECT_COLORS } from "./create";
 import "./projects.css";
 
+/** Nombres accesibles de `PROJECT_COLORS`, en el mismo orden. */
+const COLOR_NAMES = ["Amber", "Blue", "Green", "Magenta", "Yellow", "Red", "Teal", "Violet"];
+
 export function ColorSwatches({
   value,
   onChange,
@@ -39,7 +42,7 @@ export function ColorSwatches({
           role="radio"
           data-color={c}
           aria-checked={c === value}
-          aria-label={`Color ${k + 1}`}
+          aria-label={COLOR_NAMES[k] ?? `Custom color`}
           tabIndex={c === value || (!colors.includes(value) && k === 0) ? 0 : -1}
           className="swatch"
           style={{ background: c }}
@@ -85,7 +88,7 @@ export function Segmented<T>({
     <div className="seg" role="radiogroup" aria-label={label} onKeyDown={onKey}>
       {options.map((o, k) => (
         <button
-          key={o.label}
+          key={`${String(o.value)}-${k}`}
           type="button"
           role="radio"
           aria-checked={o.value === value}
@@ -153,8 +156,12 @@ export function LinearTeamPicker({
     try {
       const s = await providerSetKey(LINEAR, k);
       status.set(s);
-      setKey("");
-      setMsg(null);
+      if (s.error) {
+        setMsg({ text: s.error, error: true });
+      } else {
+        setKey("");
+        setMsg(null);
+      }
     } catch (e) {
       setMsg({ text: String(e), error: true });
     } finally {
@@ -209,7 +216,11 @@ export function LinearTeamPicker({
         <span className="dot dot-sm tone-ok" aria-hidden />
         Connected{status.linear?.viewer ? ` as ${status.linear.viewer}` : ""}
       </span>
-      {error && <span className="field-error">{error}</span>}
+      {error && (
+        <span className="field-error" role="alert">
+          {error}
+        </span>
+      )}
       {!error && teams === null && <span className="field-hint">Loading teams…</span>}
       {teams && teams.length === 0 && <span className="field-hint">No teams in this workspace.</span>}
       {teams && teams.length > 0 && (

@@ -65,7 +65,7 @@ export function Sidebar(p: Props) {
             <span className="side-item-label">{n.label}</span>
             {n.live && <span className="dot dot-sm pulse tone-accent" aria-hidden />}
             {n.count != null && (
-              <span className="side-count num" aria-label={`${n.count}`}>
+              <span className="side-count num" aria-label={n.page === "runs" ? `${n.count} running` : `${n.count} open tasks`}>
                 {n.count}
               </span>
             )}
@@ -85,7 +85,7 @@ export function Sidebar(p: Props) {
           const cur = p.current.projectId === proj.id;
           const running = p.activeByProject.get(proj.id) ?? 0;
           return (
-            <div key={proj.id} className="side-project">
+            <div key={proj.id} className="side-project" role="group" aria-label={proj.name}>
               <button
                 type="button"
                 className={`side-item side-project-head ${cur && !open ? "on-soft" : ""}`}
