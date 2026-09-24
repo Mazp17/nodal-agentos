@@ -9,7 +9,7 @@ use rusqlite::Connection;
 
 use crate::db::queries::{repos, runs as qruns};
 use crate::db::{rows, with_db};
-use crate::domain::{Executor, Run, RunKind, RunStatus};
+use crate::domain::{Executor, Run, RunKind, RunStatus, TaskStatus};
 use crate::runs::{self, SessionReadout};
 use crate::util::{blocking, now_ms};
 
@@ -51,6 +51,12 @@ pub fn apply_end(
         Some(id) => rows::get_task(conn, id)?,
         None => None,
     };
+    // Una tarea cerrada a mano (Done/Canceled) mientras corría: sin revisor ni comentario.
+    let closed = task.as_ref().is_some_and(|t| matches!(t.status, TaskStatus::Done | TaskStatus::Canceled));
+    if closed {
+        decision.enqueue_review = false;
+        decision.closing = false;
+    }
     let mut note = end.note.clone();
     // El revisor ve el run ya con su resultado (resumen, rama).
     let mut view = run.clone();
@@ -64,7 +70,7 @@ pub fn apply_end(
             Err(e) => {
                 // Sin revisor no hay gate: la tarea queda bloqueada con el motivo.
                 decision.enqueue_review = false;
-                decision.task_status = Some(crate::domain::TaskStatus::Blocked);
+                decision.task_status = Some(TaskStatus::Blocked);
                 decision.closing = true;
                 note = Some(format!("Couldn't start the reviewer: {e}"));
                 None
@@ -109,7 +115,7 @@ pub fn apply_end(
 }
 
 /// `(reviews, managesSource)` del workflow del run, del catálogo en disco.
-fn workflow_meta(env: &Env, repo_path: Option<&str>, executor: &Executor) -> (bool, Option<String>) {
+pub fn workflow_meta(env: &Env, repo_path: Option<&str>, executor: &Executor) -> (bool, Option<String>) {
     let Executor::Workflow { name } = executor else { return (false, None) };
     match executors::find_workflow(env.claude_dir.as_deref(), repo_path.map(Path::new), name) {
         Some(i) => (i.reviews, i.manages_source),
@@ -311,6 +317,19 @@ mod tests {
         apply_end(&mut f.db.lock().unwrap(), &f.env, &rev2, &end, RunStatus::Finished, None, 13).unwrap();
         assert_eq!(task_status(&f), TaskStatus::InReview);
         let _ = ReportStatus::Done;
+    }
+
+    #[test]
+    fn task_closed_by_hand_gets_no_reviewer_nor_comment() {
+        let f = fx("pump-closed");
+        link_task(&f);
+        let work = launched_run(&f, Executor::Claude, RunKind::Work, true);
+        tasks::set_status(&f.db.lock().unwrap(), &f.task.id, TaskStatus::Done, 3).unwrap();
+        let end = read_end(&work, EndSignal::Done, &done_readout("{\"status\":\"done\"}"), false);
+        assert!(apply_end(&mut f.db.lock().unwrap(), &f.env, &work, &end, RunStatus::Finished, None, 10).unwrap().is_none());
+        assert_eq!(task_status(&f), TaskStatus::Done);
+        assert!(outbox_kinds(&f).is_empty());
+        assert_eq!(qruns::get(&f.db.lock().unwrap(), &work.id).unwrap().status, RunStatus::Finished);
     }
 
     #[test]

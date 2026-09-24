@@ -33,7 +33,9 @@ pub fn run() {
             match db::open(&app.path().app_data_dir()?.join(db::DB_FILE)) {
                 Ok(db) => {
                     app.manage(db.clone());
-                    work::init(app.handle(), db)?;
+                    if let Err(e) = work::init(app.handle(), db) {
+                        eprintln!("work: {e}");
+                    }
                 }
                 Err(e) => eprintln!("nodal.db: {e}"),
             }

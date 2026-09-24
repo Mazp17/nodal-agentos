@@ -1,9 +1,9 @@
 //! Armado de runs: resolución de ejecutor y opciones (run → tarea → repo → proyecto),
 //! worktree, prompt según el ejecutor y flags de lanzamiento.
 //!
-//! Los prompts son funciones puras (con snapshots en los tests); `prepare_work` y
-//! `prepare_review` juntan los datos (base, disco, git) y devuelven el `Run` listo para
-//! insertar.
+//! Los prompts son funciones puras (con snapshots en los tests); `enqueue_work`,
+//! `prepare_review` y `enqueue_review` juntan los datos (base, disco, git) y arman el `Run`.
+//! Los prompts no empiezan con `#` ni `/` (Claude Code los tomaría como atajo o comando).
 
 use std::path::Path;
 
@@ -196,7 +196,7 @@ fn outcome_label(o: Option<RunOutcome>) -> &'static str {
 
 /// Prompt para un agente o para Claude.
 pub fn work_prompt(ctx: &TaskContext, finish: Finish, extra: Option<&str>, prev: Option<&PreviousStep>) -> String {
-    let mut out = vec![format!("# Task {}: {}", ctx.key, ctx.title)];
+    let mut out = vec![format!("Task {}: {}", ctx.key, ctx.title)];
     header(ctx, &mut out);
     plan_section(ctx, &mut out);
     criteria_section(ctx, &mut out, false);
@@ -248,7 +248,7 @@ pub fn review_prompt(
     work: Option<(&str, Option<&str>)>,
     extra: Option<&str>,
 ) -> String {
-    let mut out = vec![format!("# Review task {}: {}", ctx.key, ctx.title)];
+    let mut out = vec![format!("Review of task {}: {}", ctx.key, ctx.title)];
     header(ctx, &mut out);
     out.push("You are the reviewer: don't modify any file. Read the code, run read-only commands (tests, linters) and report.".into());
     out.push(String::new());
@@ -359,7 +359,10 @@ pub fn task_context(
     let plan_text = ops::read_plan(&plan_abs)?;
     // Un plan del repo se lee desde el cwd (en un worktree, su copia de la rama).
     let plan_path = match plan_abs.strip_prefix(&repo.path) {
-        Ok(rel) if matches!(task.plan, PlanRef::File { .. }) => Path::new(cwd).join(rel),
+        // Si el plan no está commiteado, en el worktree no existe: la ruta del repo.
+        Ok(rel) if matches!(task.plan, PlanRef::File { .. }) && Path::new(cwd).join(rel).is_file() => {
+            Path::new(cwd).join(rel)
+        }
         _ => plan_abs.clone(),
     };
     Ok(TaskContext {
@@ -552,21 +555,24 @@ pub fn prepare_review(
     // Dónde y qué revisar.
     let live_wt = task.worktree.as_ref().filter(|w| Path::new(&w.path).is_dir());
     let parent_branch = parent.filter(|p| matches!(p.executor, Executor::Workflow { .. })).and_then(|p| p.branch.clone());
+    // Un workflow trabaja en su propio worktree: se revisa su rama (no el worktree de la
+    // tarea, que puede tener el trabajo de un paso anterior).
+    let live_wt = if parent_branch.is_some() { None } else { live_wt };
     let (cwd, hint) = match (live_wt, parent_branch) {
-        (Some(wt), _) => (
-            wt.path.clone(),
-            format!(
-                "The changes for this task, in the working directory: `git diff {}...HEAD` for the branch's commits, `git diff HEAD` for uncommitted work and `git status` for new files.",
-                wt.base
-            ),
-        ),
-        (None, Some(branch)) => {
+        (_, Some(branch)) => {
             let base = worktree::current_base(Path::new(&repo.path)).unwrap_or_else(|_| "HEAD".into());
             (
                 repo.path.clone(),
                 format!("The changes are on branch `{branch}`: run `git diff {base}...{branch}` (don't check it out)."),
             )
         }
+        (Some(wt), None) => (
+            wt.path.clone(),
+            format!(
+                "The changes for this task, in the working directory: `git diff {}...HEAD` for the branch's commits, `git diff HEAD` for uncommitted work and `git status` for new files.",
+                wt.base
+            ),
+        ),
         (None, None) => (
             repo.path.clone(),
             "The changes for this task are in the repository folder: run `git diff HEAD` and `git status` for uncommitted work, and `git log` for recent commits of this task.".into(),

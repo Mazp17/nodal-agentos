@@ -58,11 +58,13 @@ pub fn pending_in_project(conn: &Connection, project_id: &str) -> Result<i64, Db
     )?)
 }
 
-/// Último run terminado de la tarea (el paso previo de la cadena).
+/// Último run terminado de la tarea (el paso previo de la cadena), incluidos los detenidos
+/// por el usuario (cancelados después de lanzarse).
 pub fn last_finished(conn: &Connection, task_id: &str) -> Result<Option<Run>, DbError> {
     Ok(conn
         .query_row(
-            "SELECT * FROM runs WHERE task_id = ?1 AND status = 'finished'
+            "SELECT * FROM runs WHERE task_id = ?1
+               AND (status = 'finished' OR (status = 'canceled' AND launched_at IS NOT NULL))
              ORDER BY COALESCE(finished_at, queued_at) DESC, queued_at DESC LIMIT 1",
             [task_id],
             run_from_row,

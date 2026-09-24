@@ -1,4 +1,4 @@
-# Task PAY-1: Logo nuevo en el header
+Task PAY-1: Logo nuevo en el header
 Imported from ENG-142: https://linear.app/acme/issue/ENG-142
 Repository: /Users/me/Code/web
 Working directory: /Users/me/Code/web

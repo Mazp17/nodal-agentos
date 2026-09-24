@@ -297,14 +297,21 @@ fn diff_base(task: Option<&Task>, run: &Run) -> Option<String> {
 pub async fn cancel_run(state: State<'_, WorkState>, run_id: String) -> Result<Run, String> {
     check_id(&run_id, "run")?;
     let inner = state.0.clone();
+    // Con el turno de la cola: la pasada no puede cerrar este run en el medio (quedaría
+    // `finished`, sin la nota del patch, y hasta con el revisor encolado).
+    let _turn = inner.pump.lock().await;
     let id = run_id.clone();
-    let (run, task) = db(&inner, move |c| {
+    let (run, task, repo_path) = db(&inner, move |c| {
         let r = qruns::get(c, &id)?;
         let t = match &r.task_id {
             Some(t) => rows::get_task(c, t)?,
             None => None,
         };
-        Ok((r, t))
+        let repo_path = match &r.repo_id {
+            Some(id) => rows::get_repo(c, id)?.map(|r| r.path),
+            None => None,
+        };
+        Ok((r, t, repo_path))
     })
     .await?;
     match run.status {
@@ -318,10 +325,15 @@ pub async fn cancel_run(state: State<'_, WorkState>, run_id: String) -> Result<R
                 }
                 tx.execute("UPDATE runs SET finished_at = ?2 WHERE id = ?1", rusqlite::params![id, now])
                     .map_err(|e| e.to_string())?;
-                // Si era el único run de trabajo, la tarea vuelve a Todo.
-                if let (Some(t), RunKind::Work) = (task, run.kind) {
+                // Sin otros runs pendientes, la tarea no queda en In Progress: vuelve a Todo si
+                // era trabajo, o a Blocked si era el revisor (el gate no pasó).
+                if let Some(t) = task {
                     if t.status == TaskStatus::InProgress && qruns::pending_for_task(&tx, &t.id)?.is_empty() {
-                        ops::apply_task_transition(&tx, &t, Some(TaskStatus::Todo), None, None, now)?;
+                        let next = match run.kind {
+                            RunKind::Work => TaskStatus::Todo,
+                            RunKind::Review => TaskStatus::Blocked,
+                        };
+                        ops::apply_task_transition(&tx, &t, Some(next), None, None, now)?;
                     }
                 }
                 tx.commit().map_err(|e| e.to_string())?;
@@ -369,8 +381,10 @@ pub async fn cancel_run(state: State<'_, WorkState>, run_id: String) -> Result<R
             };
             let env = inner.env.clone();
             let id = run.id.clone();
+            let (env2, executor) = (env.clone(), run.executor.clone());
+            let (_, manages) = blocking(move || Ok(pump::workflow_meta(&env2, repo_path.as_deref(), &executor))).await?;
             db(&inner, move |c| {
-                pump::apply_end(c, &env, &run, &end, RunStatus::Canceled, None, now_ms())?;
+                pump::apply_end(c, &env, &run, &end, RunStatus::Canceled, manages.as_deref(), now_ms())?;
                 Ok(qruns::get(c, &id)?)
             })
             .await
@@ -510,7 +524,12 @@ pub async fn open_in_editor(state: State<'_, WorkState>, run_id: String, file: O
             if !cfg!(target_os = "macos") {
                 return Err("Set an editor in Settings.".into());
             }
+            // `-t`: siempre como texto. Sin eso, un `.command` o `.app` que dejó el agente
+            // se ejecutaría. La carpeta se abre en Finder.
             let mut cmd = tokio::process::Command::new("/usr/bin/open");
+            if target.is_some() {
+                cmd.arg("-t");
+            }
             cmd.arg("--");
             if target.is_none() {
                 cmd.arg(&dir);
