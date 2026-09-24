@@ -387,6 +387,23 @@ pub struct CommentCreateData {
     pub comment_create: Success,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct IdNode {
+    #[allow(dead_code)] // Solo importa si hay nodos.
+    pub id: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct IssueComments {
+    pub comments: Connection<IdNode>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct CommentMarkerData {
+    /// `null` si la issue ya no existe o la key no la ve.
+    pub issue: Option<IssueComments>,
+}
+
 pub const PROJECTS_QUERY: &str = r#"query NodalProjects {
   projects(first: 100, filter: { status: { type: { nin: ["completed", "canceled"] } } }) {
     nodes { id name }
@@ -443,6 +460,11 @@ pub const SET_STATE_MUTATION: &str = "mutation NodalSetState($id: String!, $stat
 
 pub const COMMENT_MUTATION: &str = "mutation NodalComment($issueId: String!, $body: String!) {
   commentCreate(input: { issueId: $issueId, body: $body }) { success }
+}";
+
+/// Comentarios de la issue cuyo cuerpo contiene `marker` (idempotencia del outbox).
+pub const COMMENT_MARKER_QUERY: &str = "query NodalCommentMarker($id: String!, $marker: String!) {
+  issue(id: $id) { comments(first: 1, filter: { body: { contains: $marker } }) { nodes { id } } }
 }";
 
 /// Filtro del listado de importables: scope (`team` o `project`), tipos de estado, texto

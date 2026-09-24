@@ -138,6 +138,26 @@ pub fn decide_push(
     }
 }
 
+/// Marca invisible (comentario HTML) que identifica la fila del outbox en el cuerpo del
+/// comentario. Los ids del outbox son `AUTOINCREMENT`: nunca se reusan.
+pub fn outbox_marker(id: i64) -> String {
+    format!("<!-- nodal:outbox:{id} -->")
+}
+
+/// Cuerpo enviado: el texto más la marca.
+pub fn marked_body(body: &str, id: i64) -> String {
+    format!("{}\n\n{}", body.trim_end(), outbox_marker(id))
+}
+
+/// Manda el comentario de la fila `id` salvo que ya esté en el proveedor: si un intento
+/// anterior llegó a Linear pero no a `outbox_done` (timeout, cierre de la app), no se repite.
+async fn send_comment(p: &Provider, external_id: &str, body: &str, id: i64) -> ProviderResult<()> {
+    if p.has_comment_with(external_id, &outbox_marker(id)).await? {
+        return Ok(());
+    }
+    p.comment(external_id, &marked_body(body, id)).await
+}
+
 // ---------- Pasada de sync ----------
 
 fn err(e: DbError) -> String {
@@ -280,7 +300,7 @@ async fn drain_outbox(
         let action = decide_push(&item.payload, link.map(|l| &l.state_map), states, src.external_state.as_ref());
 
         let sent: ProviderResult<Option<ExternalState>> = match &action {
-            PushAction::Comment(body) => p.comment(&src.external_id, body).await.map(|()| None),
+            PushAction::Comment(body) => send_comment(p, &src.external_id, body, item.id).await.map(|()| None),
             PushAction::SetState(state_id) => p.set_state(&src.external_id, state_id).await.map(Some),
             PushAction::Drop(_) => Ok(None),
         };
@@ -724,6 +744,20 @@ mod tests {
     }
 
     #[test]
+    fn comment_already_posted_is_not_reposted() {
+        let env = Env::new();
+        let t = env.import(1, "s-todo");
+        env.enqueue_comment(&t.id, "cierre", 1);
+        let id = env.outbox()[0].id;
+        // Un intento anterior llegó a Linear pero la fila no se marcó (timeout, crash).
+        env.fake.data().comments.push(("uuid-1".into(), marked_body("cierre", id)));
+        let r = env.run(10);
+        assert_eq!(r.pushed, 1, "{r:?}");
+        assert!(env.outbox().is_empty());
+        assert_eq!(env.fake.data().comments.len(), 1, "not reposted");
+    }
+
+    #[test]
     fn permanent_errors_and_attempt_cap_drop_the_row() {
         let env = Env::new();
         let t = env.import(1, "s-todo");
@@ -803,7 +837,9 @@ mod tests {
         assert!(env.outbox().is_empty());
         let d = env.fake.data();
         assert!(d.set_states.is_empty());
-        assert_eq!(d.comments, vec![("uuid-1".to_string(), "**Nodal** · In Review".to_string())]);
+        assert_eq!(d.comments.len(), 1);
+        assert_eq!(d.comments[0].0, "uuid-1");
+        assert!(d.comments[0].1.starts_with("**Nodal** · In Review\n\n<!-- nodal:outbox:"), "{:?}", d.comments);
     }
 
     #[test]

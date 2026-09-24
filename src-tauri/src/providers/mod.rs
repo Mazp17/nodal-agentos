@@ -190,6 +190,9 @@ pub trait TaskProvider {
     /// equivalente por nombre/tipo del grupo del ítem. Devuelve el estado resultante.
     async fn set_state(&self, external_id: &str, state_id: &str) -> ProviderResult<ExternalState>;
     async fn comment(&self, external_id: &str, body: &str) -> ProviderResult<()>;
+    /// Si el ítem ya tiene un comentario que contiene `marker` (el outbox lo usa para no
+    /// repostear un comentario que salió pero no llegó a marcarse como enviado).
+    async fn has_comment_with(&self, external_id: &str, marker: &str) -> ProviderResult<bool>;
 }
 
 /// Despacho estático de proveedores.
@@ -236,6 +239,9 @@ impl TaskProvider for Provider {
     }
     async fn comment(&self, external_id: &str, body: &str) -> ProviderResult<()> {
         dispatch!(self, p => p.comment(external_id, body).await)
+    }
+    async fn has_comment_with(&self, external_id: &str, marker: &str) -> ProviderResult<bool> {
+        dispatch!(self, p => p.has_comment_with(external_id, marker).await)
     }
 }
 

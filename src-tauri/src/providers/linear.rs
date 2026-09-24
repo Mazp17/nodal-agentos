@@ -181,6 +181,10 @@ impl TaskProvider for LinearProvider {
     async fn comment(&self, external_id: &str, body: &str) -> ProviderResult<()> {
         Ok(self.client().create_comment(external_id, body).await?)
     }
+
+    async fn has_comment_with(&self, external_id: &str, marker: &str) -> ProviderResult<bool> {
+        Ok(self.client().has_comment_with(external_id, marker).await?)
+    }
 }
 
 #[cfg(test)]
@@ -290,6 +294,15 @@ mod tests {
         let mut other = d.workflow_state.clone();
         other.name = "Blocked".into();
         assert!(pick_team_state(&team, &other).is_none());
+    }
+
+    #[test]
+    fn comment_marker_lookup_parses() {
+        let hit: crate::linear::model::CommentMarkerData =
+            interpret_response(200, r#"{"data":{"issue":{"comments":{"nodes":[{"id":"c1"}]}}}}"#).unwrap();
+        assert_eq!(hit.issue.unwrap().comments.nodes.len(), 1);
+        let gone: crate::linear::model::CommentMarkerData = interpret_response(200, r#"{"data":{"issue":null}}"#).unwrap();
+        assert!(gone.issue.is_none());
     }
 
     #[test]

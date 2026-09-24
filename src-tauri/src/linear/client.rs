@@ -172,6 +172,14 @@ impl<'a> LinearClient<'a> {
         }
     }
 
+    /// Si la issue ya tiene un comentario que contiene `marker`.
+    pub async fn has_comment_with(&self, issue_id: &str, marker: &str) -> Result<bool, LinearError> {
+        let d: CommentMarkerData = self
+            .query(COMMENT_MARKER_QUERY, json!({ "id": issue_id, "marker": marker }))
+            .await?;
+        Ok(d.issue.is_some_and(|i| !i.comments.nodes.is_empty()))
+    }
+
     pub async fn issue_detail(&self, issue_id: &str) -> Result<IssueDetail, LinearError> {
         let d: IssueDetailData = self
             .query(&issue_detail_query(), json!({ "id": issue_id }))

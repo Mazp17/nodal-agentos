@@ -93,4 +93,9 @@ impl TaskProvider for FakeProvider {
         d.comments.push((external_id.into(), body.into()));
         Ok(())
     }
+
+    async fn has_comment_with(&self, external_id: &str, marker: &str) -> ProviderResult<bool> {
+        let d = self.data();
+        Ok(d.comments.iter().any(|(id, body)| id == external_id && body.contains(marker)))
+    }
 }
