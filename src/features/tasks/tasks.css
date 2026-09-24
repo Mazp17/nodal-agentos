@@ -306,15 +306,37 @@ details > summary.tp-step-sub { cursor: pointer; }
 .tp-warn { color: var(--amber-text); }
 
 .tp-launch {
-  padding: var(--sp-6);
+  flex: none;
+  padding: var(--sp-5) var(--sp-6);
   border-radius: var(--r-panel);
-  border: 1px solid var(--border-3);
-  background: var(--fill-1);
+  border: 1px solid color-mix(in oklch, var(--accent) 35%, transparent);
+  background: linear-gradient(180deg, color-mix(in oklch, var(--accent) 8%, transparent), rgba(0, 0, 0, 0.12));
 }
+.tp-launch-head { display: flex; align-items: baseline; gap: var(--sp-4); min-width: 0; font-size: var(--fs-md); }
+.tp-launch-title { flex: none; font-size: var(--fs-lg); font-weight: var(--fw-semibold); color: var(--text); }
 .tp-launch-row { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-4); font-size: var(--fs-md); }
 .tp-extra { width: 100%; resize: vertical; }
 .tp-launch-actions { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-2); }
-.tp-running { display: flex; align-items: center; gap: var(--sp-3); flex-wrap: wrap; }
+.tp-launch-go { width: 100%; height: 34px; justify-content: center; gap: var(--sp-3); font-size: var(--fs-lg); }
+.tp-launch-go > span { font-size: 10px; }
+
+/* Latest run: tinted by the run's tone so status reads before anything else. */
+.tp-hero {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+  padding: var(--sp-5) var(--sp-6);
+  border-radius: var(--r-panel);
+  border: 1px solid color-mix(in oklch, var(--tone) 35%, transparent);
+  background: linear-gradient(180deg, color-mix(in oklch, var(--tone) 7%, transparent), rgba(0, 0, 0, 0.12));
+}
+.tp-hero-head { display: flex; align-items: center; gap: var(--sp-4); min-width: 0; font-size: var(--fs-xs); }
+.tp-hero-stats { display: flex; gap: var(--sp-5); flex: none; color: var(--text-muted); font-size: var(--fs-xs); white-space: nowrap; }
+.tp-hero .phase-segs { gap: 3px; }
+.tp-hero .phase-segs span { height: 5px; border-radius: 2px; }
+.tp-hero-msg { font-size: var(--fs-lg); line-height: 1.5; color: var(--text); text-wrap: pretty; }
+.tp-hero-actions { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
 .tp-dates { font-size: var(--fs-xs); }
 
 .tp-foot {

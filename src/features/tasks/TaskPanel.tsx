@@ -27,14 +27,14 @@ import {
   useWorktreeStatus,
 } from "../../domain/hooks/store";
 import { taskKey, TASK_STATUSES, type Executor, type RelationKind, type RunLight, type Task, type TaskStatus } from "../../domain/types";
-import { formatDateTime, formatDuration } from "../../lib/format";
+import { formatDateTime, formatDuration, formatTokens } from "../../lib/format";
 import { SafeMarkdown } from "../../ui/Markdown";
 import { useConfirm } from "../../ui/ConfirmDialog";
 import { useFocusTrap } from "../../ui/useFocusTrap";
 import { useToast } from "../../ui/Toasts";
 import { ExecutorName, ExecutorPicker, executorLabel, resolveExecutor } from "../executors";
 import { SourceTab } from "../providers";
-import { RunBadge, useRunActions } from "../runs";
+import { PhaseSegments, RunBadge, useRunActions, useRunView } from "../runs";
 import { NewTaskDialog } from "./NewTaskDialog";
 import { PriorityBars, StatusRing } from "./bits";
 import { FINISH_LABEL, isClosed, ISOLATION_LABEL, PRIORITY_LABEL, providerLabel, STATUS_META } from "./status";
@@ -114,6 +114,7 @@ export function TaskPanel({ taskId, onClose, onOpenRun, onOpenDiff, onOpenTask, 
   const activeRun = runs.find(isRunActive);
   const workRuns = runs.filter((r) => r.kind === "work" && r.launchedAt != null);
   const lastWork = workRuns[0];
+  const heroRun = activeRun ?? current;
 
   if (!task) {
     return (
@@ -434,6 +435,88 @@ export function TaskPanel({ taskId, onClose, onOpenRun, onOpenDiff, onOpenTask, 
           />
         ) : (
           <>
+            {heroRun && (
+              <RunHero
+                run={heroRun}
+                canDiff={heroRun.kind === "work" && heroRun.launchedAt != null && (!!task.worktree || heroRun.isolation !== "worktree")}
+                prUrl={heroRun.prUrl ?? (heroRun.kind === "review" ? (lastWork?.prUrl ?? null) : null)}
+                busy={busy !== null || runActions.busy}
+                onOpenRun={onOpenRun}
+                onOpenDiff={onOpenDiff}
+                onStop={async (run) => {
+                  const done = run.status === "queued" ? await runActions.remove({ run }, key) : await runActions.stop({ run }, key);
+                  if (done) void invalidate("tasks");
+                }}
+              />
+            )}
+            {canLaunch && (
+              <section className="tp-section tp-launch" aria-label="Launch">
+                <div className="tp-launch-head">
+                  <span className="tp-launch-title">{current ? "Run again" : "Start a run"}</span>
+                  <span className="tk-muted ellipsis">
+                    in {repo.name}
+                    {willQueue ? " · queue full" : ""}
+                  </span>
+                </div>
+                <div className="tp-launch-row">
+                  <span className="tk-muted">Executor for this run</span>
+                  <ExecutorPicker
+                    repoId={repo.id}
+                    value={launchExec}
+                    inherited={assignee}
+                    label="Executor for this run"
+                    onChange={setLaunchExec}
+                    dropUp
+                  />
+                </div>
+                <textarea
+                  className="textarea tp-extra"
+                  rows={2}
+                  value={extra}
+                  onChange={(e) => setExtra(e.target.value)}
+                  placeholder="Extra instructions for this run (optional)"
+                  aria-label="Extra instructions for this run"
+                />
+                <div className="tp-launch-actions">
+                  <span className="tk-hint">
+                    {[
+                      runExec.kind === "workflow" ? null : ISOLATION_LABEL[task.isolation ?? repo.defaultIsolation ?? "worktree"],
+                      FINISH_LABEL[task.finish ?? repo.defaultFinish ?? "pr"],
+                      (task.review ?? repo.defaultReview ?? true) ? "review on" : "review off",
+                    ]
+                      .filter(Boolean)
+                      .join(" · ")}
+                  </span>
+                  <span className="tp-spacer" />
+                  {lastWork && (
+                    <button type="button" className="btn btn-sm" disabled={busy !== null} onClick={() => void doLaunch("review")}>
+                      Review now
+                    </button>
+                  )}
+                  {lastWork && (
+                    <button
+                      type="button"
+                      className="btn btn-sm"
+                      disabled={busy !== null}
+                      title="Next step on the same branch: gets the plan, criteria, previous summary and diff"
+                      onClick={() => void doLaunch("handoff")}
+                    >
+                      Hand off → {executorLabel(runExec)}
+                    </button>
+                  )}
+                </div>
+                <button
+                  type="button"
+                  className="btn btn-primary tp-launch-go"
+                  disabled={busy !== null}
+                  onClick={() => void doLaunch("run")}
+                >
+                  <span aria-hidden>▶</span>
+                  {willQueue ? "Run (will queue)" : current ? "Run again" : "Run"}
+                </button>
+              </section>
+            )}
+
             <PlanSection task={task} />
             <AcceptanceSection task={task} onEdit={() => setEditing(true)} />
             <RelationsSection task={task} onOpenTask={onOpenTask} />
@@ -504,95 +587,6 @@ export function TaskPanel({ taskId, onClose, onOpenRun, onOpenDiff, onOpenTask, 
               </section>
             )}
 
-            {activeRun && (
-              <section className="tp-section tp-launch" aria-label="Current run">
-                <span className="section-label">{activeRun.status === "queued" ? "Queued" : "Running"}</span>
-                <div className="tp-running">
-                  <ExecutorName executor={activeRun.executor} />
-                  <RunBadge run={activeRun} />
-                  <span className="tp-spacer" />
-                  <button type="button" className="btn btn-sm" onClick={() => onOpenRun(activeRun.id)}>
-                    Open run
-                  </button>
-                  <button
-                    type="button"
-                    className="btn btn-sm btn-danger"
-                    disabled={busy !== null || runActions.busy}
-                    onClick={async () => {
-                      const done =
-                        activeRun.status === "queued"
-                          ? await runActions.remove({ run: activeRun }, key)
-                          : await runActions.stop({ run: activeRun }, key);
-                      if (done) void invalidate("tasks");
-                    }}
-                  >
-                    {activeRun.status === "queued" ? "Cancel" : "Stop"}
-                  </button>
-                </div>
-              </section>
-            )}
-
-            {canLaunch && (
-              <section className="tp-section tp-launch" aria-label="Launch">
-                <span className="section-label">Launch</span>
-                <div className="tp-launch-row">
-                  <span className="tk-muted">Executor for this run</span>
-                  <ExecutorPicker
-                    repoId={repo?.id ?? null}
-                    value={launchExec}
-                    inherited={assignee}
-                    label="Executor for this run"
-                    onChange={setLaunchExec}
-                    dropUp
-                  />
-                </div>
-                <textarea
-                  className="textarea tp-extra"
-                  rows={2}
-                  value={extra}
-                  onChange={(e) => setExtra(e.target.value)}
-                  placeholder="Extra instructions for this run (optional)"
-                  aria-label="Extra instructions for this run"
-                />
-                <div className="tp-launch-actions">
-                  <span className="tk-hint">
-                    {[
-                      runExec.kind === "workflow" ? null : ISOLATION_LABEL[task.isolation ?? repo?.defaultIsolation ?? "worktree"],
-                      FINISH_LABEL[task.finish ?? repo?.defaultFinish ?? "pr"],
-                      (task.review ?? repo?.defaultReview ?? true) ? "review on" : "review off",
-                    ]
-                      .filter(Boolean)
-                      .join(" · ")}
-                  </span>
-                  <span className="tp-spacer" />
-                  {lastWork && (
-                    <button type="button" className="btn btn-sm" disabled={busy !== null} onClick={() => void doLaunch("review")}>
-                      Review now
-                    </button>
-                  )}
-                  {lastWork && (
-                    <button
-                      type="button"
-                      className="btn btn-sm"
-                      disabled={busy !== null}
-                      title="Next step on the same branch: gets the plan, criteria, previous summary and diff"
-                      onClick={() => void doLaunch("handoff")}
-                    >
-                      Hand off → {executorLabel(runExec)}
-                    </button>
-                  )}
-                  <button
-                    type="button"
-                    className="btn btn-sm btn-primary"
-                    disabled={busy !== null}
-                    onClick={() => void doLaunch("run")}
-                  >
-                    {willQueue ? "Run (will queue)" : "Run"}
-                  </button>
-                </div>
-              </section>
-            )}
-
             <div className="tp-dates tk-muted">
               Created {formatDateTime(task.createdAt)} · Updated {formatDateTime(task.updatedAt)}
               {task.closedAt ? ` · Closed ${formatDateTime(task.closedAt)}` : ""}
@@ -615,17 +609,13 @@ export function TaskPanel({ taskId, onClose, onOpenRun, onOpenDiff, onOpenTask, 
           Delete
         </button>
         <div className="tp-foot-end">
-          {activeRun ? (
-            <button type="button" className="btn btn-sm btn-primary" onClick={() => onOpenRun(activeRun.id)}>
-              Open run
+          {tab === "source" && heroRun && (
+            <button type="button" className="btn btn-sm" onClick={() => onOpenRun(heroRun.id)}>
+              {activeRun ? "Open run" : "Open last run"}
             </button>
-          ) : current && !canLaunch ? (
-            <button type="button" className="btn btn-sm" onClick={() => onOpenRun(current.id)}>
-              Open last run
-            </button>
-          ) : null}
+          )}
           {/* Same condition as the Worktree section's button: no diff to show once the worktree is gone. */}
-          {lastWork && (task.worktree || lastWork.isolation !== "worktree") && (
+          {tab === "source" && lastWork && (task.worktree || lastWork.isolation !== "worktree") && (
             <button type="button" className="btn btn-sm" onClick={() => onOpenDiff(lastWork.id)}>
               View diff
             </button>
@@ -882,6 +872,114 @@ function RelationsSection({ task, onOpenTask }: { task: Task; onOpenTask?: (id: 
           </button>
         </div>
       )}
+    </section>
+  );
+}
+
+/** Latest run up front: status, phase progress, what it's doing or what it produced, and its main actions. */
+function RunHero({
+  run: runProp,
+  canDiff,
+  prUrl,
+  busy,
+  onOpenRun,
+  onOpenDiff,
+  onStop,
+}: {
+  run: RunLight;
+  canDiff: boolean;
+  /** The run's PR, or the reviewed work run's when this is a review. */
+  prUrl: string | null;
+  busy: boolean;
+  onOpenRun: (id: string) => void;
+  onOpenDiff: (id: string) => void;
+  onStop: (run: RunLight) => Promise<void>;
+}) {
+  const v = useRunView(runProp);
+  // The shared store refreshes faster than the task's run list: read everything from it.
+  const run = v.run;
+  const active = v.tab === "active" || v.tab === "queued";
+  const result = run.verdict?.summary ?? run.summary;
+  const message = run.error
+    ? null
+    : v.phase === "running"
+      ? run.kind === "review"
+        ? "Reviewing the changes."
+        : v.phaseName
+          ? `${v.phaseName} in progress.`
+          : "Working on it."
+      : v.phase === "waiting"
+        ? `${v.waitingFor === "permission prompt" ? "Waiting for a permission prompt" : "The agent needs input to continue"}. Open the run to answer it in Claude Code.`
+        : v.phase === "queued"
+          ? `Waiting in queue${v.queuePos != null ? ` at position #${v.queuePos}` : ""}. Starts when a slot frees up.`
+          : v.phase === "awaiting"
+            ? "Waiting for confirmation before it launches."
+            : v.phase === "launching" || v.phase === "starting"
+              ? v.label === "Not visible"
+                ? "The session isn't visible in Claude Code yet."
+                : "Starting the session…"
+              : v.phase === "finished"
+                ? result
+                  ? null
+                  : "Finished. Review the result before merging."
+                : v.phase === "canceled"
+                  ? v.label === "Stopped"
+                    ? "Stopped before finishing."
+                    : "Canceled before it launched."
+                  : "The run failed.";
+
+  return (
+    <section className={`tp-hero tone-${v.tone}`} aria-label="Latest run">
+      <div className="tp-hero-head">
+        <RunBadge run={v} />
+        <span className="mono tk-muted ellipsis">
+          {executorLabel(run.executor)} · {run.kind === "review" ? "review" : "work"}
+        </span>
+        <span className="tp-spacer" />
+        <span className="tp-hero-stats num">
+          <span>{formatDuration(v.durationMs)}</span>
+          {v.tokens != null && <span>{formatTokens(v.tokens)} tok</span>}
+        </span>
+      </div>
+      <PhaseSegments run={v} />
+      {run.error ? (
+        <div className="tp-hero-msg tp-step-err">{run.error}</div>
+      ) : message ? (
+        <div className="tp-hero-msg">{message}</div>
+      ) : (
+        result && <SafeMarkdown text={result} className="md-compact tp-hero-msg" breaks />
+      )}
+      {run.verdict && run.verdict.unmet.length > 0 && (
+        <span className="tp-warn">
+          {run.verdict.unmet.length} unmet criteri{run.verdict.unmet.length === 1 ? "on" : "a"}
+        </span>
+      )}
+      <div className="tp-hero-actions">
+        {!active && prUrl ? (
+          <>
+            <button type="button" className="btn btn-sm btn-primary" onClick={() => void openUrl(prUrl).catch(() => {})}>
+              Open PR ↗
+            </button>
+            <button type="button" className="btn btn-sm" onClick={() => onOpenRun(run.id)}>
+              View run
+            </button>
+          </>
+        ) : (
+          <button type="button" className="btn btn-sm btn-primary" onClick={() => onOpenRun(run.id)}>
+            Open run
+          </button>
+        )}
+        {canDiff && (
+          <button type="button" className="btn btn-sm" onClick={() => onOpenDiff(run.id)}>
+            View diff
+          </button>
+        )}
+        {active && (
+          <button type="button" className="btn btn-sm btn-danger" disabled={busy} onClick={() => void onStop(run)}>
+            {run.status === "queued" ? "Cancel" : "Stop"}
+          </button>
+        )}
+      </div>
     </section>
   );
 }
