@@ -74,8 +74,10 @@ pub struct Pause {
 pub struct SyncMemo {
     /// Proveedor → pausa.
     pub paused: HashMap<String, Pause>,
-    /// Link → (leídos en, estados del scope).
-    states: HashMap<String, (i64, Vec<ExternalState>)>,
+    /// Link → (leídos en, mapeo con el que se leyeron, estados del scope). Un mapeo distinto
+    /// (el usuario lo guardó) invalida la entrada: un destino recién mapeado no se toma como
+    /// desaparecido.
+    states: HashMap<String, (i64, StateMap, Vec<ExternalState>)>,
 }
 
 /// Errores que no son de un ítem sino del proveedor entero: cortan la pasada y lo pausan.
@@ -259,14 +261,17 @@ pub async fn sync_run(
             if halt.is_some() {
                 break;
             }
-            let cached = memo.states.get(&link.id).filter(|(at, _)| !force && now - at < STATES_TTL_MS);
-            if let Some((_, states)) = cached {
+            let cached = memo
+                .states
+                .get(&link.id)
+                .filter(|(at, map, _)| !force && now - at < STATES_TTL_MS && *map == link.state_map);
+            if let Some((_, _, states)) = cached {
                 current.insert(link.id.clone(), states.clone());
                 continue;
             }
             match p.states(&link.scope).await {
                 Ok(states) => {
-                    memo.states.insert(link.id.clone(), (now, states.clone()));
+                    memo.states.insert(link.id.clone(), (now, link.state_map.clone(), states.clone()));
                     if link.state_map.confirmed_at.is_some() {
                         let (added, removed) = diff_known(&link.state_map.known_states, &states);
                         let names = |v: &[ExternalState]| v.iter().map(|s| s.name.as_str()).collect::<Vec<_>>().join(", ");
@@ -637,7 +642,7 @@ async fn auto_import_link(
     if !stale.is_empty() {
         // Error del link (queda en `last_sync_error` mientras dure): no se reintenta cada minuto.
         report.errors.push(format!(
-            "{}: auto-import is waiting for {} ({}): the repo of its rule or the default repo no longer exists. Review the source's repos.",
+            "{}: auto-import is waiting for {} ({}): the repo of its rule or the default repo no longer exists or belongs to another project. Review the source's repos.",
             link.scope.name,
             if stale.len() == 1 { "1 item".to_string() } else { format!("{} items", stale.len()) },
             stale.join(", ")
@@ -677,6 +682,7 @@ pub async fn run_for_app(app: &AppHandle, link_filter: Option<&str>, force: bool
     let mut memo = state.sync_lock.lock().await;
     // Las pausas se leen de `ProvidersState::pauses`: una key nueva pudo levantarlas.
     memo.paused = state.paused();
+    let before = memo.paused.clone();
     let mut providers = Vec::new();
     for name in super::KNOWN_PROVIDERS {
         match resolve(app, name).await {
@@ -688,7 +694,9 @@ pub async fn run_for_app(app: &AppHandle, link_filter: Option<&str>, force: bool
     }
     let data_dir: PathBuf = state.data_dir.clone();
     let report = sync_run(&db, &data_dir, &providers, link_filter, now_ms(), &mut memo, force).await;
-    state.set_paused(memo.paused.clone());
+    // Solo lo que cambió esta pasada: una key nueva guardada mientras corría (que levantó una
+    // pausa previa) no la recupera por la copia que tomó la pasada.
+    state.merge_paused(&before, &memo.paused);
     if !providers.is_empty() {
         use crate::events::Kind;
         // El estado de los links cambia en cada pasada; las tareas solo si hubo movimiento.
@@ -952,6 +960,23 @@ mod tests {
         env.fake.data().fail_states = None;
         assert_eq!(env.run_forced(20).pulled, 1);
         assert!(env.memo.borrow().paused.is_empty());
+    }
+
+    #[test]
+    fn saving_the_mapping_invalidates_cached_states() {
+        let mut env = Env::new();
+        let t = env.import(1, "s-todo");
+        env.run(10);
+        // Estado nuevo en el proveedor, mapeado por el usuario dentro del TTL.
+        let qa = ExternalState { id: "s-qa".into(), name: "QA".into(), kind: ExtKind::Started, color: None };
+        env.fake.data().states.push(qa);
+        env.set_link(|l| {
+            l.state_map.push.insert(TaskStatus::InReview, Some("s-qa".into()));
+        });
+        env.enqueue_status(&t.id, TaskStatus::InReview, 20);
+        let r = env.run(30);
+        assert_eq!(r.pushed, 1, "{r:?}");
+        assert_eq!(env.fake.data().set_states, vec![("uuid-1".to_string(), "s-qa".to_string())]);
     }
 
     #[test]

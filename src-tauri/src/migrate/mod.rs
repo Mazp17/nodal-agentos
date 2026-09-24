@@ -579,8 +579,12 @@ impl Ctx<'_> {
         };
         match rows::insert_repo(self.conn, &r) {
             Ok(()) => {}
+            // Solo choques de unicidad (path o id tomados); cualquier otra restricción es un bug.
             Err(DbError::Sqlite(rusqlite::Error::SqliteFailure(f, m)))
-                if f.code == rusqlite::ErrorCode::ConstraintViolation =>
+                if matches!(
+                    f.extended_code,
+                    rusqlite::ffi::SQLITE_CONSTRAINT_UNIQUE | rusqlite::ffi::SQLITE_CONSTRAINT_PRIMARYKEY
+                ) =>
             {
                 let why = m.unwrap_or_else(|| f.to_string());
                 self.skip(format!("repo {path}: conflicts with an existing repo ({why}), skipped"));
@@ -681,10 +685,16 @@ impl Ctx<'_> {
                                 .or_else(|| entry.name.clone().filter(|n| !n.trim().is_empty()))
                                 .unwrap_or_else(|| folder_name(&path));
                             let project_id = det_id("lp_", &repo_key);
-                            if !self.exists("projects", &project_id)? {
+                            let new_project = !self.exists("projects", &project_id)?;
+                            if new_project {
                                 self.create_project(&project_id, name.trim())?;
                             }
                             let Some(found) = self.ensure_repo(&project_id, &path, entry.launch(), finish)? else {
+                                // No dejar un proyecto vacío por un repo salteado.
+                                if new_project {
+                                    self.conn.execute("DELETE FROM projects WHERE id = ?1", [&project_id]).map_err(sql)?;
+                                    self.report.projects -= 1;
+                                }
                                 continue;
                             };
                             self.mark(&repo_key, "repo", Some(&found.0))?;

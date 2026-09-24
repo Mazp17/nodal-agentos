@@ -304,9 +304,22 @@ impl ProvidersState {
         self.pauses.lock().map(|m| m.clone()).unwrap_or_default()
     }
 
-    pub fn set_paused(&self, p: std::collections::HashMap<String, sync::Pause>) {
-        if let Ok(mut m) = self.pauses.lock() {
-            *m = p;
+    /// Aplica solo las pausas que una pasada puso, cambió o levantó (`before` → `after`).
+    pub fn merge_paused(
+        &self,
+        before: &std::collections::HashMap<String, sync::Pause>,
+        after: &std::collections::HashMap<String, sync::Pause>,
+    ) {
+        let Ok(mut m) = self.pauses.lock() else { return };
+        for (k, v) in after {
+            if before.get(k) != Some(v) {
+                m.insert(k.clone(), v.clone());
+            }
+        }
+        for k in before.keys() {
+            if !after.contains_key(k) {
+                m.remove(k);
+            }
         }
     }
 
