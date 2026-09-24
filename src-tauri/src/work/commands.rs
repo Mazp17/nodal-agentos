@@ -342,7 +342,9 @@ pub async fn work_summary(state: State<'_, WorkState>, project_id: Option<String
         eprintln!("work_summary: {e}");
         Vec::new()
     });
-    Ok(super::queue::work_summary(&runs, &blocked, &live, settings.concurrency, global, now_ms()))
+    let mut summary = super::queue::work_summary(&runs, &blocked, &live, settings.concurrency, global, now_ms());
+    summary.pump_error = state.0.pump_error.lock().unwrap_or_else(|p| p.into_inner()).clone();
+    Ok(summary)
 }
 
 #[tauri::command]

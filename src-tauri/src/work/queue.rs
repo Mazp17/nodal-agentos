@@ -59,7 +59,7 @@ pub fn occupied_slots(runs: &[Run], live: &[RunSummary], now: i64) -> usize {
 }
 
 /// Resumen de la cola para la UI.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WorkSummary {
     /// Slots ocupados (regla de `occupied_slots`).
@@ -71,6 +71,8 @@ pub struct WorkSummary {
     pub need_you: u32,
     /// En cola y listos para salir (sin los que esperan confirmación).
     pub queued: u32,
+    /// Error de la última pasada de la cola (p. ej. `claude agents` falla), o `null`.
+    pub pump_error: Option<String>,
 }
 
 /// La sesión espera al usuario (permiso, input, diálogo).
@@ -128,7 +130,13 @@ pub fn work_summary(
             need.insert(format!("session:{}", s.session_id));
         }
     }
-    WorkSummary { running: running as u32, capacity: concurrency, need_you: need.len() as u32, queued: queued as u32 }
+    WorkSummary {
+        running: running as u32,
+        capacity: concurrency,
+        need_you: need.len() as u32,
+        queued: queued as u32,
+        pump_error: None,
+    }
 }
 
 /// Repos con un run `in_place` activo: la cola no lanza otro ahí.
@@ -315,6 +323,9 @@ mod tests {
         // Solo propios: b (working), c (gracia), n (launching). `a` está blocked: no ocupa slot.
         assert_eq!((p.running, p.queued, p.need_you), (3, 1, 3), "{p:?}");
         assert_eq!(work_summary(&[], &[], &[], 2, false, NOW), WorkSummary { capacity: 2, ..Default::default() });
+        let v = serde_json::to_value(WorkSummary { pump_error: Some("`claude agents` failed".into()), ..Default::default() }).unwrap();
+        assert_eq!(v["pumpError"], "`claude agents` failed");
+        assert!(serde_json::to_value(WorkSummary::default()).unwrap()["pumpError"].is_null());
     }
 
     #[test]

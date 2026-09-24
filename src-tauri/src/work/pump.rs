@@ -178,6 +178,7 @@ async fn finish_run(inner: &Arc<Inner>, run: Run, signal: EndSignal) -> Result<(
 pub async fn pump(inner: &Arc<Inner>) -> Result<(), String> {
     let mut touched = false;
     let r = pump_pass(inner, &mut touched).await;
+    *inner.pump_error.lock().unwrap_or_else(|p| p.into_inner()) = r.as_ref().err().cloned();
     if touched {
         use crate::events::Kind;
         inner.events.notify_all(&[Kind::Runs, Kind::Queue, Kind::Tasks], None);

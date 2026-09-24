@@ -24,7 +24,7 @@ pub mod worktree;
 pub(crate) mod testutil;
 
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use tauri::{AppHandle, Manager};
@@ -63,6 +63,8 @@ pub struct Inner {
     pub pump: tokio::sync::Mutex<()>,
     /// `nodal://changed` hacia la UI.
     pub events: crate::events::Events,
+    /// Error de la última pasada de la cola (`None` si salió bien), para `work_summary`.
+    pub pump_error: Mutex<Option<String>>,
 }
 
 #[derive(Clone)]
@@ -83,7 +85,13 @@ pub fn init(app: &AppHandle, db: Db) -> Result<(), String> {
         }
     }
     let events = app.try_state::<crate::events::Events>().map(|e| e.inner().clone()).unwrap_or_default();
-    let inner = Arc::new(Inner { db, env, pump: tokio::sync::Mutex::new(()), events });
+    let inner = Arc::new(Inner {
+        db,
+        env,
+        pump: tokio::sync::Mutex::new(()),
+        events,
+        pump_error: Mutex::new(None),
+    });
     app.manage(WorkState(inner.clone()));
     tauri::async_runtime::spawn(async move {
         loop {

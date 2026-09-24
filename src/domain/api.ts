@@ -56,13 +56,15 @@ export interface RepoTrust {
 /**
  * `running`/`capacity`: slots ocupados de la concurrencia global (regla del pump). `needYou`:
  * tareas Blocked + runs migrados sin confirmar + sesiones esperando permiso/input, sin contar
- * dos veces la misma tarea. `queued`: listos para salir.
+ * dos veces la misma tarea. `queued`: listos para salir. `pumpError`: error de la última
+ * pasada de la cola (p. ej. `claude agents` falla en cada tick), o `null`.
  */
 export interface WorkSummary {
   running: number;
   capacity: number;
   needYou: number;
   queued: number;
+  pumpError: string | null;
 }
 
 /** Sesiones vivas trabajando/esperando y subagentes activos (mismo criterio que `activity_summary`). */
