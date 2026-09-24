@@ -588,4 +588,15 @@ mod tests {
             assert!(!d["description"].as_str().unwrap().is_empty());
         }
     }
+
+    #[test]
+    fn the_skill_describes_every_tool_and_value() {
+        let skill = include_str!("../../../skills/nodal-tasks/SKILL.md");
+        assert!(skill.starts_with("---\nname: nodal-tasks\ndescription: "));
+        let defs = definitions();
+        let tools = defs.as_array().unwrap().iter().map(|d| d["name"].as_str().unwrap());
+        for word in tools.chain(STATUSES).chain(PRIORITIES).chain(["planFile", "executor", "verdict"]) {
+            assert!(skill.contains(&format!("`{word}`")), "SKILL.md does not mention `{word}`");
+        }
+    }
 }
