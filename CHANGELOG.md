@@ -7,6 +7,7 @@ All notable changes to Nodal are documented here. The format follows [Keep a Cha
 ### Added
 
 - MCP server for agents: while Nodal is open, `nodal-mcp` (`claude mcp add nodal -- nodal-mcp`) lists projects and tasks, creates and updates tasks and reads run results, through a local Unix socket readable only by you. Launching runs stays in the app.
+- `nodal-tasks` agent skill (`skills/nodal-tasks`, `npx skills add Mazp17/nodal-agentos --skill nodal-tasks`): when to create a task instead of doing the work, how to write its plan and acceptance criteria, how to pick the repo and the executor, and how to read a run's result.
 
 ## [0.2.0] - 2026-09-24
 

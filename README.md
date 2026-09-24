@@ -52,6 +52,12 @@ claude mcp add nodal -- nodal-mcp
 
 Tools: `list_projects`, `list_tasks`, `get_task`, `create_task`, `update_task` and `get_run`. Runs are launched from the app. A debug build of `nodal-mcp` talks to a debug build of the app.
 
+The [`nodal-tasks` skill](skills/nodal-tasks/SKILL.md) teaches agents when to create a task instead of doing the work, how to write its plan and acceptance criteria, how to pick the repo and the executor, and how to read a run's result. Install it with [skills](https://skills.sh):
+
+```bash
+npx skills add Mazp17/nodal-agentos --skill nodal-tasks
+```
+
 ## Build from source
 
 Needs Node.js 20+, pnpm 10 and stable Rust.
