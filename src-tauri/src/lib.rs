@@ -26,14 +26,17 @@ async fn claude_version() -> Result<String, String> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    let secrets = secrets::Secrets::keychain();
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
-        .manage(linear::LinearState::new())
-        .manage(secrets::Secrets::default())
+        .manage(linear::LinearState::new(secrets.clone()))
+        .manage(secrets)
         .setup(|app| {
             use tauri::Manager;
-            // Sin base la app abre igual (para mostrar el error); los comandos que la usan fallan.
+            // Único lugar que arranca los workers de fondo: el pump de la cola (`work::init`)
+            // y el sync de proveedores (`providers::init`). Sin base la app abre igual (para
+            // mostrar el error): no hay pump, el sync no hace nada y los comandos fallan.
             match db::open(&app.path().app_data_dir()?.join(db::DB_FILE)) {
                 Ok(db) => {
                     app.manage(db.clone());
@@ -43,8 +46,9 @@ pub fn run() {
                 }
                 Err(e) => eprintln!("nodal.db: {e}"),
             }
-            // F1-C: sync de proveedores (worker cada 60 s). Sin base, el worker no hace nada.
-            providers::init(app.handle())?;
+            if let Err(e) = providers::init(app.handle()) {
+                eprintln!("providers: {e}");
+            }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![

@@ -21,18 +21,15 @@ pub struct LinearState {
 }
 
 impl LinearState {
-    pub fn new() -> Self {
-        Self { http: http_client(), key: KeyCache::default() }
+    /// `secrets` es la instancia compartida (`State<Secrets>`): una key guardada desde
+    /// `linear_*` o desde `provider_*` se ve en los dos lados.
+    pub fn new(secrets: crate::secrets::Secrets) -> Self {
+        Self { http: http_client(), key: KeyCache::new(secrets) }
     }
 
-    /// Para `providers::linear`: mismo cliente HTTP y misma caché de la key, así un cambio
-    /// de key desde cualquiera de los dos lados se ve en el otro.
+    /// Para `providers::linear`: mismo cliente HTTP.
     pub(crate) fn http(&self) -> &reqwest::Client {
         &self.http
-    }
-
-    pub(crate) fn key(&self) -> &KeyCache {
-        &self.key
     }
 }
 

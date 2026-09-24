@@ -7,11 +7,14 @@ use crate::secrets::Secrets;
 
 const PROVIDER: &str = "linear";
 
-/// Comparte caché con el `Secrets` que se registra como estado de Tauri.
-#[derive(Default)]
+/// Clon del `Secrets` que se registra como estado de Tauri (misma caché).
 pub struct KeyCache(Secrets);
 
 impl KeyCache {
+    pub fn new(secrets: Secrets) -> Self {
+        Self(secrets)
+    }
+
     /// Key actual, leyendo el llavero sólo la primera vez.
     pub async fn load(&self) -> Result<Option<String>, LinearError> {
         self.0.get(PROVIDER).await.map_err(LinearError::Keychain)

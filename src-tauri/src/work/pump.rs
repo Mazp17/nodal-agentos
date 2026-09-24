@@ -10,11 +10,12 @@ use rusqlite::Connection;
 use crate::db::queries::{repos, runs as qruns};
 use crate::db::{rows, with_db};
 use crate::domain::{Executor, Run, RunKind, RunStatus, TaskStatus};
+use crate::providers::plan::{closing_comment, ClosingInfo};
 use crate::runs::{self, SessionReadout};
 use crate::util::{blocking, now_ms};
 
 use super::queue::{self, EndSignal};
-use super::transitions::{closing_comment, decide, read_end, RunEnd};
+use super::transitions::{decide, executor_label, read_end, RunEnd};
 use super::{executors, launch, ops, Env, Inner};
 
 /// Mensaje de error de lanzamiento con la salida concreta para los casos conocidos.
@@ -100,8 +101,7 @@ pub fn apply_end(
                     RunKind::Review => run.parent_run_id.as_deref().map(|p| qruns::get(&tx, p)).transpose()?,
                     RunKind::Work => None,
                 };
-                let end = RunEnd { note: note.clone(), ..end.clone() };
-                Some(closing_comment(&done, &end, work.as_ref(), status))
+                Some(step_comment(&done, end, note.as_deref(), work.as_ref(), status))
             }
             _ => None,
         };
@@ -112,6 +112,21 @@ pub fn apply_end(
     }
     tx.commit().map_err(|e| e.to_string())?;
     Ok(reviewer)
+}
+
+/// Comentario de cierre de un paso. `work` es el run de trabajo del paso (PR/rama cuando
+/// cierra el revisor).
+fn step_comment(run: &Run, end: &RunEnd, note: Option<&str>, work: Option<&Run>, status: TaskStatus) -> String {
+    let label = executor_label(&run.executor);
+    closing_comment(&ClosingInfo {
+        status: Some(status),
+        executor: Some(&label),
+        summary: end.summary.as_deref(),
+        pr_url: end.pr.as_deref().or(work.and_then(|w| w.pr_url.as_deref())),
+        branch: end.branch.as_deref().or(work.and_then(|w| w.branch.as_deref())),
+        verdict: end.verdict.as_ref(),
+        note,
+    })
 }
 
 /// `(reviews, managesSource)` del workflow del run, del catálogo en disco.
@@ -409,5 +424,26 @@ mod tests {
         let e = friendly_launch_error("Workspace not trusted.", "/Users/me/Code/web", root);
         assert!(e.contains("Open Terminal in that folder"));
         assert_eq!(friendly_launch_error("other", "/x", root), "other");
+    }
+
+    #[test]
+    fn step_comment_lists_findings_and_work_branch() {
+        use crate::runs::SessionReadout;
+        use crate::work::testutil::run_of;
+        let reviewer = Executor::Agent { name: "code-reviewer".into(), source: AgentSource::User };
+        let review = run_of(reviewer, RunKind::Review, false);
+        let readout = SessionReadout {
+            detail: None,
+            last_message: Some(r#"{"verdict":"fail","unmet":["c1"],"nits":["n1"],"summary":"falta c1"}"#.into()),
+            blocker: None,
+        };
+        let end = read_end(&review, EndSignal::Done, &readout, false);
+        let mut work = run_of(Executor::Claude, RunKind::Work, true);
+        work.branch = Some("nodal/pay-1-x".into());
+        let c = step_comment(&review, &end, None, Some(&work), TaskStatus::Blocked);
+        assert_eq!(
+            c,
+            "**Nodal** · Blocked · code-reviewer\n\nBranch: `nodal/pay-1-x`\n\nfalta c1\n\n**Unmet criteria**\n- c1\n\n**Nits**\n- n1"
+        );
     }
 }

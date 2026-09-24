@@ -234,52 +234,6 @@ pub fn executor_label(e: &Executor) -> String {
     }
 }
 
-fn status_label(s: TaskStatus) -> &'static str {
-    match s {
-        TaskStatus::Backlog => "Backlog",
-        TaskStatus::Todo => "Todo",
-        TaskStatus::InProgress => "In Progress",
-        TaskStatus::InReview => "In Review",
-        TaskStatus::Blocked => "Blocked",
-        TaskStatus::Done => "Done",
-        TaskStatus::Canceled => "Canceled",
-    }
-}
-
-/// Comentario de cierre de un paso: estado, PR o rama, resumen, criterios no cumplidos y nits.
-/// `work` es el run de trabajo del paso (para PR/rama cuando cierra el revisor).
-pub fn closing_comment(run: &Run, end: &RunEnd, work: Option<&Run>, status: TaskStatus) -> String {
-    let mut lines = vec![format!("**Nodal** · {} → {}", executor_label(&run.executor), status_label(status))];
-    let pr = end.pr.clone().or_else(|| work.and_then(|w| w.pr_url.clone()));
-    let branch = end.branch.clone().or_else(|| work.and_then(|w| w.branch.clone()));
-    match (pr, branch) {
-        (Some(pr), _) => lines.push(format!("PR: {pr}")),
-        (None, Some(b)) => lines.push(format!("Branch: `{b}`")),
-        _ => {}
-    }
-    if let Some(s) = &end.summary {
-        lines.push(String::new());
-        lines.push(s.clone());
-    }
-    if let Some(v) = &end.verdict {
-        if !v.unmet.is_empty() {
-            lines.push(String::new());
-            lines.push("Unmet acceptance criteria:".into());
-            lines.extend(v.unmet.iter().map(|u| format!("- {u}")));
-        }
-        if !v.nits.is_empty() {
-            lines.push(String::new());
-            lines.push("Nits:".into());
-            lines.extend(v.nits.iter().map(|n| format!("- {n}")));
-        }
-    }
-    if let Some(n) = &end.note {
-        lines.push(String::new());
-        lines.push(format!("_{n}_"));
-    }
-    lines.join("\n")
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -468,18 +422,5 @@ mod tests {
         assert_eq!(outbox_ops(&t, Some(TaskStatus::InProgress), None, Some("asana")).len(), 1);
         // Tarea local: nada.
         assert!(outbox_ops(&task_of("t2"), Some(TaskStatus::InReview), Some("c".into()), None).is_empty());
-    }
-
-    #[test]
-    fn closing_comment_lists_findings() {
-        let review = run_of(Executor::Agent { name: "code-reviewer".into(), source: AgentSource::User }, RunKind::Review, false);
-        let end = read_end(&review, EndSignal::Done, &readout("{\"verdict\":\"fail\",\"unmet\":[\"c1\"],\"nits\":[\"n1\"],\"summary\":\"falta c1\"}"), false);
-        let mut work = run_of(agent(), RunKind::Work, true);
-        work.branch = Some("nodal/pay-1-x".into());
-        let c = closing_comment(&review, &end, Some(&work), TaskStatus::Blocked);
-        assert_eq!(
-            c,
-            "**Nodal** · code-reviewer → Blocked\nBranch: `nodal/pay-1-x`\n\nfalta c1\n\nUnmet acceptance criteria:\n- c1\n\nNits:\n- n1"
-        );
     }
 }

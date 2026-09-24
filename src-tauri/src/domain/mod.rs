@@ -7,9 +7,6 @@
 //! - enums con datos llevan el discriminante en `kind`;
 //! - fechas en epoch ms (`i64`).
 
-// F0 fija los contratos; los usos llegan en F1.
-#![allow(dead_code)]
-
 use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
@@ -19,10 +16,15 @@ use serde::{Deserialize, Serialize};
 macro_rules! str_enum {
     ($ty:ident { $($variant:ident => $s:literal),+ $(,)? }) => {
         impl $ty {
+            #[cfg(test)]
+            #[allow(dead_code)]
             pub const ALL: &'static [$ty] = &[$($ty::$variant),+];
+            // Generadas para todos los enums; no todos las usan fuera de los tests.
+            #[allow(dead_code)]
             pub fn as_str(self) -> &'static str {
                 match self { $($ty::$variant => $s),+ }
             }
+            #[allow(dead_code)]
             pub fn parse(s: &str) -> Option<Self> {
                 match s { $($s => Some($ty::$variant),)+ _ => None }
             }
@@ -62,12 +64,6 @@ pub struct LaunchOptions {
     pub effort: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub permission_mode: Option<String>,
-}
-
-impl LaunchOptions {
-    pub fn is_empty(&self) -> bool {
-        self.model.is_none() && self.effort.is_none() && self.permission_mode.is_none()
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

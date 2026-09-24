@@ -388,6 +388,7 @@ pub fn insert_outbox(conn: &Connection, o: &OutboxItem) -> Result<i64, DbError> 
     Ok(conn.last_insert_rowid())
 }
 
+#[cfg(test)]
 pub fn get_outbox(conn: &Connection, id: i64) -> Result<Option<OutboxItem>, DbError> {
     Ok(conn.query_row("SELECT * FROM sync_outbox WHERE id = ?1", [id], outbox_from_row).optional()?)
 }

@@ -13,7 +13,6 @@ pub mod dto;
 pub mod executors;
 pub mod launch;
 pub mod ops;
-pub mod outbox;
 pub mod pump;
 pub mod queue;
 pub mod report;

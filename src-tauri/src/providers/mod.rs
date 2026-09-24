@@ -10,7 +10,7 @@
 //!   anterior (vive acá para no pisar `db/queries`).
 //! - `commands`: comandos de Tauri.
 //!
-//! API para la cola (F1-B): `enqueue_status` y `enqueue_comment` agregan filas al outbox en
+//! API para la cola (`work`): `enqueue_status` y `enqueue_comment` agregan filas al outbox en
 //! la misma transacción que la transición, y `plan::closing_comment` arma el comentario.
 
 pub mod commands;
@@ -31,8 +31,6 @@ use tauri::{AppHandle, Manager};
 
 use crate::domain::{ExtKind, ExternalState, Priority, ScopeRef};
 
-// La cola (F1-B) los usa al aplicar transiciones; hasta la integración no tienen llamador.
-#[allow(unused_imports)]
 pub use store::{enqueue_comment, enqueue_status};
 
 /// Los comandos de Tauri rechazan con un string listo para mostrar (en inglés).
@@ -254,11 +252,12 @@ pub fn check_provider(name: &str) -> PResult<()> {
 
 /// Proveedor listo para usar, o `None` si no hay key guardada.
 pub async fn resolve(app: &AppHandle, name: &str) -> PResult<Option<Provider>> {
+    check_provider(name)?;
+    let Some(key) = app.state::<crate::secrets::Secrets>().get(name).await? else { return Ok(None) };
     match name {
         "linear" => {
-            let state = app.state::<crate::linear::LinearState>();
-            let key = state.key().load().await.map_err(|e| e.to_string())?;
-            Ok(key.map(|k| Provider::Linear(linear::LinearProvider::new(state.http().clone(), k))))
+            let http = app.state::<crate::linear::LinearState>().http().clone();
+            Ok(Some(Provider::Linear(linear::LinearProvider::new(http, key))))
         }
         other => Err(format!("Unknown provider \"{other}\".")),
     }
@@ -290,34 +289,6 @@ pub fn init(app: &AppHandle) -> Result<(), String> {
 
 // ---------- Utilidades ----------
 
-pub fn now_ms() -> i64 {
-    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as i64).unwrap_or(0)
-}
-
-/// Id ordenable por tiempo, `[0-9a-z]` (termina en rutas: `tasks/<id>/`). Mismo formato que
-/// el de las tareas locales. TODO(F1 integración): usar el generador de ids de `db/queries`.
-pub fn new_id(now: i64) -> String {
-    use std::hash::{BuildHasher, Hasher};
-    use std::sync::atomic::{AtomicU32, Ordering};
-    static SEQ: AtomicU32 = AtomicU32::new(0);
-    let seq = SEQ.fetch_add(1, Ordering::Relaxed);
-    let mut h = std::collections::hash_map::RandomState::new().build_hasher();
-    h.write_i64(now);
-    h.write_u32(seq);
-    h.write_u32(std::process::id());
-    format!("t{}{}{}", base32(now as u64, 10), base32(seq as u64, 3), base32(h.finish(), 5))
-}
-
-fn base32(mut n: u64, width: usize) -> String {
-    const ALPHABET: &[u8; 32] = b"0123456789abcdefghjkmnpqrstvwxyz";
-    let mut out = vec![b'0'; width];
-    for slot in out.iter_mut().rev() {
-        *slot = ALPHABET[(n % 32) as usize];
-        n /= 32;
-    }
-    String::from_utf8(out).expect("ascii")
-}
-
 /// Epoch ms → `YYYY-MM-DDTHH:MM:SS.mmmZ` (UTC), sin depender de chrono.
 pub fn iso_from_ms(ms: i64) -> String {
     let secs = ms.div_euclid(1000);
@@ -346,14 +317,6 @@ mod tests {
         assert_eq!(iso_from_ms(0), "1970-01-01T00:00:00.000Z");
         assert_eq!(iso_from_ms(1_700_000_000_123), "2023-11-14T22:13:20.123Z");
         assert_eq!(iso_from_ms(951_782_400_000), "2000-02-29T00:00:00.000Z");
-    }
-
-    #[test]
-    fn ids_are_unique_and_path_safe() {
-        let a = new_id(1);
-        let b = new_id(1);
-        assert_ne!(a, b);
-        assert!(a.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit()));
     }
 
     #[test]

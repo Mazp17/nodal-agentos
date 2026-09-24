@@ -8,12 +8,13 @@ use rusqlite::Connection;
 use crate::db::queries::{projects, relations, repos, runs as qruns, tasks};
 use crate::db::rows;
 use crate::domain::*;
+use crate::providers;
 use crate::runs::options;
 use crate::util::{new_id, write_atomic};
 
 use super::dto::*;
 use super::transitions::{apply_status, outbox_ops, OutboxOp};
-use super::{outbox, validate, Env};
+use super::{validate, Env};
 
 // ---------- Proyectos ----------
 
@@ -221,10 +222,11 @@ pub fn push_status(
     now: i64,
 ) -> Result<(), String> {
     for op in outbox_ops(task, status, comment, manages_source) {
-        match op {
-            OutboxOp::Status(s) => outbox::enqueue_status(conn, &task.id, s, now)?,
-            OutboxOp::Comment(body) => outbox::enqueue_comment(conn, &task.id, &body, now)?,
-        }
+        let queued = match op {
+            OutboxOp::Status(s) => providers::enqueue_status(conn, &task.id, s, now),
+            OutboxOp::Comment(body) => providers::enqueue_comment(conn, &task.id, &body, now),
+        };
+        queued.map_err(|e| e.to_string())?;
     }
     Ok(())
 }

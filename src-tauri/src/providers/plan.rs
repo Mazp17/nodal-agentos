@@ -170,11 +170,9 @@ pub fn extract_acceptance(md: &str) -> Vec<String> {
 }
 
 // ---------- Comentario de cierre ----------
-// Lo arma la cola (F1-B) al terminar un paso; hasta la integración no tiene llamador
-// (de ahí los `allow(dead_code)`).
+// Lo arma la cola (`work::pump`) al terminar un paso.
 
 /// Lo que se cuenta en el comentario que Nodal deja al terminar un paso.
-#[allow(dead_code)]
 #[derive(Debug, Clone, Default)]
 pub struct ClosingInfo<'a> {
     pub status: Option<TaskStatus>,
@@ -184,11 +182,10 @@ pub struct ClosingInfo<'a> {
     pub pr_url: Option<&'a str>,
     pub branch: Option<&'a str>,
     pub verdict: Option<&'a Verdict>,
-    /// El ejecutor no dejó el bloque JSON final y no hubo revisor.
-    pub no_report: bool,
+    /// Aviso del paso (sin reporte, detenido, sin veredicto…), en cursiva al final.
+    pub note: Option<&'a str>,
 }
 
-#[allow(dead_code)]
 fn status_label(s: TaskStatus) -> &'static str {
     match s {
         TaskStatus::Backlog => "Backlog",
@@ -202,7 +199,6 @@ fn status_label(s: TaskStatus) -> &'static str {
 }
 
 /// Comentario de cierre en markdown: estado, PR o rama, resumen, criterios no cumplidos y nits.
-#[allow(dead_code)]
 pub fn closing_comment(c: &ClosingInfo) -> String {
     let mut head = String::from("**Nodal**");
     if let Some(s) = c.status {
@@ -221,9 +217,6 @@ pub fn closing_comment(c: &ClosingInfo) -> String {
     if let Some(s) = summary.map(str::trim).filter(|s| !s.is_empty()) {
         parts.push(s.to_string());
     }
-    if c.no_report {
-        parts.push("_The executor finished without a report._".into());
-    }
     if let Some(v) = c.verdict {
         if !v.unmet.is_empty() {
             parts.push(format!("**Unmet criteria**\n{}", bullets(&v.unmet)));
@@ -232,10 +225,12 @@ pub fn closing_comment(c: &ClosingInfo) -> String {
             parts.push(format!("**Nits**\n{}", bullets(&v.nits)));
         }
     }
+    if let Some(n) = c.note.map(str::trim).filter(|n| !n.is_empty()) {
+        parts.push(format!("_{n}_"));
+    }
     parts.join("\n\n")
 }
 
-#[allow(dead_code)]
 fn bullets(items: &[String]) -> String {
     items.iter().map(|i| format!("- {}", i.trim())).collect::<Vec<_>>().join("\n")
 }
@@ -328,7 +323,7 @@ No actualices el task manager: Nodal sincroniza el estado.
 
     #[test]
     fn write_plan_only_when_changed() {
-        let dir = std::env::temp_dir().join(format!("nodal-plan-{}", crate::providers::new_id(1)));
+        let dir = std::env::temp_dir().join(format!("nodal-plan-{}", crate::util::new_id('x', 1)));
         let path = plan_path(&dir, "t1");
         assert!(write_plan(&path, "a").unwrap());
         assert!(!write_plan(&path, "a").unwrap());
@@ -386,10 +381,10 @@ No actualices el task manager: Nodal sincroniza el estado.
             status: Some(TaskStatus::InReview),
             pr_url: Some("https://example.com/pr/1"),
             branch: Some("b"),
-            no_report: true,
+            note: Some("Finished without a report."),
             ..Default::default()
         });
         assert!(c.contains("PR: https://example.com/pr/1") && !c.contains("Branch"));
-        assert!(c.contains("without a report"));
+        assert!(c.ends_with("_Finished without a report._"));
     }
 }

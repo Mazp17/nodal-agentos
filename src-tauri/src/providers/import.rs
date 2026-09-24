@@ -10,7 +10,8 @@ use crate::domain::{ExternalState, SourceLink, Task};
 
 use super::plan::{extract_acceptance, plan_path, render_plan, write_plan};
 use super::state_map::{propose_pull, pull_status};
-use super::{new_id, store, ExternalItem};
+use super::{store, ExternalItem};
+use crate::util::new_id;
 
 /// Espejo de `ImportableItem` en `api.ts`.
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -120,7 +121,7 @@ fn import_one(
     let task = store::insert_imported(
         &tx,
         store::NewImported {
-            id: new_id(now),
+            id: new_id('t', now),
             project_id: &link.project_id,
             repo_id,
             link,
@@ -221,7 +222,7 @@ pub mod tests {
     }
 
     pub fn tmp_dir() -> std::path::PathBuf {
-        std::env::temp_dir().join(format!("nodal-import-{}", new_id(crate::providers::now_ms())))
+        std::env::temp_dir().join(format!("nodal-import-{}", new_id('x', crate::util::now_ms())))
     }
 
     #[test]

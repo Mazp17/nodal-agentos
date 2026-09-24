@@ -2,9 +2,6 @@
 //! Una sola conexión detrás de un `Mutex`; los accesos async pasan por `with_db`, que
 //! corre el closure en un hilo bloqueante para no frenar el runtime.
 
-// F0 fija los contratos; los usos llegan en F1.
-#![allow(dead_code)]
-
 pub mod queries;
 pub mod rows;
 pub mod schema;
@@ -74,6 +71,7 @@ pub fn open(path: &Path) -> Result<Db, DbError> {
 }
 
 /// Base en memoria con el esquema aplicado (tests).
+#[cfg(test)]
 pub fn open_in_memory() -> Result<Db, DbError> {
     let mut conn = Connection::open_in_memory()?;
     configure(&mut conn)?;

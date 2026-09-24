@@ -2,11 +2,15 @@
 //! Servicio `com.nodal.app`, cuenta `<provider>-api-key` (p. ej. `linear-api-key`).
 //! Las keys nunca se serializan hacia el frontend ni se loguean.
 //!
-//! `Secrets` se registra como estado de Tauri (`State<Secrets>`); `linear::key::KeyCache` ya
-//! lo usa por debajo. Los proveedores nuevos (F1-C) lo usan directamente.
+//! Hay una sola instancia (`Secrets::keychain()`, creada en `lib.rs`): se registra como
+//! estado de Tauri (`State<Secrets>`, la usan los proveedores) y `linear::LinearState` guarda
+//! un clon (misma caché) para los comandos `linear_*`.
 
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, Mutex};
+
+// Las llamadas al llavero son bloqueantes (y pueden esperar un diálogo del sistema).
+use crate::util::blocking;
 
 pub const SERVICE: &str = "com.nodal.app";
 
@@ -66,16 +70,12 @@ pub struct Secrets {
     cache: Arc<Mutex<HashMap<String, Option<String>>>>,
 }
 
-/// Todas las instancias por defecto comparten backend y caché: da igual si se llega por
-/// `State<Secrets>` o por `linear::key::KeyCache`, ven la misma key.
-impl Default for Secrets {
-    fn default() -> Self {
-        static SHARED: OnceLock<Secrets> = OnceLock::new();
-        SHARED.get_or_init(|| Self::with_backend(Keychain)).clone()
-    }
-}
-
 impl Secrets {
+    /// Llavero del sistema. Los clones comparten backend y caché.
+    pub fn keychain() -> Self {
+        Self::with_backend(Keychain)
+    }
+
     pub fn with_backend(backend: impl SecretBackend) -> Self {
         Self { backend: Arc::new(backend), cache: Arc::default() }
     }
@@ -123,14 +123,6 @@ impl Secrets {
         self.set_cached(provider, None);
         Ok(())
     }
-}
-
-/// Las llamadas al llavero son bloqueantes (y pueden esperar un diálogo del sistema),
-/// así que corren fuera del runtime async.
-async fn blocking<T: Send + 'static>(f: impl FnOnce() -> Result<T, String> + Send + 'static) -> Result<T, String> {
-    tauri::async_runtime::spawn_blocking(f)
-        .await
-        .map_err(|e| format!("Internal error reading the keychain: {e}"))?
 }
 
 #[cfg(test)]

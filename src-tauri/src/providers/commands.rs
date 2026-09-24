@@ -13,7 +13,9 @@ use crate::linear::LinearState;
 use super::import::{import_items, importable_rows, ImportRequest, ImportResult, ImportableItem, Skipped};
 use super::state_map::{self, SourceStatesReport};
 use super::sync::{run_for_app, SyncReport};
-use super::{check_provider, new_id, now_ms, require, resolve, store, ImportQuery, PResult, Provider, ProvidersState, TaskProvider};
+use crate::secrets::Secrets;
+use crate::util::{new_id, now_ms};
+use super::{check_provider, require, resolve, store, ImportQuery, PResult, Provider, ProvidersState, TaskProvider};
 
 /// Tope del listado de importables por llamada (páginas de 25).
 const LIST_MAX_PAGES: usize = 4;
@@ -69,14 +71,14 @@ pub async fn provider_set_key(app: AppHandle, provider: String, key: Option<Stri
     let linear = app.state::<LinearState>();
     let p = Provider::Linear(super::linear::LinearProvider::new(linear.http().clone(), key.clone()));
     let viewer = p.status().await?;
-    linear.key().store(key).await.map_err(|err| err.to_string())?;
+    app.state::<Secrets>().set(&provider, &key).await?;
     Ok(ProviderStatus { provider, has_key: true, viewer: Some(viewer), error: None })
 }
 
 #[tauri::command]
 pub async fn provider_clear_key(app: AppHandle, provider: String) -> PResult<ProviderStatus> {
     check_provider(&provider)?;
-    app.state::<LinearState>().key().clear().await.map_err(|err| err.to_string())?;
+    app.state::<Secrets>().delete(&provider).await?;
     Ok(ProviderStatus { provider, has_key: false, viewer: None, error: None })
 }
 
@@ -146,7 +148,7 @@ pub async fn create_source_link(app: AppHandle, db: State<'_, Db>, input: NewSou
     };
     let now = now_ms();
     let link = SourceLink {
-        id: new_id(now),
+        id: new_id('s', now),
         project_id: input.project_id,
         provider: input.provider,
         scope: input.scope,

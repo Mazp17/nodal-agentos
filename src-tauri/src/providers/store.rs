@@ -296,7 +296,6 @@ pub fn disconnect_link(conn: &mut Connection, link_id: &str, now: i64) -> Result
 // ---------- Outbox ----------
 // `enqueue_*` los llama la cola (F1-B); hasta la integración solo los usan los tests.
 
-#[allow(dead_code)]
 fn task_provider(conn: &Connection, task_id: &str) -> Result<Option<String>, DbError> {
     Ok(conn
         .query_row("SELECT src_provider FROM tasks WHERE id = ?1", [task_id], |r| r.get::<_, Option<String>>(0))
@@ -311,7 +310,6 @@ fn task_provider(conn: &Connection, task_id: &str) -> Result<Option<String>, DbE
 ///
 /// Contrato del payload: `SetState.state_id` lleva el `TaskStatus` (`"in_review"`); un valor
 /// que no sea un `TaskStatus` se toma como id de estado externo literal.
-#[allow(dead_code)]
 pub fn enqueue_status(conn: &Connection, task_id: &str, status: TaskStatus, now: i64) -> Result<bool, DbError> {
     let Some(provider) = task_provider(conn, task_id)? else { return Ok(false) };
     conn.execute("DELETE FROM sync_outbox WHERE task_id = ?1 AND kind = 'set_state'", [task_id])?;
@@ -321,14 +319,12 @@ pub fn enqueue_status(conn: &Connection, task_id: &str, status: TaskStatus, now:
 }
 
 /// Encola un comentario para una tarea importada (se manda aunque el mapeo esté pendiente).
-#[allow(dead_code)]
 pub fn enqueue_comment(conn: &Connection, task_id: &str, body: &str, now: i64) -> Result<bool, DbError> {
     let Some(provider) = task_provider(conn, task_id)? else { return Ok(false) };
     insert(conn, task_id, &provider, OutboxPayload::Comment { body: body.to_string() }, now)?;
     Ok(true)
 }
 
-#[allow(dead_code)]
 fn insert(conn: &Connection, task_id: &str, provider: &str, payload: OutboxPayload, now: i64) -> Result<i64, DbError> {
     rows::insert_outbox(
         conn,
