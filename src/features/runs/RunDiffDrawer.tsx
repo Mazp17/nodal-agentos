@@ -111,7 +111,7 @@ export function RunDiffDrawer({ runId, onClose }: RunDiffDrawerProps) {
 
   return (
     <>
-      <div className="scrim" onClick={onClose} aria-hidden />
+      <div className="scrim diff-scrim" onClick={onClose} aria-hidden />
       <div ref={ref} className="sheet diff-panel" role="dialog" aria-modal="true" aria-labelledby="diff-title" tabIndex={-1}>
         <header className="diff-head">
           <div className="diff-head-main">
