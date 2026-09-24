@@ -7,6 +7,7 @@ mod migrate;
 mod providers;
 mod runs;
 mod secrets;
+mod updates;
 mod util;
 mod work;
 
@@ -31,6 +32,9 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .menu(updates::menu)
+        .on_menu_event(updates::on_menu_event)
         .manage(linear::LinearState::new(secrets.clone()))
         .manage(secrets)
         .setup(|app| {
@@ -140,6 +144,8 @@ pub fn run() {
             activity::activity_summary,
             activity::project_activity,
             migrate::import_legacy_data,
+            updates::updates_enabled,
+            updates::restart_app,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

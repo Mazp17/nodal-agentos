@@ -26,6 +26,7 @@
   "bundle": {
     "active": true,
     "targets": "all",
+    "createUpdaterArtifacts": true,
     "macOS": {
       "signingIdentity": "-"
     },
@@ -36,5 +37,13 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ]
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDQ3OUZENDM2QzlBNzIyQTkKUldTcElxZkpOdFNmUng5ZVhXbDhtMm5uVDdQZ2crNjhWSnVyVFNWTDNRc2IxYnJZbXI5ZDU3WWgK",
+      "endpoints": [
+        "https://github.com/Mazp17/nodal-agentos/releases/latest/download/latest.json"
+      ]
+    }
   }
 }
