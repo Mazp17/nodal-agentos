@@ -35,7 +35,7 @@ fn forward_lines<R: AsyncRead + Unpin + Send + 'static>(stream: R, tx: mpsc::Unb
     });
 }
 
-/// Flags del ejecutor (`--agent`, `--disallowedTools`) que van además de las opciones.
+/// Flags del ejecutor (`--agent`, `--disallowedTools`, …) que van además de las opciones.
 /// Cada valor por separado; los que se arman acá ya vienen validados.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ExtraFlags {
@@ -47,6 +47,8 @@ pub struct ExtraFlags {
     /// `--disallowedTools A,B,C` (separadas por coma: la opción es variádica y, con
     /// espacios, se come el prompt; verificado en el spike con 2.1.281).
     pub disallowed_tools: Vec<String>,
+    /// `--append-system-prompt <text>`: un solo argumento, sin escapar (no hay shell).
+    pub append_system_prompt: Option<String>,
 }
 
 impl ExtraFlags {
@@ -63,6 +65,10 @@ impl ExtraFlags {
         if !self.disallowed_tools.is_empty() {
             out.push("--disallowedTools".into());
             out.push(self.disallowed_tools.join(","));
+        }
+        if let Some(p) = &self.append_system_prompt {
+            out.push("--append-system-prompt".into());
+            out.push(p.clone());
         }
         out
     }
@@ -333,6 +339,17 @@ pub async fn get_agent_transcript(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn append_system_prompt_is_one_arg_after_the_variadic_lists() {
+        let extra = ExtraFlags {
+            allowed_tools: vec!["Bash(npm test:*)".into()],
+            append_system_prompt: Some("Don't ask: stop.".into()),
+            ..Default::default()
+        };
+        assert_eq!(extra.to_args(), ["--allowedTools", "Bash(npm test:*)", "--append-system-prompt", "Don't ask: stop."]);
+        assert!(ExtraFlags::default().to_args().is_empty());
+    }
 
     /// Contra el `claude` real y los datos de esta máquina: `cargo test -- --ignored`.
     /// Solo lee (`claude agents` + archivos); no lanza runs.
