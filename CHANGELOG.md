@@ -4,6 +4,10 @@ All notable changes to Nodal are documented here. The format follows [Keep a Cha
 
 ## [Unreleased]
 
+### Changed
+
+- The task panel opens with the latest run (status, phases, result and its actions) and a highlighted launch card; the plan and step history follow.
+
 ## [0.1.0] - 2026-09-24
 
 First public alpha (macOS only).
