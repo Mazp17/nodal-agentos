@@ -146,19 +146,13 @@ function ImportBody({
       if (r.imported.length) {
         toast(`Imported ${plural(r.imported.length, "task")}`, `From ${prov} · ${link.scope.name}`, "ok");
       }
-      if (r.skipped.length) {
-        const names = new Map(selected.map((it) => [it.externalId, it.identifier]));
-        toast(
-          `${plural(r.skipped.length, "issue")} not imported`,
-          r.skipped.map((s) => `${names.get(s.externalId) ?? s.externalId}: ${s.reason}`).join("\n"),
-          "danger",
-        );
-      }
       onImported(r);
       if (!r.skipped.length) onClose();
       else {
         // Quedan seleccionados solo los que fallaron, para reintentar o cambiar de repo.
         const failed = new Set(r.skipped.map((s) => s.externalId));
+        const names = new Map(selected.map((it) => [it.externalId, it.identifier]));
+        setError(r.skipped.map((s) => `${names.get(s.externalId) ?? s.externalId}: ${s.reason}`).join("\n"));
         setSel((m) => new Map([...m].filter(([id]) => failed.has(id))));
         items.reload();
       }
