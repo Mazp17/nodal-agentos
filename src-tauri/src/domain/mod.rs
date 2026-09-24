@@ -45,7 +45,10 @@ pub struct Project {
     pub next_task_number: i64,
     /// Color del proyecto en la UI (hex o `oklch(...)`).
     pub color: String,
-    /// Ejecutor por defecto si el repo no define uno. `None` → Claude.
+    /// Descripción libre (v2).
+    #[serde(default)]
+    pub description: Option<String>,
+    /// Ejecutor por defecto si el repo no define uno. `None` → el global de Settings → Claude.
     pub default_executor: Option<Executor>,
     /// Revisor por defecto si el repo no define uno. `None` → `code-reviewer`.
     pub reviewer: Option<String>,
@@ -230,6 +233,10 @@ pub struct TaskSource {
     pub external_state: Option<ExternalState>,
     pub last_synced_at: Option<i64>,
     pub sync_error: Option<String>,
+    /// El estado externo actual no está en el mapeo pull (v2): la tarea conserva su estado
+    /// Nodal y la UI muestra "estado externo sin mapear".
+    #[serde(default)]
+    pub unmapped: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -376,6 +383,10 @@ pub struct Run {
     pub error: Option<String>,
     /// Etiqueta del run importado de una versión anterior (issue o tarea vieja).
     pub legacy_label: Option<String>,
+    /// Tokens del transcript (input + output + cache), sumados al cerrar (v2). `None` en
+    /// workflows o si no se pudo leer.
+    #[serde(default)]
+    pub tokens: Option<i64>,
 }
 
 // ---------- Fuentes externas ----------
@@ -424,6 +435,31 @@ pub struct SourceLink {
     pub state_map: StateMap,
     pub auto_import: bool,
     pub created_at: i64,
+    /// Última pasada del sync sobre este link (v2).
+    #[serde(default)]
+    pub last_synced_at: Option<i64>,
+    /// Error de la última pasada (`None` si fue bien).
+    #[serde(default)]
+    pub last_sync_error: Option<String>,
+    /// Altas/bajas de estados sin revisar. `None` = nada pendiente.
+    #[serde(default)]
+    pub pending_state_changes: Option<StateChanges>,
+}
+
+/// Estados del proveedor que cambiaron contra `StateMap.known_states` (v2). Lo deja el
+/// sync; se limpia al guardar el mapeo.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StateChanges {
+    pub added: Vec<ExternalState>,
+    pub removed: Vec<ExternalState>,
+}
+
+impl StateChanges {
+    #[allow(dead_code)] // lo usa el sync (punto 3)
+    pub fn is_empty(&self) -> bool {
+        self.added.is_empty() && self.removed.is_empty()
+    }
 }
 
 /// Qué hay que escribir en el proveedor.
@@ -475,11 +511,13 @@ pub struct Settings {
     pub editor: Option<String>,
     /// Revisor global si ni el repo ni el proyecto definen uno.
     pub reviewer: String,
+    /// Último fallback del ejecutor: repo → proyecto → este → Claude.
+    pub default_executor: Option<Executor>,
 }
 
 impl Default for Settings {
     fn default() -> Self {
-        Self { concurrency: DEFAULT_CONCURRENCY, editor: None, reviewer: DEFAULT_REVIEWER.into() }
+        Self { concurrency: DEFAULT_CONCURRENCY, editor: None, reviewer: DEFAULT_REVIEWER.into(), default_executor: None }
     }
 }
 

@@ -35,6 +35,7 @@ pub fn create_project(conn: &Connection, input: &NewProject, now: i64) -> Result
         reviewer: None,
         created_at: now,
         archived_at: None,
+        description: None,
     };
     projects::insert(conn, &p)?;
     Ok(p)
@@ -450,6 +451,13 @@ pub fn set_settings(conn: &mut Connection, s: &Settings) -> Result<Settings, Str
         concurrency: validate::concurrency(s.concurrency)?,
         editor: s.editor.as_deref().map(str::trim).filter(|e| !e.is_empty()).map(validate::editor).transpose()?,
         reviewer: validate::reviewer(&s.reviewer)?,
+        default_executor: match &s.default_executor {
+            Some(e) => {
+                validate::executor(e)?;
+                Some(e.clone())
+            }
+            None => None,
+        },
     };
     rows::save_settings(conn, &clean)?;
     Ok(rows::load_settings(conn)?)
@@ -620,6 +628,9 @@ mod tests {
             state_map: map,
             auto_import: false,
             created_at: 1,
+            last_synced_at: None,
+            last_sync_error: None,
+            pending_state_changes: None,
         };
         rows::insert_source_link(&c, &link).unwrap();
         c.execute(
@@ -646,7 +657,7 @@ mod tests {
     fn settings_validation() {
         let db = open_in_memory().unwrap();
         let mut c = db.lock().unwrap();
-        let s = set_settings(&mut c, &Settings { concurrency: 2, editor: Some("cursor".into()), reviewer: "code-reviewer".into() }).unwrap();
+        let s = set_settings(&mut c, &Settings { concurrency: 2, editor: Some("cursor".into()), reviewer: "code-reviewer".into(), default_executor: None }).unwrap();
         assert_eq!((s.concurrency, s.editor.as_deref()), (2, Some("cursor")));
         assert!(set_settings(&mut c, &Settings { concurrency: 0, ..s.clone() }).is_err());
         assert!(set_settings(&mut c, &Settings { editor: Some("vim; rm".into()), ..s.clone() }).is_err());

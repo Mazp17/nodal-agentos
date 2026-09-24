@@ -462,6 +462,7 @@ fn blank_run(id: String, task: &Task, repo: &Repo, now: i64, queue_position: f64
         branch: None,
         error: None,
         legacy_label: None,
+        tokens: None,
     }
 }
 

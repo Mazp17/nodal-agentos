@@ -442,6 +442,7 @@ impl Ctx<'_> {
             reviewer: None,
             created_at: self.now,
             archived_at: None,
+            description: None,
         };
         rows::insert_project(self.conn, &p).map_err(sql)?;
         self.report.projects += 1;
@@ -595,6 +596,9 @@ impl Ctx<'_> {
                             state_map: StateMap::default(),
                             auto_import: false,
                             created_at: self.now,
+                            last_synced_at: None,
+                            last_sync_error: None,
+                            pending_state_changes: None,
                         };
                         rows::insert_source_link(self.conn, &link).map_err(sql)?;
                         id
@@ -778,6 +782,7 @@ impl Ctx<'_> {
             branch: None,
             error,
             legacy_label: Some(legacy_label),
+            tokens: None,
         };
         rows::insert_run(self.conn, &run).map_err(sql)?;
         self.mark(key, "run", Some(&id))?;

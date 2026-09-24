@@ -381,6 +381,9 @@ mod tests {
             state_map: map,
             auto_import: false,
             created_at: 1,
+            last_synced_at: None,
+            last_sync_error: None,
+            pending_state_changes: None,
         };
         rows::insert_source_link(&c, &link).unwrap();
         c.execute(

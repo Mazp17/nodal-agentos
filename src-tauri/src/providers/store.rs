@@ -187,6 +187,7 @@ pub fn insert_imported(conn: &Connection, n: NewImported) -> Result<Task, DbErro
             external_state: Some(n.item.state.clone()),
             last_synced_at: Some(n.now),
             sync_error: None,
+            unmapped: false,
         }),
         created_at: n.now,
         updated_at: n.now,

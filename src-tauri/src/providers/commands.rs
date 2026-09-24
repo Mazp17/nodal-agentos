@@ -157,6 +157,9 @@ pub async fn create_source_link(app: AppHandle, db: State<'_, Db>, input: NewSou
         state_map: if states.is_empty() { StateMap::default() } else { state_map::propose(&states) },
         auto_import: input.auto_import,
         created_at: now,
+        last_synced_at: None,
+        last_sync_error: None,
+        pending_state_changes: None,
     };
     with_db(&db, move |c| {
         if !store::project_exists(c, &link.project_id)? {

@@ -59,6 +59,7 @@ pub fn project_from_row(row: &Row) -> rusqlite::Result<Project> {
         key: row.get("key")?,
         next_task_number: row.get("next_task_number")?,
         color: row.get("color")?,
+        description: row.get("description")?,
         default_executor: get_opt_json(row, "default_executor_json")?,
         reviewer: row.get("reviewer")?,
         created_at: row.get("created_at")?,
@@ -69,12 +70,12 @@ pub fn project_from_row(row: &Row) -> rusqlite::Result<Project> {
 pub fn insert_project(conn: &Connection, p: &Project) -> Result<(), DbError> {
     conn.execute(
         "INSERT INTO projects (id, name, key, next_task_number, color, default_executor_json,
-                               reviewer, created_at, archived_at)
-         VALUES (:id, :name, :key, :next, :color, :exec, :reviewer, :created, :archived)",
+                               reviewer, created_at, archived_at, description)
+         VALUES (:id, :name, :key, :next, :color, :exec, :reviewer, :created, :archived, :description)",
         named_params! {
             ":id": p.id, ":name": p.name, ":key": p.key, ":next": p.next_task_number,
             ":color": p.color, ":exec": opt_json(&p.default_executor)?, ":reviewer": p.reviewer,
-            ":created": p.created_at, ":archived": p.archived_at,
+            ":created": p.created_at, ":archived": p.archived_at, ":description": p.description,
         },
     )?;
     Ok(())
@@ -157,6 +158,7 @@ pub fn task_from_row(row: &Row) -> rusqlite::Result<Task> {
             external_state: get_opt_json(row, "src_state_json")?,
             last_synced_at: row.get("src_last_synced_at")?,
             sync_error: row.get("src_sync_error")?,
+            unmapped: row.get("src_unmapped")?,
         }),
         None => None,
     };
@@ -198,13 +200,13 @@ pub fn insert_task(conn: &Connection, t: &Task) -> Result<(), DbError> {
                             position, plan_kind, plan_path, plan_overridden, acceptance_json,
                             assignee_json, isolation, finish, review, wt_path, wt_branch, wt_base,
                             src_provider, src_link_id, src_external_id, src_identifier, src_url,
-                            src_state_json, src_last_synced_at, src_sync_error,
+                            src_state_json, src_last_synced_at, src_sync_error, src_unmapped,
                             created_at, updated_at, closed_at)
          VALUES (:id, :project, :repo, :number, :title, :status, :priority, :labels,
                  :position, :plan_kind, :plan_path, :plan_overridden, :acceptance,
                  :assignee, :isolation, :finish, :review, :wt_path, :wt_branch, :wt_base,
                  :src_provider, :src_link, :src_ext, :src_ident, :src_url,
-                 :src_state, :src_synced, :src_error,
+                 :src_state, :src_synced, :src_error, :src_unmapped,
                  :created, :updated, :closed)",
         named_params! {
             ":id": t.id, ":project": t.project_id, ":repo": t.repo_id, ":number": t.number,
@@ -221,6 +223,7 @@ pub fn insert_task(conn: &Connection, t: &Task) -> Result<(), DbError> {
             ":src_state": src.and_then(|s| s.external_state.as_ref()).map(to_json).transpose()?,
             ":src_synced": src.and_then(|s| s.last_synced_at),
             ":src_error": src.and_then(|s| s.sync_error.as_ref()),
+            ":src_unmapped": src.is_some_and(|s| s.unmapped),
             ":created": t.created_at, ":updated": t.updated_at, ":closed": t.closed_at,
         },
     )?;
@@ -290,6 +293,7 @@ pub fn run_from_row(row: &Row) -> rusqlite::Result<Run> {
         branch: row.get("branch")?,
         error: row.get("error")?,
         legacy_label: row.get("legacy_label")?,
+        tokens: row.get("tokens")?,
     })
 }
 
@@ -298,11 +302,11 @@ pub fn insert_run(conn: &Connection, r: &Run) -> Result<(), DbError> {
         "INSERT INTO runs (id, task_id, repo_id, cwd, executor_json, kind, parent_run_id, prompt,
                            extra_instructions, options_json, finish, isolation, review, verdict_json, status,
                            queue_position, claude_run_id, session_id, queued_at, launched_at,
-                           finished_at, outcome, summary, pr_url, branch, error, legacy_label)
+                           finished_at, outcome, summary, pr_url, branch, error, legacy_label, tokens)
          VALUES (:id, :task, :repo, :cwd, :exec, :kind, :parent, :prompt,
                  :extra, :options, :finish, :isolation, :review, :verdict, :status,
                  :qpos, :claude_id, :session, :queued, :launched,
-                 :finished, :outcome, :summary, :pr, :branch, :error, :legacy)",
+                 :finished, :outcome, :summary, :pr, :branch, :error, :legacy, :tokens)",
         named_params! {
             ":id": r.id, ":task": r.task_id, ":repo": r.repo_id, ":cwd": r.cwd,
             ":exec": to_json(&r.executor)?, ":kind": r.kind, ":parent": r.parent_run_id,
@@ -312,7 +316,7 @@ pub fn insert_run(conn: &Connection, r: &Run) -> Result<(), DbError> {
             ":qpos": r.queue_position, ":claude_id": r.claude_run_id, ":session": r.session_id,
             ":queued": r.queued_at, ":launched": r.launched_at, ":finished": r.finished_at,
             ":outcome": r.outcome, ":summary": r.summary, ":pr": r.pr_url, ":branch": r.branch,
-            ":error": r.error, ":legacy": r.legacy_label,
+            ":error": r.error, ":legacy": r.legacy_label, ":tokens": r.tokens,
         },
     )?;
     Ok(())
@@ -335,6 +339,9 @@ pub fn source_link_from_row(row: &Row) -> rusqlite::Result<SourceLink> {
         state_map: get_json(row, "state_map_json")?,
         auto_import: row.get("auto_import")?,
         created_at: row.get("created_at")?,
+        last_synced_at: row.get("last_synced_at")?,
+        last_sync_error: row.get("last_sync_error")?,
+        pending_state_changes: get_opt_json(row, "pending_state_changes")?,
     })
 }
 
@@ -342,13 +349,16 @@ pub fn insert_source_link(conn: &Connection, l: &SourceLink) -> Result<(), DbErr
     conn.execute(
         "INSERT INTO source_links (id, project_id, provider, scope_kind, scope_id, scope_name,
                                    default_repo_id, repo_rules_json, state_map_json, auto_import,
-                                   created_at)
-         VALUES (:id, :project, :provider, :skind, :sid, :sname, :repo, :rules, :map, :auto, :created)",
+                                   created_at, last_synced_at, last_sync_error, pending_state_changes)
+         VALUES (:id, :project, :provider, :skind, :sid, :sname, :repo, :rules, :map, :auto, :created,
+                 :synced, :sync_error, :pending)",
         named_params! {
             ":id": l.id, ":project": l.project_id, ":provider": l.provider,
             ":skind": l.scope.kind, ":sid": l.scope.id, ":sname": l.scope.name,
             ":repo": l.default_repo_id, ":rules": to_json(&l.repo_rules)?,
             ":map": to_json(&l.state_map)?, ":auto": l.auto_import, ":created": l.created_at,
+            ":synced": l.last_synced_at, ":sync_error": l.last_sync_error,
+            ":pending": opt_json(&l.pending_state_changes)?,
         },
     )?;
     Ok(())

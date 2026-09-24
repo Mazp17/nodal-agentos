@@ -404,6 +404,7 @@ mod tests {
             external_state: None,
             last_synced_at: None,
             sync_error: None,
+            unmapped: false,
         });
         t
     }

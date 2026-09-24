@@ -12,7 +12,8 @@ export interface Project {
   key: string;
   nextTaskNumber: number;
   color: string;
-  /** `null` → Claude. */
+  description: string | null;
+  /** `null` → `Settings.defaultExecutor` → Claude. */
   defaultExecutor: Executor | null;
   /** `null` → `code-reviewer`. */
   reviewer: string | null;
@@ -101,6 +102,8 @@ export interface TaskSource {
   externalState: ExternalState | null;
   lastSyncedAt: number | null;
   syncError: string | null;
+  /** El estado externo actual no está en el mapeo pull ("estado externo sin mapear"). */
+  unmapped: boolean;
 }
 
 export interface Task {
@@ -185,6 +188,8 @@ export interface Run {
   branch: string | null;
   error: string | null;
   legacyLabel: string | null;
+  /** Tokens del transcript (agente/Claude/revisor), sumados al cerrar. */
+  tokens: number | null;
 }
 
 // ---------- Fuentes externas ----------
@@ -210,6 +215,12 @@ export interface StateMap {
   knownStates: ExternalState[];
 }
 
+/** Estados del proveedor que cambiaron contra `knownStates`; se limpia con `saveStateMap`. */
+export interface StateChanges {
+  added: ExternalState[];
+  removed: ExternalState[];
+}
+
 export interface SourceLink {
   id: string;
   projectId: string;
@@ -220,6 +231,10 @@ export interface SourceLink {
   stateMap: StateMap;
   autoImport: boolean;
   createdAt: number;
+  lastSyncedAt: number | null;
+  lastSyncError: string | null;
+  /** `null` = nada pendiente. */
+  pendingStateChanges: StateChanges | null;
 }
 
 export type OutboxPayload = { kind: "set_state"; stateId: string } | { kind: "comment"; body: string };
@@ -242,4 +257,6 @@ export interface Settings {
   /** `code`, `cursor`... `null` → el del sistema. */
   editor: string | null;
   reviewer: string;
+  /** Último fallback del ejecutor: repo → proyecto → este → Claude. */
+  defaultExecutor: Executor | null;
 }

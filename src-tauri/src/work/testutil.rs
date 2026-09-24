@@ -57,6 +57,7 @@ pub fn run_of(executor: Executor, kind: RunKind, review: bool) -> Run {
         branch: None,
         error: None,
         legacy_label: None,
+        tokens: None,
     }
 }
 
@@ -71,6 +72,7 @@ pub fn project_of(id: &str, key: &str) -> Project {
         reviewer: None,
         created_at: 1,
         archived_at: None,
+        description: None,
     }
 }
 

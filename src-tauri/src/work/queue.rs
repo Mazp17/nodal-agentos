@@ -188,6 +188,7 @@ mod tests {
             branch: None,
             error: None,
             legacy_label: None,
+            tokens: None,
         }
     }
 

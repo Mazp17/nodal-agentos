@@ -98,14 +98,14 @@ pub fn update(conn: &Connection, r: &Run) -> Result<(), DbError> {
                          claude_run_id = :claude_id, session_id = :session, launched_at = :launched,
                          finished_at = :finished, outcome = :outcome, summary = :summary, pr_url = :pr,
                          branch = :branch, error = :error, legacy_label = :legacy, prompt = :prompt,
-                         options_json = :options
+                         options_json = :options, tokens = :tokens
          WHERE id = :id",
         named_params! {
             ":id": r.id, ":cwd": r.cwd, ":status": r.status, ":qpos": r.queue_position,
             ":verdict": opt_json(&r.verdict)?, ":claude_id": r.claude_run_id, ":session": r.session_id,
             ":launched": r.launched_at, ":finished": r.finished_at, ":outcome": r.outcome,
             ":summary": r.summary, ":pr": r.pr_url, ":branch": r.branch, ":error": r.error,
-            ":legacy": r.legacy_label, ":prompt": r.prompt, ":options": to_json(&r.options)?,
+            ":legacy": r.legacy_label, ":prompt": r.prompt, ":options": to_json(&r.options)?, ":tokens": r.tokens,
         },
     )?;
     if n == 0 {
