@@ -380,6 +380,30 @@ fn reimport_after_state_changes_and_duplicate_entries() {
 }
 
 #[test]
+fn reimport_reuses_a_repo_whose_path_changed() {
+    let src = TempDir::new("moved");
+    let data = TempDir::new("moved-data");
+    let task = |id: &str, at: i64| {
+        format!(r#"{{"id":"{id}","repoPath":"/Users/me/Code/acme-tools","title":"T {id}","plan":{{"kind":"text"}},"status":"todo","createdAt":{at}}}"#)
+    };
+    fs::write(src.0.join("tasks.json"), format!(r#"{{"tasks":[{}]}}"#, task("ta1", 1))).unwrap();
+    fs::create_dir_all(src.0.join("tasks/ta1")).unwrap();
+    fs::write(src.0.join("tasks/ta1/plan.md"), "plan").unwrap();
+    let db = open_in_memory().unwrap();
+    let mut conn = db.lock().unwrap();
+    import_folder(&mut conn, &src.0, &data.0, T0).unwrap();
+    let repo = repo_id_of(&conn, "/Users/me/Code/acme-tools");
+    conn.execute("UPDATE repos SET path = '/Users/me/Code/tools-moved' WHERE id = ?1", [&repo]).unwrap();
+
+    // La versión vieja siguió creando tareas con el path viejo.
+    fs::write(src.0.join("tasks.json"), format!(r#"{{"tasks":[{},{}]}}"#, task("ta1", 1), task("ta2", 2))).unwrap();
+    let r = import_folder(&mut conn, &src.0, &data.0, T0 + 1).unwrap();
+    assert_eq!((r.tasks, r.repos), (1, 0), "{r:#?}");
+    let repo_of: String = conn.query_row("SELECT repo_id FROM tasks WHERE id = 'ta2'", [], |r| r.get(0)).unwrap();
+    assert_eq!(repo_of, repo);
+}
+
+#[test]
 fn first_import_keeps_a_configured_concurrency() {
     let data = TempDir::new("conc");
     let db = open_in_memory().unwrap();

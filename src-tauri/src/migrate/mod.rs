@@ -449,8 +449,25 @@ impl Ctx<'_> {
         Ok(())
     }
 
-    fn create_repo(&mut self, project_id: &str, path: &str, launch: LaunchOptions, finish: Finish) -> Result<String, String> {
-        let id = det_id("lr_", path);
+    /// Id determinista del repo que la importación crea para `path`.
+    fn repo_id_for(path: &str) -> String {
+        det_id("lr_", path)
+    }
+
+    /// Crea el repo de `path` en el proyecto, o devuelve el que ya creó una importación
+    /// anterior (aunque después le cambiaran el path). Un choque con otro repo no aborta la
+    /// importación: se saltea con aviso (`None`).
+    fn ensure_repo(
+        &mut self,
+        project_id: &str,
+        path: &str,
+        launch: LaunchOptions,
+        finish: Finish,
+    ) -> Result<Option<(String, String)>, String> {
+        let id = Self::repo_id_for(path);
+        if let Some(found) = self.repo_by_id(&id)? {
+            return Ok(Some(found));
+        }
         let position: i64 = self
             .conn
             .query_row("SELECT COUNT(*) FROM repos WHERE project_id = ?1", [project_id], |r| r.get(0))
@@ -469,9 +486,19 @@ impl Ctx<'_> {
             position,
             created_at: self.now,
         };
-        rows::insert_repo(self.conn, &r).map_err(sql)?;
+        match rows::insert_repo(self.conn, &r) {
+            Ok(()) => {}
+            Err(DbError::Sqlite(rusqlite::Error::SqliteFailure(f, m)))
+                if f.code == rusqlite::ErrorCode::ConstraintViolation =>
+            {
+                let why = m.unwrap_or_else(|| f.to_string());
+                self.skip(format!("repo {path}: conflicts with an existing repo ({why}), skipped"));
+                return Ok(None);
+            }
+            Err(e) => return Err(sql(e)),
+        }
         self.report.repos += 1;
-        Ok(id)
+        Ok(Some((id, project_id.to_string())))
     }
 
     /// Proyecto "Local" de la importación (se crea la primera vez que hace falta).
@@ -544,27 +571,36 @@ impl Ctx<'_> {
                     self.already(&repo_key);
                     found
                 }
-                None => match self.repo_by_path(&path)? {
-                    Some(found) => {
-                        // Ya lo tenía el usuario (o lo creó otra entrada): se reusa sin tocarlo.
-                        self.mark(&repo_key, "repo", Some(&found.0))?;
-                        found
+                None => {
+                    // Ya lo tenía el usuario, lo creó otra entrada o una importación anterior
+                    // (aunque después le cambiaran el path): se reusa sin tocarlo.
+                    let existing = match self.repo_by_path(&path)? {
+                        Some(found) => Some(found),
+                        None => self.repo_by_id(&Self::repo_id_for(&path))?,
+                    };
+                    match existing {
+                        Some(found) => {
+                            self.mark(&repo_key, "repo", Some(&found.0))?;
+                            found
+                        }
+                        None => {
+                            let name = scopes
+                                .iter()
+                                .find_map(|s| s.name.clone().filter(|n| !n.trim().is_empty()))
+                                .or_else(|| entry.name.clone().filter(|n| !n.trim().is_empty()))
+                                .unwrap_or_else(|| folder_name(&path));
+                            let project_id = det_id("lp_", &repo_key);
+                            if !self.exists("projects", &project_id)? {
+                                self.create_project(&project_id, name.trim())?;
+                            }
+                            let Some(found) = self.ensure_repo(&project_id, &path, entry.launch(), finish)? else {
+                                continue;
+                            };
+                            self.mark(&repo_key, "repo", Some(&found.0))?;
+                            found
+                        }
                     }
-                    None => {
-                    let name = scopes
-                        .iter()
-                        .find_map(|s| s.name.clone().filter(|n| !n.trim().is_empty()))
-                        .or_else(|| entry.name.clone().filter(|n| !n.trim().is_empty()))
-                        .unwrap_or_else(|| folder_name(&path));
-                    let project_id = det_id("lp_", &repo_key);
-                    if !self.exists("projects", &project_id)? {
-                        self.create_project(&project_id, name.trim())?;
-                    }
-                    let repo_id = self.create_repo(&project_id, &path, entry.launch(), finish)?;
-                    self.mark(&repo_key, "repo", Some(&repo_id))?;
-                    (repo_id, project_id)
-                    }
-                },
+                }
             };
 
             for s in scopes {
@@ -653,13 +689,23 @@ impl Ctx<'_> {
                 continue;
             }
             let path = canon_path(&t.repo_path);
-            let (repo_id, project_id) = match self.repo_by_path(&path)? {
+            let existing = match self.repo_by_path(&path)? {
+                Some(found) => Some(found),
+                // El repo que creó una importación anterior, aunque le hayan cambiado el path.
+                None => self.repo_by_id(&Self::repo_id_for(&path))?,
+            };
+            let (repo_id, project_id) = match existing {
                 Some(found) => found,
                 None => {
                     let project_id = self.local_project()?;
                     let finish = self.finish_by_path.get(&path).copied().unwrap_or(Finish::Pr);
-                    let repo_id = self.create_repo(&project_id, &path, LaunchOptions::default(), finish)?;
-                    (repo_id, project_id)
+                    match self.ensure_repo(&project_id, &path, LaunchOptions::default(), finish)? {
+                        Some(found) => found,
+                        None => {
+                            self.skip(format!("{file}: task {} skipped, its repository could not be created", t.id));
+                            continue;
+                        }
+                    }
                 }
             };
             let number: i64 = self
