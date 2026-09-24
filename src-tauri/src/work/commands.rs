@@ -275,10 +275,43 @@ pub async fn list_executors(state: State<'_, WorkState>, repo_id: Option<String>
     blocking(move || Ok(executors::catalog(claude.as_deref(), repo_path.as_deref().map(Path::new)))).await
 }
 
+/// `project_id` (opcional) filtra por proyecto además de por tarea.
 #[tauri::command]
-pub async fn list_task_runs(state: State<'_, WorkState>, task_id: Option<String>) -> Result<Vec<Run>, String> {
+pub async fn list_task_runs(
+    state: State<'_, WorkState>,
+    task_id: Option<String>,
+    project_id: Option<String>,
+) -> Result<Vec<Run>, String> {
     let task_id = opt_id(task_id, "task")?;
-    db(&state.0, move |c| Ok(qruns::list(c, task_id.as_deref())?)).await
+    let project_id = opt_id(project_id, "project")?;
+    db(&state.0, move |c| Ok(qruns::list_filtered(c, project_id.as_deref(), task_id.as_deref())?)).await
+}
+
+/// Como `list_task_runs`, sin `prompt` ni `extraInstructions`.
+#[tauri::command]
+pub async fn list_runs_light(
+    state: State<'_, WorkState>,
+    project_id: Option<String>,
+    task_id: Option<String>,
+) -> Result<Vec<RunLight>, String> {
+    let task_id = opt_id(task_id, "task")?;
+    let project_id = opt_id(project_id, "project")?;
+    let runs = db(&state.0, move |c| Ok(qruns::list_filtered(c, project_id.as_deref(), task_id.as_deref())?)).await?;
+    Ok(runs.into_iter().map(RunLight::from).collect())
+}
+
+#[tauri::command]
+pub async fn get_run(state: State<'_, WorkState>, run_id: String) -> Result<Run, String> {
+    check_id(&run_id, "run")?;
+    db(&state.0, move |c| Ok(qruns::get(c, &run_id)?)).await
+}
+
+/// El último run de cada tarea (sin límite de historial), liviano.
+#[tauri::command]
+pub async fn latest_runs_by_task(state: State<'_, WorkState>, project_id: Option<String>) -> Result<Vec<RunLight>, String> {
+    let project_id = opt_id(project_id, "project")?;
+    let runs = db(&state.0, move |c| Ok(qruns::latest_by_task(c, project_id.as_deref())?)).await?;
+    Ok(runs.into_iter().map(RunLight::from).collect())
 }
 
 #[tauri::command]

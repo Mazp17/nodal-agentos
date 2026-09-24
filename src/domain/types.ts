@@ -192,6 +192,9 @@ export interface Run {
   tokens: number | null;
 }
 
+/** `Run` sin `prompt` ni `extraInstructions`, para listas. */
+export type RunLight = Omit<Run, "prompt" | "extraInstructions">;
+
 // ---------- Fuentes externas ----------
 
 export interface ScopeRef {

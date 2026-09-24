@@ -84,3 +84,49 @@ fn task_number_counter_and_status() {
     assert!(repos::find_by_path(&c, "/r1").unwrap().is_some());
     assert_eq!(repos::next_position(&c, "p1").unwrap(), 1);
 }
+
+#[test]
+fn runs_filtered_by_project_and_latest_by_task() {
+    let db = open_in_memory().unwrap();
+    let c = db.lock().unwrap();
+    seed(&c);
+    insert_project(&c, &project_of("p2", "WEB")).unwrap();
+    insert_repo(&c, &repo_of("r2", "p2", "/r2")).unwrap();
+    let mut t2 = task_of("t2");
+    t2.number = 2;
+    insert_task(&c, &t2).unwrap();
+    let mut t3 = task_of("t3");
+    t3.project_id = "p2".into();
+    t3.repo_id = "r2".into();
+    insert_task(&c, &t3).unwrap();
+    let mk = |id: &str, task: Option<&str>, repo: &str, at: i64| {
+        let mut r = queued(id, at as f64);
+        r.task_id = task.map(Into::into);
+        r.repo_id = Some(repo.into());
+        r.status = RunStatus::Finished;
+        r
+    };
+    for r in [
+        mk("a", Some("t1"), "r1", 1),
+        mk("b", Some("t1"), "r1", 3),
+        mk("c", Some("t2"), "r1", 2),
+        mk("d", Some("t3"), "r2", 4),
+        mk("e", None, "r2", 5),
+    ] {
+        runs::insert(&c, &r).unwrap();
+    }
+    let ids = |v: Vec<Run>| v.into_iter().map(|r| r.id).collect::<Vec<_>>();
+    assert_eq!(ids(runs::list_filtered(&c, None, None).unwrap()), ["e", "d", "b", "c", "a"]);
+    assert_eq!(ids(runs::list_filtered(&c, Some("p1"), None).unwrap()), ["b", "c", "a"]);
+    // Un run sin tarea cuenta en el proyecto de su repo.
+    assert_eq!(ids(runs::list_filtered(&c, Some("p2"), None).unwrap()), ["e", "d"]);
+    assert_eq!(ids(runs::list_filtered(&c, Some("p1"), Some("t2")).unwrap()), ["c"]);
+    assert!(runs::list_filtered(&c, Some("p2"), Some("t1")).unwrap().is_empty());
+
+    assert_eq!(ids(runs::latest_by_task(&c, None).unwrap()), ["d", "b", "c"]);
+    assert_eq!(ids(runs::latest_by_task(&c, Some("p1")).unwrap()), ["b", "c"]);
+
+    let light = serde_json::to_value(RunLight::from(runs::get(&c, "b").unwrap())).unwrap();
+    assert!(light.get("prompt").is_none() && light.get("extraInstructions").is_none());
+    assert_eq!(light["taskId"], "t1");
+}

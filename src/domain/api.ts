@@ -28,6 +28,7 @@ import type {
   Repo,
   RepoRule,
   Run,
+  RunLight,
   ScopeRef,
   Settings,
   SourceLink,
@@ -317,7 +318,16 @@ export const worktreeStatus = (taskId: string) => invoke<WorktreeStatus>("worktr
 /** Agentes, workflows y Claude; con `repoId` suma los del repo. */
 export const listExecutors = (repoId: string | null) => invoke<ExecutorInfo[]>("list_executors", { repoId });
 /** Runs de la tarea (o todos con `null`), más recientes primero. */
-export const listTaskRuns = (taskId: string | null) => invoke<Run[]>("list_task_runs", { taskId });
+export const listTaskRuns = (taskId: string | null, projectId: string | null = null) =>
+  invoke<Run[]>("list_task_runs", { taskId, projectId });
+/** Como `listTaskRuns` (hasta 500), sin `prompt` ni `extraInstructions`. Un run sin tarea cuenta en el proyecto de su repo. */
+export const listRunsLight = (projectId: string | null = null, taskId: string | null = null) =>
+  invoke<RunLight[]>("list_runs_light", { projectId, taskId });
+/** Run completo (con `prompt`). */
+export const getRun = (runId: string) => invoke<Run>("get_run", { runId });
+/** El último run de cada tarea, sin límite de historial. */
+export const latestRunsByTask = (projectId: string | null = null) =>
+  invoke<RunLight[]>("latest_runs_by_task", { projectId });
 /** Cola global: runs `queued`, en orden de salida. */
 export const listQueue = () => invoke<Run[]>("list_queue");
 /** Encola un run de trabajo (o lo lanza si hay slot). */

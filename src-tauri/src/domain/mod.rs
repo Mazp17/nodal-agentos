@@ -389,6 +389,71 @@ pub struct Run {
     pub tokens: Option<i64>,
 }
 
+/// `Run` sin `prompt` ni `extraInstructions`, para listas (historial, board).
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RunLight {
+    pub id: String,
+    pub task_id: Option<String>,
+    pub repo_id: Option<String>,
+    pub cwd: String,
+    pub executor: Executor,
+    pub kind: RunKind,
+    pub parent_run_id: Option<String>,
+    pub options: LaunchOptions,
+    pub finish: Finish,
+    pub isolation: Option<Isolation>,
+    pub review: bool,
+    pub verdict: Option<Verdict>,
+    pub status: RunStatus,
+    pub queue_position: f64,
+    pub claude_run_id: Option<String>,
+    pub session_id: Option<String>,
+    pub queued_at: i64,
+    pub launched_at: Option<i64>,
+    pub finished_at: Option<i64>,
+    pub outcome: Option<RunOutcome>,
+    pub summary: Option<String>,
+    pub pr_url: Option<String>,
+    pub branch: Option<String>,
+    pub error: Option<String>,
+    pub legacy_label: Option<String>,
+    pub tokens: Option<i64>,
+}
+
+impl From<Run> for RunLight {
+    fn from(r: Run) -> Self {
+        RunLight {
+            id: r.id,
+            task_id: r.task_id,
+            repo_id: r.repo_id,
+            cwd: r.cwd,
+            executor: r.executor,
+            kind: r.kind,
+            parent_run_id: r.parent_run_id,
+            options: r.options,
+            finish: r.finish,
+            isolation: r.isolation,
+            review: r.review,
+            verdict: r.verdict,
+            status: r.status,
+            queue_position: r.queue_position,
+            claude_run_id: r.claude_run_id,
+            session_id: r.session_id,
+            queued_at: r.queued_at,
+            launched_at: r.launched_at,
+            finished_at: r.finished_at,
+            outcome: r.outcome,
+            summary: r.summary,
+            pr_url: r.pr_url,
+            branch: r.branch,
+            error: r.error,
+            legacy_label: r.legacy_label,
+            tokens: r.tokens,
+        }
+    }
+}
+
 // ---------- Fuentes externas ----------
 
 /// Scope del proveedor que se vincula (team o proyecto de Linear, proyecto de Asana...).

@@ -26,6 +26,38 @@ pub fn list(conn: &Connection, task_id: Option<&str>) -> Result<Vec<Run>, DbErro
     )
 }
 
+/// Filtro por proyecto: el de la tarea, o el del repo si el run no tiene tarea.
+const IN_PROJECT: &str = "(?1 IS NULL OR t.project_id = ?1 OR (r.task_id IS NULL AND rp.project_id = ?1))";
+
+/// Como `list`, pero también por proyecto (`None`: todos). Hasta `HISTORY_LIMIT`.
+pub fn list_filtered(conn: &Connection, project_id: Option<&str>, task_id: Option<&str>) -> Result<Vec<Run>, DbError> {
+    query(
+        conn,
+        &format!(
+            "SELECT r.* FROM runs r
+             LEFT JOIN tasks t ON t.id = r.task_id
+             LEFT JOIN repos rp ON rp.id = r.repo_id
+             WHERE {IN_PROJECT} AND (?2 IS NULL OR r.task_id = ?2)
+             ORDER BY r.queued_at DESC, r.id DESC LIMIT ?3"
+        ),
+        rusqlite::params![project_id, task_id, HISTORY_LIMIT],
+    )
+}
+
+/// El último run (por `queued_at`) de cada tarea del proyecto (`None`: todas), sin límite
+/// de historial.
+pub fn latest_by_task(conn: &Connection, project_id: Option<&str>) -> Result<Vec<Run>, DbError> {
+    query(
+        conn,
+        "SELECT * FROM (
+             SELECT r.*, ROW_NUMBER() OVER (PARTITION BY r.task_id ORDER BY r.queued_at DESC, r.id DESC) AS rn
+             FROM runs r JOIN tasks t ON t.id = r.task_id
+             WHERE ?1 IS NULL OR t.project_id = ?1
+         ) WHERE rn = 1 ORDER BY queued_at DESC, id DESC",
+        rusqlite::params![project_id],
+    )
+}
+
 /// Cola global en orden de salida.
 pub fn queue(conn: &Connection) -> Result<Vec<Run>, DbError> {
     query(conn, "SELECT * FROM runs WHERE status = 'queued' ORDER BY queue_position, queued_at, id", [])
