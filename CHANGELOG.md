@@ -4,6 +4,10 @@ All notable changes to Nodal are documented here. The format follows [Keep a Cha
 
 ## [Unreleased]
 
+### Changed
+
+- Every run is launched with `--append-system-prompt` telling it it's unattended, so it reports and stops instead of ending on a question and leaving the task In Progress.
+
 ## [0.2.0] - 2026-09-24
 
 ### Added
