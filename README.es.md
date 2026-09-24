@@ -49,6 +49,16 @@ Nodal no reemplaza a Claude Code: maneja el CLI `claude` que ya tienes instalado
 
 Para compilar desde el código fuente también necesitas Node.js 20+, pnpm 10 y Rust estable.
 
+## Instalación
+
+Descarga el último `Nodal_<versión>_universal.dmg` (Apple Silicon e Intel) desde [Releases](https://github.com/Mazp17/nodal-agentos/releases), ábrelo y arrastra Nodal a Aplicaciones.
+
+Nodal no está notarizado por Apple, así que macOS bloquea la primera apertura ("Nodal está dañado" o "no se puede abrir"). Quita la marca de cuarentena una vez:
+
+```bash
+xattr -dr com.apple.quarantine /Applications/Nodal.app
+```
+
 ## Cómo empezar
 
 ```bash

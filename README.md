@@ -49,6 +49,16 @@ Nodal does not replace Claude Code: it drives the `claude` CLI you already have 
 
 To build from source you also need Node.js 20+, pnpm 10 and a stable Rust toolchain.
 
+## Install
+
+Download the latest `Nodal_<version>_universal.dmg` (Apple Silicon and Intel) from [Releases](https://github.com/Mazp17/nodal-agentos/releases), open it and drag Nodal to Applications.
+
+Nodal is not notarized by Apple, so macOS blocks the first launch ("Nodal is damaged" or "cannot be opened"). Remove the quarantine flag once:
+
+```bash
+xattr -dr com.apple.quarantine /Applications/Nodal.app
+```
+
 ## Getting started
 
 ```bash

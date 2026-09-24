@@ -9,7 +9,8 @@
     "build": "pnpm lint:no-native-dialogs && tsc && vite build",
     "preview": "vite preview",
     "lint:no-native-dialogs": "grep -rnE '(window|globalThis|self)\\??\\.(confirm|alert|prompt)[[:space:]]*\\(|(^|[^.?[:alnum:]_$])(confirm|alert|prompt)\\(' src; [ $? -eq 1 ] || { echo 'Native dialogs do not work under Tauri (plugin-dialog makes them async). Use useConfirm() from src/ui/ConfirmDialog.' >&2; exit 1; }",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "release:bump": "node scripts/release-bump.mjs"
   },
   "dependencies": {
     "@fontsource/jetbrains-mono": "^5.3.0",
