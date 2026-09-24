@@ -239,6 +239,11 @@ pub fn team_filter(team_ids: Option<&[String]>) -> Value {
 //   `Mutation.commentCreate(input: CommentCreateInput{issueId, body})`, ambos con `success`
 //   (`IssuePayload.issue` trae el estado resultante);
 // - `Query.workflowState(id: String!)` y `Team.states(first)` para resolver el push.
+// Reglas de proyecto (mismo schema, 2026-09-24):
+// - `Issue.{project: Project {id, name}, createdAt: DateTime!, completedAt: DateTime,
+//   canceledAt: DateTime}`;
+// - `IssueFilter.{completedAt, canceledAt}: NullableDateComparator{gt: DateTimeOrDuration}`;
+// - `ProjectFilter.accessibleTeams: TeamCollectionFilter{some: TeamFilter{id}}`.
 
 /// Página del listado de importables. Chico a propósito: cada issue trae `labels(first: 20)`.
 pub const SYNC_PAGE_SIZE: u32 = 25;
@@ -281,6 +286,12 @@ pub struct SyncIssue {
     pub url: String,
     pub priority: f64,
     pub updated_at: String,
+    #[serde(default)]
+    pub created_at: Option<String>,
+    #[serde(default)]
+    pub completed_at: Option<String>,
+    #[serde(default)]
+    pub canceled_at: Option<String>,
     #[serde(default)]
     pub description: Option<String>,
     pub state: WorkflowState,
@@ -410,6 +421,16 @@ pub const PROJECTS_QUERY: &str = r#"query NodalProjects {
   }
 }"#;
 
+/// Proyectos activos a los que tiene acceso un team (para elegir la regla de proyecto).
+pub const TEAM_PROJECTS_QUERY: &str = r#"query NodalTeamProjects($teamId: ID!) {
+  projects(first: 100, filter: {
+    accessibleTeams: { some: { id: { eq: $teamId } } },
+    status: { type: { nin: ["completed", "canceled"] } }
+  }) {
+    nodes { id name }
+  }
+}"#;
+
 pub const PROJECT_TEAMS_QUERY: &str = "query NodalProjectTeams($id: String!) {
   project(id: $id) { teams(first: 20) { nodes { id key name } } }
 }";
@@ -423,7 +444,7 @@ pub const WORKFLOW_STATES_QUERY: &str = "query NodalStates($teamIds: [ID!]) {
 pub const IMPORTABLE_QUERY: &str = "query NodalImportable($filter: IssueFilter, $first: Int!, $after: String) {
   issues(filter: $filter, first: $first, after: $after, orderBy: updatedAt) {
     nodes {
-      id identifier title url priority updatedAt
+      id identifier title url priority updatedAt createdAt completedAt canceledAt
       state { id name type position color }
       team { id key name }
       project { id name }
@@ -436,7 +457,7 @@ pub const IMPORTABLE_QUERY: &str = "query NodalImportable($filter: IssueFilter, 
 pub const ISSUES_BY_IDS_QUERY: &str = "query NodalIssues($ids: [ID!], $first: Int!) {
   issues(filter: { id: { in: $ids } }, first: $first, includeArchived: true) {
     nodes {
-      id identifier title url priority updatedAt description
+      id identifier title url priority updatedAt createdAt completedAt canceledAt description
       state { id name type position color }
       team { id key name }
       project { id name }
@@ -490,6 +511,41 @@ pub fn importable_filter(
             or.push(json!({ "number": { "eq": n } }));
         }
         and.push(json!({ "or": or }));
+    }
+    if let Some(iso) = created_after_iso {
+        and.push(json!({ "createdAt": { "gt": iso } }));
+    }
+    json!({ "and": and })
+}
+
+/// Filtro de una regla de proyecto: scope del link (`team` o `project`) + proyecto de la
+/// regla, abiertas (`state_types`) y, con `closed_within_days`, también las completadas o
+/// canceladas hace menos de esos días (`completedAt`/`canceledAt` con duración ISO 8601
+/// relativa, como `issue_filter`); con `created_after_iso`, solo las creadas después.
+pub fn project_rule_filter(
+    scope_kind: &str,
+    scope_id: &str,
+    project_id: &str,
+    state_types: &[&str],
+    closed_within_days: Option<u32>,
+    created_after_iso: Option<&str>,
+) -> Value {
+    let mut and = vec![match scope_kind {
+        "project" => json!({ "project": { "id": { "eq": scope_id } } }),
+        _ => json!({ "team": { "id": { "eq": scope_id } } }),
+    }];
+    and.push(json!({ "project": { "id": { "eq": project_id } } }));
+    let open = (!state_types.is_empty()).then(|| json!({ "state": { "type": { "in": state_types } } }));
+    match (open, closed_within_days) {
+        (open, Some(days)) => {
+            let since = format!("-P{days}D");
+            let mut or: Vec<Value> = open.into_iter().collect();
+            or.push(json!({ "completedAt": { "gt": since } }));
+            or.push(json!({ "canceledAt": { "gt": since } }));
+            and.push(json!({ "or": or }));
+        }
+        (Some(open), None) => and.push(open),
+        (None, None) => {}
     }
     if let Some(iso) = created_after_iso {
         and.push(json!({ "createdAt": { "gt": iso } }));

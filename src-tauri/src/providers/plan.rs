@@ -260,6 +260,8 @@ pub mod tests {
             assignee: None,
             priority: Priority::None,
             updated_at: "2026-09-20T10:00:00.000Z".into(),
+            created_at: Some("2026-09-01T10:00:00.000Z".into()),
+            closed_at: None,
         }
     }
 

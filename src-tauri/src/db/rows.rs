@@ -159,6 +159,12 @@ pub fn task_from_row(row: &Row) -> rusqlite::Result<Task> {
             last_synced_at: row.get("src_last_synced_at")?,
             sync_error: row.get("src_sync_error")?,
             unmapped: row.get("src_unmapped")?,
+            project: match row.get::<_, Option<String>>("src_project_id")? {
+                Some(id) => Some(ExtProject { id, name: row.get::<_, Option<String>>("src_project_name")?.unwrap_or_default() }),
+                None => None,
+            },
+            rule_id: row.get("src_rule_id")?,
+            moved: get_opt_json(row, "src_moved")?,
         }),
         None => None,
     };
@@ -201,12 +207,14 @@ pub fn insert_task(conn: &Connection, t: &Task) -> Result<(), DbError> {
                             assignee_json, isolation, finish, review, wt_path, wt_branch, wt_base,
                             src_provider, src_link_id, src_external_id, src_identifier, src_url,
                             src_state_json, src_last_synced_at, src_sync_error, src_unmapped,
+                            src_project_id, src_project_name, src_rule_id, src_moved,
                             created_at, updated_at, closed_at)
          VALUES (:id, :project, :repo, :number, :title, :status, :priority, :labels,
                  :position, :plan_kind, :plan_path, :plan_overridden, :acceptance,
                  :assignee, :isolation, :finish, :review, :wt_path, :wt_branch, :wt_base,
                  :src_provider, :src_link, :src_ext, :src_ident, :src_url,
                  :src_state, :src_synced, :src_error, :src_unmapped,
+                 :src_project, :src_project_name, :src_rule, :src_moved,
                  :created, :updated, :closed)",
         named_params! {
             ":id": t.id, ":project": t.project_id, ":repo": t.repo_id, ":number": t.number,
@@ -224,6 +232,10 @@ pub fn insert_task(conn: &Connection, t: &Task) -> Result<(), DbError> {
             ":src_synced": src.and_then(|s| s.last_synced_at),
             ":src_error": src.and_then(|s| s.sync_error.as_ref()),
             ":src_unmapped": src.is_some_and(|s| s.unmapped),
+            ":src_project": src.and_then(|s| s.project.as_ref()).map(|p| &p.id),
+            ":src_project_name": src.and_then(|s| s.project.as_ref()).map(|p| &p.name),
+            ":src_rule": src.and_then(|s| s.rule_id.as_ref()),
+            ":src_moved": src.and_then(|s| s.moved.as_ref()).map(to_json).transpose()?,
             ":created": t.created_at, ":updated": t.updated_at, ":closed": t.closed_at,
         },
     )?;
@@ -335,7 +347,11 @@ pub fn source_link_from_row(row: &Row) -> rusqlite::Result<SourceLink> {
         provider: row.get("provider")?,
         scope: ScopeRef { kind: row.get("scope_kind")?, id: row.get("scope_id")?, name: row.get("scope_name")? },
         default_repo_id: row.get("default_repo_id")?,
-        repo_rules: get_json(row, "repo_rules_json")?,
+        repo_rules: {
+            let mut rules: Vec<RepoRule> = get_json(row, "repo_rules_json")?;
+            normalize_legacy_rules(&mut rules, row.get("created_at")?);
+            rules
+        },
         state_map: get_json(row, "state_map_json")?,
         auto_import: row.get("auto_import")?,
         created_at: row.get("created_at")?,

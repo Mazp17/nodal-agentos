@@ -7,10 +7,13 @@ use serde::{Deserialize, Deserializer, Serialize};
 use tauri::{AppHandle, Manager, State};
 
 use crate::db::{with_db, Db, DbError};
-use crate::domain::{ExtKind, RepoRule, ScopeRef, SourceLink, StateMap, Task};
+use crate::domain::{ExtKind, RepoRule, RuleKind, ScopeRef, SourceLink, StateMap, Task};
 use crate::linear::LinearState;
 
-use super::import::{import_items, importable_rows, ImportRequest, ImportResult, ImportableItem, Skipped};
+use super::import::{
+    backfill_keeps, import_items, importable_rows, plan_backfill, rule_query, BackfillPlan, ImportRequest, ImportResult,
+    ImportableItem, RulePreview, Skipped, BACKFILL_MAX_PAGES,
+};
 use super::state_map::{self, SourceStatesReport};
 use super::sync::{run_for_app, SyncReport};
 use crate::events::{notify, Kind};
@@ -170,10 +173,44 @@ fn check_link_repos(conn: &rusqlite::Connection, link: &SourceLink) -> Result<()
     for repo in repos {
         store::check_repo_in_project(conn, repo, &link.project_id)?;
     }
-    if link.repo_rules.iter().any(|r| r.label.trim().is_empty()) {
-        return Err(DbError::Invalid("Routing rules need a label.".into()));
-    }
     Ok(())
+}
+
+/// Reglas que manda la UI → reglas guardadas. Una regla nueva (sin id, o con otro tipo o
+/// valor que la guardada con ese id) recibe id y `created_at = now`: desde ahí cuenta su
+/// auto-import. Las que no cambiaron conservan id y `created_at` (no se confía en el
+/// cliente). Rechaza valores vacíos y dos reglas para el mismo proyecto.
+pub fn prepare_rules(old: &[RepoRule], incoming: Vec<RepoRule>, now: i64) -> Result<Vec<RepoRule>, DbError> {
+    let mut out: Vec<RepoRule> = Vec::with_capacity(incoming.len());
+    for mut r in incoming {
+        r.value = r.value.trim().to_string();
+        r.name = r.name.trim().to_string();
+        if r.value.is_empty() {
+            return Err(DbError::Invalid(match r.kind {
+                RuleKind::Label => "Routing rules need a label.".into(),
+                RuleKind::Project => "Project rules need a project.".into(),
+            }));
+        }
+        if r.name.is_empty() {
+            r.name = r.value.clone();
+        }
+        let same = old.iter().find(|o| !r.id.is_empty() && o.id == r.id && o.kind == r.kind && o.value == r.value);
+        match same {
+            Some(o) => r.created_at = o.created_at,
+            None => {
+                r.id = new_id('r', now);
+                r.created_at = now;
+            }
+        }
+        if out.iter().any(|o| o.id == r.id) {
+            r.id = new_id('r', now);
+        }
+        if r.is_project() && out.iter().any(|o| o.is_project() && o.value == r.value) {
+            return Err(DbError::Invalid(format!("The project \"{}\" already has a rule.", r.name)));
+        }
+        out.push(r);
+    }
+    Ok(out)
 }
 
 #[tauri::command]
@@ -201,7 +238,7 @@ pub async fn create_source_link(app: AppHandle, db: State<'_, Db>, input: NewSou
         provider: input.provider,
         scope: input.scope,
         default_repo_id: input.default_repo_id,
-        repo_rules: input.repo_rules,
+        repo_rules: prepare_rules(&[], input.repo_rules, now).map_err(e)?,
         state_map: if states.is_empty() { StateMap::default() } else { state_map::propose(&states) },
         auto_import: input.auto_import,
         created_at: now,
@@ -230,7 +267,7 @@ pub async fn update_source_link(app: AppHandle, db: State<'_, Db>, id: String, p
             link.default_repo_id = r;
         }
         if let Some(r) = patch.repo_rules {
-            link.repo_rules = r;
+            link.repo_rules = prepare_rules(&link.repo_rules, r, now_ms())?;
         }
         if let Some(a) = patch.auto_import {
             link.auto_import = a;
@@ -316,6 +353,8 @@ pub async fn provider_list_importable(
                 text: query.clone(),
                 state_kinds: kinds.clone(),
                 created_after: None,
+                project_id: None,
+                closed_within_days: None,
                 cursor: cursor.take(),
             })
             .await?;
@@ -361,6 +400,128 @@ pub async fn import_tasks(
     Ok(result)
 }
 
+// ---------- Reglas de proyecto ----------
+
+/// Proyectos del proveedor elegibles como regla del link (en Linear: los activos de su team).
+#[tauri::command]
+pub async fn source_rule_projects(app: AppHandle, db: State<'_, Db>, link_id: String) -> PResult<Vec<ScopeRef>> {
+    let link = load_link(&db, &link_id).await?;
+    Ok(require(&app, &link.provider).await?.rule_projects(&link.scope).await?)
+}
+
+fn find_rule(link: &SourceLink, rule_id: &str) -> PResult<RepoRule> {
+    link.repo_rules
+        .iter()
+        .find(|r| r.id == rule_id && r.is_project())
+        .cloned()
+        .ok_or_else(|| "Project rule not found. Reload the source and try again.".to_string())
+}
+
+/// Ítems del backfill de la regla (todas las páginas hasta `BACKFILL_MAX_PAGES`), con la
+/// pausa del proveedor: si está en pausa no va a la red, y un rate limit o una key rechazada
+/// lo pausan como en el sync.
+async fn backfill_items(app: &AppHandle, link: &SourceLink, rule: &RepoRule) -> PResult<(Provider, Vec<super::ExternalItem>)> {
+    let state = app.state::<ProvidersState>();
+    let now = now_ms();
+    if let Some(pause) = state.pause_of(&link.provider, now) {
+        return Err(format!(
+            "{} sync is paused until {} ({}). Try again later or run a manual sync.",
+            link.provider,
+            super::iso_from_ms(pause.until),
+            pause.reason
+        ));
+    }
+    let p = require(app, &link.provider).await?;
+    let base = rule_query(link, rule, true);
+    let mut items = Vec::new();
+    let mut cursor = None;
+    for page_no in 0..BACKFILL_MAX_PAGES {
+        let page = match p.list_importable(&super::ImportQuery { cursor: cursor.take(), ..base.clone() }).await {
+            Ok(page) => page,
+            Err(err) => {
+                state.pause_on(&link.provider, &err, now);
+                return Err(err.message);
+            }
+        };
+        items.extend(page.items.into_iter().filter(|i| backfill_keeps(i, now)));
+        match page.next_cursor {
+            Some(c) if page_no + 1 < BACKFILL_MAX_PAGES => cursor = Some(c),
+            Some(_) => {
+                eprintln!("import_rule: {} has more than {BACKFILL_MAX_PAGES} pages; the rest waits", rule.name);
+                break;
+            }
+            None => break,
+        }
+    }
+    Ok((p, items))
+}
+
+async fn backfill_plan(app: &AppHandle, db: &Db, link_id: &str, rule_id: &str) -> PResult<(SourceLink, RepoRule, Provider, BackfillPlan)> {
+    let link = load_link(db, link_id).await?;
+    let rule = find_rule(&link, rule_id)?;
+    let (p, items) = backfill_items(app, &link, &rule).await?;
+    let (l, r) = (link.clone(), rule.clone());
+    let plan = with_db(db, move |c| plan_backfill(c, &l, &r, &items)).await.map_err(e)?;
+    Ok((link, rule, p, plan))
+}
+
+/// Cuántos ítems traería el backfill de la regla (abiertos + cerrados en los últimos 14
+/// días), cuántos ya están en su repo y cuántos en otro (esos no se mueven).
+#[tauri::command]
+pub async fn preview_rule_import(app: AppHandle, db: State<'_, Db>, link_id: String, rule_id: String) -> PResult<RulePreview> {
+    Ok(backfill_plan(&app, &db, &link_id, &rule_id).await?.3.preview())
+}
+
+/// Backfill de una regla de proyecto: importa al repo de la regla los ítems del proyecto
+/// (dentro del scope del link) abiertos o cerrados en los últimos 14 días. Los ya
+/// importados en otro repo no se mueven: vuelven en `skipped`. Corre bajo el lock del sync
+/// para no competir con el auto-import.
+#[tauri::command]
+pub async fn import_rule(app: AppHandle, db: State<'_, Db>, link_id: String, rule_id: String) -> PResult<ImportResult> {
+    let state = app.state::<ProvidersState>();
+    let _sync = state.sync_lock.lock().await;
+    let (link, rule, p, plan) = backfill_plan(&app, &db, &link_id, &rule_id).await?;
+    let mut skipped = plan.elsewhere;
+    let full = if plan.to_import.is_empty() {
+        Vec::new()
+    } else {
+        match p.pull(&plan.to_import).await {
+            Ok(v) => v,
+            Err(err) => {
+                state.pause_on(&link.provider, &err, now_ms());
+                return Err(err.message);
+            }
+        }
+    };
+    let found: std::collections::HashSet<&str> = full.iter().map(|i| i.external_id.as_str()).collect();
+    skipped.extend(plan.to_import.iter().filter(|id| !found.contains(id.as_str())).map(|id| Skipped {
+        external_id: id.clone(),
+        reason: format!("Not found in {} (deleted, archived or no access).", link.provider),
+    }));
+    let pairs = full.into_iter().map(|i| (i, rule.repo_id.clone())).collect();
+    let data_dir = state.data_dir.clone();
+    let (l, here, rule_id) = (link.clone(), plan.here, rule.id.clone());
+    let mut result = with_db(&db, move |c| {
+        store::tag_rule(c, &l.id, &rule_id, &here)?;
+        import_items(c, &data_dir, &l, pairs, now_ms())
+    })
+    .await
+    .map_err(e)?;
+    result.skipped.extend(skipped);
+    notify(&app, &[Kind::Tasks], Some(&link.project_id));
+    Ok(result)
+}
+
+/// Resuelve el aviso "cambió de proyecto en el proveedor": `move` la pasa al repo
+/// sugerido (rechaza con un run activo o un worktree), `keep` la deja donde está.
+#[tauri::command]
+pub async fn resolve_moved_task(app: AppHandle, db: State<'_, Db>, task_id: String, action: store::MovedAction) -> PResult<Task> {
+    with_db(&db, move |c| store::resolve_moved(c, &task_id, action, now_ms()))
+        .await
+        .map_err(e)
+        .inspect(|t| notify(&app, &[Kind::Tasks], Some(&t.project_id)))
+}
+
 // ---------- Sync ----------
 
 /// Una pasada de sync ahora (todas las fuentes, o solo `link_id`).
@@ -401,6 +562,32 @@ mod tests {
         assert_eq!(v["viewer"], "Ana");
         assert!(v["error"].is_null());
         assert_eq!(v["pausedUntil"], 5);
+    }
+
+    #[test]
+    fn prepare_rules_assigns_ids_and_keeps_created_at() {
+        let old = vec![RepoRule::project("proj-a", "A", "r1", 5), RepoRule::label("docs", "r2")];
+        // Sin cambios: conserva id y created_at aunque el cliente mande otro.
+        let mut same = old.clone();
+        same[0].created_at = 999;
+        let out = prepare_rules(&old, same, 50).unwrap();
+        assert_eq!((out[0].id.as_str(), out[0].created_at), ("rule-proj-a", 5));
+        // Regla nueva (sin id) y regla con el mismo id pero otro proyecto: id y created_at nuevos.
+        let incoming: Vec<RepoRule> = serde_json::from_value(serde_json::json!([
+            {"id": "rule-proj-a", "kind": "project", "value": "proj-b", "name": "B", "repoId": "r1"},
+            {"kind": "project", "value": " proj-c ", "repoId": "r2"},
+            {"label": "legacy", "repoId": "r2"}
+        ]))
+        .unwrap();
+        let out = prepare_rules(&old, incoming, 50).unwrap();
+        assert!(out.iter().all(|r| r.id.starts_with('r') && r.id != "rule-proj-a" && r.created_at == 50), "{out:?}");
+        assert_eq!((out[1].value.as_str(), out[1].name.as_str()), ("proj-c", "proj-c"));
+        assert_eq!((out[2].kind, out[2].value.as_str()), (RuleKind::Label, "legacy"));
+        // Validaciones.
+        let dup = vec![RepoRule::project("p", "P", "r1", 1), RepoRule::project("p", "P", "r2", 1)];
+        assert!(prepare_rules(&[], dup, 1).unwrap_err().to_string().contains("already has a rule"));
+        let empty = vec![RepoRule::label(" ", "r1")];
+        assert!(prepare_rules(&[], empty, 1).unwrap_err().to_string().contains("need a label"));
     }
 
     #[test]

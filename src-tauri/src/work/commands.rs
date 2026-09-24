@@ -347,7 +347,10 @@ pub async fn work_summary(state: State<'_, WorkState>, project_id: Option<String
     let global = project_id.is_none();
     let (runs, blocked, settings) = db(&state.0, move |c| {
         let p = project_id.as_deref();
-        Ok((qruns::pending_of(c, p)?, tasks::blocked_ids(c, p)?, rows::load_settings(c)?))
+        // Las tareas que cambiaron de proyecto en el proveedor también esperan al usuario.
+        let mut need = tasks::blocked_ids(c, p)?;
+        need.extend(crate::providers::store::moved_ids(c, p)?);
+        Ok((qruns::pending_of(c, p)?, need, rows::load_settings(c)?))
     })
     .await?;
     let live = crate::runs::list_runs().await.unwrap_or_else(|e| {

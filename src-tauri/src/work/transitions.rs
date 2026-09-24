@@ -411,6 +411,9 @@ mod tests {
             last_synced_at: None,
             sync_error: None,
             unmapped: false,
+            project: None,
+            rule_id: None,
+            moved: None,
         });
         t
     }

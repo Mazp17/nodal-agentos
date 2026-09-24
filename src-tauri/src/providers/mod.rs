@@ -29,7 +29,7 @@ use std::path::PathBuf;
 use serde::Serialize;
 use tauri::{AppHandle, Manager};
 
-use crate::domain::{ExtKind, ExternalState, Priority, ScopeRef};
+use crate::domain::{ExtKind, ExtProject, ExternalState, Priority, ScopeRef};
 
 pub use store::{enqueue_comment, enqueue_status};
 
@@ -143,6 +143,20 @@ pub struct ExternalItem {
     pub priority: Priority,
     /// ISO 8601, tal cual lo da el proveedor.
     pub updated_at: String,
+    /// ISO 8601. `None` si el proveedor no lo informa.
+    pub created_at: Option<String>,
+    /// ISO 8601: cuándo se completó o canceló (`None` si está abierto o no se sabe).
+    pub closed_at: Option<String>,
+}
+
+impl ExternalItem {
+    /// Proyecto del proveedor al que pertenece (scope `project`), si tiene.
+    pub fn project(&self) -> Option<ExtProject> {
+        self.scopes
+            .iter()
+            .find(|s| s.kind == "project")
+            .map(|s| ExtProject { id: s.id.clone(), name: s.name.clone() })
+    }
 }
 
 /// Consulta del listado de importables.
@@ -155,7 +169,26 @@ pub struct ImportQuery {
     pub state_kinds: Vec<ExtKind>,
     /// Solo ítems creados después de este instante (epoch ms). Lo usa el auto-import.
     pub created_after: Option<i64>,
+    /// Solo ítems de este proyecto del proveedor (dentro de `scope`): reglas de proyecto.
+    pub project_id: Option<String>,
+    /// Además de `state_kinds`, los completados o cancelados hace menos de estos días
+    /// (backfill de una regla de proyecto).
+    pub closed_within_days: Option<u32>,
     pub cursor: Option<String>,
+}
+
+impl ImportQuery {
+    pub fn new(scope: ScopeRef) -> Self {
+        ImportQuery {
+            scope,
+            text: None,
+            state_kinds: OPEN_KINDS.to_vec(),
+            created_after: None,
+            project_id: None,
+            closed_within_days: None,
+            cursor: None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -178,6 +211,9 @@ pub trait TaskProvider {
     async fn scopes(&self) -> ProviderResult<Vec<ScopeRef>>;
     /// Estados actuales del scope, en orden del proveedor.
     async fn states(&self, scope: &ScopeRef) -> ProviderResult<Vec<ExternalState>>;
+    /// Proyectos del proveedor que pueden ser regla de un link con este scope (en Linear:
+    /// los proyectos activos del team; un link a un proyecto, ese proyecto).
+    async fn rule_projects(&self, scope: &ScopeRef) -> ProviderResult<Vec<ScopeRef>>;
     async fn list_importable(&self, query: &ImportQuery) -> ProviderResult<Page>;
     /// Ítems completos por id. Los que ya no existen (o la key no ve) no vuelven.
     async fn pull(&self, external_ids: &[String]) -> ProviderResult<Vec<ExternalItem>>;
@@ -224,6 +260,9 @@ impl TaskProvider for Provider {
     }
     async fn states(&self, scope: &ScopeRef) -> ProviderResult<Vec<ExternalState>> {
         dispatch!(self, p => p.states(scope).await)
+    }
+    async fn rule_projects(&self, scope: &ScopeRef) -> ProviderResult<Vec<ScopeRef>> {
+        dispatch!(self, p => p.rule_projects(scope).await)
     }
     async fn list_importable(&self, query: &ImportQuery) -> ProviderResult<Page> {
         dispatch!(self, p => p.list_importable(query).await)
@@ -326,6 +365,19 @@ impl ProvidersState {
     /// Pausa vigente de un proveedor.
     pub fn pause_of(&self, provider: &str, now: i64) -> Option<sync::Pause> {
         self.paused().remove(provider).filter(|p| p.until > now)
+    }
+
+    /// Un rate limit o una key rechazada fuera del sync (backfill de una regla) pausan el
+    /// proveedor igual que en el sync; otros errores no.
+    pub fn pause_on(&self, provider: &str, err: &ProviderError, now: i64) {
+        let ms = match err.kind {
+            ErrorKind::RateLimited => sync::RATE_LIMIT_PAUSE_MS,
+            ErrorKind::Auth => sync::AUTH_PAUSE_MS,
+            _ => return,
+        };
+        if let Ok(mut m) = self.pauses.lock() {
+            m.insert(provider.to_string(), sync::Pause { until: now + ms, reason: err.message.clone() });
+        }
     }
 
     /// Una key nueva (o borrada) levanta la pausa.

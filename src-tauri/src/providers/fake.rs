@@ -6,7 +6,7 @@ use std::sync::{Arc, Mutex, MutexGuard};
 
 use crate::domain::{ExternalState, ScopeRef};
 
-use super::{ErrorKind, ExternalItem, ImportQuery, Page, ProviderError, ProviderResult, TaskProvider};
+use super::{iso_from_ms, ErrorKind, ExternalItem, ImportQuery, Page, ProviderError, ProviderResult, TaskProvider};
 
 #[derive(Default)]
 pub struct FakeData {
@@ -20,6 +20,12 @@ pub struct FakeData {
     pub comments: Vec<(String, String)>,
     /// Llamadas a `states`.
     pub states_calls: usize,
+    /// Proyectos que devuelve `rule_projects`.
+    pub projects: Vec<ScopeRef>,
+    /// "Ahora" del proveedor (epoch ms) para `closed_within_days`.
+    pub now: i64,
+    /// Consultas recibidas por `list_importable`.
+    pub queries: Vec<ImportQuery>,
 }
 
 #[derive(Clone, Default)]
@@ -53,13 +59,28 @@ impl TaskProvider for FakeProvider {
         }
     }
 
+    async fn rule_projects(&self, _scope: &ScopeRef) -> ProviderResult<Vec<ScopeRef>> {
+        Ok(self.data().projects.clone())
+    }
+
+    /// Emula el filtro de Linear: tipos de estado (o cerrados hace menos de
+    /// `closed_within_days`), texto, proyecto y `created_after` (fechas ISO comparables).
     async fn list_importable(&self, q: &ImportQuery) -> ProviderResult<Page> {
-        let d = self.data();
+        let mut d = self.data();
+        d.queries.push(q.clone());
+        let since = q.closed_within_days.map(|days| iso_from_ms(d.now - i64::from(days) * 86_400_000));
+        let created = q.created_after.map(iso_from_ms);
         let items = d
             .items
             .values()
-            .filter(|i| q.state_kinds.is_empty() || q.state_kinds.contains(&i.state.kind))
+            .filter(|i| {
+                let open = q.state_kinds.is_empty() || q.state_kinds.contains(&i.state.kind);
+                let recent = since.as_ref().is_some_and(|s| i.closed_at.as_ref().is_some_and(|c| c > s));
+                open || recent
+            })
             .filter(|i| q.text.as_deref().is_none_or(|t| i.title.to_lowercase().contains(&t.to_lowercase())))
+            .filter(|i| q.project_id.as_ref().is_none_or(|p| i.project().is_some_and(|ip| &ip.id == p)))
+            .filter(|i| created.as_ref().is_none_or(|c| i.created_at.as_ref().is_some_and(|ic| ic > c)))
             .cloned()
             .collect();
         Ok(Page { items, next_cursor: None })

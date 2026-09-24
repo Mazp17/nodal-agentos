@@ -15,7 +15,10 @@
 //!   (unlink) no vuelve por auto-import.
 //! - Auto-import: ítems abiertos del scope creados después del link, con repo por regla o
 //!   default; sin repo resoluble no se importan y se reporta. El pull completo solo se pide
-//!   para candidatos nuevos con repo.
+//!   para candidatos nuevos con repo. Cada regla de proyecto suma (aunque el link no tenga
+//!   auto-import) los ítems abiertos de su proyecto creados después de la regla.
+//! - Proyecto: el pull guarda el proyecto del proveedor de cada tarea; una que llegó por
+//!   regla de proyecto y cambió de proyecto queda `moved` (no se mueve sola).
 //! - Rate limit o key rechazada en cualquier paso cortan la pasada del proveedor y lo pausan
 //!   en memoria (`SyncMemo`); los estados de cada scope se releen cada `STATES_TTL_MS`. Un
 //!   sync manual (`force`) ignora la pausa y relee los estados.
@@ -30,9 +33,11 @@ use tauri::{AppHandle, Manager};
 
 use crate::db::{rows, with_db, Db, DbError};
 use crate::util::now_ms;
-use crate::domain::{ExternalState, OutboxPayload, PlanRef, SourceLink, StateChanges, StateMap, Task, TaskStatus};
+use crate::domain::{
+    ExtProject, ExternalState, MovedInfo, OutboxPayload, PlanRef, SourceLink, StateChanges, StateMap, Task, TaskStatus,
+};
 
-use super::import::{import_items, suggest_repo};
+use super::import::{import_items, project_rule, rule_query, suggest_repo, suggest_repo_for};
 use super::plan::{plan_path, render_plan, write_plan};
 use super::state_map::{diff_known, literal_target, pull_status, push_target, PushTarget, SkipReason};
 use super::{
@@ -131,6 +136,48 @@ pub fn decide_pull(task: &Task, item: &ExternalItem, map: &StateMap, active_run:
         sync_error: mapped.is_none().then(|| {
             format!("External state \"{}\" is not mapped to a Nodal status. Review the mapping.", item.state.name)
         }),
+    }
+}
+
+/// Proyecto, regla de origen y aviso de cambio de proyecto de una tarea tras el pull.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ProjectUpdate {
+    pub project: Option<ExtProject>,
+    pub rule_id: Option<String>,
+    pub moved: Option<MovedInfo>,
+}
+
+/// Una tarea que llegó por una regla de proyecto y cuya issue ahora está en otro proyecto no
+/// se mueve de repo: queda `moved` hasta que el usuario decida. Si el repo que le tocaría es
+/// el mismo, no hay nada que decidir (pasa a la regla del proyecto nuevo, si hay); si vuelve
+/// al proyecto original, el aviso se limpia. Las demás tareas solo registran el proyecto.
+pub fn decide_project(task: &Task, item: &ExternalItem, link: &SourceLink) -> ProjectUpdate {
+    let src = task.source.as_ref();
+    let current = item.project();
+    let current_id = current.as_ref().map(|p| p.id.as_str());
+    let rule_id = src.and_then(|s| s.rule_id.clone());
+    let anchor = match src.and_then(|s| s.moved.as_ref()) {
+        Some(m) => Some(m.from_project.clone()),
+        None => rule_id
+            .as_deref()
+            .and_then(|id| link.repo_rules.iter().find(|r| r.id == id && r.is_project()))
+            .map(|r| {
+                let stored = src.and_then(|s| s.project.as_ref()).filter(|p| p.id == r.value);
+                ExtProject { id: r.value.clone(), name: stored.map_or_else(|| r.name.clone(), |p| p.name.clone()) }
+            }),
+    };
+    let Some(anchor) = anchor.filter(|a| current_id != Some(a.id.as_str())) else {
+        return ProjectUpdate { project: current, rule_id, moved: None };
+    };
+    let suggested = suggest_repo(link, current_id, &item.labels);
+    if suggested.as_deref() == Some(task.repo_id.as_str()) {
+        let rule_id = project_rule(link, current_id).filter(|r| r.repo_id == task.repo_id).map(|r| r.id.clone());
+        return ProjectUpdate { project: current, rule_id, moved: None };
+    }
+    ProjectUpdate {
+        project: current.clone(),
+        rule_id,
+        moved: Some(MovedInfo { from_project: anchor, to_project: current, suggested_repo_id: suggested }),
     }
 }
 
@@ -308,7 +355,7 @@ pub async fn sync_run(
                 }
                 let before = report.errors.len();
                 halt = pull_link(db, data_dir, p, link, &flagged, now, &mut report).await;
-                if link.auto_import && halt.is_none() {
+                if (link.auto_import || link.repo_rules.iter().any(|r| r.is_project())) && halt.is_none() {
                     halt = auto_import_link(db, data_dir, p, link, now, &mut report).await;
                 }
                 link_errors.entry(link.id.clone()).or_default().extend(report.errors[before..].iter().cloned());
@@ -464,7 +511,7 @@ async fn drain_outbox(
 struct PullCtx<'a> {
     data_dir: &'a Path,
     provider: &'a str,
-    map: &'a StateMap,
+    link: &'a SourceLink,
     now: i64,
 }
 
@@ -476,7 +523,8 @@ fn apply_pull_task(
     item: Option<&ExternalItem>,
     keep_error: bool,
 ) -> Result<bool, DbError> {
-    let PullCtx { data_dir, provider, map, now } = *ctx;
+    let PullCtx { data_dir, provider, link, now } = *ctx;
+    let map = &link.state_map;
     // La tarea se leyó antes de ir a la red: si entre medio la desvincularon, la movieron de
     // link o le sobrescribieron el plan, manda lo que hay ahora.
     let before = task.source.as_ref().map(|s| (s.link_id.clone(), s.external_id.clone()));
@@ -507,6 +555,8 @@ fn apply_pull_task(
             now,
         },
     )?;
+    let pu = decide_project(task, item, link);
+    store::set_src_project(conn, &task.id, pu.project.as_ref(), pu.rule_id.as_deref(), pu.moved.as_ref())?;
     if !task.plan_overridden && task.plan == PlanRef::Text {
         write_plan(&plan_path(data_dir, &task.id), &render_plan(item))
             .map_err(|e| DbError::Invalid(format!("Could not write the plan of {}: {e}", item.identifier)))?;
@@ -542,11 +592,11 @@ async fn pull_link(
             return halts(&e).then_some(e);
         }
     };
-    let (data_dir, provider, map, flagged) = (data_dir.to_path_buf(), p.name(), link.state_map.clone(), flagged.clone());
+    let (data_dir, provider, link, flagged) = (data_dir.to_path_buf(), p.name(), link.clone(), flagged.clone());
     let res = with_db(db, move |c| {
         let mut pulled = 0;
         let mut errors = Vec::new();
-        let ctx = PullCtx { data_dir: &data_dir, provider, map: &map, now };
+        let ctx = PullCtx { data_dir: &data_dir, provider, link: &link, now };
         for t in &tasks {
             let item = t.source.as_ref().and_then(|s| items.get(&s.external_id));
             match apply_pull_task(c, &ctx, t, item, flagged.contains(&t.id)) {
@@ -576,27 +626,32 @@ async fn auto_import_link(
     now: i64,
     report: &mut SyncReport,
 ) -> Option<ProviderError> {
+    // Consultas: el scope entero (ítems creados después del link) si el link tiene
+    // auto-import, y cada regla de proyecto (ítems creados después de la regla; los
+    // anteriores los trae su backfill). Una regla de proyecto auto-importa siempre.
+    let mut queries = Vec::new();
+    if link.auto_import {
+        queries.push(ImportQuery { created_after: Some(link.created_at), ..ImportQuery::new(link.scope.clone()) });
+    }
+    queries.extend(link.repo_rules.iter().filter(|r| r.is_project()).map(|r| rule_query(link, r, false)));
     let mut candidates = Vec::new();
-    let mut cursor = None;
-    for _ in 0..AUTO_IMPORT_MAX_PAGES {
-        let q = ImportQuery {
-            scope: link.scope.clone(),
-            text: None,
-            state_kinds: super::OPEN_KINDS.to_vec(),
-            created_after: Some(link.created_at),
-            cursor: cursor.take(),
-        };
-        match p.list_importable(&q).await {
-            Ok(page) => {
-                candidates.extend(page.items);
-                match page.next_cursor {
-                    Some(c) => cursor = Some(c),
-                    None => break,
+    let mut seen = HashSet::new();
+    for base in queries {
+        let mut cursor = None;
+        for _ in 0..AUTO_IMPORT_MAX_PAGES {
+            let q = ImportQuery { cursor: cursor.take(), ..base.clone() };
+            match p.list_importable(&q).await {
+                Ok(page) => {
+                    candidates.extend(page.items.into_iter().filter(|i| seen.insert(i.external_id.clone())));
+                    match page.next_cursor {
+                        Some(c) => cursor = Some(c),
+                        None => break,
+                    }
                 }
-            }
-            Err(e) => {
-                report.errors.push(format!("{}: {e}", link.scope.name));
-                return halts(&e).then_some(e);
+                Err(e) => {
+                    report.errors.push(format!("{}: {e}", link.scope.name));
+                    return halts(&e).then_some(e);
+                }
             }
         }
     }
@@ -609,7 +664,7 @@ async fn auto_import_link(
             {
                 // Un repo de regla o por defecto que ya no es del proyecto (borrado) no se
                 // reintenta: el ítem espera a que se corrija la fuente.
-                let repo = suggest_repo(&l, &i.labels);
+                let repo = suggest_repo_for(&l, &i);
                 let usable = match &repo {
                     Some(r) => store::repo_project(c, r)?.as_deref() == Some(l.project_id.as_str()),
                     None => false,
@@ -1280,7 +1335,7 @@ mod tests {
         // `default_repo_id` tiene FK (ON DELETE SET NULL); las reglas no: pueden quedar colgadas.
         env.set_link(|l| {
             l.auto_import = true;
-            l.repo_rules = vec![RepoRule { label: "api".into(), repo_id: "r-gone".into() }];
+            l.repo_rules = vec![RepoRule::label("api", "r-gone")];
         });
         let mut it = item(20, None);
         it.labels = vec!["api".into()];
@@ -1293,6 +1348,171 @@ mod tests {
         assert!(l.last_sync_error.unwrap().contains("no longer exists"));
         env.set_link(|l| l.repo_rules[0].repo_id = "r-web".into());
         assert_eq!(env.run(20).imported, 1);
+    }
+
+    fn in_project(it: ExternalItem, proj: &str) -> ExternalItem {
+        crate::providers::import::tests::in_project(it, proj)
+    }
+
+    /// 2026-09-10T00:00:00Z.
+    const RULE_AT: i64 = 1_788_998_400_000;
+
+    #[test]
+    fn project_rule_auto_imports_new_items_even_without_auto_import() {
+        let mut env = Env::new();
+        env.set_link(|l| l.repo_rules.push(RepoRule::project("proj-guides", "Guides", "r-docs", RULE_AT)));
+        {
+            let mut d = env.fake.data();
+            let mut add = |n: u32, proj: &str, created: &str, st: &str| {
+                let mut it = in_project(item(n, None), proj);
+                it.created_at = Some(created.into());
+                it.state = state(st);
+                d.items.insert(it.external_id.clone(), it);
+            };
+            add(30, "guides", "2026-09-15T08:00:00.000Z", "s-todo"); // nueva y abierta: entra
+            add(31, "guides", "2026-09-01T08:00:00.000Z", "s-todo"); // anterior a la regla: backfill
+            add(32, "guides", "2026-09-15T08:00:00.000Z", "s-done"); // cerrada
+            add(33, "site", "2026-09-15T08:00:00.000Z", "s-todo"); // otro proyecto, link sin auto-import
+            add(34, "guides", "2026-09-16T08:00:00.000Z", "s-todo"); // desvinculada a mano
+        }
+        let t34 = {
+            let it = env.fake.data().items["uuid-34"].clone();
+            let mut conn = env.db.lock().unwrap();
+            import_items(&mut conn, &env.dir, &env.link, vec![(it, "r-docs".into())], 1).unwrap().imported.remove(0)
+        };
+        store::unlink_task(&env.db.lock().unwrap(), &t34.id, 2).unwrap();
+
+        let r = env.run(RULE_AT + 1000);
+        assert_eq!(r.imported, 1, "{r:?}");
+        let c = env.db.lock().unwrap();
+        let t = store::task_by_external(&c, "fake", "uuid-30").unwrap().unwrap();
+        assert_eq!(t.repo_id, "r-docs");
+        let src = t.source.unwrap();
+        assert_eq!(src.rule_id.as_deref(), Some("rule-proj-guides"));
+        assert_eq!(src.project.unwrap().name, "guides");
+        for n in [31, 32, 33, 34] {
+            assert!(store::task_by_external(&c, "fake", &format!("uuid-{n}")).unwrap().is_none(), "uuid-{n}");
+        }
+        drop(c);
+        let q = env.fake.data().queries.clone();
+        assert_eq!(q.len(), 1, "solo la consulta de la regla: {q:?}");
+        assert_eq!((q[0].project_id.as_deref(), q[0].created_after), (Some("proj-guides"), Some(RULE_AT)));
+        assert_eq!(env.run(RULE_AT + 2000).imported, 0);
+    }
+
+    fn move_to(env: &Env, n: u32, proj: Option<&str>) {
+        let mut d = env.fake.data();
+        let it = d.items.get_mut(&format!("uuid-{n}")).unwrap();
+        it.scopes.retain(|s| s.kind != "project");
+        if let Some(p) = proj {
+            it.scopes.push(ScopeRef { kind: "project".into(), id: format!("proj-{p}"), name: p.into() });
+        }
+    }
+
+    fn import_in(env: &Env, n: u32, proj: &str, repo: &str) -> Task {
+        let it = in_project(item(n, None), proj);
+        env.fake.data().items.insert(it.external_id.clone(), it.clone());
+        let mut conn = env.db.lock().unwrap();
+        import_items(&mut conn, &env.dir, &env.link, vec![(it, repo.into())], 1).unwrap().imported.remove(0)
+    }
+
+    fn resolve(env: &Env, id: &str, action: store::MovedAction) -> Result<Task, DbError> {
+        store::resolve_moved(&env.db.lock().unwrap(), id, action, 99)
+    }
+
+    #[test]
+    fn project_change_flags_rule_tasks_and_resolves() {
+        let mut env = Env::new();
+        env.set_link(|l| {
+            l.repo_rules.push(RepoRule::project("proj-site", "Site", "r-web", 1));
+            l.repo_rules.push(RepoRule::project("proj-guides", "Guides", "r-docs", 1));
+        });
+        let t = import_in(&env, 40, "site", "r-web");
+        assert_eq!(t.source.as_ref().unwrap().rule_id.as_deref(), Some("rule-proj-site"));
+        let plain = import_in(&env, 42, "site", "r-docs"); // no llegó por la regla
+
+        move_to(&env, 40, Some("guides"));
+        move_to(&env, 42, Some("guides"));
+        env.run(10);
+        let t2 = env.task(&t.id);
+        assert_eq!(t2.repo_id, "r-web", "no se mueve sola");
+        let m = t2.source.as_ref().unwrap().moved.clone().unwrap();
+        assert_eq!(m.from_project, ExtProject { id: "proj-site".into(), name: "site".into() });
+        assert_eq!(m.to_project.unwrap().id, "proj-guides");
+        assert_eq!(m.suggested_repo_id.as_deref(), Some("r-docs"));
+        let p = env.task(&plain.id).source.unwrap();
+        assert_eq!((p.moved, p.project.unwrap().id), (None, "proj-guides".to_string()));
+        assert_eq!(store::moved_ids(&env.db.lock().unwrap(), Some("p1")).unwrap(), vec![t.id.clone()]);
+
+        // Vuelve al proyecto original: el aviso se limpia.
+        move_to(&env, 40, Some("site"));
+        env.run(20);
+        assert_eq!(env.task(&t.id).source.unwrap().moved, None);
+
+        // Se va de nuevo; con run activo no se puede mover, sin run sí.
+        move_to(&env, 40, Some("guides"));
+        env.run(30);
+        env.db
+            .lock()
+            .unwrap()
+            .execute(
+                "INSERT INTO runs (id, task_id, cwd, executor_json, kind, prompt, finish, status, queue_position, queued_at)
+                 VALUES ('run1', ?1, '/tmp', '{\"kind\":\"claude\"}', 'work', 'p', 'pr', 'queued', 1, 1)",
+                [&t.id],
+            )
+            .unwrap();
+        let err = resolve(&env, &t.id, store::MovedAction::Move).unwrap_err().to_string();
+        assert!(err.contains("queued or running run"), "{err}");
+        assert_eq!(env.task(&t.id).repo_id, "r-web");
+        env.db.lock().unwrap().execute("UPDATE runs SET status = 'finished'", []).unwrap();
+        env.db
+            .lock()
+            .unwrap()
+            .execute("UPDATE tasks SET wt_path = '/tmp/wt', wt_branch = 'b', wt_base = 'main' WHERE id = ?1", [&t.id])
+            .unwrap();
+        let err = resolve(&env, &t.id, store::MovedAction::Move).unwrap_err().to_string();
+        assert!(err.contains("worktree"), "{err}");
+        env.db
+            .lock()
+            .unwrap()
+            .execute("UPDATE tasks SET wt_path = NULL, wt_branch = NULL, wt_base = NULL WHERE id = ?1", [&t.id])
+            .unwrap();
+        let moved = resolve(&env, &t.id, store::MovedAction::Move).unwrap();
+        assert_eq!(moved.repo_id, "r-docs");
+        let src = moved.source.unwrap();
+        assert_eq!((src.moved, src.rule_id.as_deref()), (None, Some("rule-proj-guides")));
+        env.run(40);
+        assert_eq!(env.task(&t.id).source.unwrap().moved, None, "no vuelve a avisar");
+        assert!(resolve(&env, &t.id, store::MovedAction::Keep).unwrap_err().to_string().contains("no pending"));
+    }
+
+    #[test]
+    fn project_change_keep_and_same_repo() {
+        let mut env = Env::new();
+        env.set_link(|l| {
+            l.repo_rules.push(RepoRule::project("proj-site", "Site", "r-web", 1));
+            l.repo_rules.push(RepoRule::project("proj-alt", "Alt", "r-web", 1));
+        });
+        let a = import_in(&env, 50, "site", "r-web");
+        let b = import_in(&env, 51, "site", "r-web");
+        // Sin regla, label ni default para el proyecto nuevo: aviso sin repo sugerido.
+        move_to(&env, 50, None);
+        // El proyecto nuevo va al mismo repo: nada que decidir.
+        move_to(&env, 51, Some("alt"));
+        env.run(10);
+        let m = env.task(&a.id).source.unwrap().moved.unwrap();
+        assert_eq!((m.to_project, m.suggested_repo_id), (None, None));
+        let sb = env.task(&b.id).source.unwrap();
+        assert_eq!((sb.moved, sb.rule_id.as_deref()), (None, Some("rule-proj-alt")));
+
+        let err = resolve(&env, &a.id, store::MovedAction::Move).unwrap_err().to_string();
+        assert!(err.contains("No repo is suggested"), "{err}");
+        let kept = resolve(&env, &a.id, store::MovedAction::Keep).unwrap();
+        assert_eq!(kept.repo_id, "r-web");
+        let src = kept.source.unwrap();
+        assert_eq!((src.moved, src.rule_id), (None, None));
+        env.run(20);
+        assert_eq!(env.task(&a.id).source.unwrap().moved, None, "keep: no vuelve a avisar");
     }
 
     #[test]

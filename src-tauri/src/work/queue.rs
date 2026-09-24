@@ -66,8 +66,9 @@ pub struct WorkSummary {
     pub running: u32,
     /// Concurrencia global de Settings.
     pub capacity: u32,
-    /// Cosas distintas esperando al usuario: tareas Blocked, runs migrados sin confirmar y
-    /// sesiones esperando permiso/input. Una tarea cuenta una sola vez.
+    /// Cosas distintas esperando al usuario: tareas Blocked o movidas de proyecto en el
+    /// proveedor, runs migrados sin confirmar y sesiones esperando permiso/input. Una tarea
+    /// cuenta una sola vez.
     pub need_you: u32,
     /// En cola y listos para salir (sin los que esperan confirmación).
     pub queued: u32,

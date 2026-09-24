@@ -3,7 +3,7 @@
 
 use crate::domain::{ExtKind, ExternalState, Priority, ScopeRef};
 use crate::linear::client::LinearClient;
-use crate::linear::model::{importable_filter, pick_team_state, ScopedState, SyncIssue, WorkflowState};
+use crate::linear::model::{importable_filter, pick_team_state, project_rule_filter, ScopedState, SyncIssue, WorkflowState};
 
 use super::{iso_from_ms, ChildItem, ErrorKind, ExternalItem, ImportQuery, ItemRef, Page, ProviderError, ProviderResult, TaskProvider};
 
@@ -110,6 +110,8 @@ pub fn to_item(i: SyncIssue) -> ExternalItem {
         assignee: i.assignee.map(|a| a.name),
         priority: priority(i.priority),
         updated_at: i.updated_at,
+        created_at: i.created_at,
+        closed_at: i.completed_at.or(i.canceled_at),
     }
 }
 
@@ -147,10 +149,34 @@ impl TaskProvider for LinearProvider {
         Ok(if states.is_empty() { Vec::new() } else { scoped_states(&states) })
     }
 
+    async fn rule_projects(&self, scope: &ScopeRef) -> ProviderResult<Vec<ScopeRef>> {
+        match scope.kind.as_str() {
+            "team" => Ok(self
+                .client()
+                .team_projects(&scope.id)
+                .await?
+                .into_iter()
+                .map(|p| ScopeRef { kind: "project".into(), id: p.id, name: p.name })
+                .collect()),
+            "project" => Ok(vec![scope.clone()]),
+            other => Err(ProviderError::new(ErrorKind::Permanent, format!("Unsupported Linear scope \"{other}\"."))),
+        }
+    }
+
     async fn list_importable(&self, q: &ImportQuery) -> ProviderResult<Page> {
         let types: Vec<&str> = q.state_kinds.iter().filter_map(|k| linear_type(*k)).collect();
         let created = q.created_after.map(iso_from_ms);
-        let filter = importable_filter(&q.scope.kind, &q.scope.id, &types, q.text.as_deref(), created.as_deref());
+        let filter = match &q.project_id {
+            Some(project) => project_rule_filter(
+                &q.scope.kind,
+                &q.scope.id,
+                project,
+                &types,
+                q.closed_within_days,
+                created.as_deref(),
+            ),
+            None => importable_filter(&q.scope.kind, &q.scope.id, &types, q.text.as_deref(), created.as_deref()),
+        };
         let (issues, next) =
             self.client().importable_page(&filter, q.cursor.as_deref()).await?;
         Ok(Page { items: issues.into_iter().map(to_item).collect(), next_cursor: next })
@@ -321,6 +347,66 @@ mod tests {
     }
 
     #[test]
+    fn project_rule_filter_shape() {
+        // Backfill: team + proyecto + (abiertas | cerradas en 14 días).
+        let f = project_rule_filter("team", "team-eng", "proj-web", &["triage", "backlog", "unstarted", "started"], Some(14), None);
+        assert_eq!(f["and"][0], json!({"team": {"id": {"eq": "team-eng"}}}));
+        assert_eq!(f["and"][1], json!({"project": {"id": {"eq": "proj-web"}}}));
+        assert_eq!(
+            f["and"][2],
+            json!({"or": [
+                {"state": {"type": {"in": ["triage", "backlog", "unstarted", "started"]}}},
+                {"completedAt": {"gt": "-P14D"}},
+                {"canceledAt": {"gt": "-P14D"}}
+            ]})
+        );
+        assert_eq!(f["and"].as_array().unwrap().len(), 3);
+        // Auto-import: abiertas creadas después de la regla.
+        let a = project_rule_filter("team", "team-eng", "proj-web", &["started"], None, Some("2026-09-10T00:00:00.000Z"));
+        assert_eq!(a["and"][2], json!({"state": {"type": {"in": ["started"]}}}));
+        assert_eq!(a["and"][3], json!({"createdAt": {"gt": "2026-09-10T00:00:00.000Z"}}));
+    }
+
+    /// Página del backfill (fixture ficticio): abierta, completada hace 2 días y cancelada
+    /// hace 30 (Linear no debería devolverla; el control local la descarta igual).
+    #[test]
+    fn backfill_page_parses_dates_and_project() {
+        let body = r##"{"data":{"issues":{"nodes":[
+          {"id":"u1","identifier":"ENG-1","title":"Abierta","url":"https://linear.app/acme/issue/ENG-1/a",
+           "priority":0,"updatedAt":"2026-09-20T10:00:00.000Z","createdAt":"2026-08-01T10:00:00.000Z",
+           "completedAt":null,"canceledAt":null,
+           "state":{"id":"st-todo","name":"Todo","type":"unstarted","position":2,"color":"#e2e2e2"},
+           "team":{"id":"team-eng","key":"ENG","name":"Engineering"},"project":{"id":"proj-web","name":"Website"},
+           "labels":{"nodes":[]}},
+          {"id":"u2","identifier":"ENG-2","title":"Hecha","url":"https://linear.app/acme/issue/ENG-2/b",
+           "priority":3,"updatedAt":"2026-09-19T10:00:00.000Z","createdAt":"2026-08-02T10:00:00.000Z",
+           "completedAt":"2026-09-19T10:00:00.000Z","canceledAt":null,
+           "state":{"id":"st-done","name":"Done","type":"completed","position":6,"color":"#5e6ad2"},
+           "team":{"id":"team-eng","key":"ENG","name":"Engineering"},"project":{"id":"proj-web","name":"Website"},
+           "labels":{"nodes":[{"name":"frontend"}]}},
+          {"id":"u3","identifier":"ENG-3","title":"Vieja","url":"https://linear.app/acme/issue/ENG-3/c",
+           "priority":0,"updatedAt":"2026-08-22T10:00:00.000Z","createdAt":"2026-08-03T10:00:00.000Z",
+           "completedAt":null,"canceledAt":"2026-08-22T10:00:00.000Z",
+           "state":{"id":"st-canc","name":"Canceled","type":"canceled","position":7,"color":"#95a2b3"},
+           "team":{"id":"team-eng","key":"ENG","name":"Engineering"},"project":{"id":"proj-web","name":"Website"},
+           "labels":{"nodes":[]}}
+        ],"pageInfo":{"hasNextPage":false,"endCursor":null}}}}"##;
+        let d: SyncIssuesData = interpret_response(200, body).unwrap();
+        let items: Vec<_> = d.issues.nodes.into_iter().map(to_item).collect();
+        assert_eq!(items[0].project().unwrap().name, "Website");
+        assert_eq!(items[0].created_at.as_deref(), Some("2026-08-01T10:00:00.000Z"));
+        assert_eq!(items[1].closed_at.as_deref(), Some("2026-09-19T10:00:00.000Z"));
+        assert_eq!(items[2].closed_at.as_deref(), Some("2026-08-22T10:00:00.000Z"));
+        let now = 1_789_948_800_000; // 2026-09-21
+        let kept: Vec<_> = items
+            .iter()
+            .filter(|i| crate::providers::import::backfill_keeps(i, now))
+            .map(|i| i.identifier.as_str())
+            .collect();
+        assert_eq!(kept, vec!["ENG-1", "ENG-2"]);
+    }
+
+    #[test]
     fn kinds_round_trip() {
         for k in [ExtKind::Triage, ExtKind::Backlog, ExtKind::Unstarted, ExtKind::Started, ExtKind::Completed, ExtKind::Canceled] {
             assert_eq!(ext_kind(linear_type(k).unwrap()), k);
@@ -351,6 +437,8 @@ mod tests {
                 text: None,
                 state_kinds: super::super::OPEN_KINDS.to_vec(),
                 created_after: None,
+                project_id: None,
+                closed_within_days: None,
                 cursor: None,
             };
             let page = p.list_importable(&q).await.expect("list");

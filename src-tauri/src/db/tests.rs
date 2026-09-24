@@ -96,6 +96,13 @@ fn imported_task(id: &str, project_id: &str, repo_id: &str, number: i64, ext: &s
             last_synced_at: Some(99),
             sync_error: Some("rate limited".into()),
             unmapped: false,
+            project: Some(ExtProject { id: "proj-web".into(), name: "Website".into() }),
+            rule_id: Some("rule-1".into()),
+            moved: Some(MovedInfo {
+                from_project: ExtProject { id: "proj-old".into(), name: "Old site".into() },
+                to_project: Some(ExtProject { id: "proj-web".into(), name: "Website".into() }),
+                suggested_repo_id: None,
+            }),
         }),
         status: TaskStatus::InReview,
         closed_at: Some(123),
@@ -182,7 +189,7 @@ fn migrates_v1_data_to_v2() {
     )
     .unwrap();
     migrate(&mut c).unwrap();
-    assert_eq!(user_version(&c).unwrap(), 2);
+    assert_eq!(user_version(&c).unwrap(), MIGRATIONS.len() as i64);
     assert_eq!(get_project(&c, "p1").unwrap().unwrap().description, None);
     let l = get_source_link(&c, "l1").unwrap().unwrap();
     assert_eq!((l.last_synced_at, l.last_sync_error, l.pending_state_changes), (None, None, None));
@@ -205,6 +212,54 @@ fn migrates_v1_data_to_v2() {
     s.default_executor = Some(Executor::Workflow { name: "plan-task".into() });
     save_settings(&mut c, &s).unwrap();
     assert_eq!(load_settings(&c).unwrap().default_executor, s.default_executor);
+}
+
+#[test]
+fn migrates_v2_data_to_v3() {
+    let mut c = Connection::open_in_memory().unwrap();
+    c.pragma_update(None, "foreign_keys", "ON").unwrap();
+    c.execute_batch(MIGRATIONS[0]).unwrap();
+    c.execute_batch(MIGRATIONS[1]).unwrap();
+    c.pragma_update(None, "user_version", 2).unwrap();
+    // Base v2: reglas con el JSON viejo y una tarea vinculada sin columnas de proyecto.
+    c.execute_batch(
+        r#"INSERT INTO projects (id, name, key, color, created_at) VALUES ('p1', 'Pay', 'PAY', '#fff', 1);
+         INSERT INTO repos (id, project_id, path, name, created_at) VALUES ('r1', 'p1', '/r1', 'web', 1);
+         INSERT INTO source_links (id, project_id, provider, scope_kind, scope_id, scope_name, repo_rules_json,
+                                   state_map_json, created_at)
+           VALUES ('l1', 'p1', 'linear', 'team', 'tm', 'Eng', '[{"label":"frontend","repoId":"r1"}]',
+                   '{"pull":{},"push":{},"confirmedAt":null,"knownStates":[]}', 7);
+         INSERT INTO tasks (id, project_id, repo_id, number, title, status, plan_kind, created_at, updated_at,
+                            src_provider, src_link_id, src_external_id, src_identifier, src_url)
+           VALUES ('t1', 'p1', 'r1', 1, 'x', 'todo', 'text', 1, 1, 'linear', 'l1', 'e1', 'ENG-1', 'https://example.com/1');"#,
+    )
+    .unwrap();
+    migrate(&mut c).unwrap();
+    assert_eq!(user_version(&c).unwrap(), 3);
+    let src = get_task(&c, "t1").unwrap().unwrap().source.unwrap();
+    assert_eq!((src.project, src.rule_id, src.moved), (None, None, None));
+    let rules = get_source_link(&c, "l1").unwrap().unwrap().repo_rules;
+    assert_eq!(rules.len(), 1);
+    assert_eq!((rules[0].kind, rules[0].value.as_str(), rules[0].created_at), (RuleKind::Label, "frontend", 7));
+
+    // Las columnas nuevas se escriben y se leen.
+    let moved = MovedInfo {
+        from_project: ExtProject { id: "pa".into(), name: "A".into() },
+        to_project: None,
+        suggested_repo_id: Some("r1".into()),
+    };
+    c.execute(
+        "UPDATE tasks SET src_project_id = 'pb', src_project_name = 'B', src_rule_id = 'rule-0', src_moved = ?1",
+        [serde_json::to_string(&moved).unwrap()],
+    )
+    .unwrap();
+    let src = get_task(&c, "t1").unwrap().unwrap().source.unwrap();
+    assert_eq!(src.project, Some(ExtProject { id: "pb".into(), name: "B".into() }));
+    assert_eq!((src.rule_id.as_deref(), src.moved.as_ref()), (Some("rule-0"), Some(&moved)));
+    let json: serde_json::Value = serde_json::to_value(&src).unwrap();
+    assert_eq!(json["moved"]["fromProject"]["name"], "A");
+    assert!(json["moved"]["toProject"].is_null());
+    assert_eq!(json["moved"]["suggestedRepoId"], "r1");
 }
 
 #[test]
@@ -329,7 +384,7 @@ fn link(id: &str, project_id: &str, default_repo: Option<&str>) -> SourceLink {
         provider: "linear".into(),
         scope: ScopeRef { kind: "team".into(), id: "team-1".into(), name: "Engineering".into() },
         default_repo_id: default_repo.map(String::from),
-        repo_rules: vec![RepoRule { label: "frontend".into(), repo_id: "r1".into() }],
+        repo_rules: vec![RepoRule::label("frontend", "r1")],
         state_map: StateMap {
             pull,
             push,

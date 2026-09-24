@@ -96,6 +96,14 @@ impl<'a> LinearClient<'a> {
         Ok(out)
     }
 
+    /// Proyectos activos a los que tiene acceso el team, por nombre.
+    pub async fn team_projects(&self, team_id: &str) -> Result<Vec<ProjectRef>, LinearError> {
+        let d: ProjectsData = self.query(TEAM_PROJECTS_QUERY, json!({ "teamId": team_id })).await?;
+        let mut out = d.projects.nodes;
+        out.sort_by_key(|p| p.name.to_lowercase());
+        Ok(out)
+    }
+
     pub async fn project_teams(&self, project_id: &str) -> Result<Vec<Team>, LinearError> {
         let d: ProjectTeamsData = self.query(PROJECT_TEAMS_QUERY, json!({ "id": project_id })).await?;
         Ok(d.project.teams.nodes)

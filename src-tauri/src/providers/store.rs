@@ -7,7 +7,8 @@ use rusqlite::{params, Connection, OptionalExtension};
 use crate::db::rows::{self, outbox_from_row, source_link_from_row, task_from_row};
 use crate::db::DbError;
 use crate::domain::{
-    ExternalState, OutboxItem, OutboxPayload, PlanRef, SourceLink, StateChanges, Task, TaskSource, TaskStatus,
+    ExtProject, ExternalState, MovedInfo, OutboxItem, OutboxPayload, PlanRef, SourceLink, StateChanges, Task,
+    TaskSource, TaskStatus,
 };
 
 use super::ExternalItem;
@@ -161,6 +162,8 @@ pub struct NewImported<'a> {
     pub item: &'a ExternalItem,
     pub status: TaskStatus,
     pub acceptance: Vec<String>,
+    /// Regla de proyecto por la que llega (ver `TaskSource.rule_id`).
+    pub rule_id: Option<String>,
     pub now: i64,
 }
 
@@ -210,6 +213,9 @@ pub fn insert_imported(conn: &Connection, n: NewImported) -> Result<Task, DbErro
             last_synced_at: Some(n.now),
             sync_error: None,
             unmapped: false,
+            project: n.item.project(),
+            rule_id: n.rule_id,
+            moved: None,
         }),
         created_at: n.now,
         updated_at: n.now,
@@ -262,6 +268,117 @@ pub fn apply_pull(conn: &Connection, u: &PullUpdate) -> Result<(), DbError> {
     Ok(())
 }
 
+/// Proyecto del proveedor visto en el pull, regla de origen y cambio de proyecto pendiente
+/// (ver `sync::decide_project`). Escribe los tres tal cual.
+pub fn set_src_project(
+    conn: &Connection,
+    task_id: &str,
+    project: Option<&ExtProject>,
+    rule_id: Option<&str>,
+    moved: Option<&MovedInfo>,
+) -> Result<(), DbError> {
+    conn.execute(
+        "UPDATE tasks SET src_project_id = ?2, src_project_name = ?3, src_rule_id = ?4, src_moved = ?5
+         WHERE id = ?1 AND src_provider IS NOT NULL",
+        params![
+            task_id,
+            project.map(|p| &p.id),
+            project.map(|p| &p.name),
+            rule_id,
+            moved.map(json).transpose()?
+        ],
+    )?;
+    Ok(())
+}
+
+/// El backfill de una regla encontró estas tareas ya en su repo: pasan a "llegadas por la
+/// regla" (avisan si la issue cambia de proyecto). Solo las de ese link y sin aviso pendiente.
+pub fn tag_rule(conn: &Connection, link_id: &str, rule_id: &str, task_ids: &[String]) -> Result<(), DbError> {
+    for id in task_ids {
+        conn.execute(
+            "UPDATE tasks SET src_rule_id = ?3 WHERE id = ?1 AND src_link_id = ?2 AND src_moved IS NULL",
+            params![id, link_id, rule_id],
+        )?;
+    }
+    Ok(())
+}
+
+/// Tareas con un cambio de proyecto sin decidir (para el contador "need you").
+pub fn moved_ids(conn: &Connection, project_id: Option<&str>) -> Result<Vec<String>, DbError> {
+    let mut stmt =
+        conn.prepare("SELECT id FROM tasks WHERE src_moved IS NOT NULL AND (?1 IS NULL OR project_id = ?1)")?;
+    let out = stmt.query_map([project_id], |r| r.get::<_, String>(0))?.collect::<rusqlite::Result<_>>()?;
+    Ok(out)
+}
+
+/// Qué hacer con una tarea cuya issue cambió de proyecto.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MovedAction {
+    /// Pasarla al repo sugerido.
+    Move,
+    /// Dejarla en su repo.
+    Keep,
+}
+
+/// Resuelve el aviso de cambio de proyecto. `Move` rechaza con un run activo, un worktree o
+/// un plan en archivo fuera del repo nuevo. En los dos casos la tarea queda asociada a la
+/// regla del proyecto actual si esa regla apunta a su repo (así el próximo pull no vuelve a
+/// avisar por el mismo cambio).
+pub fn resolve_moved(conn: &Connection, task_id: &str, action: MovedAction, now: i64) -> Result<Task, DbError> {
+    let task = rows::get_task(conn, task_id)?.ok_or_else(|| DbError::Invalid("Task not found.".into()))?;
+    let Some(src) = task.source.as_ref() else {
+        return Err(DbError::Invalid("This task is no longer linked to its source.".into()));
+    };
+    let Some(moved) = src.moved.as_ref() else {
+        return Err(DbError::Invalid("This task has no pending project change.".into()));
+    };
+    let link = match src.link_id.as_deref() {
+        Some(id) => rows::get_source_link(conn, id)?,
+        None => None,
+    };
+    let repo_id = match action {
+        MovedAction::Keep => task.repo_id.clone(),
+        MovedAction::Move => {
+            let Some(target) = moved.suggested_repo_id.clone() else {
+                return Err(DbError::Invalid("No repo is suggested for its new project: keep it or move it by hand.".into()));
+            };
+            if target != task.repo_id {
+                check_repo_in_project(conn, &target, &task.project_id)?;
+                if has_active_run(conn, &task.id)? {
+                    return Err(DbError::Invalid(
+                        "The task has a queued or running run: wait for it or cancel it before moving it to another repo."
+                            .into(),
+                    ));
+                }
+                if task.worktree.is_some() {
+                    return Err(DbError::Invalid(
+                        "Clean up the task's worktree before moving it to another repo.".into(),
+                    ));
+                }
+                if let PlanRef::File { path } = &task.plan {
+                    let repo = rows::get_repo(conn, &target)?.ok_or_else(|| DbError::Invalid("Repo not found.".into()))?;
+                    crate::work::validate::plan_file(std::path::Path::new(&repo.path), path).map_err(|_| {
+                        DbError::Invalid("The plan file is in the old repo: pick a new plan for this task first.".into())
+                    })?;
+                }
+            }
+            target
+        }
+    };
+    let current = moved.to_project.as_ref().map(|p| p.id.as_str());
+    let rule_id = link
+        .as_ref()
+        .and_then(|l| super::import::project_rule(l, current))
+        .filter(|r| r.repo_id == repo_id)
+        .map(|r| r.id.clone());
+    conn.execute(
+        "UPDATE tasks SET repo_id = ?2, src_rule_id = ?3, src_moved = NULL, updated_at = ?4 WHERE id = ?1",
+        params![task.id, repo_id, rule_id, now],
+    )?;
+    rows::get_task(conn, &task.id)?.ok_or_else(|| DbError::Invalid("Task not found.".into()))
+}
+
 pub fn set_sync_error(conn: &Connection, task_id: &str, error: Option<&str>) -> Result<(), DbError> {
     // Una tarea desvinculada mientras el sync iba a la red no recibe `src_*` de nuevo.
     conn.execute(
@@ -300,7 +417,8 @@ pub fn unlink_task(conn: &Connection, task_id: &str, now: i64) -> Result<Task, D
     let n = conn.execute(
         "UPDATE tasks SET src_provider = NULL, src_link_id = NULL, src_external_id = NULL, src_identifier = NULL,
                           src_url = NULL, src_state_json = NULL, src_last_synced_at = NULL, src_sync_error = NULL,
-                          updated_at = ?2
+                          src_unmapped = 0, src_project_id = NULL, src_project_name = NULL, src_rule_id = NULL,
+                          src_moved = NULL, updated_at = ?2
          WHERE id = ?1",
         params![task_id, now],
     )?;

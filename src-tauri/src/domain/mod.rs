@@ -237,6 +237,16 @@ pub struct TaskSource {
     /// Nodal y la UI muestra "estado externo sin mapear".
     #[serde(default)]
     pub unmapped: bool,
+    /// Proyecto del proveedor visto en el último import/pull (v3).
+    #[serde(default)]
+    pub project: Option<ExtProject>,
+    /// Regla de proyecto por la que llegó al repo (v3): solo esas tareas avisan si la issue
+    /// cambia de proyecto.
+    #[serde(default)]
+    pub rule_id: Option<String>,
+    /// Cambio de proyecto pendiente de decidir (v3).
+    #[serde(default)]
+    pub moved: Option<MovedInfo>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -466,12 +476,107 @@ pub struct ScopeRef {
     pub name: String,
 }
 
-/// Al importar, una tarea con este label va a este repo.
+/// Qué mira una regla de ruteo.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RuleKind {
+    /// Un label del ítem (sin distinguir mayúsculas).
+    #[default]
+    Label,
+    /// El proyecto del proveedor (proyecto de Linear) al que pertenece el ítem.
+    Project,
+}
+
+/// Al importar, un ítem con este label (o de este proyecto del proveedor) va a este repo.
+/// Precedencia: regla de proyecto > regla de label > repo por defecto del link.
+///
+/// Compatible con el JSON v1/v2 `{label, repoId}`: `kind` default `label`, `value` acepta
+/// `label`, y `id`/`created_at`/`name` vacíos se completan al leer
+/// (`normalize_legacy_rules`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RepoRule {
-    pub label: String,
+    #[serde(default)]
+    pub id: String,
+    #[serde(default)]
+    pub kind: RuleKind,
+    /// Label, o id del proyecto del proveedor.
+    #[serde(alias = "label")]
+    pub value: String,
+    /// Nombre visible (el del proyecto; en las de label, el label).
+    #[serde(default)]
+    pub name: String,
     pub repo_id: String,
+    /// Las reglas de proyecto auto-importan ítems creados después de esto (los anteriores
+    /// los trae el backfill al crear la regla).
+    #[serde(default)]
+    pub created_at: i64,
+}
+
+impl RepoRule {
+    pub fn is_project(&self) -> bool {
+        self.kind == RuleKind::Project
+    }
+
+    #[cfg(test)]
+    pub fn label(label: &str, repo_id: &str) -> Self {
+        RepoRule {
+            id: format!("rule-{label}"),
+            kind: RuleKind::Label,
+            value: label.into(),
+            name: label.into(),
+            repo_id: repo_id.into(),
+            created_at: 1,
+        }
+    }
+
+    #[cfg(test)]
+    pub fn project(id: &str, name: &str, repo_id: &str, created_at: i64) -> Self {
+        RepoRule {
+            id: format!("rule-{id}"),
+            kind: RuleKind::Project,
+            value: id.into(),
+            name: name.into(),
+            repo_id: repo_id.into(),
+            created_at,
+        }
+    }
+}
+
+/// Completa lo que el JSON viejo no trae: id estable por posición (`rule-{i}`, así dos
+/// lecturas dan el mismo id), `created_at` del link y `name` = `value`.
+pub fn normalize_legacy_rules(rules: &mut [RepoRule], link_created_at: i64) {
+    for (i, r) in rules.iter_mut().enumerate() {
+        if r.id.is_empty() {
+            r.id = format!("rule-{i}");
+        }
+        if r.created_at == 0 {
+            r.created_at = link_created_at;
+        }
+        if r.name.trim().is_empty() {
+            r.name = r.value.clone();
+        }
+    }
+}
+
+/// Proyecto del proveedor al que pertenece un ítem (id y nombre).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExtProject {
+    pub id: String,
+    pub name: String,
+}
+
+/// La issue cambió de proyecto en el proveedor después de llegar por una regla de proyecto
+/// (v3). Nodal no la mueve de repo: espera a `resolve_moved_task`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MovedInfo {
+    pub from_project: ExtProject,
+    /// `None`: la issue quedó sin proyecto.
+    pub to_project: Option<ExtProject>,
+    /// Repo que le tocaría ahora por las reglas; `None` si ninguna aplica.
+    pub suggested_repo_id: Option<String>,
 }
 
 /// Mapeo de estados en las dos direcciones. Lo propone Nodal; lo confirma el usuario.

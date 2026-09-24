@@ -205,7 +205,20 @@ ALTER TABLE tasks ADD COLUMN src_unmapped INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE runs ADD COLUMN tokens INTEGER;
 "#;
 
-pub const MIGRATIONS: &[&str] = &[V1, V2];
+/// v3: aditiva. Reglas de ruteo por proyecto del proveedor (van en `repo_rules_json`, sin
+/// DDL) y, en la tarea:
+/// - `src_project_id`/`src_project_name`: proyecto del proveedor visto en el último pull;
+/// - `src_rule_id`: regla de proyecto por la que llegó a su repo;
+/// - `src_moved`: JSON `{fromProject, toProject, suggestedRepoId}` si la issue cambió de
+///   proyecto y falta que el usuario decida (`resolve_moved_task`).
+const V3: &str = r#"
+ALTER TABLE tasks ADD COLUMN src_project_id TEXT;
+ALTER TABLE tasks ADD COLUMN src_project_name TEXT;
+ALTER TABLE tasks ADD COLUMN src_rule_id TEXT;
+ALTER TABLE tasks ADD COLUMN src_moved TEXT;
+"#;
+
+pub const MIGRATIONS: &[&str] = &[V1, V2, V3];
 
 pub fn user_version(conn: &Connection) -> Result<i64, DbError> {
     Ok(conn.query_row("PRAGMA user_version", [], |r| r.get(0))?)
