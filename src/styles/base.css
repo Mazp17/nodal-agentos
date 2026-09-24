@@ -375,7 +375,7 @@ button.badge:hover { filter: brightness(1.2); }
   position: fixed;
   top: 64px;
   left: 50%;
-  transform: translateX(-50%);
+  translate: -50% 0; /* not transform: the entry animation (drop) would override it */
   z-index: 56;
   width: var(--w-dialog);
   max-width: calc(100vw - 32px);
