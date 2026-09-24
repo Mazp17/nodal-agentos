@@ -2,7 +2,6 @@ import { useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNod
 import { openUrl } from "@tauri-apps/plugin-opener";
 import {
   addTaskRelation,
-  cancelRun,
   cleanupWorktree,
   deleteTask,
   removeTaskRelation,
@@ -29,11 +28,12 @@ import {
 import { taskKey, TASK_STATUSES, type Executor, type RelationKind, type RunLight, type Task, type TaskStatus } from "../../domain/types";
 import { formatDateTime, formatDuration } from "../../lib/format";
 import { SafeMarkdown } from "../../ui/Markdown";
+import { useConfirm } from "../../ui/ConfirmDialog";
 import { useFocusTrap } from "../../ui/useFocusTrap";
 import { useToast } from "../../ui/Toasts";
 import { ExecutorName, ExecutorPicker, executorLabel, resolveExecutor } from "../executors";
 import { SourceTab } from "../providers";
-import { RunBadge } from "../runs";
+import { RunBadge, useRunActions } from "../runs";
 import { NewTaskDialog } from "./NewTaskDialog";
 import { PriorityBars, StatusRing } from "./bits";
 import { FINISH_LABEL, isClosed, ISOLATION_LABEL, PRIORITY_LABEL, providerLabel, STATUS_META } from "./status";
@@ -71,6 +71,8 @@ export function TaskPanel({ taskId, onClose, onOpenRun, onOpenDiff, onOpenTask, 
   const headingId = useId();
   const push = useToast();
   const launch = useLaunch();
+  const ask = useConfirm();
+  const runActions = useRunActions();
 
   const taskQ = useTask(taskId);
   const task = taskQ.data;
@@ -182,8 +184,21 @@ export function TaskPanel({ taskId, onClose, onOpenRun, onOpenDiff, onOpenTask, 
   const cleanUp = async () => {
     const w = task.worktree;
     if (!w) return;
-    if (!window.confirm(`Delete the worktree and the branch ${w.branch}?\n\n${w.path}`)) return;
     setBusy("cleanup");
+    const ok = await ask({
+      title: `Delete the worktree and branch ${w.branch}?`,
+      body: (
+        <>
+          <span>Nodal refuses if the branch has unpushed commits or uncommitted changes.</span>
+          <span className="confirm-path">{w.path}</span>
+        </>
+      ),
+      confirmLabel: "Clean up",
+    });
+    if (!ok) {
+      setBusy(null);
+      return;
+    }
     try {
       await cleanupWorktree(task.id, false);
       setCleanupBlocked(null);
@@ -199,34 +214,59 @@ export function TaskPanel({ taskId, onClose, onOpenRun, onOpenDiff, onOpenTask, 
   const cleanUpAnyway = async () => {
     const w = task.worktree;
     if (!w) return;
+    // Ocupado desde ya: el await de abajo deja una ventana para un segundo clic.
+    setBusy("cleanup");
     // Estado fresco: el del polling puede tener hasta 20 s.
     const s = await worktreeStatus(task.id).catch(() => wt.data);
     const losses = [
       s && s.unpushed > 0 ? `${s.unpushed} commit${s.unpushed === 1 ? "" : "s"} that exist nowhere else` : null,
       s?.dirty ? "uncommitted changes" : null,
     ].filter(Boolean);
-    const ok = window.confirm(
-      `Force clean up ${w.branch}?\n\nThis permanently deletes ${losses.length ? losses.join(" and ") : "any unpublished work"} in\n${w.path}\n\nThis can't be undone.`,
-    );
-    if (!ok) return;
-    void act("clean up the worktree", async () => {
+    const ok = await ask({
+      title: `Force clean up ${w.branch}?`,
+      body: (
+        <>
+          <span>
+            This permanently deletes {losses.length ? losses.join(" and ") : "any unpublished work"} in the worktree and
+            the branch. This can't be undone.
+          </span>
+          <span className="confirm-path">{w.path}</span>
+        </>
+      ),
+      confirmLabel: "Delete permanently",
+    });
+    if (!ok) {
+      setBusy(null);
+      return;
+    }
+    await act("clean up the worktree", async () => {
       await cleanupWorktree(task.id, true);
       setCleanupBlocked(null);
     }, ["Worktree cleaned up", w.branch]);
   };
 
-  const remove = () => {
-    if (!window.confirm(`Delete ${key} "${task.title}"? This can't be undone.`)) return;
-    void act("delete the task", async () => {
+  const remove = async () => {
+    const ok = await ask({
+      title: `Delete ${key}?`,
+      body: `"${task.title}" and its plan are deleted. This can't be undone.`,
+      confirmLabel: "Delete task",
+    });
+    if (!ok) return;
+    await act("delete the task", async () => {
       await deleteTask(task.id);
       onClose();
     }, ["Task deleted", task.title]);
   };
 
-  const unlink = () => {
+  const unlink = async () => {
     if (!src) return;
-    if (!window.confirm(`Unlink ${src.identifier}? It stays in ${providerLabel(src.provider)}; this task becomes local and stops syncing.`)) return;
-    void act("unlink the task", () => unlinkTask(task.id), [`${key} unlinked`, `${src.identifier} stays in ${providerLabel(src.provider)}.`]);
+    const ok = await ask({
+      title: `Unlink ${src.identifier}?`,
+      body: `It stays in ${providerLabel(src.provider)}. This task becomes local and stops syncing in both directions.`,
+      confirmLabel: "Unlink",
+    });
+    if (!ok) return;
+    await act("unlink the task", () => unlinkTask(task.id), [`${key} unlinked`, `${src.identifier} stays in ${providerLabel(src.provider)}.`]);
   };
 
   return (
@@ -458,13 +498,14 @@ export function TaskPanel({ taskId, onClose, onOpenRun, onOpenDiff, onOpenTask, 
                   <button
                     type="button"
                     className="btn btn-sm btn-danger"
-                    disabled={busy !== null}
-                    onClick={() =>
-                      void act(activeRun.status === "queued" ? "cancel the run" : "stop the run", () => cancelRun(activeRun.id), [
-                        activeRun.status === "queued" ? "Removed from the queue" : "Run stopped",
-                        key,
-                      ])
-                    }
+                    disabled={busy !== null || runActions.busy}
+                    onClick={async () => {
+                      const done =
+                        activeRun.status === "queued"
+                          ? await runActions.remove({ run: activeRun }, key)
+                          : await runActions.stop({ run: activeRun }, key);
+                      if (done) void invalidate("tasks");
+                    }}
                   >
                     {activeRun.status === "queued" ? "Cancel" : "Stop"}
                   </button>
@@ -547,11 +588,11 @@ export function TaskPanel({ taskId, onClose, onOpenRun, onOpenDiff, onOpenTask, 
           Edit
         </button>
         {src && (
-          <button type="button" className="btn btn-sm" disabled={busy !== null} onClick={unlink}>
+          <button type="button" className="btn btn-sm" disabled={busy !== null} onClick={() => void unlink()}>
             Unlink
           </button>
         )}
-        <button type="button" className="btn btn-sm btn-danger" disabled={busy !== null || !!activeRun} onClick={remove}>
+        <button type="button" className="btn btn-sm btn-danger" disabled={busy !== null || !!activeRun} onClick={() => void remove()}>
           Delete
         </button>
         <span className="tp-spacer" />
