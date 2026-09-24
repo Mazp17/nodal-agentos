@@ -155,8 +155,14 @@ pub struct WorktreeStatus {
     pub dirty: bool,
 }
 
-fn count(repo: &Path, args: &[&str]) -> u32 {
-    git::ok(repo, args).ok().and_then(|s| s.trim().parse().ok()).unwrap_or(0)
+/// `git rev-list --count <args> --`. Un error se propaga: contar 0 por error dejaría
+/// borrar una rama con commits sin publicar.
+fn count(repo: &Path, args: &[&str]) -> Result<u32, String> {
+    let mut full = vec!["rev-list", "--count"];
+    full.extend_from_slice(args);
+    full.push("--");
+    let out = git::ok(repo, &full)?;
+    out.trim().parse().map_err(|_| format!("Unexpected output from git rev-list: {}", out.trim()))
 }
 
 /// Estado de `wt` (`None`: la tarea no tiene worktree).
@@ -173,11 +179,11 @@ pub fn status(repo: &Path, wt: Option<&WorktreeRef>) -> Result<WorktreeStatus, S
         let branch = format!("refs/heads/{}", wt.branch);
         let base_ok = git::run(repo, &["rev-parse", "--verify", "--quiet", &format!("{}^{{commit}}", wt.base)])?.ok;
         if base_ok {
-            st.ahead = count(repo, &["rev-list", "--count", &branch, "--not", &wt.base]);
-            st.unpushed = count(repo, &["rev-list", "--count", &branch, "--not", &wt.base, "--remotes"]);
+            st.ahead = count(repo, &[&branch, "--not", &wt.base])?;
+            st.unpushed = count(repo, &[&branch, "--not", &wt.base, "--remotes"])?;
         } else {
             // Sin base (borrada): todo lo que no esté en un remoto se perdería.
-            st.unpushed = count(repo, &["rev-list", "--count", &branch, "--not", "--remotes"]);
+            st.unpushed = count(repo, &[&branch, "--not", "--remotes"])?;
             st.ahead = st.unpushed;
         }
     }

@@ -96,12 +96,30 @@ pub fn repo_trust_blocking(path: &Path, config_file: Option<&Path>) -> Result<Re
     let Some(file) = config_file else { return Ok(unknown) };
     let Ok(text) = std::fs::read_to_string(file) else { return Ok(unknown) };
     let Ok(config) = serde_json::from_str::<Value>(&text) else { return Ok(unknown) };
-    let bound = if path.is_dir() { git::toplevel(path)? } else { None };
+    // git devuelve rutas resueltas (`/private/tmp`, no `/tmp`): se compara con la ruta
+    // canonicalizada, y si no alcanza, con la ruta tal cual (sin límite git).
+    let real = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+    let bound = if real.is_dir() { git::toplevel(&real)?.map(|t| t.canonicalize().unwrap_or(t)) } else { None };
     let canonical = match &bound {
-        Some(top) => main_root(top).unwrap_or_else(|| top.clone()),
-        None => path.to_path_buf(),
+        Some(top) => main_root(top).map(|m| m.canonicalize().unwrap_or(m)).unwrap_or_else(|| top.clone()),
+        None => real.clone(),
     };
-    Ok(trust_of(&config, path, &canonical, bound.as_deref()))
+    let t = trust_of(&config, &real, &canonical, bound.as_deref());
+    if t.trusted == Some(true) || real == path {
+        return Ok(t);
+    }
+    let raw_bound = bound.as_ref().and_then(|b| {
+        // El mismo límite expresado con el prefijo sin resolver.
+        let rel = real.strip_prefix(b).ok()?;
+        let n = rel.components().count();
+        let mut p = path;
+        for _ in 0..n {
+            p = p.parent()?;
+        }
+        Some(p.to_path_buf())
+    });
+    let raw = trust_of(&config, path, raw_bound.as_deref().unwrap_or(path), raw_bound.as_deref());
+    Ok(if raw.trusted == Some(true) { raw } else { t })
 }
 
 /// Si Claude Code ya confía en la carpeta (sin diálogo de confianza al lanzar).
@@ -174,5 +192,15 @@ mod tests {
         assert_eq!(repo_trust_blocking(&repo, Some(&file)).unwrap().source, TrustSource::Unknown);
         assert_eq!(repo_trust_blocking(&repo, Some(&t.0.join("missing.json"))).unwrap().trusted, None);
         assert!(repo_trust_blocking(Path::new("relativa"), Some(&file)).is_err());
+
+        // Symlink a la carpeta: se resuelve para comparar con lo que devuelve git.
+        let link = t.0.join("link");
+        std::os::unix::fs::symlink(&repo, &link).unwrap();
+        std::fs::write(&file, cfg(&[(repo.join("src").to_str().unwrap(), true)]).to_string()).unwrap();
+        let r = repo_trust_blocking(&link.join("src"), Some(&file)).unwrap();
+        assert_eq!((r.trusted, r.source), (Some(true), TrustSource::Parent));
+        // Y una entrada guardada con la ruta sin resolver también cuenta.
+        std::fs::write(&file, cfg(&[(link.to_str().unwrap(), true)]).to_string()).unwrap();
+        assert_eq!(repo_trust_blocking(&link.join("src"), Some(&file)).unwrap().trusted, Some(true));
     }
 }

@@ -416,22 +416,25 @@ pub fn reorder_tasks(conn: &mut Connection, status: TaskStatus, ids: &[String], 
         }
     }
     let Some(project_id) = project else { return Ok(None) };
-    let rest: Vec<String> = {
+    let column: Vec<(String, f64)> = {
         let mut stmt = tx
-            .prepare("SELECT id FROM tasks WHERE project_id = ?1 AND status = ?2 ORDER BY position, created_at, id")
+            .prepare("SELECT id, position FROM tasks WHERE project_id = ?1 AND status = ?2 ORDER BY position, created_at, id")
             .map_err(|e| e.to_string())?;
         let rows = stmt
-            .query_map(rusqlite::params![project_id, status], |r| r.get::<_, String>(0))
+            .query_map(rusqlite::params![project_id, status], |r| Ok((r.get::<_, String>(0)?, r.get::<_, f64>(1)?)))
             .map_err(|e| e.to_string())?;
         rows.collect::<rusqlite::Result<Vec<_>>>().map_err(|e| e.to_string())?
     };
-    let order = ids.iter().cloned().chain(rest.into_iter().filter(|id| !seen.contains(id.as_str())));
+    let old: std::collections::HashMap<&str, f64> = column.iter().map(|(id, p)| (id.as_str(), *p)).collect();
+    let order = ids.iter().map(String::as_str).chain(column.iter().map(|(id, _)| id.as_str()).filter(|id| !seen.contains(id)));
+    // Solo se tocan (y cambian `updated_at`) las que cambian de posición.
     for (i, id) in order.enumerate() {
-        tx.execute(
-            "UPDATE tasks SET position = ?1, updated_at = ?2 WHERE id = ?3",
-            rusqlite::params![(i + 1) as f64, now, id],
-        )
-        .map_err(|e| e.to_string())?;
+        let pos = (i + 1) as f64;
+        if old.get(id) == Some(&pos) {
+            continue;
+        }
+        tx.execute("UPDATE tasks SET position = ?1, updated_at = ?2 WHERE id = ?3", rusqlite::params![pos, now, id])
+            .map_err(|e| e.to_string())?;
     }
     tx.commit().map_err(|e| e.to_string())?;
     Ok(Some(project_id))
@@ -650,6 +653,9 @@ mod tests {
         let got = reorder_tasks(&mut c, TaskStatus::Todo, &[t3.id.clone(), t1.id.clone()], 15).unwrap();
         assert_eq!(got.as_deref(), Some(p.id.as_str()));
         assert_eq!((pos(&c, &t3.id), pos(&c, &t1.id), pos(&c, &t2.id)), (1.0, 2.0, 3.0));
+        // Repetir el mismo orden no toca ninguna fila.
+        reorder_tasks(&mut c, TaskStatus::Todo, &[t3.id.clone(), t1.id.clone()], 99).unwrap();
+        assert_eq!(tasks::get(&c, &t2.id).unwrap().updated_at, 15);
         assert!(reorder_tasks(&mut c, TaskStatus::Todo, &[t1.id.clone(), t1.id.clone()], 16).unwrap_err().contains("twice"));
         assert!(reorder_tasks(&mut c, TaskStatus::Done, std::slice::from_ref(&t1.id), 16).unwrap_err().contains("column"));
         assert!(reorder_tasks(&mut c, TaskStatus::Todo, &["t-no".into()], 16).is_err());

@@ -58,7 +58,6 @@ pub fn occupied_slots(runs: &[Run], live: &[RunSummary], now: i64) -> usize {
     working + pending
 }
 
-/// Repos con un run `in_place` activo: la cola no lanza otro ahí.
 /// Resumen de la cola para la UI.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -132,6 +131,7 @@ pub fn work_summary(
     WorkSummary { running: running as u32, capacity: concurrency, need_you: need.len() as u32, queued: queued as u32 }
 }
 
+/// Repos con un run `in_place` activo: la cola no lanza otro ahí.
 fn locked_repos(runs: &[Run], live: &[RunSummary], now: i64) -> HashSet<String> {
     runs.iter()
         .filter(|r| r.isolation == Some(Isolation::InPlace))
