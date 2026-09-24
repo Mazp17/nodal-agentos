@@ -13,7 +13,7 @@ use crate::runs::options;
 use crate::util::{new_id, write_atomic};
 
 use super::dto::*;
-use super::transitions::{apply_status, outbox_ops, OutboxOp};
+use super::transitions::{apply_status, outbox_ops, outbox_ops_for, OutboxOp, QUEUE_PUSHED_STATUSES};
 use super::{validate, Env};
 
 // ---------- Proyectos ----------
@@ -71,15 +71,24 @@ pub fn update_project(conn: &Connection, id: &str, patch: &ProjectPatch, now: i6
     Ok(p)
 }
 
-/// Borra en cascada repos, tareas y fuentes. Rechaza si hay runs en curso. Devuelve los
-/// ids de las tareas borradas (para limpiar sus planes en disco).
+/// Borra en cascada repos, tareas y fuentes. Rechaza si hay runs en curso o tareas con
+/// worktree (quedarían la carpeta y la rama `nodal/*` huérfanas). Devuelve los ids de las
+/// tareas borradas (para limpiar sus planes en disco).
 pub fn delete_project(conn: &mut Connection, id: &str) -> Result<Vec<String>, String> {
     projects::get(conn, id)?;
     if qruns::pending_in_project(conn, id)? > 0 {
         return Err("The project has queued or running runs: cancel them first.".into());
     }
     let tx = conn.transaction().map_err(|e| e.to_string())?;
-    let task_ids: Vec<String> = tasks::list(&tx, Some(id))?.into_iter().map(|t| t.id).collect();
+    let all = tasks::list(&tx, Some(id))?;
+    let with_wt: Vec<&str> = all.iter().filter(|t| t.worktree.is_some()).map(|t| t.title.as_str()).collect();
+    if !with_wt.is_empty() {
+        return Err(format!(
+            "Clean up the worktree of these tasks first (task → Clean up): {}.",
+            with_wt.join(", ")
+        ));
+    }
+    let task_ids: Vec<String> = all.into_iter().map(|t| t.id).collect();
     // Desvincular las tareas de sus fuentes antes del cascade (la FK de `src_link_id` no
     // deja borrar un link con tareas apuntándole, y el orden del cascade no está garantizado).
     tx.execute(
@@ -215,8 +224,8 @@ fn stage_plan(repo: &Repo, plan: &PlanInput, staging: &Path) -> Result<PlanRef, 
     }
 }
 
-/// Filas del outbox por un cambio de estado hecho en Nodal (a mano, o por la cola), en la
-/// transacción de quien llama.
+/// Filas del outbox por un cambio de estado hecho a mano en Nodal, en la transacción de
+/// quien llama (los de la cola pasan por `apply_task_transition`).
 pub fn push_status(
     conn: &Connection,
     task: &Task,
@@ -225,7 +234,11 @@ pub fn push_status(
     manages_source: Option<&str>,
     now: i64,
 ) -> Result<(), String> {
-    for op in outbox_ops(task, status, comment, manages_source) {
+    push_ops(conn, task, outbox_ops(task, status, comment, manages_source), now)
+}
+
+fn push_ops(conn: &Connection, task: &Task, ops: Vec<OutboxOp>, now: i64) -> Result<(), String> {
+    for op in ops {
         let queued = match op {
             OutboxOp::Status(s) => providers::enqueue_status(conn, &task.id, s, now),
             OutboxOp::Comment(body) => providers::enqueue_comment(conn, &task.id, &body, now),
@@ -441,7 +454,8 @@ pub fn reorder_tasks(conn: &mut Connection, status: TaskStatus, ids: &[String], 
 }
 
 /// Cambia el estado de la tarea por una transición de la cola (respeta Done/Canceled) y
-/// deja las filas del outbox en la misma transacción. Devuelve el estado nuevo si cambió.
+/// deja las filas del outbox en la misma transacción (incluido el regreso a Todo al sacar
+/// de la cola su único run). Devuelve el estado nuevo si cambió.
 pub fn apply_task_transition(
     conn: &Connection,
     task: &Task,
@@ -455,17 +469,21 @@ pub fn apply_task_transition(
         tasks::set_status(conn, &task.id, s, now)?;
     }
     if status.is_some() || comment.is_some() {
-        push_status(conn, task, status, comment, manages_source, now)?;
+        push_ops(conn, task, outbox_ops_for(task, status, comment, manages_source, &QUEUE_PUSHED_STATUSES), now)?;
     }
     Ok(status)
 }
 
-/// Borra la tarea y su plan en texto. Rechaza si tiene runs en cola o en curso. El worktree
-/// (si hay) queda: se limpia aparte.
+/// Borra la tarea y su plan en texto. Rechaza si tiene runs en cola o en curso, o si tiene
+/// worktree: se limpia antes con "Clean up" (que revisa lo sin publicar), para no dejar la
+/// carpeta y la rama `nodal/*` huérfanas.
 pub fn delete_task(conn: &Connection, env: &Env, id: &str) -> Result<(), String> {
-    tasks::get(conn, id)?;
+    let t = tasks::get(conn, id)?;
     if !qruns::pending_for_task(conn, id)?.is_empty() {
         return Err("The task has a queued or running run: cancel it first.".into());
+    }
+    if t.worktree.is_some() {
+        return Err("The task has a worktree: clean up the worktree first (Clean up), then delete the task.".into());
     }
     tasks::delete(conn, id)?;
     match std::fs::remove_dir_all(env.plan_dir(id)) {
@@ -592,6 +610,14 @@ mod tests {
         assert_eq!((r.launch.model.as_deref(), r.reviewer.as_deref(), r.default_finish), (None, Some("sec-reviewer"), Finish::Commit));
         let t = create_task(&mut c, &f.env, &new_task(&p, &r, "Una"), 4).unwrap();
         assert!(delete_repo(&c, &r.id).unwrap_err().contains("has 1 task"));
+        // Con worktree no se borra ni la tarea ni el proyecto (quedarían huérfanos).
+        let mut with_wt = tasks::get(&c, &t.id).unwrap();
+        with_wt.worktree = Some(WorktreeRef { path: "/wt/pay-1".into(), branch: "nodal/pay-1".into(), base: "main".into() });
+        tasks::update(&c, &with_wt).unwrap();
+        assert!(delete_task(&c, &f.env, &t.id).unwrap_err().contains("clean up the worktree first"));
+        assert!(delete_project(&mut c, &p.id).unwrap_err().contains("Clean up the worktree"));
+        with_wt.worktree = None;
+        tasks::update(&c, &with_wt).unwrap();
         delete_task(&c, &f.env, &t.id).unwrap();
         delete_repo(&c, &r.id).unwrap();
     }

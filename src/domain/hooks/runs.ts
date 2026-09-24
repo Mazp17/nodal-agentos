@@ -449,6 +449,8 @@ export interface QueueSummary {
   needYou: number;
   /** Runs listos para salir. */
   queued: number;
+  /** Error de la última pasada de la cola, o `null`. */
+  pumpError: string | null;
   /** "2/4 running · 1 need you · 3 queued" (partes vacías omitidas). */
   label: string;
   loaded: boolean;
@@ -466,9 +468,10 @@ export function useQueueSummary(projectId: string | null = null): QueueSummary {
     const capacity = d?.capacity ?? 0;
     const needYou = d?.needYou ?? 0;
     const queued = d?.queued ?? 0;
+    const pumpError = d?.pumpError ?? null;
     const parts = [`${running}/${capacity || "?"} running`];
     if (needYou) parts.push(`${needYou} need you`);
     if (queued) parts.push(`${queued} queued`);
-    return { running, capacity, needYou, queued, label: parts.join(" · "), loaded: d !== undefined };
+    return { running, capacity, needYou, queued, pumpError, label: parts.join(" · "), loaded: d !== undefined };
   }, [d]);
 }
