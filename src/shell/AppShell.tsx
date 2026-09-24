@@ -346,7 +346,7 @@ export function AppShell() {
         );
         break;
       case "settings":
-        content = <SettingsView section={nav.settingsSection} onSection={nav.setSettingsSection} />;
+        content = <SettingsView section={nav.settingsSection} onSection={nav.setSettingsSection} updates={updates} />;
         break;
       case "run":
         content = route.runId ? (

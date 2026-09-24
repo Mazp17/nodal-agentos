@@ -8,7 +8,7 @@ import { readJsonPref, writePref } from "./storage";
 export type ProjectPage = "board" | "tasks" | "runs" | "activity" | "project-settings";
 export type Page = ProjectPage | "settings" | "run";
 
-export type SettingsSection = "integrations" | "execution" | "diagnostics";
+export type SettingsSection = "integrations" | "execution" | "updates" | "diagnostics";
 export type ProjectSection = "general" | "repos" | "sources";
 
 export interface Route {
@@ -68,7 +68,7 @@ export function useNav(): Nav {
   );
   const [settingsSection, setSettingsSection] = useState<SettingsSection>(() => {
     const s = readJsonPref<string>("settingsSection", "integrations", (v): v is string => typeof v === "string");
-    return s === "execution" || s === "diagnostics" ? s : "integrations";
+    return s === "execution" || s === "updates" || s === "diagnostics" ? s : "integrations";
   });
   const [projectSection, setProjectSection] = useState<ProjectSection>("general");
 
