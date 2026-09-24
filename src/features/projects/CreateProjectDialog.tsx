@@ -20,8 +20,10 @@ export function CreateProjectDialog({ onClose, onCreated }: Props) {
   const titleId = useId();
   const nameId = useId();
   const keyId = useId();
+  const descId = useId();
 
   const [name, setName] = useState("");
+  const [description, setDescription] = useState("");
   const [key, setKey] = useState("");
   const [keyEdited, setKeyEdited] = useState(false);
   const [color, setColor] = useState<string>(PROJECT_COLORS[ctx.projects.length % PROJECT_COLORS.length]!);
@@ -59,6 +61,7 @@ export function CreateProjectDialog({ onClose, onCreated }: Props) {
         name,
         key: effectiveKey,
         color,
+        description,
         repos,
         scope: connect ? scope : null,
       });
@@ -105,6 +108,19 @@ export function CreateProjectDialog({ onClose, onCreated }: Props) {
                 setName(e.target.value);
                 setError(null);
               }}
+            />
+          </div>
+          <div className="field">
+            <label className="field-label" htmlFor={descId}>
+              Description <span className="faint">optional</span>
+            </label>
+            <textarea
+              id={descId}
+              className="input field-textarea"
+              rows={2}
+              placeholder="What this project is about"
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
             />
           </div>
           <div className="field">

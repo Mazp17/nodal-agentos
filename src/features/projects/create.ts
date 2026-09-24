@@ -23,6 +23,8 @@ export interface ProjectDraft {
   name: string;
   key: string;
   color: string;
+  /** Opcional; vacío = sin descripción. */
+  description?: string;
   /** Raíces git ya resueltas. */
   repos: string[];
   /** Team o project de Linear a conectar, si hay. */
@@ -51,7 +53,7 @@ export async function createProjectWithRepos(ctx: ProjectsState, d: ProjectDraft
     try {
       // Directo a la API: relee una sola vez al final. Releer ya haría que el shell viera
       // un proyecto y desmontara el onboarding con los repos todavía por agregar.
-      project = await createProject({ name: d.name.trim(), key, color: d.color });
+      project = await createProject({ name: d.name.trim(), key, color: d.color, description: d.description?.trim() || null });
       break;
     } catch (e) {
       if (!d.autoKey || !String(e).includes("already used") || tried.length >= 20) throw e;

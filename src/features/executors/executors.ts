@@ -25,16 +25,21 @@ export function executorKindLabel(e: Executor): string {
   return e.kind === "agent" ? "Agent" : e.kind === "workflow" ? "Workflow" : "Claude session";
 }
 
-/** Default heredado (sin mirar la tarea): repo → proyecto → Claude. */
-export function inheritedExecutor(repo: Repo | null | undefined, project: Project | null | undefined): Executor {
-  return repo?.defaultExecutor ?? project?.defaultExecutor ?? CLAUDE;
+/** Default heredado (sin mirar la tarea): repo → proyecto → Settings (`global`) → Claude. */
+export function inheritedExecutor(
+  repo: Repo | null | undefined,
+  project: Project | null | undefined,
+  global: Executor | null | undefined = null,
+): Executor {
+  return repo?.defaultExecutor ?? project?.defaultExecutor ?? global ?? CLAUDE;
 }
 
-/** Asignado efectivo: tarea → repo → proyecto → Claude. */
+/** Asignado efectivo: tarea → repo → proyecto → Settings (`global`) → Claude. */
 export function resolveExecutor(
   task: Pick<Task, "assignee"> | null | undefined,
   repo: Repo | null | undefined,
   project: Project | null | undefined,
+  global: Executor | null | undefined = null,
 ): Executor {
-  return task?.assignee ?? inheritedExecutor(repo, project);
+  return task?.assignee ?? inheritedExecutor(repo, project, global);
 }

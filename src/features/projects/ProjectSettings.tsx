@@ -5,7 +5,8 @@ import { ProjectSourcesSettings } from "../providers";
 import { SectionHead } from "../settings/SettingsView";
 import type { ProjectSection } from "../../shell/useNav";
 import { useToast } from "../../ui/Toasts";
-import { ExecutorSelect } from "./executors";
+import { ExecutorSelect, executorLabel } from "./executors";
+import { useSettings } from "../../domain/hooks/store";
 import { ColorSwatches, Segmented, type SegOption } from "./fields";
 import { RepoNoticeBar, resolveGitRoot, useRepoPicker } from "./repoPicker";
 import "./projects.css";
@@ -58,14 +59,18 @@ function GeneralSection({ project, onDeleted }: { project: Project; onDeleted: (
   const ctx = useProjects();
   const toast = useToast();
   const nameId = useId();
+  const descId = useId();
   const execId = useId();
   const reviewerId = useId();
   const [name, setName] = useState(project.name);
+  const [description, setDescription] = useState(project.description ?? "");
+  const globalExecutor = useSettings().data?.defaultExecutor ?? null;
   const [reviewer, setReviewer] = useState(project.reviewer ?? "");
   const [confirming, setConfirming] = useState(false);
   const [deleting, setDeleting] = useState(false);
 
   useEffect(() => setName(project.name), [project.name]);
+  useEffect(() => setDescription(project.description ?? ""), [project.description]);
   useEffect(() => setReviewer(project.reviewer ?? ""), [project.reviewer]);
 
   const patch = async (p: Parameters<typeof ctx.updateProject>[1]) => {
@@ -74,8 +79,14 @@ function GeneralSection({ project, onDeleted }: { project: Project; onDeleted: (
     } catch (e) {
       toast("Couldn't save the project", String(e), "danger");
       setName(project.name);
+      setDescription(project.description ?? "");
       setReviewer(project.reviewer ?? "");
     }
+  };
+
+  const commitDescription = () => {
+    const d = description.trim();
+    if ((d || null) !== project.description) void patch({ description: d || null });
   };
 
   const commitName = () => {
@@ -120,6 +131,20 @@ function GeneralSection({ project, onDeleted }: { project: Project; onDeleted: (
           />
         </div>
         <div className="field">
+          <label className="field-label" htmlFor={descId}>
+            Description
+          </label>
+          <textarea
+            id={descId}
+            className="input field-textarea field-w-md"
+            rows={2}
+            placeholder="What this project is about"
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            onBlur={commitDescription}
+          />
+        </div>
+        <div className="field">
           <span className="field-label">Color</span>
           <ColorSwatches value={project.color} onChange={(color) => void patch({ color })} />
         </div>
@@ -135,10 +160,10 @@ function GeneralSection({ project, onDeleted }: { project: Project; onDeleted: (
             id={execId}
             repoId={null}
             value={project.defaultExecutor}
-            inheritLabel="Claude (default)"
+            inheritLabel={`Global default (${globalExecutor ? executorLabel(globalExecutor) : "Claude"})`}
             onChange={(defaultExecutor) => void patch({ defaultExecutor })}
           />
-          <span className="field-hint">Used when neither the task nor its repo picks one.</span>
+          <span className="field-hint">Used when neither the task nor its repo picks one. The global default is in Settings → Execution.</span>
         </div>
         <div className="field">
           <label className="field-label" htmlFor={reviewerId}>

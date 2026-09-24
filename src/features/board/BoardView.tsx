@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, type DragEvent, type ReactNode } from "react";
 import { moveTask, reorderTasks } from "../../domain/api";
 import { useAllRuns, useLatestRunByTask } from "../../domain/hooks/runs";
-import { invalidate, useProjectList, useRepos, useTasks } from "../../domain/hooks/store";
+import { invalidate, useProjectList, useRepos, useSettings, useTasks } from "../../domain/hooks/store";
 import { taskKey, type Task, type TaskStatus } from "../../domain/types";
 import { useToast } from "../../ui/Toasts";
 import { resolveExecutor } from "../executors";
@@ -45,6 +45,7 @@ export function BoardView({ projectId, onOpenTask, onOpenRun, onNewProject, onOp
   const repos = useRepos(projectId);
   const tasks = useTasks(projectId);
   const runs = useAllRuns();
+  const globalExecutor = useSettings().data?.defaultExecutor ?? null;
 
   const [filters, setFilters] = useState<Filters>(NO_FILTERS);
   const [showHidden, setShowHidden] = useState<Record<string, boolean>>({});
@@ -133,7 +134,7 @@ export function BoardView({ projectId, onOpenTask, onOpenRun, onNewProject, onOp
       task: t,
       project,
       repo,
-      assignee: resolveExecutor(t, repo, project),
+      assignee: resolveExecutor(t, repo, project, globalExecutor),
       run,
       phase: run ? phases.get(run.id) : undefined,
     };

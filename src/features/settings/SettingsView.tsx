@@ -1,12 +1,14 @@
 import { useCallback, useEffect, useId, useState, type ReactNode } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { getSettings, providerStatus, setSettings, type ProviderStatus } from "../../domain/api";
+import { providerStatus, setSettings, type ProviderStatus } from "../../domain/api";
 import { useProjects } from "../../domain/hooks/projects";
 import type { Settings } from "../../domain/types";
 import { IntegrationsSettings } from "../providers";
 import { resolveGitRoot } from "../projects/repoPicker";
 import { Segmented } from "../projects/fields";
-import { invalidate, KEYS, setData } from "../../domain/hooks/store";
+import { invalidate, KEYS, setData, useSettings } from "../../domain/hooks/store";
+import { CLAUDE } from "../executors/executors";
+import { ExecutorPicker } from "../executors";
 import type { SettingsSection } from "../../shell/useNav";
 import { useToast } from "../../ui/Toasts";
 import { summarize, useLegacyImport } from "./legacyImport";
@@ -87,52 +89,45 @@ const MAX_CONCURRENCY = 16;
 
 function ExecutionSettings({ onSaved }: { onSaved: (s: Settings) => void }) {
   const toast = useToast();
-  const [s, setS] = useState<Settings | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const settings = useSettings();
+  const s = settings.data;
   const [reviewer, setReviewer] = useState("");
   const [saving, setSaving] = useState(false);
   const parId = useId();
   const reviewerId = useId();
+  const execId = useId();
 
   useEffect(() => {
-    getSettings()
-      .then((v) => {
-        setS(v);
-        setReviewer(v.reviewer);
-      })
-      .catch((e) => setError(String(e)));
-  }, []);
+    if (s) setReviewer(s.reviewer);
+  }, [s?.reviewer]);
 
-  // Un guardado a la vez (el stepper se deshabilita): sin respuestas desordenadas.
+  // Un guardado a la vez (los controles se deshabilitan): sin respuestas desordenadas.
+  // Optimista sobre el store compartido; si falla, la relectura lo corrige.
   const save = async (next: Settings) => {
-    const prev = s;
-    setS(next);
+    setData<Settings>(KEYS.settings, () => next);
     setSaving(true);
     try {
-      const saved = await setSettings(next);
-      setS(saved);
-      setReviewer(saved.reviewer);
-      onSaved(saved);
+      onSaved(await setSettings(next));
     } catch (e) {
-      setS(prev);
-      if (prev) setReviewer(prev.reviewer);
+      void invalidate("settings");
       toast("Couldn't save settings", String(e), "danger");
     } finally {
       setSaving(false);
     }
   };
 
-  if (error) {
-    return (
+  if (!s) {
+    return settings.error ? (
       <>
         <SectionHead title="Execution" />
         <div className="field-error" role="alert">
-          Couldn't read the settings: {error}
+          Couldn't read the settings: {settings.error}
         </div>
       </>
+    ) : (
+      <SectionHead title="Execution" text="Loading…" />
     );
   }
-  if (!s) return <SectionHead title="Execution" text="Loading…" />;
 
   const commitReviewer = () => {
     const r = reviewer.trim();
@@ -175,6 +170,26 @@ function ExecutionSettings({ onSaved }: { onSaved: (s: Settings) => void }) {
         </div>
         <div className="settings-row">
           <div className="settings-row-text">
+            <span className="settings-row-title" id={execId}>
+              Default executor
+            </span>
+            <span className="settings-row-hint">
+              Runs tasks when neither the task, its repo nor its project picks one. Projects and repos can override it.
+            </span>
+          </div>
+          <div aria-labelledby={execId} role="group">
+            <ExecutorPicker
+              repoId={null}
+              value={s.defaultExecutor}
+              inherited={CLAUDE}
+              label="Default executor"
+              disabled={saving}
+              onChange={(defaultExecutor) => void save({ ...s, defaultExecutor })}
+            />
+          </div>
+        </div>
+        <div className="settings-row">
+          <div className="settings-row-text">
             <label className="settings-row-title" htmlFor={reviewerId}>
               Default reviewer
             </label>
@@ -204,13 +219,11 @@ function ExecutionSettings({ onSaved }: { onSaved: (s: Settings) => void }) {
               { value: null as string | null, label: "System default" },
               ...EDITORS.map((e) => ({ value: e as string | null, label: EDITOR_LABEL[e] ?? e })),
             ]}
+            disabled={saving}
             onChange={(editor) => void save({ ...s, editor })}
           />
         </div>
       </div>
-      <p className="settings-note">
-        The default executor is set per project and per repo (Project → Settings). Without one, tasks run with Claude.
-      </p>
     </>
   );
 }

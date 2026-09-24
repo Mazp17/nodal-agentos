@@ -141,7 +141,7 @@ export function NewTaskDialog({ projectId, taskId, defaultRepoId, onClose, onSav
   }, [focusAc]);
 
   const imported = !!original?.source;
-  const inherited = inheritedExecutor(repo, project);
+  const inherited = inheritedExecutor(repo, project, settings.data?.defaultExecutor);
   const effExecutor = assignee ?? inherited;
   const isWorkflow = effExecutor.kind === "workflow";
   const effIsolation = isolation ?? repo?.defaultIsolation ?? "worktree";

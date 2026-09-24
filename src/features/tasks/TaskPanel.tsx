@@ -22,6 +22,7 @@ import {
   useTaskPlan,
   useTaskRelations,
   useTasks,
+  useSettings,
   useWorktreeStatus,
 } from "../../domain/hooks/store";
 import { taskKey, TASK_STATUSES, type Executor, type RelationKind, type RunLight, type Task, type TaskStatus } from "../../domain/types";
@@ -76,6 +77,7 @@ export function TaskPanel({ taskId, onClose, onOpenRun, onOpenDiff, onOpenTask, 
   const repos = useRepos(task?.projectId ?? null);
   const runsQ = useTaskRuns(taskId);
   const summary = useQueueSummary();
+  const globalExecutor = useSettings().data?.defaultExecutor ?? null;
 
   const [tab, setTab] = useState<"overview" | "source">("overview");
   const [menu, setMenu] = useState<"status" | "repo" | null>(null);
@@ -129,7 +131,7 @@ export function TaskPanel({ taskId, onClose, onOpenRun, onOpenDiff, onOpenTask, 
   }
 
   const key = project ? taskKey(project.key, task.number) : `#${task.number}`;
-  const assignee = resolveExecutor(task, repo, project);
+  const assignee = resolveExecutor(task, repo, project, globalExecutor);
   const runExec = launchExec ?? assignee;
   const src = task.source;
   const closed = isClosed(task.status);
