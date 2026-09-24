@@ -1,5 +1,7 @@
 mod activity;
 mod config;
+mod db;
+mod domain;
 mod issue_runs;
 mod linear;
 mod runs;
@@ -27,6 +29,14 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .manage(linear::LinearState::new())
         .setup(|app| {
+            use tauri::Manager;
+            // Todavía no la usa nadie (llega en F1): si falla, se avisa y la app sigue.
+            match db::open(&app.path().app_data_dir()?.join(db::DB_FILE)) {
+                Ok(db) => {
+                    app.manage(db);
+                }
+                Err(e) => eprintln!("nodal.db: {e}"),
+            }
             issue_runs::init(app.handle())?;
             tasks::init(app.handle())?;
             Ok(())

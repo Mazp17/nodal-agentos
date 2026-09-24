@@ -1,26 +1,10 @@
 //! Tipos que el módulo `runs` expone al frontend. Espejo en `src/features/runs/types.ts`.
 //! Son nuestros, no de Claude Code: el parseo del formato interno vive en `claude_fs.rs`.
 
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 
-/// Flags opcionales de `claude --bg` que se configuran por repo.
-/// Valores permitidos: ver `runs::options` (verificados contra `claude --help` 2.1.281).
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct LaunchOptions {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub model: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub effort: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub permission_mode: Option<String>,
-}
-
-impl LaunchOptions {
-    pub fn is_empty(&self) -> bool {
-        self.model.is_none() && self.effort.is_none() && self.permission_mode.is_none()
-    }
-}
+/// Movido a `domain`; se reexporta para no romper los usos actuales.
+pub use crate::domain::LaunchOptions;
 
 /// Lo que devuelve `launch_run`: el id corto que imprime `claude --bg`.
 #[derive(Debug, Clone, PartialEq, Serialize)]
