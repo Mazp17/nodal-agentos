@@ -625,7 +625,22 @@ function LinearProjectRow({ repo, ctx }: { repo: Repo; ctx: LinearCtx }) {
           );
         })}
       </select>
-      {ctx.connection !== "connected" ? (
+      {current && ctx.connection === "connected" && (
+        <button
+          type="button"
+          className="btn btn-sm"
+          disabled={saver.busy}
+          title={`Import issues from ${current.rule.name || "this project"} that aren't in Nodal yet`}
+          onClick={() => void saver.resync(current.link, current.rule, repo.name)}
+        >
+          {saver.syncing ? "Syncing…" : "Sync"}
+        </button>
+      )}
+      {saver.phase ? (
+        <span className="field-hint" role="status">
+          {saver.phase}
+        </span>
+      ) : ctx.connection !== "connected" ? (
         <span className="field-hint">
           {ctx.connection === "loading" ? "Checking Linear…" : "Linear isn't reachable with the saved key."}
           {ctx.connection !== "loading" && (
@@ -650,6 +665,10 @@ function LinearProjectRow({ repo, ctx }: { repo: Repo; ctx: LinearCtx }) {
           <button type="button" className="btn btn-ghost btn-sm" onClick={ctx.onOpenSources}>
             Manage in Sources
           </button>
+        </span>
+      ) : saver.last && saver.last.ruleId === current?.rule.id ? (
+        <span className={`field-hint repo-sync-status tone-${saver.last.tone}`} role="status" title={new Date(saver.last.at).toLocaleString()}>
+          {saver.last.text}
         </span>
       ) : (
         <span className="field-hint">New issues in this project are imported here.</span>

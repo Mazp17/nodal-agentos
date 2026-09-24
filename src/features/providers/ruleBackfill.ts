@@ -30,12 +30,20 @@ export interface RuleEdit {
 
 export interface RuleSaver {
   busy: boolean;
+  /** Qué está haciendo ahora ("Checking Linear…", "Importing 12 issues…"); null si nada. */
+  phase: string | null;
+  /** Resultado del último backfill/sync ("Imported 3 issues"), para mostrarlo junto al control. */
+  last: { ruleId: string; text: string; tone: "ok" | "warn" | "danger"; at: number } | null;
+  /** Hay un `resync` en curso. */
+  syncing: boolean;
   /**
    * Aplica `edits` en orden. Si uno falla, deshace los anteriores (re-guarda su lista previa).
    * Con `backfill`, después ofrece importar lo que ya existe en ese proyecto
    * (preview → confirmación → `importRule` → toast). Devuelve false si no se guardó (ya avisó).
    */
   save: (edits: RuleEdit | RuleEdit[], backfill?: BackfillTarget) => Promise<boolean>;
+  /** Re-importa lo que ya existe en el proyecto de una regla guardada, sin confirmación. */
+  resync: (link: SourceLink, rule: RepoRule, repoName: string) => Promise<void>;
 }
 
 /*
@@ -62,6 +70,24 @@ export function useRuleBackfill(): RuleSaver {
   const ask = useConfirm();
   const toast = useToast();
   const [pending, setPending] = useState(0);
+  const [phase, setPhase] = useState<string | null>(null);
+  const [last, setLast] = useState<RuleSaver["last"]>(null);
+  const [syncing, setSyncing] = useState(0);
+  const report = useCallback(
+    (ruleId: string, text: string, tone: "ok" | "warn" | "danger") => setLast({ ruleId, text, tone, at: Date.now() }),
+    [],
+  );
+
+  /** `importRule` con fase visible, toast y resultado inline. */
+  const runImport = useCallback(
+    async (linkId: string, ruleId: string, repoName: string, count?: number) => {
+      setPhase(count ? `Importing ${plural(count, "issue")}…` : "Importing issues…");
+      const [title, body, tone] = importToast(await importRule(linkId, ruleId), repoName);
+      toast(title, body, tone);
+      report(ruleId, title, tone);
+    },
+    [report, toast],
+  );
 
   const runBackfill = useCallback(
     async (savedLinks: SourceLink[], t: BackfillTarget) => {
@@ -70,10 +96,13 @@ export function useRuleBackfill(): RuleSaver {
       const rule = saved?.repoRules.find(match);
       if (!saved || !rule) return;
       try {
+        setPhase(`Checking ${t.projectName} in Linear…`);
         const p = await previewRuleImport(saved.id, rule.id);
+        setPhase(null);
         const elsewhere = p.inOtherRepos > 0 ? `${p.inOtherRepos} already imported elsewhere stay where they are` : null;
         if (p.count === 0) {
           toast("Rule saved. No issues to import", elsewhere ? `${elsewhere}.` : undefined, "ok");
+          report(rule.id, `No issues to import${elsewhere ? ` (${elsewhere})` : ""}`, "ok");
           return;
         }
         const ok = await ask({
@@ -90,14 +119,18 @@ export function useRuleBackfill(): RuleSaver {
         });
         if (!ok) {
           toast("Rule saved", "Only new issues will be imported.", "info");
+          report(rule.id, `Skipped ${plural(p.count, "existing issue")}; only new ones will be imported`, "ok");
           return;
         }
-        toast(...importToast(await importRule(saved.id, rule.id), t.repoName));
+        await runImport(saved.id, rule.id, t.repoName, p.count);
       } catch (err) {
         toast("Couldn't import issues", `${errorText(err)}\nThe rule is saved; only new issues will be imported.`, "danger");
+        report(rule.id, `Import failed: ${errorText(err)}`, "danger");
+      } finally {
+        setPhase(null);
       }
     },
-    [ask, toast],
+    [ask, report, runImport, toast],
   );
 
   const save = useCallback(
@@ -105,6 +138,7 @@ export function useRuleBackfill(): RuleSaver {
       const edits = Array.isArray(input) ? input : [input];
       setPending((n) => n + 1);
       return enqueue(async () => {
+        setPhase("Saving…");
         /** Lista previa de cada edit ya guardado, para deshacer. */
         const done: { link: SourceLink; before: RepoRule[] }[] = [];
         const saved: SourceLink[] = [];
@@ -119,6 +153,7 @@ export function useRuleBackfill(): RuleSaver {
           toast("Couldn't save the rule", [errorText(err), rollback].filter(Boolean).join("\n"), "danger");
           return false;
         } finally {
+          setPhase(null);
           invalidateProviders("links");
         }
         if (backfill) await runBackfill(saved, backfill);
@@ -128,7 +163,28 @@ export function useRuleBackfill(): RuleSaver {
     [runBackfill, toast],
   );
 
-  return { busy: pending > 0, save };
+  const resync = useCallback(
+    (link: SourceLink, rule: RepoRule, repoName: string) => {
+      setPending((n) => n + 1);
+      setSyncing((n) => n + 1);
+      return enqueue(async () => {
+        try {
+          await runImport(link.id, rule.id, repoName);
+        } catch (err) {
+          toast("Couldn't sync issues", errorText(err), "danger");
+          report(rule.id, `Sync failed: ${errorText(err)}`, "danger");
+        } finally {
+          setPhase(null);
+        }
+      }).finally(() => {
+        setPending((n) => n - 1);
+        setSyncing((n) => n - 1);
+      });
+    },
+    [report, runImport, toast],
+  );
+
+  return { busy: pending > 0, syncing: syncing > 0, phase, last, save, resync };
 }
 
 /** Re-guarda las listas previas (en orden inverso). Devuelve qué no se pudo restaurar, si algo. */

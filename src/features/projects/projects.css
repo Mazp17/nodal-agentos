@@ -70,5 +70,6 @@
 .repo-opt-label { width: 118px; flex: none; font-size: var(--fs-md); color: var(--text-muted); }
 .repo-opt-input { width: 220px; height: var(--h-lg); }
 .repo-opts-note { margin-top: var(--sp-1); }
+.repo-sync-status.tone-warn, .repo-sync-status.tone-danger { color: var(--tone); }
 .executor-select { min-width: 220px; max-width: 100%; }
 .field-textarea { height: auto; min-height: 52px; padding-top: var(--sp-2); padding-bottom: var(--sp-2); resize: vertical; line-height: var(--lh-snug); }
