@@ -47,10 +47,11 @@ export interface NewProject {
   name: string;
   key: string;
   color?: string;
+  description?: string | null;
 }
 
 /** Solo los campos presentes se cambian; `null` borra los opcionales. */
-export type ProjectPatch = Partial<Pick<Project, "name" | "key" | "color" | "defaultExecutor" | "reviewer">> & {
+export type ProjectPatch = Partial<Pick<Project, "name" | "key" | "color" | "description" | "defaultExecutor" | "reviewer">> & {
   archived?: boolean;
 };
 

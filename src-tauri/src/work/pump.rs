@@ -266,7 +266,7 @@ mod tests {
         let db = open_in_memory().unwrap();
         let task = {
             let mut c = db.lock().unwrap();
-            let p = ops::create_project(&c, &NewProject { name: "Pay".into(), key: "PAY".into(), color: None }, 1).unwrap();
+            let p = ops::create_project(&c, &NewProject { name: "Pay".into(), key: "PAY".into(), color: None, description: None }, 1).unwrap();
             let input: NewRepo = serde_json::from_value(json!({"path": "x", "defaultIsolation": "in_place"})).unwrap();
             let r = ops::add_repo(&c, &p.id, &input, &repo_dir, 1).unwrap();
             let nt: NewTask = serde_json::from_value(json!({

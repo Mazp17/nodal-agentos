@@ -199,6 +199,17 @@ pub fn concurrency(n: u32) -> Result<u32, String> {
     }
 }
 
+const MAX_DESCRIPTION_CHARS: usize = 2000;
+
+/// Descripción de proyecto: recortada; vacía → `None`.
+pub fn description(s: Option<&str>) -> Result<Option<String>, String> {
+    let Some(t) = s.map(str::trim).filter(|t| !t.is_empty()) else { return Ok(None) };
+    if t.chars().count() > MAX_DESCRIPTION_CHARS {
+        return Err(format!("The description is too long (max {MAX_DESCRIPTION_CHARS} characters)."));
+    }
+    Ok(Some(t.to_string()))
+}
+
 pub fn extra_instructions(s: Option<&str>) -> Result<Option<String>, String> {
     let Some(t) = s.map(str::trim).filter(|t| !t.is_empty()) else { return Ok(None) };
     if t.chars().count() > MAX_EXTRA_CHARS {
