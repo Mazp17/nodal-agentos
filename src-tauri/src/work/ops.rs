@@ -13,7 +13,7 @@ use crate::runs::options;
 use crate::util::{new_id, write_atomic};
 
 use super::dto::*;
-use super::transitions::{apply_status, outbox_ops, OutboxOp};
+use super::transitions::{apply_status, outbox_ops, outbox_ops_for, OutboxOp, QUEUE_PUSHED_STATUSES};
 use super::{validate, Env};
 
 // ---------- Proyectos ----------
@@ -224,8 +224,8 @@ fn stage_plan(repo: &Repo, plan: &PlanInput, staging: &Path) -> Result<PlanRef, 
     }
 }
 
-/// Filas del outbox por un cambio de estado hecho en Nodal (a mano, o por la cola), en la
-/// transacción de quien llama.
+/// Filas del outbox por un cambio de estado hecho a mano en Nodal, en la transacción de
+/// quien llama (los de la cola pasan por `apply_task_transition`).
 pub fn push_status(
     conn: &Connection,
     task: &Task,
@@ -234,7 +234,11 @@ pub fn push_status(
     manages_source: Option<&str>,
     now: i64,
 ) -> Result<(), String> {
-    for op in outbox_ops(task, status, comment, manages_source) {
+    push_ops(conn, task, outbox_ops(task, status, comment, manages_source), now)
+}
+
+fn push_ops(conn: &Connection, task: &Task, ops: Vec<OutboxOp>, now: i64) -> Result<(), String> {
+    for op in ops {
         let queued = match op {
             OutboxOp::Status(s) => providers::enqueue_status(conn, &task.id, s, now),
             OutboxOp::Comment(body) => providers::enqueue_comment(conn, &task.id, &body, now),
@@ -450,7 +454,8 @@ pub fn reorder_tasks(conn: &mut Connection, status: TaskStatus, ids: &[String], 
 }
 
 /// Cambia el estado de la tarea por una transición de la cola (respeta Done/Canceled) y
-/// deja las filas del outbox en la misma transacción. Devuelve el estado nuevo si cambió.
+/// deja las filas del outbox en la misma transacción (incluido el regreso a Todo al sacar
+/// de la cola su único run). Devuelve el estado nuevo si cambió.
 pub fn apply_task_transition(
     conn: &Connection,
     task: &Task,
@@ -464,7 +469,7 @@ pub fn apply_task_transition(
         tasks::set_status(conn, &task.id, s, now)?;
     }
     if status.is_some() || comment.is_some() {
-        push_status(conn, task, status, comment, manages_source, now)?;
+        push_ops(conn, task, outbox_ops_for(task, status, comment, manages_source, &QUEUE_PUSHED_STATUSES), now)?;
     }
     Ok(status)
 }

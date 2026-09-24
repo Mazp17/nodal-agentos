@@ -446,6 +446,21 @@ mod tests {
     }
 
     #[test]
+    fn back_to_todo_is_pushed_to_the_provider() {
+        let f = fx("pump-todo");
+        link_task(&f);
+        let c = f.db.lock().unwrap();
+        tasks::set_status(&c, &f.task.id, TaskStatus::InProgress, 3).unwrap();
+        let t = tasks::get(&c, &f.task.id).unwrap();
+        // Lo que hace cancelar el único run en cola de la tarea.
+        ops::apply_task_transition(&c, &t, Some(TaskStatus::Todo), None, None, 4).unwrap();
+        let state: String = c
+            .query_row("SELECT payload_json FROM sync_outbox WHERE kind = 'set_state'", [], |r| r.get(0))
+            .unwrap();
+        assert!(state.contains("todo"), "{state}");
+    }
+
+    #[test]
     fn friendly_trust_error() {
         let root = Path::new("/Users/me/.nodal/worktrees");
         let e = friendly_launch_error("`claude --bg` exited ...: Workspace not trusted. Run `claude` in x", "/Users/me/.nodal/worktrees/web/pay-1", root);

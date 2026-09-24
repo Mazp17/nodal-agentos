@@ -198,6 +198,12 @@ pub fn on_enqueue_work(current: TaskStatus) -> Option<TaskStatus> {
 /// Estados que Nodal empuja al proveedor.
 pub const PUSHED_STATUSES: [TaskStatus; 3] = [TaskStatus::InProgress, TaskStatus::InReview, TaskStatus::Blocked];
 
+/// Los que empuja la cola: además, Todo, cuando se saca de la cola el único run de una
+/// tarea y vuelve de In Progress a Todo (si no, el proveedor quedaría en In Progress). El
+/// proveedor lo resuelve con su `state_map` como los demás.
+pub const QUEUE_PUSHED_STATUSES: [TaskStatus; 4] =
+    [TaskStatus::InProgress, TaskStatus::InReview, TaskStatus::Blocked, TaskStatus::Todo];
+
 /// Qué escribir en el proveedor por un cambio hecho en Nodal.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum OutboxOp {
@@ -215,12 +221,23 @@ pub fn outbox_ops(
     comment: Option<String>,
     manages_source: Option<&str>,
 ) -> Vec<OutboxOp> {
+    outbox_ops_for(task, new_status, comment, manages_source, &PUSHED_STATUSES)
+}
+
+/// Como `outbox_ops`, con los estados que se empujan (`pushed`).
+pub fn outbox_ops_for(
+    task: &Task,
+    new_status: Option<TaskStatus>,
+    comment: Option<String>,
+    manages_source: Option<&str>,
+    pushed: &[TaskStatus],
+) -> Vec<OutboxOp> {
     let Some(src) = &task.source else { return Vec::new() };
     if manages_source == Some(src.provider.as_str()) {
         return Vec::new();
     }
     let mut out = Vec::new();
-    if let Some(s) = new_status.filter(|s| PUSHED_STATUSES.contains(s)) {
+    if let Some(s) = new_status.filter(|s| pushed.contains(s)) {
         out.push(OutboxOp::Status(s));
     }
     if let Some(body) = comment {
@@ -426,5 +443,11 @@ mod tests {
         assert_eq!(outbox_ops(&t, Some(TaskStatus::InProgress), None, Some("asana")).len(), 1);
         // Tarea local: nada.
         assert!(outbox_ops(&task_of("t2"), Some(TaskStatus::InReview), Some("c".into()), None).is_empty());
+        // Todo solo lo empuja la cola (al sacar de la cola el único run), no un movimiento a mano.
+        assert!(outbox_ops(&t, Some(TaskStatus::Todo), None, None).is_empty());
+        assert_eq!(
+            outbox_ops_for(&t, Some(TaskStatus::Todo), None, None, &QUEUE_PUSHED_STATUSES),
+            vec![OutboxOp::Status(TaskStatus::Todo)]
+        );
     }
 }
