@@ -14,7 +14,11 @@
 //! - Pull solo de tareas abiertas o cerradas hace menos de 7 días; un ítem desvinculado
 //!   (unlink) no vuelve por auto-import.
 //! - Auto-import: ítems abiertos del scope creados después del link, con repo por regla o
-//!   default; sin repo resoluble no se importan y se reporta.
+//!   default; sin repo resoluble no se importan y se reporta. El pull completo solo se pide
+//!   para candidatos nuevos con repo.
+//! - Rate limit o key rechazada en cualquier paso cortan la pasada del proveedor y lo pausan
+//!   en memoria (`SyncMemo`); los estados de cada scope se releen cada `STATES_TTL_MS`. Un
+//!   sync manual (`force`) ignora la pausa y relee los estados.
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -32,8 +36,8 @@ use super::import::{import_items, suggest_repo};
 use super::plan::{plan_path, render_plan, write_plan};
 use super::state_map::{diff_known, literal_target, pull_status, push_target, PushTarget, SkipReason};
 use super::{
-    resolve, store, ErrorKind, ExternalItem, ImportQuery, PResult, Provider, ProviderResult, ProvidersState,
-    TaskProvider,
+    resolve, store, ErrorKind, ExternalItem, ImportQuery, PResult, Provider, ProviderError, ProviderResult,
+    ProvidersState, TaskProvider,
 };
 
 pub const TICK: Duration = Duration::from_secs(60);
@@ -44,11 +48,39 @@ pub const BACKOFF_MAX_MS: i64 = 60 * 60_000;
 /// Intentos de una fila del outbox con errores transitorios antes de descartarla.
 pub const MAX_ATTEMPTS: i64 = 10;
 const AUTO_IMPORT_MAX_PAGES: usize = 4;
+/// Los estados de cada scope se releen cada tanto (o en un sync manual), no en cada pasada.
+pub const STATES_TTL_MS: i64 = 10 * 60_000;
+/// Pausa del proveedor entero tras un rate limit o una key rechazada (el worker no lo toca
+/// hasta entonces; un sync manual o una key nueva la levantan).
+pub const RATE_LIMIT_PAUSE_MS: i64 = 5 * 60_000;
+pub const AUTH_PAUSE_MS: i64 = 30 * 60_000;
 
 /// Espera antes del intento `attempts + 1` (30 s, 1 min, 2 min… hasta 1 h).
 pub fn backoff_ms(attempts: i64) -> i64 {
     let exp = (attempts - 1).clamp(0, 20) as u32;
     BACKOFF_BASE_MS.saturating_mul(1 << exp).min(BACKOFF_MAX_MS)
+}
+
+/// Proveedor en pausa (ver `RATE_LIMIT_PAUSE_MS`).
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Pause {
+    pub until: i64,
+    pub reason: String,
+}
+
+/// Memoria del sync entre pasadas (en memoria; vive bajo `ProvidersState::sync_lock`).
+#[derive(Debug, Default)]
+pub struct SyncMemo {
+    /// Proveedor → pausa.
+    pub paused: HashMap<String, Pause>,
+    /// Link → (leídos en, estados del scope).
+    states: HashMap<String, (i64, Vec<ExternalState>)>,
+}
+
+/// Errores que no son de un ítem sino del proveedor entero: cortan la pasada y lo pausan.
+fn halts(e: &ProviderError) -> bool {
+    matches!(e.kind, ErrorKind::RateLimited | ErrorKind::Auth)
 }
 
 /// Espejo de `SyncReport` en `api.ts`.
@@ -165,12 +197,15 @@ fn err(e: DbError) -> String {
 }
 
 /// Una pasada completa (o solo de `link_filter`). `providers`: los que tienen key.
+/// `force` (sync manual): ignora la pausa de los proveedores y relee los estados.
 pub async fn sync_run(
     db: &Db,
     data_dir: &Path,
     providers: &[Provider],
     link_filter: Option<&str>,
     now: i64,
+    memo: &mut SyncMemo,
+    force: bool,
 ) -> SyncReport {
     let mut report = SyncReport::default();
     let links = match with_db(db, |c| store::list_links(c, None)).await {
@@ -195,17 +230,43 @@ pub async fn sync_run(
     }
 
     for p in providers {
+        let name = p.name();
+        match memo.paused.get(name) {
+            Some(pause) if !force && pause.until > now => {
+                report.notices.push(format!(
+                    "{name}: sync paused until {} ({})",
+                    super::iso_from_ms(pause.until),
+                    pause.reason
+                ));
+                continue;
+            }
+            Some(_) => {
+                memo.paused.remove(name);
+            }
+            None => {}
+        }
         let targets: Vec<&SourceLink> = links
             .iter()
-            .filter(|l| l.provider == p.name() && link_filter.is_none_or(|id| id == l.id))
+            .filter(|l| l.provider == name && link_filter.is_none_or(|id| id == l.id))
             .collect();
 
         let mut current: HashMap<String, Vec<ExternalState>> = HashMap::new();
         // Errores atribuibles a cada link en esta pasada (estados, pull, auto-import).
         let mut link_errors: HashMap<String, Vec<String>> = HashMap::new();
+        // Rate limit o key rechazada: el resto de la pasada fallaría igual.
+        let mut halt: Option<ProviderError> = None;
         for link in &targets {
+            if halt.is_some() {
+                break;
+            }
+            let cached = memo.states.get(&link.id).filter(|(at, _)| !force && now - at < STATES_TTL_MS);
+            if let Some((_, states)) = cached {
+                current.insert(link.id.clone(), states.clone());
+                continue;
+            }
             match p.states(&link.scope).await {
                 Ok(states) => {
+                    memo.states.insert(link.id.clone(), (now, states.clone()));
                     if link.state_map.confirmed_at.is_some() {
                         let (added, removed) = diff_known(&link.state_map.known_states, &states);
                         let names = |v: &[ExternalState]| v.iter().map(|s| s.name.as_str()).collect::<Vec<_>>().join(", ");
@@ -226,21 +287,42 @@ pub async fn sync_run(
                     let msg = format!("{}: {e}", link.scope.name);
                     link_errors.entry(link.id.clone()).or_default().push(msg.clone());
                     report.errors.push(msg);
+                    if halts(&e) {
+                        halt = Some(e);
+                    }
                 }
             }
         }
 
-        let flagged = drain_outbox(db, p, &links, &current, link_filter, now, &mut report).await;
-        for link in &targets {
-            let before = report.errors.len();
-            pull_link(db, data_dir, p, link, &flagged, now, &mut report).await;
-            if link.auto_import {
-                auto_import_link(db, data_dir, p, link, now, &mut report).await;
+        if halt.is_none() {
+            let (flagged, h) = drain_outbox(db, p, &links, &current, link_filter, now, &mut report).await;
+            halt = h;
+            for link in &targets {
+                if halt.is_some() {
+                    break;
+                }
+                let before = report.errors.len();
+                halt = pull_link(db, data_dir, p, link, &flagged, now, &mut report).await;
+                if link.auto_import && halt.is_none() {
+                    halt = auto_import_link(db, data_dir, p, link, now, &mut report).await;
+                }
+                link_errors.entry(link.id.clone()).or_default().extend(report.errors[before..].iter().cloned());
             }
-            link_errors.entry(link.id.clone()).or_default().extend(report.errors[before..].iter().cloned());
+        }
+        if let Some(e) = &halt {
+            let until = now + if e.kind == ErrorKind::Auth { AUTH_PAUSE_MS } else { RATE_LIMIT_PAUSE_MS };
+            report.notices.push(format!("{name}: sync paused until {} ({e})", super::iso_from_ms(until)));
+            memo.paused.insert(name.to_string(), Pause { until, reason: e.message.clone() });
         }
         for link in &targets {
-            let msg = link_errors.remove(&link.id).filter(|v| !v.is_empty()).map(|v| v.join("\n"));
+            let mut errors = link_errors.remove(&link.id).unwrap_or_default();
+            if let Some(e) = &halt {
+                // Los links que no llegaron a sincronizarse también muestran por qué.
+                if errors.is_empty() {
+                    errors.push(format!("{}: {e}", link.scope.name));
+                }
+            }
+            let msg = (!errors.is_empty()).then(|| errors.join("\n"));
             let id = link.id.clone();
             if let Err(e) = with_db(db, move |c| store::set_link_sync(c, &id, now, msg.as_deref())).await {
                 report.errors.push(err(e));
@@ -258,15 +340,16 @@ async fn drain_outbox(
     link_filter: Option<&str>,
     now: i64,
     report: &mut SyncReport,
-) -> HashSet<String> {
+) -> (HashSet<String>, Option<ProviderError>) {
     // Tareas a las que el push les dejó un error o aviso: el pull de esta pasada no lo borra.
     let mut flagged = HashSet::new();
+    let mut halt = None;
     let name = p.name();
     let items = match with_db(db, move |c| store::due_outbox(c, name, now)).await {
         Ok(i) => i,
         Err(e) => {
             report.errors.push(err(e));
-            return flagged;
+            return (flagged, None);
         }
     };
     // Orden por tarea: si una fila falla, las siguientes de esa tarea esperan (el comentario
@@ -338,7 +421,10 @@ async fn drain_outbox(
                 // Sin key o con rate limit, el resto de las filas fallaría igual. Esos errores
                 // no son de la fila: no gastan intentos (una key revocada no descarta cambios),
                 // solo corren el próximo intento (la espera larga es la pausa del proveedor).
-                stop = matches!(e.kind, ErrorKind::RateLimited | ErrorKind::Auth);
+                stop = halts(&e);
+                if stop {
+                    halt = Some(e.clone());
+                }
                 let attempts = if stop { item.attempts } else { item.attempts + 1 };
                 let give_up = e.kind == ErrorKind::Permanent || (!stop && attempts >= MAX_ATTEMPTS);
                 let msg = if give_up {
@@ -366,7 +452,7 @@ async fn drain_outbox(
             break;
         }
     }
-    flagged
+    (flagged, halt)
 }
 
 /// Lo común a todas las tareas de un link en el pull.
@@ -431,24 +517,24 @@ async fn pull_link(
     flagged: &HashSet<String>,
     now: i64,
     report: &mut SyncReport,
-) {
+) -> Option<ProviderError> {
     let link_id = link.id.clone();
     let tasks = match with_db(db, move |c| store::linked_tasks(c, Some(&link_id), now)).await {
         Ok(t) => t,
         Err(e) => {
             report.errors.push(err(e));
-            return;
+            return None;
         }
     };
     if tasks.is_empty() {
-        return;
+        return None;
     }
     let ids: Vec<String> = tasks.iter().filter_map(|t| t.source.as_ref().map(|s| s.external_id.clone())).collect();
     let items: HashMap<String, ExternalItem> = match p.pull(&ids).await {
         Ok(v) => v.into_iter().map(|i| (i.external_id.clone(), i)).collect(),
         Err(e) => {
             report.errors.push(format!("{}: {e}", link.scope.name));
-            return;
+            return halts(&e).then_some(e);
         }
     };
     let (data_dir, provider, map, flagged) = (data_dir.to_path_buf(), p.name(), link.state_map.clone(), flagged.clone());
@@ -474,6 +560,7 @@ async fn pull_link(
         }
         Err(e) => report.errors.push(err(e)),
     }
+    None
 }
 
 async fn auto_import_link(
@@ -483,7 +570,7 @@ async fn auto_import_link(
     link: &SourceLink,
     now: i64,
     report: &mut SyncReport,
-) {
+) -> Option<ProviderError> {
     let mut candidates = Vec::new();
     let mut cursor = None;
     for _ in 0..AUTO_IMPORT_MAX_PAGES {
@@ -504,7 +591,7 @@ async fn auto_import_link(
             }
             Err(e) => {
                 report.errors.push(format!("{}: {e}", link.scope.name));
-                return;
+                return halts(&e).then_some(e);
             }
         }
     }
@@ -525,7 +612,7 @@ async fn auto_import_link(
         Ok(f) => f,
         Err(e) => {
             report.errors.push(err(e));
-            return;
+            return None;
         }
     };
     let mut routed: Vec<(String, String)> = Vec::new();
@@ -539,14 +626,14 @@ async fn auto_import_link(
         }
     }
     if routed.is_empty() {
-        return;
+        return None;
     }
     let ids: Vec<String> = routed.iter().map(|(id, _)| id.clone()).collect();
     let full: HashMap<String, ExternalItem> = match p.pull(&ids).await {
         Ok(v) => v.into_iter().map(|i| (i.external_id.clone(), i)).collect(),
         Err(e) => {
             report.errors.push(format!("{}: {e}", link.scope.name));
-            return;
+            return halts(&e).then_some(e);
         }
     };
     let pairs: Vec<(ExternalItem, String)> =
@@ -559,15 +646,19 @@ async fn auto_import_link(
         }
         Err(e) => report.errors.push(err(e)),
     }
+    None
 }
 
 // ---------- Worker y comando ----------
 
-/// Proveedores con key, una pasada, bajo el lock de sync.
-pub async fn run_for_app(app: &AppHandle, link_filter: Option<&str>) -> PResult<SyncReport> {
+/// Proveedores con key, una pasada, bajo el lock de sync. `force`: sync manual (ver
+/// `sync_run`).
+pub async fn run_for_app(app: &AppHandle, link_filter: Option<&str>, force: bool) -> PResult<SyncReport> {
     let db: Db = app.try_state::<Db>().map(|s| s.inner().clone()).ok_or("The database is not available.")?;
     let state = app.state::<ProvidersState>();
-    let _guard = state.sync_lock.lock().await;
+    let mut memo = state.sync_lock.lock().await;
+    // Las pausas se leen de `ProvidersState::pauses`: una key nueva pudo levantarlas.
+    memo.paused = state.paused();
     let mut providers = Vec::new();
     for name in super::KNOWN_PROVIDERS {
         match resolve(app, name).await {
@@ -578,7 +669,8 @@ pub async fn run_for_app(app: &AppHandle, link_filter: Option<&str>) -> PResult<
         }
     }
     let data_dir: PathBuf = state.data_dir.clone();
-    let report = sync_run(&db, &data_dir, &providers, link_filter, now_ms()).await;
+    let report = sync_run(&db, &data_dir, &providers, link_filter, now_ms(), &mut memo, force).await;
+    state.set_paused(memo.paused.clone());
     if !providers.is_empty() {
         use crate::events::Kind;
         // El estado de los links cambia en cada pasada; las tareas solo si hubo movimiento.
@@ -593,7 +685,7 @@ pub fn spawn_worker(app: AppHandle) {
     tauri::async_runtime::spawn(async move {
         tokio::time::sleep(FIRST_TICK).await;
         loop {
-            match run_for_app(&app, None).await {
+            match run_for_app(&app, None, false).await {
                 Ok(r) => {
                     for e in &r.errors {
                         eprintln!("sync: {e}");
@@ -627,6 +719,7 @@ mod tests {
         fake: FakeProvider,
         providers: Vec<Provider>,
         link: SourceLink,
+        memo: std::cell::RefCell<SyncMemo>,
     }
 
     impl Drop for Env {
@@ -641,7 +734,14 @@ mod tests {
             let link = seed(&db.lock().unwrap());
             let fake = FakeProvider::default();
             fake.data().states = team_states();
-            Env { db, dir: tmp_dir(), providers: vec![Provider::Fake(fake.clone())], fake, link }
+            Env {
+                db,
+                dir: tmp_dir(),
+                providers: vec![Provider::Fake(fake.clone())],
+                fake,
+                link,
+                memo: Default::default(),
+            }
         }
 
         /// Importa el ítem `n` (en estado `state_id`) al repo web y lo deja en el fake.
@@ -660,7 +760,17 @@ mod tests {
         }
 
         fn run(&self, now: i64) -> SyncReport {
-            tauri::async_runtime::block_on(sync_run(&self.db, &self.dir, &self.providers, None, now))
+            self.run_with(now, false)
+        }
+
+        /// Sync manual: sin pausa y releyendo estados.
+        fn run_forced(&self, now: i64) -> SyncReport {
+            self.run_with(now, true)
+        }
+
+        fn run_with(&self, now: i64, force: bool) -> SyncReport {
+            let mut memo = self.memo.borrow_mut();
+            tauri::async_runtime::block_on(sync_run(&self.db, &self.dir, &self.providers, None, now, &mut memo, force))
         }
 
         fn task(&self, id: &str) -> Task {
@@ -792,6 +902,54 @@ mod tests {
     }
 
     #[test]
+    fn rate_limit_pauses_the_provider_between_passes() {
+        let env = Env::new();
+        let t = env.import(1, "s-todo");
+        env.fake.data().fail_states = Some(ProviderError::new(ErrorKind::RateLimited, "rate limited"));
+        let r = env.run(10);
+        assert!(r.notices.iter().any(|n| n.contains("fake: sync paused until")), "{r:?}");
+        env.fake.data().fail_states = None;
+        env.fake.data().items.get_mut("uuid-1").unwrap().title = "Nuevo".into();
+        let calls = env.fake.data().states_calls;
+        // En pausa: el worker no toca el proveedor.
+        let r = env.run(20);
+        assert_eq!((r.pulled, env.fake.data().states_calls), (0, calls), "{r:?}");
+        assert_eq!(env.task(&t.id).title, t.title);
+        let l = store::get_link(&env.db.lock().unwrap(), &env.link.id).unwrap();
+        assert!(l.last_sync_error.unwrap().contains("rate limited"), "the link keeps the reason");
+        // Vencida la pausa, vuelve a sincronizar.
+        let r = env.run(10 + RATE_LIMIT_PAUSE_MS);
+        assert_eq!(r.pulled, 1, "{r:?}");
+        assert_eq!(env.task(&t.id).title, "Nuevo");
+        assert!(env.memo.borrow().paused.is_empty());
+    }
+
+    #[test]
+    fn manual_sync_ignores_the_pause() {
+        let env = Env::new();
+        env.import(1, "s-todo");
+        env.fake.data().fail_states = Some(ProviderError::new(ErrorKind::Auth, "key revoked"));
+        env.run(10);
+        assert_eq!(env.memo.borrow().paused["fake"].until, 10 + AUTH_PAUSE_MS);
+        env.fake.data().fail_states = None;
+        assert_eq!(env.run_forced(20).pulled, 1);
+        assert!(env.memo.borrow().paused.is_empty());
+    }
+
+    #[test]
+    fn states_are_cached_between_passes() {
+        let env = Env::new();
+        env.import(1, "s-todo");
+        env.run(10);
+        env.run(20);
+        assert_eq!(env.fake.data().states_calls, 1);
+        env.run(10 + STATES_TTL_MS);
+        assert_eq!(env.fake.data().states_calls, 2);
+        env.run_forced(10 + STATES_TTL_MS + 1);
+        assert_eq!(env.fake.data().states_calls, 3);
+    }
+
+    #[test]
     fn auth_errors_never_drop_changes() {
         let env = Env::new();
         let t = env.import(1, "s-todo");
@@ -857,7 +1015,7 @@ mod tests {
         // "In Review" desaparece del proveedor: no se empuja y se avisa.
         env.fake.data().states.retain(|s| s.id != "s-review");
         env.enqueue_status(&t.id, TaskStatus::InReview, 20);
-        let r = env.run(30);
+        let r = env.run_forced(30);
         assert!(env.fake.data().set_states.is_empty());
         assert!(r.notices.iter().any(|n| n.contains("\"In Review\" no longer exists")), "{r:?}");
         assert!(env.task(&t.id).source.unwrap().sync_error.unwrap().contains("no longer exists"));

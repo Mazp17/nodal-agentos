@@ -292,15 +292,46 @@ pub async fn require(app: &AppHandle, name: &str) -> PResult<Provider> {
 pub struct ProvidersState {
     /// `app_data_dir`: los planes van en `tasks/<id>/plan.md`.
     pub data_dir: PathBuf,
-    /// Un solo sync a la vez (worker y `sync_now`).
-    pub sync_lock: tokio::sync::Mutex<()>,
+    /// Un solo sync a la vez (worker y `sync_now`), con su memoria entre pasadas.
+    pub sync_lock: tokio::sync::Mutex<sync::SyncMemo>,
+    /// Proveedores en pausa por rate limit o key rechazada. Aparte del lock de sync para que
+    /// `provider_status` y el cambio de key no esperen a una pasada en curso.
+    pauses: std::sync::Mutex<std::collections::HashMap<String, sync::Pause>>,
+}
+
+impl ProvidersState {
+    pub fn paused(&self) -> std::collections::HashMap<String, sync::Pause> {
+        self.pauses.lock().map(|m| m.clone()).unwrap_or_default()
+    }
+
+    pub fn set_paused(&self, p: std::collections::HashMap<String, sync::Pause>) {
+        if let Ok(mut m) = self.pauses.lock() {
+            *m = p;
+        }
+    }
+
+    /// Pausa vigente de un proveedor.
+    pub fn pause_of(&self, provider: &str, now: i64) -> Option<sync::Pause> {
+        self.paused().remove(provider).filter(|p| p.until > now)
+    }
+
+    /// Una key nueva (o borrada) levanta la pausa.
+    pub fn clear_pause(&self, provider: &str) {
+        if let Ok(mut m) = self.pauses.lock() {
+            m.remove(provider);
+        }
+    }
 }
 
 /// Registra el estado y arranca el worker de sync. Necesita `LinearState` y la base
 /// (`db::Db`) ya registrados; si la base no abrió, el worker no hace nada.
 pub fn init(app: &AppHandle) -> Result<(), String> {
     let data_dir = app.path().app_data_dir().map_err(|e| format!("Couldn't find the app data folder: {e}"))?;
-    app.manage(ProvidersState { data_dir, sync_lock: tokio::sync::Mutex::new(()) });
+    app.manage(ProvidersState {
+        data_dir,
+        sync_lock: tokio::sync::Mutex::new(sync::SyncMemo::default()),
+        pauses: Default::default(),
+    });
     sync::spawn_worker(app.clone());
     Ok(())
 }
