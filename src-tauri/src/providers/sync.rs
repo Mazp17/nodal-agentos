@@ -602,7 +602,14 @@ async fn auto_import_link(
             if store::task_by_external(c, &l.provider, &i.external_id)?.is_none()
                 && !store::is_unlinked(c, &l.provider, &i.external_id)?
             {
-                out.push((suggest_repo(&l, &i.labels), i));
+                // Un repo de regla o por defecto que ya no es del proyecto (borrado) no se
+                // reintenta: el ítem espera a que se corrija la fuente.
+                let repo = suggest_repo(&l, &i.labels);
+                let usable = match &repo {
+                    Some(r) => store::repo_project(c, r)?.as_deref() == Some(l.project_id.as_str()),
+                    None => false,
+                };
+                out.push((repo, usable, i));
             }
         }
         Ok(out)
@@ -616,14 +623,25 @@ async fn auto_import_link(
         }
     };
     let mut routed: Vec<(String, String)> = Vec::new();
-    for (repo, item) in fresh {
+    let mut stale: Vec<String> = Vec::new();
+    for (repo, usable, item) in fresh {
         match repo {
-            Some(r) => routed.push((item.external_id, r)),
+            Some(r) if usable => routed.push((item.external_id, r)),
+            Some(_) => stale.push(item.identifier),
             None => report.notices.push(format!(
                 "{}: not auto-imported (no repo rule matches its labels and the source has no default repo).",
                 item.identifier
             )),
         }
+    }
+    if !stale.is_empty() {
+        // Error del link (queda en `last_sync_error` mientras dure): no se reintenta cada minuto.
+        report.errors.push(format!(
+            "{}: auto-import is waiting for {} ({}): the repo of its rule or the default repo no longer exists. Review the source's repos.",
+            link.scope.name,
+            if stale.len() == 1 { "1 item".to_string() } else { format!("{} items", stale.len()) },
+            stale.join(", ")
+        ));
     }
     if routed.is_empty() {
         return None;
@@ -1207,6 +1225,27 @@ mod tests {
         let t = store::task_by_external(&env.db.lock().unwrap(), "fake", "uuid-11").unwrap().unwrap();
         assert_eq!(t.repo_id, "r-web");
         assert_eq!(env.run(30).imported, 0);
+    }
+
+    #[test]
+    fn auto_import_with_deleted_repo_is_reported_not_retried() {
+        let mut env = Env::new();
+        // `default_repo_id` tiene FK (ON DELETE SET NULL); las reglas no: pueden quedar colgadas.
+        env.set_link(|l| {
+            l.auto_import = true;
+            l.repo_rules = vec![RepoRule { label: "api".into(), repo_id: "r-gone".into() }];
+        });
+        let mut it = item(20, None);
+        it.labels = vec!["api".into()];
+        env.fake.data().items.insert("uuid-20".into(), it);
+        let r = env.run(10);
+        assert_eq!(r.imported, 0);
+        assert!(r.errors.iter().any(|e| e.contains("waiting for 1 item (ENG-20)")), "{r:?}");
+        assert!(!r.errors.iter().any(|e| e.starts_with("Auto-import")), "no import attempt: {r:?}");
+        let l = store::get_link(&env.db.lock().unwrap(), &env.link.id).unwrap();
+        assert!(l.last_sync_error.unwrap().contains("no longer exists"));
+        env.set_link(|l| l.repo_rules[0].repo_id = "r-web".into());
+        assert_eq!(env.run(20).imported, 1);
     }
 
     #[test]
