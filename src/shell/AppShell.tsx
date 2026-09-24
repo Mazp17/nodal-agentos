@@ -39,7 +39,7 @@ export function AppShell() {
   const queue = useQueueSummary();
   const toast = useToast();
   const legacy = useLegacyImport();
-  useUpdates();
+  const updates = useUpdates();
 
   const [forceOnboarding, setForceOnboarding] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
@@ -380,6 +380,11 @@ export function AppShell() {
         activeByProject={work.activeByProject}
         mappingDrift={mappingDrift}
         provider={foot}
+        version={updates.version}
+        updateAvailable={updates.available}
+        updating={updates.installing}
+        checkingUpdates={updates.checking}
+        onUpdate={updates.check}
         onGo={(page, pid) => go(page, pid)}
         onToggleProject={(pid) => {
           // Como en el diseño: elegir otro proyecto lo abre en la misma página; el actual se pliega.

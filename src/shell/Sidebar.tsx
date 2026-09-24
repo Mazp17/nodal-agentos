@@ -26,6 +26,12 @@ interface Props {
   /** Proyectos con fuentes cuyos estados cambiaron en el proveedor (mapeo por revisar). */
   mappingDrift: ReadonlySet<string>;
   provider: ProviderFoot;
+  /** Versión instalada, y la más nueva si el chequeo de updates encontró una. */
+  version: string | null;
+  updateAvailable: string | null;
+  updating: boolean;
+  checkingUpdates: boolean;
+  onUpdate: () => void;
   onGo: (page: "board" | "runs" | "settings" | ProjectPage, projectId: string | null) => void;
   onToggleProject: (projectId: string) => void;
   onNewProject: () => void;
@@ -138,9 +144,24 @@ export function Sidebar(p: Props) {
         {p.projects.length === 0 && <div className="side-empty">No projects yet.</div>}
       </nav>
 
-      <div className="side-foot" role="status">
-        <span className={`dot dot-sm tone-${p.provider.tone}`} aria-hidden />
-        <span className="ellipsis">{p.provider.label}</span>
+      <div className="side-foot">
+        <span className="side-foot-status" role="status">
+          <span className={`dot dot-sm tone-${p.provider.tone}`} aria-hidden />
+          <span className="ellipsis">{p.provider.label}</span>
+        </span>
+        {p.updateAvailable ? (
+          <button
+            type="button"
+            className="side-version side-update"
+            disabled={p.updating || p.checkingUpdates}
+            onClick={p.onUpdate}
+            aria-label={p.version ? `Update to v${p.updateAvailable} (installed v${p.version})` : undefined}
+          >
+            {p.updating ? "Updating…" : `Update to v${p.updateAvailable}`}
+          </button>
+        ) : (
+          p.version && <span className="side-version">v{p.version}</span>
+        )}
       </div>
     </aside>
   );
