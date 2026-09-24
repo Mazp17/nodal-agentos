@@ -21,7 +21,7 @@
 //!   sin outcome (no se reevalúa: no dispara transiciones); `queued` → sigue **Queued**: con
 //!   `legacy_label` la cola no lo lanza solo (`work::queue::awaiting_confirmation`) hasta
 //!   que se confirma (`confirm_run`) o se cancela;
-//! - `concurrency` → settings (solo la primera vez: no pisa un cambio posterior);
+//! - `concurrency` → settings (solo la primera vez, y nunca pisa uno ya configurado);
 //! - un JSON corrupto (archivo o registro) se saltea con aviso en `skipped`.
 
 pub mod legacy;
@@ -512,7 +512,7 @@ impl Ctx<'_> {
                 self.conn
                     .execute(
                         "INSERT INTO settings (key, value_json) VALUES ('concurrency', ?1)
-                         ON CONFLICT(key) DO UPDATE SET value_json = excluded.value_json",
+                         ON CONFLICT(key) DO NOTHING",
                         [c.to_string()],
                     )
                     .map_err(sql)?;

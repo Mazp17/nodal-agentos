@@ -380,6 +380,16 @@ fn reimport_after_state_changes_and_duplicate_entries() {
 }
 
 #[test]
+fn first_import_keeps_a_configured_concurrency() {
+    let data = TempDir::new("conc");
+    let db = open_in_memory().unwrap();
+    let mut conn = db.lock().unwrap();
+    conn.execute("INSERT INTO settings (key, value_json) VALUES ('concurrency', '1')", []).unwrap();
+    import_folder(&mut conn, &fixture("legacy"), &data.0, T0).unwrap();
+    assert_eq!(rows::load_settings(&conn).unwrap().concurrency, 1);
+}
+
+#[test]
 fn nested_data_dir_is_filtered_at_any_level() {
     let src = TempDir::new("nested");
     let data = src.0.join("app/data");
