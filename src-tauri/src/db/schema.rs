@@ -194,6 +194,7 @@ CREATE TABLE legacy_imports (
 ///   que cambiaron contra `known_states` (se limpia al guardar el mapeo);
 /// - `tasks.src_unmapped`: el estado externo actual no está en el mapeo pull;
 /// - `runs.tokens`: tokens del transcript (agente/Claude/revisor) sumados al cerrar.
+///
 /// `Settings.defaultExecutor` es una fila más de `settings`: no necesita DDL.
 const V2: &str = r#"
 ALTER TABLE projects ADD COLUMN description TEXT;
