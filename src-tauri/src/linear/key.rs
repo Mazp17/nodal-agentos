@@ -4,6 +4,8 @@
 use super::error::LinearError;
 use std::sync::Mutex;
 
+// Misma convención que `secrets.rs` (F1-A): servicio `com.nodal.app`, cuenta
+// `<provider>-api-key`. TODO(F1 integración): unificar con `secrets.rs` y borrar esto.
 const SERVICE: &str = "com.nodal.app";
 const ACCOUNT: &str = "linear-api-key";
 

@@ -1,11 +1,11 @@
 //! Linear en modo sólo lectura. Todas las llamadas salen desde Rust, así la API key
 //! no pasa por el webview y la CSP no necesita abrir `connect-src` a linear.app.
 
-mod client;
+pub(crate) mod client;
 mod detail;
 mod error;
 mod key;
-mod model;
+pub(crate) mod model;
 
 use client::{http_client, LinearClient};
 use detail::IssueDetail;
@@ -23,6 +23,16 @@ pub struct LinearState {
 impl LinearState {
     pub fn new() -> Self {
         Self { http: http_client(), key: KeyCache::default() }
+    }
+
+    /// Para `providers::linear`: mismo cliente HTTP y misma caché de la key, así un cambio
+    /// de key desde cualquiera de los dos lados se ve en el otro.
+    pub(crate) fn http(&self) -> &reqwest::Client {
+        &self.http
+    }
+
+    pub(crate) fn key(&self) -> &KeyCache {
+        &self.key
     }
 }
 

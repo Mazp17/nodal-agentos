@@ -4,6 +4,7 @@ mod db;
 mod domain;
 mod issue_runs;
 mod linear;
+mod providers;
 mod runs;
 mod tasks;
 
@@ -37,6 +38,8 @@ pub fn run() {
                 }
                 Err(e) => eprintln!("nodal.db: {e}"),
             }
+            // F1-C: sync de proveedores (worker cada 60 s). Sin base, el worker no hace nada.
+            providers::init(app.handle())?;
             issue_runs::init(app.handle())?;
             tasks::init(app.handle())?;
             Ok(())
@@ -55,6 +58,20 @@ pub fn run() {
             linear::linear_teams,
             linear::linear_board,
             linear::linear_issue_detail,
+            providers::commands::provider_status,
+            providers::commands::provider_set_key,
+            providers::commands::provider_clear_key,
+            providers::commands::provider_scopes,
+            providers::commands::list_source_links,
+            providers::commands::create_source_link,
+            providers::commands::update_source_link,
+            providers::commands::delete_source_link,
+            providers::commands::unlink_task,
+            providers::commands::source_states,
+            providers::commands::save_state_map,
+            providers::commands::provider_list_importable,
+            providers::commands::import_tasks,
+            providers::commands::sync_now,
             config::get_config,
             config::save_config,
             config::resolve_repo,

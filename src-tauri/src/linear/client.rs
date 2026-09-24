@@ -88,6 +88,90 @@ impl<'a> LinearClient<'a> {
         Ok(Board { teams: states.into_team_states(), issues, truncated })
     }
 
+    /// Proyectos activos (ni completed ni canceled), por nombre.
+    pub async fn projects(&self) -> Result<Vec<ProjectRef>, LinearError> {
+        let d: ProjectsData = self.query(PROJECTS_QUERY, json!({})).await?;
+        let mut out = d.projects.nodes;
+        out.sort_by_key(|p| p.name.to_lowercase());
+        Ok(out)
+    }
+
+    pub async fn project_teams(&self, project_id: &str) -> Result<Vec<Team>, LinearError> {
+        let d: ProjectTeamsData = self.query(PROJECT_TEAMS_QUERY, json!({ "id": project_id })).await?;
+        Ok(d.project.teams.nodes)
+    }
+
+    /// Estados (no archivados) de esos teams, ordenados por team y posición.
+    pub async fn workflow_states(&self, team_ids: &[String]) -> Result<Vec<ScopedState>, LinearError> {
+        let d: WorkflowStatesData = self.query(WORKFLOW_STATES_QUERY, json!({ "teamIds": team_ids })).await?;
+        let mut out = d.workflow_states.nodes;
+        out.sort_by(|a, b| a.team.key.cmp(&b.team.key).then(a.state.position.total_cmp(&b.state.position)));
+        Ok(out)
+    }
+
+    /// Una página del listado de importables (`filter` de `model::importable_filter`).
+    pub async fn importable_page(
+        &self,
+        filter: &Value,
+        after: Option<&str>,
+    ) -> Result<(Vec<SyncIssue>, Option<String>), LinearError> {
+        let d: SyncIssuesData = self
+            .query(IMPORTABLE_QUERY, json!({ "filter": filter, "first": SYNC_PAGE_SIZE, "after": after }))
+            .await?;
+        let next = match d.issues.page_info {
+            PageInfo { has_next_page: true, end_cursor } => end_cursor,
+            _ => None,
+        };
+        Ok((d.issues.nodes, next))
+    }
+
+    /// Issues completas por UUID, en lotes de `PULL_BATCH`. Las que no existen (o la key no
+    /// ve) simplemente no vuelven.
+    pub async fn issues_by_ids(&self, ids: &[String]) -> Result<Vec<SyncIssue>, LinearError> {
+        let mut out = Vec::with_capacity(ids.len());
+        for chunk in ids.chunks(PULL_BATCH) {
+            let d: SyncIssuesData = self
+                .query(ISSUES_BY_IDS_QUERY, json!({ "ids": chunk, "first": chunk.len() }))
+                .await?;
+            out.extend(d.issues.nodes);
+        }
+        Ok(out)
+    }
+
+    /// Estados del team de la issue y el estado `state_id` (de cualquier team).
+    pub async fn issue_team_states(
+        &self,
+        issue_id: &str,
+        state_id: &str,
+    ) -> Result<(Vec<WorkflowState>, WorkflowState), LinearError> {
+        let d: IssueTeamStatesData = self
+            .query(ISSUE_TEAM_STATES_QUERY, json!({ "id": issue_id, "stateId": state_id }))
+            .await?;
+        Ok((d.issue.team.states.nodes, d.workflow_state))
+    }
+
+    /// Cambia el estado y devuelve el estado resultante.
+    pub async fn set_issue_state(&self, issue_id: &str, state_id: &str) -> Result<WorkflowState, LinearError> {
+        let d: IssueUpdateData = self
+            .query(SET_STATE_MUTATION, json!({ "id": issue_id, "stateId": state_id }))
+            .await?;
+        match d.issue_update {
+            IssueUpdatePayload { success: true, issue: Some(i) } => Ok(i.state),
+            _ => Err(LinearError::Api("issueUpdate returned success: false".into())),
+        }
+    }
+
+    pub async fn create_comment(&self, issue_id: &str, body: &str) -> Result<(), LinearError> {
+        let d: CommentCreateData = self
+            .query(COMMENT_MUTATION, json!({ "issueId": issue_id, "body": body }))
+            .await?;
+        if d.comment_create.success {
+            Ok(())
+        } else {
+            Err(LinearError::Api("commentCreate returned success: false".into()))
+        }
+    }
+
     pub async fn issue_detail(&self, issue_id: &str) -> Result<IssueDetail, LinearError> {
         let d: IssueDetailData = self
             .query(&issue_detail_query(), json!({ "id": issue_id }))
