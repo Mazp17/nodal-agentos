@@ -4,7 +4,15 @@ import { projectIdOf, useRun, type RunsState } from "../../domain/hooks/runs";
 import type { Run, RunLight, Verdict } from "../../domain/types";
 import { formatDateTime, formatDuration, formatTokens } from "../../lib/format";
 import { useRunActions } from "./actions";
-import { AGENT_STATUS, AgentTranscript, modelName } from "./AgentTranscript";
+import {
+  AGENT_STATUS,
+  AgentTranscript,
+  DEFAULT_LIMIT,
+  FULL_LIMIT,
+  modelName,
+  TranscriptConversation,
+  useRunTranscript,
+} from "./AgentTranscript";
 import { classifyLaunchError, LaunchBlockerNotice, useLaunchBlocker } from "./LaunchBlockerNotice";
 import { RunBadge } from "./RunBadge";
 import {
@@ -137,10 +145,16 @@ export function RunDetailView({ runId, onBack, onOpenTask, onOpenRun, onOpenDiff
             <span>
               Elapsed <span className="rd-meta-v num">{formatDuration(view.durationMs)}</span>
             </span>
-            {isWorkflow && (
+            {isWorkflow ? (
               <span>
                 Tokens <span className="rd-meta-v num">{formatTokens(view.tokens)}</span>
               </span>
+            ) : (
+              run.tokens != null && (
+                <span>
+                  Tokens <span className="rd-meta-v num">{formatTokens(run.tokens)}</span>
+                </span>
+              )
             )}
           </div>
         </div>
@@ -463,11 +477,17 @@ function SubagentsPanel({
 }
 
 /**
- * Runs de agente o de Claude: no hay fases ni subagentes que leer. Se muestra el prompt
- * que armó Nodal y el reporte final (el resumen que devolvió el agente en su último mensaje).
+ * Runs de agente, de Claude o del revisor: no hay fases ni subagentes que leer. Se muestra el
+ * reporte final, el prompt que armó Nodal y el transcript de la sesión principal
+ * (`get_run_transcript`), que se repite mientras la sesión sigue viva.
  */
 function SessionPanel({ view, full, live }: { view: RunView; full: Run | null | undefined; live: boolean }) {
   const run = view.run;
+  const [limit, setLimit] = useState(DEFAULT_LIMIT);
+  // Solo "running"/"waiting" cambian el archivo; "starting" todavía no tiene sesión.
+  const polling = view.phase === "running" || view.phase === "waiting";
+  const load = useRunTranscript(run.sessionId ? run.id : null, polling, limit);
+  const t = load.status === "ok" ? load.transcript : null;
   return (
     <div className="panel rd-session">
       <div className="rd-panel-head">
@@ -485,7 +505,7 @@ function SessionPanel({ view, full, live }: { view: RunView; full: Run | null | 
           ) : (
             <p className="rd-result-note">
               {live
-                ? "The agent is working. Its final report shows up here when the session ends; attach to follow it live."
+                ? "The agent is working. Its final report shows up here when the session ends; the transcript below follows it live."
                 : view.tab === "queued"
                   ? "The session hasn't started yet."
                   : "The session ended without a final report."}
@@ -502,6 +522,24 @@ function SessionPanel({ view, full, live }: { view: RunView; full: Run | null | 
           <summary>Prompt</summary>
           <pre>{full ? full.prompt : "Loading…"}</pre>
         </details>
+        {!run.sessionId ? null : load.status === "loading" ? (
+          <p className="rd-result-note">Loading transcript…</p>
+        ) : load.status === "error" ? (
+          <p className="rd-result-note tr-error" role="alert">
+            Couldn't load the transcript: {load.error}
+          </p>
+        ) : t === null ? (
+          <p className="rd-result-note">No transcript file for this session yet.</p>
+        ) : (
+          <TranscriptConversation
+            t={t}
+            limit={limit}
+            onMore={() => setLimit(FULL_LIMIT)}
+            live={polling}
+            view={view}
+            waiting={view.phase === "waiting"}
+          />
+        )}
       </div>
     </div>
   );

@@ -79,7 +79,8 @@ export function RunDiffDrawer({ runId, onClose }: RunDiffDrawerProps) {
   const file = files.find((f) => f.path === selected) ?? files[0];
   const adds = files.reduce((a, f) => a + f.additions, 0);
   const dels = files.reduce((a, f) => a + f.deletions, 0);
-  const branch = run?.branch ?? task?.worktree?.branch ?? null;
+  const branch = diff?.branch ?? run?.branch ?? task?.worktree?.branch ?? null;
+  const commits = diff?.commits ?? [];
 
   const copy = async () => {
     if (!diff) return;
@@ -127,13 +128,21 @@ export function RunDiffDrawer({ runId, onClose }: RunDiffDrawerProps) {
                   <span className="diff-ref">{branch ?? "HEAD"}</span>
                   <span>·</span>
                   <span>
-                    {files.length} file{files.length === 1 ? "" : "s"} · +{adds} −{dels}
+                    {commits.length} commit{commits.length === 1 ? "" : "s"} · {files.length} file{files.length === 1 ? "" : "s"} · +{adds} −{dels}
                   </span>
                   {diff.includesWorkingTree && (
                     <>
                       <span>·</span>
-                      <span>Uncommitted changes · live</span>
-                      {live && <span className="dot dot-sm pulse tone-accent" aria-hidden />}
+                      <span>Uncommitted changes</span>
+                    </>
+                  )}
+                  {diff.live && (
+                    <>
+                      <span>·</span>
+                      <span className="diff-live">
+                        <span className="dot dot-sm pulse tone-accent" aria-hidden />
+                        Live
+                      </span>
                     </>
                   )}
                 </>
@@ -153,6 +162,23 @@ export function RunDiffDrawer({ runId, onClose }: RunDiffDrawerProps) {
             ✕
           </button>
         </header>
+
+        {commits.length > 0 && (
+          <details className="diff-commits">
+            <summary>
+              {commits.length} commit{commits.length === 1 ? "" : "s"} on {branch ?? "HEAD"}
+              {commits.length >= 200 ? " (showing the latest 200)" : ""}
+            </summary>
+            <ol className="diff-commit-list">
+              {commits.map((c) => (
+                <li key={c.sha} className="diff-commit" title={`${c.sha}\n${c.author}`}>
+                  <span className="diff-commit-sha">{c.shortSha}</span>
+                  <span className="ellipsis">{c.subject}</span>
+                </li>
+              ))}
+            </ol>
+          </details>
+        )}
 
         {load.status === "loading" ? (
           <p className="diff-note">Loading changes…</p>
