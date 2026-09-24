@@ -2,6 +2,8 @@
 
 Thanks for your interest in Nodal. Issues, ideas and pull requests are welcome.
 
+Everyone taking part is expected to follow the [Code of Conduct](CODE_OF_CONDUCT.md).
+
 ## Before you start
 
 - For anything bigger than a small fix, open an issue first to agree on the approach.
