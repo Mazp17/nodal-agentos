@@ -14,6 +14,8 @@ pub struct FakeData {
     pub items: BTreeMap<String, ExternalItem>,
     /// Si está, `set_state` y `comment` fallan con este error.
     pub fail_writes: Option<ProviderError>,
+    /// Si está, `states` falla con este error.
+    pub fail_states: Option<ProviderError>,
     pub set_states: Vec<(String, String)>,
     pub comments: Vec<(String, String)>,
 }
@@ -41,7 +43,11 @@ impl TaskProvider for FakeProvider {
     }
 
     async fn states(&self, _scope: &ScopeRef) -> ProviderResult<Vec<ExternalState>> {
-        Ok(self.data().states.clone())
+        let d = self.data();
+        match &d.fail_states {
+            Some(e) => Err(e.clone()),
+            None => Ok(d.states.clone()),
+        }
     }
 
     async fn list_importable(&self, q: &ImportQuery) -> ProviderResult<Page> {

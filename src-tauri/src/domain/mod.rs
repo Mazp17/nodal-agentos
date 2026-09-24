@@ -456,7 +456,6 @@ pub struct StateChanges {
 }
 
 impl StateChanges {
-    #[allow(dead_code)] // lo usa el sync (punto 3)
     pub fn is_empty(&self) -> bool {
         self.added.is_empty() && self.removed.is_empty()
     }
