@@ -4,6 +4,8 @@ All notable changes to Nodal are documented here. The format follows [Keep a Cha
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-09-24
+
 ### Added
 
 - In-app updates: Nodal checks for a new version on launch, once a day while it's open, and from Nodal → Check for Updates… or Settings → Updates; shows the release notes and installs and restarts only if you choose Update. The sidebar footer shows the installed version, or "Update to x.y.z" when there is a newer one. Debug builds don't check. Coming from 0.1.0, download this version by hand one last time.
@@ -35,5 +37,6 @@ First public alpha (macOS only).
 - Import of data from earlier development versions.
 - Universal `.dmg` for Apple Silicon and Intel. Not notarized by Apple: see the install steps in the README.
 
-[Unreleased]: https://github.com/Mazp17/nodal-agentos/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/Mazp17/nodal-agentos/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/Mazp17/nodal-agentos/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/Mazp17/nodal-agentos/releases/tag/v0.1.0
