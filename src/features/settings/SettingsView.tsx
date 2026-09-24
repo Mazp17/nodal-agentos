@@ -18,6 +18,7 @@ import { invalidate, KEYS, setData, useSettings } from "../../domain/hooks/store
 import { CLAUDE } from "../executors/executors";
 import { ExecutorPicker } from "../executors";
 import type { SettingsSection } from "../../shell/useNav";
+import type { Updates } from "../updates/useUpdates";
 import { useToast } from "../../ui/Toasts";
 import { summarize, useLegacyImport } from "./legacyImport";
 import "./settings.css";
@@ -25,12 +26,14 @@ import "./settings.css";
 const SECTIONS: { id: SettingsSection; label: string }[] = [
   { id: "integrations", label: "Integrations" },
   { id: "execution", label: "Execution" },
+  { id: "updates", label: "Updates" },
   { id: "diagnostics", label: "Diagnostics" },
 ];
 
 interface Props {
   section: SettingsSection;
   onSection: (s: SettingsSection) => void;
+  updates: Updates;
 }
 
 /** La píldora y los diálogos leen la concurrencia del store compartido. */
@@ -39,7 +42,7 @@ function onSettingsSaved(s: Settings) {
   void invalidate("settings");
 }
 
-export function SettingsView({ section, onSection }: Props) {
+export function SettingsView({ section, onSection, updates }: Props) {
   return (
     <div className="settings">
       <nav className="settings-nav" aria-label="Settings sections">
@@ -59,6 +62,7 @@ export function SettingsView({ section, onSection }: Props) {
         <div className="settings-col">
           {section === "integrations" && <IntegrationsSettings />}
           {section === "execution" && <ExecutionSettings onSaved={onSettingsSaved} />}
+          {section === "updates" && <UpdatesSettings updates={updates} />}
           {section === "diagnostics" && <DiagnosticsSettings />}
         </div>
       </div>
@@ -75,6 +79,44 @@ export function SectionHead({ title, text, children }: { title: string; text?: s
       </div>
       {children}
     </div>
+  );
+}
+
+// ---------- Updates ----------
+
+function UpdatesSettings({ updates: u }: { updates: Updates }) {
+  const off = u.enabled !== true;
+  const status =
+    u.enabled === null
+      ? ""
+      : off
+        ? "Development builds don't check for updates."
+        : u.installing
+          ? `Installing v${u.available ?? ""}… Nodal restarts when it's done.`
+          : u.checking
+            ? "Checking…"
+            : u.available
+              ? `v${u.available} is available.`
+              : u.lastChecked
+                ? `Up to date · checked ${u.lastChecked.toLocaleString([], { dateStyle: "medium", timeStyle: "short" })}`
+                : "Not checked yet.";
+  return (
+    <>
+      <SectionHead title="Updates" text="Nodal checks on launch and once a day while it's open. It only installs when you choose Update." />
+      <div className="panel settings-card">
+        <div className="settings-row">
+          <div className="settings-row-text">
+            <span className="settings-row-title">Nodal {u.version ? `v${u.version}` : ""}</span>
+            <span className="settings-row-hint" role="status">
+              {status}
+            </span>
+          </div>
+          <button type="button" className={`btn ${u.available ? "btn-primary" : ""}`} disabled={off || u.checking || u.installing} onClick={u.check}>
+            {u.available ? `Update to v${u.available}` : "Check for updates"}
+          </button>
+        </div>
+      </div>
+    </>
   );
 }
 

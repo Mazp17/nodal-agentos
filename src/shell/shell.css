@@ -83,6 +83,12 @@
   color: var(--text-muted);
   min-width: 0;
 }
+/* Versión a la derecha del pie; si hay una más nueva, pasa a ser el botón de actualizar. */
+.side-version { margin-left: auto; flex-shrink: 0; font-size: var(--fs-xs); white-space: nowrap; }
+.side-foot-status { display: flex; align-items: center; gap: var(--sp-3); min-width: 0; }
+.side-update { border: 0; background: none; padding: 0; color: var(--accent); font-family: inherit; }
+.side-update:hover:not(:disabled) { color: var(--accent-hover); text-decoration: underline; }
+.side-update:disabled { color: var(--text-muted); }
 
 /* ---- Panel principal ---- */
 .main-wrap { flex: 1; min-width: 0; display: flex; padding: var(--sp-3) var(--sp-3) var(--sp-3) 0; }

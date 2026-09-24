@@ -15,6 +15,7 @@ import { ActivityView, RunDetailView, RunDiffDrawer, RunsView } from "../feature
 import { useLegacyImport } from "../features/settings/legacyImport";
 import { SettingsView } from "../features/settings/SettingsView";
 import { NewTaskDialog, TaskPanel, TasksView } from "../features/tasks";
+import { useUpdates } from "../features/updates/useUpdates";
 import { useToast } from "../ui/Toasts";
 import { CommandPalette, type PaletteItem } from "./palette/CommandPalette";
 import { Sidebar, type ProviderFoot } from "./Sidebar";
@@ -38,6 +39,7 @@ export function AppShell() {
   const queue = useQueueSummary();
   const toast = useToast();
   const legacy = useLegacyImport();
+  const updates = useUpdates();
 
   const [forceOnboarding, setForceOnboarding] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
@@ -344,7 +346,7 @@ export function AppShell() {
         );
         break;
       case "settings":
-        content = <SettingsView section={nav.settingsSection} onSection={nav.setSettingsSection} />;
+        content = <SettingsView section={nav.settingsSection} onSection={nav.setSettingsSection} updates={updates} />;
         break;
       case "run":
         content = route.runId ? (
@@ -378,6 +380,11 @@ export function AppShell() {
         activeByProject={work.activeByProject}
         mappingDrift={mappingDrift}
         provider={foot}
+        version={updates.version}
+        updateAvailable={updates.available}
+        updating={updates.installing}
+        checkingUpdates={updates.checking}
+        onUpdate={updates.check}
         onGo={(page, pid) => go(page, pid)}
         onToggleProject={(pid) => {
           // Como en el diseño: elegir otro proyecto lo abre en la misma página; el actual se pliega.

@@ -1,0 +1,2 @@
+/* Release notes in the update dialog: long changelogs scroll instead of pushing the buttons off screen. */
+.update-notes { max-height: 50vh; overflow-y: auto; }
