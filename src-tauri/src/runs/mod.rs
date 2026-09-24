@@ -4,17 +4,19 @@
 pub mod claude_bin;
 pub(crate) mod claude_fs;
 pub mod options;
+pub mod terminal;
 pub mod types;
+pub mod workflows;
 
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::time::Duration;
 
-use tauri::AppHandle;
+use tauri::State;
 use tokio::io::{AsyncBufReadExt, AsyncRead, BufReader};
 use tokio::sync::mpsc;
 
-use crate::config;
+use crate::db::{self, Db};
 use types::{LaunchBlocker, LaunchOptions, RunDetail, RunRef, RunSummary, Transcript};
 
 const LAUNCH_TIMEOUT: Duration = Duration::from_secs(30);
@@ -32,10 +34,37 @@ fn forward_lines<R: AsyncRead + Unpin + Send + 'static>(stream: R, tx: mpsc::Unb
     });
 }
 
-/// Lanza `claude --bg [flags] <prompt>` en `cwd` y devuelve el id corto de la sesión.
+/// Flags del ejecutor (`--agent`, `--disallowedTools`) que van además de las opciones.
+/// Cada valor por separado; los que se arman acá ya vienen validados.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ExtraFlags {
+    /// `--agent <name>`.
+    pub agent: Option<String>,
+    /// `--disallowedTools A,B,C` (separadas por coma: la opción es variádica y, con
+    /// espacios, se come el prompt; verificado en el spike con 2.1.281).
+    pub disallowed_tools: Vec<String>,
+}
+
+impl ExtraFlags {
+    pub fn to_args(&self) -> Vec<String> {
+        let mut out = Vec::new();
+        if let Some(a) = &self.agent {
+            out.push("--agent".into());
+            out.push(a.clone());
+        }
+        if !self.disallowed_tools.is_empty() {
+            out.push("--disallowedTools".into());
+            out.push(self.disallowed_tools.join(","));
+        }
+        out
+    }
+}
+
+/// Lanza `claude --bg [flags] -- <prompt>` en `cwd` y devuelve el id corto de la sesión.
 /// Todo va como argumentos propios (sin shell), así que no hay nada que escapar; los
-/// flags se validan contra las listas permitidas de `options`.
-pub async fn launch_with(cwd: String, prompt: String, opts: &LaunchOptions) -> Result<RunRef, String> {
+/// flags se validan contra las listas permitidas de `options`. El `--` corta las opciones
+/// variádicas antes del prompt.
+pub async fn launch_with(cwd: String, prompt: String, opts: &LaunchOptions, extra: &ExtraFlags) -> Result<RunRef, String> {
     let dir = Path::new(&cwd);
     if !dir.is_absolute() {
         return Err(format!("The folder must be an absolute path: {cwd}"));
@@ -55,6 +84,8 @@ pub async fn launch_with(cwd: String, prompt: String, opts: &LaunchOptions) -> R
     let mut cmd = claude_bin::claude_command()?;
     cmd.arg("--bg")
         .args(&flags)
+        .args(extra.to_args())
+        .arg("--")
         .arg(&prompt)
         .current_dir(dir)
         .stdout(Stdio::piped())
@@ -114,22 +145,34 @@ pub async fn launch_with(cwd: String, prompt: String, opts: &LaunchOptions) -> R
     }
 }
 
-/// Lanzamiento manual: usa el model/effort/permission mode del repo si `cwd` está mapeado.
+/// Opciones del repo cuya raíz es `cwd` (comparando también la ruta canonicalizada).
+fn repo_options_for(conn: &rusqlite::Connection, cwd: &str) -> Result<LaunchOptions, db::DbError> {
+    let mut keys = vec![cwd.trim_end_matches('/').to_string()];
+    if let Ok(c) = Path::new(cwd).canonicalize() {
+        keys.push(c.to_string_lossy().into_owned());
+    }
+    for k in keys {
+        if let Some(r) = crate::db::queries::repos::find_by_path(conn, &k)? {
+            return Ok(r.launch);
+        }
+    }
+    Ok(LaunchOptions::default())
+}
+
+/// Lanzamiento manual (fuera de la cola): usa el model/effort/permission mode del repo si
+/// `cwd` es un repo registrado.
 #[tauri::command]
-pub async fn launch_run(app: AppHandle, cwd: String, prompt: String) -> Result<RunRef, String> {
-    let path = config::config_path(&app)?;
+pub async fn launch_run(db: State<'_, Db>, cwd: String, prompt: String) -> Result<RunRef, String> {
     let key = cwd.clone();
-    // Una config ilegible no bloquea el lanzamiento manual: se lanza sin flags.
-    let opts = tauri::async_runtime::spawn_blocking(move || match config::load_from(&path) {
-        Ok(cfg) => config::find_by_path(&cfg, &key).map(|m| m.launch_options()).unwrap_or_default(),
+    // Una base ilegible no bloquea el lanzamiento manual: se lanza sin flags.
+    let opts = match db::with_db(&db, move |c| repo_options_for(c, &key)).await {
+        Ok(o) => o,
         Err(e) => {
             eprintln!("launch_run: {e}; launching without repo options");
             LaunchOptions::default()
         }
-    })
-    .await
-    .map_err(|e| format!("Internal error: {e}"))?;
-    launch_with(cwd, prompt, &opts).await
+    };
+    launch_with(cwd, prompt, &opts, &ExtraFlags::default()).await
 }
 
 /// Sesiones en background (`claude agents --json --all`), más recientes primero.
@@ -148,6 +191,31 @@ fn projects_dir() -> Result<PathBuf, String> {
     Ok(claude_fs::claude_config_dir()
         .ok_or("Couldn't locate the Claude Code folder ($HOME is not set).")?
         .join("projects"))
+}
+
+/// Lo que dejó una sesión terminada, leído de disco (bloqueante). Para la cola.
+#[derive(Debug, Default, Clone)]
+pub struct SessionReadout {
+    /// Detalle del workflow más reciente (solo si la sesión corrió uno).
+    pub detail: Option<RunDetail>,
+    /// Último mensaje del asistente en el transcript principal.
+    pub last_message: Option<String>,
+    /// Nombre del workflow si Claude Code pidió aprobarlo y no llegó a correr.
+    pub blocker: Option<Option<String>>,
+}
+
+pub fn read_session(session_id: &str, cwd: &str) -> SessionReadout {
+    if !claude_fs::is_valid_session_id(session_id) {
+        return SessionReadout::default();
+    }
+    let Ok(projects) = projects_dir() else { return SessionReadout::default() };
+    let detail = claude_fs::find_session_dir(&projects, cwd, session_id).and_then(|d| claude_fs::read_run_detail(&d));
+    let jsonl = claude_fs::find_session_jsonl(&projects, cwd, session_id);
+    SessionReadout {
+        detail,
+        last_message: jsonl.as_deref().and_then(claude_fs::read_last_assistant_text),
+        blocker: jsonl.as_deref().and_then(claude_fs::read_workflow_review_denial),
+    }
 }
 
 /// Detalle del workflow más reciente de la sesión. `None` si la sesión todavía no tiene
@@ -239,7 +307,7 @@ mod tests {
                 d.map(|d| (d.workflow_id, d.source, d.current_phase, d.agents.len()))
             );
         }
-        let err = tauri::async_runtime::block_on(launch_with("/no/existe".into(), "x".into(), &LaunchOptions::default()))
+        let err = tauri::async_runtime::block_on(launch_with("/no/existe".into(), "x".into(), &LaunchOptions::default(), &ExtraFlags::default()))
             .unwrap_err();
         assert_eq!(err, "The folder doesn't exist or isn't a directory: /no/existe");
     }

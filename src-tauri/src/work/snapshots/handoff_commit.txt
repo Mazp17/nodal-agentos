@@ -1,0 +1,37 @@
+Task PAY-1: Logo nuevo en el header
+Repository: /Users/me/Code/web
+Working directory: /Users/me/.nodal/worktrees/web/pay-1-logo
+This is a git worktree dedicated to this task, on branch `nodal/pay-1-logo` (based on `main`). Work only here and stay on this branch.
+
+## Plan
+The plan is at /data/tasks/t1/plan.md.
+<plan>
+# Logo
+Cambiar el logo del header por el nuevo.
+</plan>
+
+## Acceptance criteria
+- El logo nuevo aparece en el header
+- Los tests pasan
+
+## Previous step
+code-reviewer reviewed this work before you: blocked.
+Its summary: Falta el logo en mobile.
+Unmet acceptance criteria to fix:
+- El logo nuevo aparece en el header
+Nits:
+- Renombrar logo2.svg
+Changes so far (diff against `main`):
+```diff
+diff --git a/a.css b/a.css
++.logo{}
+```
+You don't have its conversation: continue from the current state of the working directory.
+
+## When you finish
+Commit your changes on the current branch with clear messages. Don't push and don't open a pull request.
+End your final message with a fenced JSON block, exactly in this shape:
+```json
+{"status": "done", "summary": "<one paragraph: what you did and anything a reviewer should know>", "pr": null, "branch": "<branch name, or null>"}
+```
+Use "status": "blocked" and explain why in "summary" if you couldn't finish. Put the pull request URL in "pr" if you opened one.

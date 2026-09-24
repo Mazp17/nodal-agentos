@@ -1,0 +1,27 @@
+Review of task PAY-1: Logo nuevo en el header
+Repository: /Users/me/Code/web
+Working directory: /Users/me/.nodal/worktrees/web/pay-1-logo
+This is a git worktree dedicated to this task, on branch `nodal/pay-1-logo` (based on `main`). Work only here and stay on this branch.
+You are the reviewer: don't modify any file. Read the code, run read-only commands (tests, linters) and report.
+
+## What to review
+The changes for this task, in the working directory: `git diff main...HEAD` for the branch's commits, `git diff HEAD` for uncommitted work and `git status` for new files.
+frontend-developer did the work and reported: Cambié el logo.
+
+## Plan
+The plan is at /data/tasks/t1/plan.md.
+<plan>
+# Logo
+Cambiar el logo del header por el nuevo.
+</plan>
+
+## Acceptance criteria
+- El logo nuevo aparece en el header
+- Los tests pasan
+
+## Verdict
+End your final message with a fenced JSON block, exactly in this shape:
+```json
+{"verdict": "pass", "unmet": [], "nits": [], "summary": "<one paragraph>"}
+```
+Use "pass" only if every acceptance criterion is met; otherwise "fail", with each unmet criterion or blocking problem in "unmet". Minor suggestions go in "nits".

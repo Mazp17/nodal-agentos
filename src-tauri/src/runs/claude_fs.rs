@@ -1057,6 +1057,55 @@ pub fn find_session_jsonl(projects: &Path, cwd: &str, session_id: &str) -> Optio
     fs::read_dir(projects).ok()?.flatten().map(|e| e.path().join(&file)).find(|p| p.is_file())
 }
 
+/// Tope del último mensaje que se devuelve (el bloque JSON final va al final).
+const LAST_TEXT_MAX: usize = 64 * 1024;
+
+/// Texto del último mensaje del asistente en las líneas de un transcript de sesión: los
+/// bloques `text` del último turno con texto, unidos. Ignora sidechains (subagentes).
+pub fn last_assistant_text_in(text: &str) -> Option<String> {
+    let mut last: Option<String> = None;
+    for line in text.lines() {
+        if !line.contains("\"assistant\"") {
+            continue;
+        }
+        let Ok(v) = serde_json::from_str::<Value>(line) else { continue };
+        if v.get("type").and_then(Value::as_str) != Some("assistant")
+            || v.get("isSidechain").and_then(Value::as_bool) == Some(true)
+        {
+            continue;
+        }
+        let Some(Value::Array(blocks)) = v.get("message").and_then(|m| m.get("content")) else { continue };
+        let joined: Vec<&str> = blocks
+            .iter()
+            .filter(|b| b.get("type").and_then(Value::as_str) == Some("text"))
+            .filter_map(|b| b.get("text").and_then(Value::as_str))
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .collect();
+        if !joined.is_empty() {
+            last = Some(joined.join("\n\n"));
+        }
+    }
+    last.map(|s| {
+        if s.len() <= LAST_TEXT_MAX {
+            return s;
+        }
+        // Se conserva el final, que es donde va el bloque JSON.
+        let mut start = s.len() - LAST_TEXT_MAX;
+        while !s.is_char_boundary(start) {
+            start += 1;
+        }
+        s[start..].to_string()
+    })
+}
+
+/// Último mensaje del asistente del transcript principal (`<sid>.jsonl`). Lee como mucho
+/// la cola del archivo (ver `read_transcript_text`).
+pub fn read_last_assistant_text(path: &Path) -> Option<String> {
+    let (text, _, _) = read_transcript_text(path).ok()?;
+    last_assistant_text_in(&text)
+}
+
 /// Busca en las líneas de un transcript de sesión la llamada a `Workflow` rechazada por
 /// falta de aprobación. `Some(nombre)` si la encuentra (el nombre puede faltar).
 pub fn find_workflow_review_denial(text: &str) -> Option<Option<String>> {

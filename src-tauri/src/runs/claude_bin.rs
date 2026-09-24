@@ -48,13 +48,6 @@ pub fn resolve_bin(name: &str) -> Option<PathBuf> {
     from_path.into_iter().chain(extra_dirs()).map(|d| d.join(name)).find(|c| is_executable(c))
 }
 
-/// `name` listo para configurar: sin stdin y con PATH ampliado.
-pub fn tool_command(name: &str) -> Option<Command> {
-    let mut cmd = Command::new(resolve_bin(name)?);
-    cmd.env("PATH", augmented_path()).stdin(Stdio::null());
-    Some(cmd)
-}
-
 /// Ruta del binario `claude`: primero el PATH, después `~/.local/bin/claude` y afines.
 pub fn resolve_claude() -> Result<PathBuf, String> {
     resolve_bin("claude").ok_or_else(|| {
@@ -62,7 +55,7 @@ pub fn resolve_claude() -> Result<PathBuf, String> {
     })
 }
 
-fn augmented_path() -> OsString {
+pub fn augmented_path() -> OsString {
     let mut dirs: Vec<PathBuf> = std::env::var_os("PATH")
         .map(|p| std::env::split_paths(&p).collect())
         .unwrap_or_default();

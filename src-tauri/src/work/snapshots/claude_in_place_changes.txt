@@ -1,0 +1,26 @@
+Task PAY-1: Logo nuevo en el header
+Imported from ENG-142: https://linear.app/acme/issue/ENG-142
+Repository: /Users/me/Code/web
+Working directory: /Users/me/Code/web
+This is the repository folder itself. Don't switch branches.
+
+## Plan
+The plan is at /data/tasks/t1/plan.md.
+<plan>
+# Logo
+Cambiar el logo del header por el nuevo.
+</plan>
+
+## Acceptance criteria
+None were given: infer them from the plan.
+
+## Extra instructions for this run
+Usá solo CSS.
+
+## When you finish
+Leave your changes uncommitted in the working directory. Don't commit, push or open a pull request.
+End your final message with a fenced JSON block, exactly in this shape:
+```json
+{"status": "done", "summary": "<one paragraph: what you did and anything a reviewer should know>", "pr": null, "branch": "<branch name, or null>"}
+```
+Use "status": "blocked" and explain why in "summary" if you couldn't finish. Put the pull request URL in "pr" if you opened one.

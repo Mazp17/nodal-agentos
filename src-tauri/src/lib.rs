@@ -1,13 +1,12 @@
 mod activity;
-mod config;
 mod db;
 mod domain;
-mod issue_runs;
 mod linear;
 mod migrate;
 mod runs;
 mod secrets;
-mod tasks;
+mod util;
+mod work;
 
 use std::time::Duration;
 
@@ -33,15 +32,16 @@ pub fn run() {
         .manage(secrets::Secrets::default())
         .setup(|app| {
             use tauri::Manager;
-            // Todavía no la usa nadie (llega en F1): si falla, se avisa y la app sigue.
+            // Sin base la app abre igual (para mostrar el error); los comandos que la usan fallan.
             match db::open(&app.path().app_data_dir()?.join(db::DB_FILE)) {
                 Ok(db) => {
-                    app.manage(db);
+                    app.manage(db.clone());
+                    if let Err(e) = work::init(app.handle(), db) {
+                        eprintln!("work: {e}");
+                    }
                 }
                 Err(e) => eprintln!("nodal.db: {e}"),
             }
-            issue_runs::init(app.handle())?;
-            tasks::init(app.handle())?;
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -51,6 +51,10 @@ pub fn run() {
             runs::get_run_detail,
             runs::get_agent_transcript,
             runs::get_launch_blocker,
+            runs::terminal::attach_run,
+            runs::terminal::stop_run,
+            runs::terminal::open_terminal_at,
+            util::paths::resolve_git_root,
             linear::linear_key_status,
             linear::linear_set_api_key,
             linear::linear_clear_api_key,
@@ -58,27 +62,39 @@ pub fn run() {
             linear::linear_teams,
             linear::linear_board,
             linear::linear_issue_detail,
-            config::get_config,
-            config::save_config,
-            config::resolve_repo,
-            config::resolve_repo_config,
-            config::resolve_git_root,
-            issue_runs::list_workflows,
-            issue_runs::launch_issue_run,
-            issue_runs::list_issue_runs,
-            issue_runs::cancel_queued,
-            issue_runs::attach_run,
-            issue_runs::stop_run,
-            issue_runs::open_terminal_at,
-            tasks::create_task,
-            tasks::update_task,
-            tasks::delete_task,
-            tasks::list_tasks,
-            tasks::set_task_done,
-            tasks::read_task_plan,
-            tasks::launch_task_run,
-            tasks::list_task_runs,
-            tasks::cancel_task_run,
+            work::commands::list_projects,
+            work::commands::create_project,
+            work::commands::update_project,
+            work::commands::delete_project,
+            work::commands::list_repos,
+            work::commands::add_repo,
+            work::commands::update_repo,
+            work::commands::delete_repo,
+            work::commands::list_tasks,
+            work::commands::get_task,
+            work::commands::create_task,
+            work::commands::update_task,
+            work::commands::delete_task,
+            work::commands::move_task,
+            work::commands::read_task_plan,
+            work::commands::list_task_relations,
+            work::commands::add_task_relation,
+            work::commands::remove_task_relation,
+            work::commands::cleanup_worktree,
+            work::commands::list_executors,
+            work::commands::list_task_runs,
+            work::commands::list_queue,
+            work::commands::launch_task,
+            work::commands::hand_off,
+            work::commands::review_now,
+            work::commands::confirm_run,
+            work::commands::cancel_run,
+            work::commands::reorder_queue,
+            work::commands::run_diff,
+            work::commands::open_in_editor,
+            work::commands::open_worktree,
+            work::commands::get_settings,
+            work::commands::set_settings,
             activity::repo_activity,
             activity::activity_summary,
             migrate::import_legacy_data,
