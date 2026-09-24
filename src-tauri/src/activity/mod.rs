@@ -573,7 +573,7 @@ mod tests {
     fn summary_counts_live_sessions_and_active_agents_across_repos() {
         let (projects, now) = setup("summary");
         let repo = PathBuf::from("/Users/me/Code/repo");
-        let one = summarize(&assemble(&[repo.clone()], &agents(now), &projects, &AppRuns::default(), now));
+        let one = summarize(&assemble(std::slice::from_ref(&repo), &agents(now), &projects, &AppRuns::default(), now));
         // alive0000000001, acdrepo00000001 y aworkflow000000001.
         assert_eq!(one.agents, 3, "{one:?}");
         assert_eq!(one.sessions, 2, "background working + headless: {one:?}");

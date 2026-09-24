@@ -55,7 +55,7 @@ impl<'a> LinearClient<'a> {
     pub async fn teams(&self) -> Result<Vec<Team>, LinearError> {
         let d: TeamsData = self.query(TEAMS_QUERY, json!({})).await?;
         let mut teams = d.teams.nodes;
-        teams.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+        teams.sort_by_key(|t| t.name.to_lowercase());
         Ok(teams)
     }
 

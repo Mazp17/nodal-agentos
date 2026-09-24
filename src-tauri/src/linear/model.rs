@@ -154,7 +154,7 @@ impl TeamStatesData {
                 }
             })
             .collect();
-        out.sort_by(|a, b| a.team.name.to_lowercase().cmp(&b.team.name.to_lowercase()));
+        out.sort_by_key(|t| t.team.name.to_lowercase());
         out
     }
 }
