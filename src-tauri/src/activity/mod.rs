@@ -499,6 +499,10 @@ mod tests {
                 copy_dir(&e.path(), &to);
             } else {
                 std::fs::copy(e.path(), &to).unwrap();
+                // En macOS `fs::copy` conserva el mtime del origen (el del checkout): se fija a
+                // ahora para que las ventanas de tiempo no dependan de cuándo se clonó el repo.
+                let f = std::fs::File::options().append(true).open(&to).unwrap();
+                f.set_modified(std::time::SystemTime::now()).unwrap();
             }
         }
     }
