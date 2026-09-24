@@ -188,11 +188,12 @@ export function BoardView({ projectId, onOpenTask, onOpenRun, onNewProject, onOp
   };
 
   const setPatch = (t: Task) => setPatched((m) => new Map(m).set(t.id, t));
-  const dropPatch = (id: string) =>
+  /** Descarta estos parches, salvo los que un arrastre posterior ya reemplazó. */
+  const dropPatches = (mine: Task[]) =>
     setPatched((m) => {
       const n = new Map(m);
-      n.delete(id);
-      return n;
+      for (const p of mine) if (n.get(p.id) === p) n.delete(p.id);
+      return n.size === m.size ? m : n;
     });
 
   /**
@@ -212,15 +213,18 @@ export function BoardView({ projectId, onOpenTask, onOpenRun, onNewProject, onOp
     const cut = at === -1 ? column.length : at;
     const ordered = [...column.slice(0, cut), task, ...column.slice(cut)];
     const ids = ordered.map((t) => t.id);
-    ordered.forEach((t, k) => setPatch({ ...t, status, position: k + 1 }));
+    const mine = ordered.map((t, k) => ({ ...t, status, position: k + 1 }));
+    mine.forEach(setPatch);
     try {
       if (task.status !== status) await moveTask(task.id, status, cut + 1);
       await reorderTasks(status, ids);
     } catch (err) {
-      for (const t of ordered) dropPatch(t.id);
       push("Couldn't move the task", String(err), "danger");
     } finally {
-      void invalidate("tasks");
+      // Los parches sólo cubren el viaje de ida: releída la lista, manda el servidor. Si no,
+      // un parche con el mismo `updatedAt` podría tapar indefinidamente lo que diga el backend.
+      await invalidate("tasks");
+      dropPatches(mine);
     }
   };
 
