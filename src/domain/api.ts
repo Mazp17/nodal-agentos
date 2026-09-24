@@ -451,6 +451,9 @@ export const importLegacyData = (folder: string) => invoke<LegacyImportReport>("
 
 // ---------- Settings ----------
 
+/** Salida de `claude --version` (p. ej. `2.1.0 (Claude Code)`); rechaza si no se encuentra el CLI. */
+export const claudeVersion = () => invoke<string>("claude_version");
+
 export const getSettings = () => invoke<Settings>("get_settings");
 export const setSettings = (settings: Settings) => invoke<Settings>("set_settings", { settings });
 
