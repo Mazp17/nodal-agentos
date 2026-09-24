@@ -184,7 +184,6 @@ export function TaskPanel({ taskId, onClose, onOpenRun, onOpenDiff, onOpenTask, 
   const cleanUp = async () => {
     const w = task.worktree;
     if (!w) return;
-    setBusy("cleanup");
     const ok = await ask({
       title: `Delete the worktree and branch ${w.branch}?`,
       body: (
@@ -195,10 +194,8 @@ export function TaskPanel({ taskId, onClose, onOpenRun, onOpenDiff, onOpenTask, 
       ),
       confirmLabel: "Clean up",
     });
-    if (!ok) {
-      setBusy(null);
-      return;
-    }
+    if (!ok) return;
+    setBusy("cleanup");
     try {
       await cleanupWorktree(task.id, false);
       setCleanupBlocked(null);
@@ -222,6 +219,9 @@ export function TaskPanel({ taskId, onClose, onOpenRun, onOpenDiff, onOpenTask, 
       s && s.unpushed > 0 ? `${s.unpushed} commit${s.unpushed === 1 ? "" : "s"} that exist nowhere else` : null,
       s?.dirty ? "uncommitted changes" : null,
     ].filter(Boolean);
+    // Libre durante el confirm (modal: no hay doble clic posible) para que el foco
+    // vuelva al botón al cancelar; `act` lo vuelve a marcar.
+    setBusy(null);
     const ok = await ask({
       title: `Force clean up ${w.branch}?`,
       body: (
@@ -235,10 +235,7 @@ export function TaskPanel({ taskId, onClose, onOpenRun, onOpenDiff, onOpenTask, 
       ),
       confirmLabel: "Delete permanently",
     });
-    if (!ok) {
-      setBusy(null);
-      return;
-    }
+    if (!ok) return;
     await act("clean up the worktree", async () => {
       await cleanupWorktree(task.id, true);
       setCleanupBlocked(null);

@@ -21,7 +21,10 @@ export interface ConfirmOptions {
 
 type Confirm = (opts: ConfirmOptions) => Promise<boolean>;
 
-const ConfirmContext = createContext<Confirm>(() => Promise.resolve(false));
+const ConfirmContext = createContext<Confirm>(() => {
+  console.error("useConfirm() outside <ConfirmProvider>: the action was cancelled.");
+  return Promise.resolve(false);
+});
 
 /** `const ask = useConfirm(); await ask({ title, body, confirmLabel })` → true si el usuario confirmó. */
 export function useConfirm(): Confirm {
@@ -78,6 +81,15 @@ function ConfirmDialog({
 }: ConfirmOptions & { onSettle: (ok: boolean) => void }) {
   const ref = useFocusTrap<HTMLDivElement>(() => onSettle(false));
   const titleId = useId();
+  // Los atajos globales del shell (⌘K, ⌘1…9, ⌘,) ignoran eventos con defaultPrevented:
+  // mientras se confirma no se abre la paleta ni se navega por debajo.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && !/^[acvxz]$/i.test(e.key)) e.preventDefault();
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, []);
   const bodyId = useId();
   return (
     <>
