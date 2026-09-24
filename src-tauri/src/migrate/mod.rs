@@ -29,7 +29,7 @@ pub mod legacy;
 #[cfg(test)]
 mod tests;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -133,19 +133,28 @@ pub fn backup(src: &Path, data_dir: &Path, now: i64) -> Result<(PathBuf, Vec<Str
     }
     fs::create_dir(&dest).map_err(|e| format!("Couldn't create {}: {e}", dest.display()))?;
     let dest_canon = dest.canonicalize().map_err(|e| e.to_string())?;
+    let data_canon = data_dir.canonicalize().map_err(|e| e.to_string())?;
     let mut skipped = Vec::new();
-    copy_dir(&src, &dest, &dest_canon, true, &mut skipped)?;
+    copy_dir(&src, &dest, &Skip { dest: &dest_canon, data_dir: &data_canon }, &mut skipped)?;
     Ok((dest, skipped))
 }
 
-fn copy_dir(from: &Path, to: &Path, dest_root: &Path, top: bool, skipped: &mut Vec<String>) -> Result<(), String> {
+/// Qué no se copia: el backup en curso y, dentro de la carpeta de datos actual (esté donde
+/// esté dentro del origen), los backups anteriores y la base.
+struct Skip<'a> {
+    dest: &'a Path,
+    data_dir: &'a Path,
+}
+
+fn copy_dir(from: &Path, to: &Path, skip: &Skip, skipped: &mut Vec<String>) -> Result<(), String> {
+    let in_data_dir = from.canonicalize().is_ok_and(|p| p == skip.data_dir);
     let entries = fs::read_dir(from).map_err(|e| format!("Couldn't read {}: {e}", from.display()))?;
     let mut entries: Vec<_> = entries.collect::<Result<_, _>>().map_err(|e| e.to_string())?;
     entries.sort_by_key(|e| e.file_name());
     for entry in entries {
         let name = entry.file_name();
         let name_s = name.to_string_lossy();
-        if top && (name_s.starts_with(BACKUP_PREFIX) || name_s.starts_with(db::DB_FILE)) {
+        if in_data_dir && (name_s.starts_with(BACKUP_PREFIX) || name_s.starts_with(db::DB_FILE)) {
             continue;
         }
         let path = entry.path();
@@ -154,11 +163,11 @@ fn copy_dir(from: &Path, to: &Path, dest_root: &Path, top: bool, skipped: &mut V
         if meta.file_type().is_symlink() {
             skipped.push(format!("{}: symbolic link, not copied", path.display()));
         } else if meta.is_dir() {
-            if path.canonicalize().is_ok_and(|p| p == dest_root) {
+            if path.canonicalize().is_ok_and(|p| p == skip.dest) {
                 continue;
             }
             fs::create_dir(&target).map_err(|e| format!("Couldn't create {}: {e}", target.display()))?;
-            copy_dir(&path, &target, dest_root, false, skipped)?;
+            copy_dir(&path, &target, skip, skipped)?;
         } else if meta.is_file() {
             fs::copy(&path, &target).map_err(|e| format!("Couldn't copy {}: {e}", path.display()))?;
         } else {
@@ -181,6 +190,7 @@ pub fn import_backup(conn: &mut Connection, dir: &Path, data_dir: &Path, now: i6
         report: LegacyImportReport { backup_dir: dir.display().to_string(), ..Default::default() },
         finish_by_path: HashMap::new(),
         plans: Vec::new(),
+        fresh: HashSet::new(),
     };
     ctx.import_config(dir)?;
     ctx.import_tasks(dir)?;
@@ -217,6 +227,9 @@ struct Ctx<'c> {
     finish_by_path: HashMap<String, Finish>,
     /// Planes a copiar después del commit: (origen en el backup, destino).
     plans: Vec<(PathBuf, PathBuf)>,
+    /// Claves marcadas en esta misma importación (un duplicado dentro del archivo no cuenta
+    /// como "ya importado").
+    fresh: HashSet<String>,
 }
 
 /// Hash FNV-1a de 64 bits: estable entre versiones de Rust (a diferencia de `DefaultHasher`).
@@ -233,17 +246,29 @@ fn det_id(prefix: &str, key: &str) -> String {
     format!("{prefix}{}", fnv(key))
 }
 
-/// Normaliza un path viejo: `~`, espacios, `/` final y symlinks (si existe).
-pub fn canon_path(raw: &str) -> String {
+fn expand(raw: &str) -> PathBuf {
     let raw = raw.trim();
-    let p = match (raw.strip_prefix("~/"), std::env::var_os("HOME")) {
+    match (raw.strip_prefix("~/"), std::env::var_os("HOME")) {
         (Some(rest), Some(home)) => PathBuf::from(home).join(rest),
         _ => PathBuf::from(raw),
-    };
-    let p = p.canonicalize().unwrap_or(p);
+    }
+}
+
+fn trim_slash(p: &Path) -> String {
     let s = p.to_string_lossy();
     let t = s.trim_end_matches('/');
     if t.is_empty() { "/".into() } else { t.into() }
+}
+
+/// `~`, espacios y `/` final; no toca el disco (para claves de idempotencia).
+pub fn norm_path(raw: &str) -> String {
+    trim_slash(&expand(raw))
+}
+
+/// Como `norm_path`, más symlinks resueltos si la ruta existe (para comparar con `repos.path`).
+pub fn canon_path(raw: &str) -> String {
+    let p = expand(raw);
+    trim_slash(&p.canonicalize().unwrap_or(p))
 }
 
 fn folder_name(path: &str) -> String {
@@ -356,7 +381,14 @@ impl Ctx<'_> {
             .map_err(sql)
     }
 
-    fn mark(&self, key: &str, kind: &str, target: Option<&str>) -> Result<(), String> {
+    fn already(&mut self, key: &str) {
+        if !self.fresh.contains(key) {
+            self.report.already_imported += 1;
+        }
+    }
+
+    fn mark(&mut self, key: &str, kind: &str, target: Option<&str>) -> Result<(), String> {
+        self.fresh.insert(key.to_string());
         self.conn
             .execute(
                 "INSERT OR REPLACE INTO legacy_imports (source_key, kind, target_id, imported_at) VALUES (?1, ?2, ?3, ?4)",
@@ -375,6 +407,13 @@ impl Ctx<'_> {
     }
 
     // --- proyectos y repos ---
+
+    fn repo_by_id(&self, id: &str) -> Result<Option<(String, String)>, String> {
+        self.conn
+            .query_row("SELECT id, project_id FROM repos WHERE id = ?1", [id], |r| Ok((r.get(0)?, r.get(1)?)))
+            .optional()
+            .map_err(sql)
+    }
 
     fn repo_by_path(&self, path: &str) -> Result<Option<(String, String)>, String> {
         self.conn
@@ -475,7 +514,7 @@ impl Ctx<'_> {
         if let Some(c) = cfg.concurrency {
             const KEY: &str = "settings:concurrency";
             if self.seen(KEY)?.is_some() {
-                self.report.already_imported += 1;
+                self.already(KEY);
             } else {
                 let c = c.clamp(1, MAX_CONCURRENCY);
                 self.conn
@@ -500,18 +539,26 @@ impl Ctx<'_> {
             self.finish_by_path.entry(path.clone()).or_insert(finish);
             let scopes = entry.scopes();
 
-            let repo_key = format!("config:repo:{path}");
-            let (repo_id, project_id) = match self.repo_by_path(&path)? {
+            // La clave usa el path sin resolver symlinks: no cambia si la carpeta aparece,
+            // desaparece o cambia un symlink entre dos importaciones.
+            let stable = norm_path(&entry.path);
+            let repo_key = format!("config:repo:{stable}");
+            let previous = match self.seen(&repo_key)? {
+                Some(Some(id)) => self.repo_by_id(&id)?,
+                _ => None,
+            };
+            let (repo_id, project_id) = match previous {
                 Some(found) => {
-                    if self.seen(&repo_key)?.is_some() {
-                        self.report.already_imported += 1;
-                    } else {
-                        // Ya lo tenía el usuario: se reusa sin tocarlo.
-                        self.mark(&repo_key, "repo", Some(&found.0))?;
-                    }
+                    self.already(&repo_key);
                     found
                 }
-                None => {
+                None => match self.repo_by_path(&path)? {
+                    Some(found) => {
+                        // Ya lo tenía el usuario (o lo creó otra entrada): se reusa sin tocarlo.
+                        self.mark(&repo_key, "repo", Some(&found.0))?;
+                        found
+                    }
+                    None => {
                     let name = scopes
                         .iter()
                         .find_map(|s| s.name.clone().filter(|n| !n.trim().is_empty()))
@@ -524,13 +571,14 @@ impl Ctx<'_> {
                     let repo_id = self.create_repo(&project_id, &path, entry.launch(), finish)?;
                     self.mark(&repo_key, "repo", Some(&repo_id))?;
                     (repo_id, project_id)
-                }
+                    }
+                },
             };
 
             for s in scopes {
-                let link_key = format!("config:link:{path}:{}:{}:{}", s.provider, s.kind, s.id);
+                let link_key = format!("config:link:{stable}:{}:{}:{}", s.provider, s.kind, s.id);
                 if self.seen(&link_key)?.is_some() {
-                    self.report.already_imported += 1;
+                    self.already(&link_key);
                     continue;
                 }
                 let dup = self
@@ -581,9 +629,14 @@ impl Ctx<'_> {
             let key = format!("task:{}", t.id);
             let new_id = if is_safe_id(&t.id) { t.id.clone() } else { det_id("lt_", &key) };
             let is_text = matches!(t.plan, legacy::PlanRef::Text);
-            if self.seen(&key)?.is_some() {
-                self.report.already_imported += 1;
-                if is_text {
+            if let Some(target) = self.seen(&key)? {
+                self.already(&key);
+                // Si el usuario la borró después, no se deja un plan huérfano.
+                let alive = match target {
+                    Some(id) => self.exists("tasks", &id)?,
+                    None => false,
+                };
+                if is_text && alive {
                     self.queue_plan(dir, &t.id, &new_id);
                 }
                 continue;
@@ -746,9 +799,10 @@ impl Ctx<'_> {
         let raws = self.read_records(dir, file, "runs");
         for (i, v) in raws.into_iter().enumerate() {
             let Some(r) = self.parse::<legacy::TaskRun>(file, i, v) else { continue };
-            let key = format!("task-run:{}:{}:{}", r.task_id, r.queued_at, r.run_id.as_deref().unwrap_or(""));
+            // Sin `run_id`: un run que estaba en cola y después se lanzó sigue siendo el mismo.
+            let key = format!("task-run:{}:{}", r.task_id, r.queued_at);
             if self.seen(&key)?.is_some() {
-                self.report.already_imported += 1;
+                self.already(&key);
                 continue;
             }
             let (status, error) = match map_run_status(&r.status, r.error.clone()) {
@@ -790,9 +844,9 @@ impl Ctx<'_> {
         let raws = self.read_records(dir, file, "runs");
         for (i, v) in raws.into_iter().enumerate() {
             let Some(r) = self.parse::<legacy::IssueRun>(file, i, v) else { continue };
-            let key = format!("issue-run:{}:{}:{}", r.issue_id, r.queued_at, r.run_id.as_deref().unwrap_or(""));
+            let key = format!("issue-run:{}:{}", r.issue_id, r.queued_at);
             if self.seen(&key)?.is_some() {
-                self.report.already_imported += 1;
+                self.already(&key);
                 continue;
             }
             let (status, error) = match map_run_status(&r.status, r.error.clone()) {

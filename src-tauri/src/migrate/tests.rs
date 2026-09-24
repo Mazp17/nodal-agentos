@@ -47,6 +47,11 @@ fn snapshot(root: &Path) -> BTreeMap<String, Vec<u8>> {
     out
 }
 
+fn copy_tree(from: &Path, to: &Path) {
+    let none = Path::new("/nonexistent");
+    copy_dir(from, to, &Skip { dest: none, data_dir: none }, &mut Vec::new()).unwrap();
+}
+
 fn count(conn: &Connection, table: &str) -> i64 {
     conn.query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |r| r.get(0)).unwrap()
 }
@@ -185,7 +190,7 @@ fn source_folder_stays_intact_and_backup_is_a_full_copy() {
     // Se importa desde una copia en temp, para poder comparar metadatos sin tocar el repo.
     let src = TempDir::new("src");
     let data = TempDir::new("data");
-    copy_dir(&fixture("legacy"), &src.0, Path::new("/nonexistent"), true, &mut Vec::new()).unwrap();
+    copy_tree(&fixture("legacy"), &src.0);
     let before = snapshot(&src.0);
     let mtimes = |root: &Path| -> Vec<std::time::SystemTime> {
         let mut v: Vec<_> = before.keys().map(|k| fs::metadata(root.join(k)).unwrap().modified().unwrap()).collect();
@@ -208,7 +213,7 @@ fn source_folder_stays_intact_and_backup_is_a_full_copy() {
 #[test]
 fn importing_the_data_folder_itself_skips_backups_and_db() {
     let data = TempDir::new("self");
-    copy_dir(&fixture("legacy"), &data.0, Path::new("/nonexistent"), true, &mut Vec::new()).unwrap();
+    copy_tree(&fixture("legacy"), &data.0);
     fs::write(data.0.join("nodal.db"), b"sqlite").unwrap();
     fs::create_dir(data.0.join("legacy-backup-1")).unwrap();
     fs::write(data.0.join("legacy-backup-1/old.json"), b"{}").unwrap();
@@ -337,4 +342,47 @@ fn helpers() {
     assert_eq!(executor_from_prompt("/plan-task {}"), Executor::Workflow { name: "plan-task".into() });
     assert_eq!(executor_from_prompt("hola"), Executor::Claude);
     assert!(map_run_status("weird", None).is_err());
+}
+
+#[test]
+fn reimport_after_state_changes_and_duplicate_entries() {
+    let src = TempDir::new("changing");
+    let data = TempDir::new("changing-data");
+    // Mismo path en dos entradas (team y proyecto): un repo, dos links, nada "ya importado".
+    fs::write(
+        src.0.join("config.json"),
+        r#"{"repos":[{"teamId":"team-a","path":"/Users/me/Code/acme-one"},
+                     {"projectId":"proj-b","path":"/Users/me/Code/acme-one/"}]}"#,
+    )
+    .unwrap();
+    let queued = r#"{"runs":[{"issueId":"i1","identifier":"ENG-9","workflow":"linear-issue",
+        "cwd":"/Users/me/Code/acme-one","queuedAt":10,"status":"queued"}]}"#;
+    fs::write(src.0.join("issue-runs.json"), queued).unwrap();
+
+    let db = open_in_memory().unwrap();
+    let mut conn = db.lock().unwrap();
+    let r1 = import_folder(&mut conn, &src.0, &data.0, T0).unwrap();
+    assert_eq!((r1.projects, r1.repos, r1.runs, r1.already_imported), (1, 1, 1, 0), "{r1:#?}");
+    assert_eq!(count(&conn, "source_links"), 2);
+
+    // La versión vieja lanzó el run después: ahora tiene runId. No se duplica.
+    let launched = queued.replace(r#""status":"queued""#, r#""status":"launched","runId":"abcd1234""#);
+    fs::write(src.0.join("issue-runs.json"), launched).unwrap();
+    let r2 = import_folder(&mut conn, &src.0, &data.0, T0 + 1).unwrap();
+    // Por registro: 2 entradas de repo + 2 links + 1 run.
+    assert_eq!((r2.runs, r2.already_imported), (0, 5), "{r2:#?}");
+    assert_eq!(count(&conn, "runs"), 1);
+}
+
+#[test]
+fn nested_data_dir_is_filtered_at_any_level() {
+    let src = TempDir::new("nested");
+    let data = src.0.join("app/data");
+    fs::create_dir_all(data.join("legacy-backup-1")).unwrap();
+    fs::write(data.join("nodal.db"), b"x").unwrap();
+    fs::write(data.join("tasks.json"), b"{\"tasks\":[]}").unwrap();
+    let db = open_in_memory().unwrap();
+    let r = import_folder(&mut db.lock().unwrap(), &src.0, &data, T0).unwrap();
+    let copied = snapshot(Path::new(&r.backup_dir));
+    assert_eq!(copied.keys().collect::<Vec<_>>(), ["app/data/tasks.json"]);
 }
