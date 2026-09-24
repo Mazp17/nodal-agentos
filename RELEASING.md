@@ -71,8 +71,9 @@ Release tags are protected: only a repository admin can move or delete them.
 Before publishing, check the downloaded build on a Mac:
 
 - [ ] It installs, and opens after running `xattr -dr com.apple.quarantine /Applications/Nodal.app`.
-- [ ] Nodal → About Nodal shows the new version.
+- [ ] Nodal → About Nodal, the sidebar footer and Settings → Updates show the new version.
 - [ ] Updating from the previous version works: with the previous release installed and the draft published, Nodal offers "Nodal x.y.z is available" on launch (or from Nodal → Check for Updates…), and Update installs it and restarts into the new version. If it doesn't, turn the release back into a draft right away so nobody else gets it.
+- [ ] Settings → Updates → Check for updates says "You're up to date" on the new version.
 - [ ] Projects, tasks and runs from the previous version are still there.
 - [ ] A task in a test repo runs to completion.
 - [ ] If Linear is connected, the task's status shows up in Linear.

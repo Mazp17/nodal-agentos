@@ -6,7 +6,7 @@ All notable changes to Nodal are documented here. The format follows [Keep a Cha
 
 ### Added
 
-- In-app updates: Nodal checks for a new version on launch and from Nodal → Check for Updates…, shows the release notes and installs and restarts only if you choose Update. Debug builds don't check. Coming from 0.1.0, download this version by hand one last time.
+- In-app updates: Nodal checks for a new version on launch, once a day while it's open, and from Nodal → Check for Updates… or Settings → Updates; shows the release notes and installs and restarts only if you choose Update. The sidebar footer shows the installed version, or "Update to x.y.z" when there is a newer one. Debug builds don't check. Coming from 0.1.0, download this version by hand one last time.
 
 ### Changed
 
