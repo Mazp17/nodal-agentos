@@ -7,6 +7,7 @@ import {
   invalidateProviders,
   useProviderScopes,
   useProviderStatus,
+  useRuleProjects,
   useNow,
   useSourceLinks,
   useSourceStates,
@@ -16,6 +17,7 @@ import { Field, InlineConfirm, ProviderMark, Segmented, Switch } from "./parts";
 import { ScopePicker } from "./ScopePicker";
 import { StateMapEditor } from "./StateMapEditor";
 import { formatAgo, plural, providerName } from "./meta";
+import { newProjectRule, useRuleBackfill } from "./ruleBackfill";
 
 export interface ProjectSourcesSettingsProps {
   projectId: string;
@@ -404,7 +406,7 @@ function SourceCard({
 
         <Field label="Routing rules" top>
           <RoutingRules
-            rules={link.repoRules}
+            link={link}
             repos={repos}
             disabled={busy === "patch"}
             onChange={(rules) => void patch({ repoRules: rules })}
@@ -552,59 +554,122 @@ function RepoChoice({
 }
 
 function RoutingRules({
-  rules,
+  link,
   repos,
   onChange,
   disabled,
 }: {
-  rules: RepoRule[];
+  link: SourceLink;
   repos: Repo[];
+  /** Cambios de reglas de label (las de proyecto se guardan acá, con su backfill). */
   onChange: (rules: RepoRule[]) => void;
   disabled?: boolean;
 }) {
-  const [adding, setAdding] = useState(false);
+  const rules = link.repoRules;
+  const saver = useRuleBackfill();
+  /** `project` con `editing`: id de la regla que se reemplaza (`null` = nueva). */
+  const [form, setForm] = useState<{ kind: "label" } | { kind: "project"; editing: string | null } | null>(null);
   const [label, setLabel] = useState("");
+  const [projectId, setProjectId] = useState("");
   const [repoId, setRepoId] = useState("");
+  const projects = useRuleProjects([link.id], form?.kind === "project");
   const repoName = (id: string) => repos.find((r) => r.id === id)?.name ?? "Unknown repo";
   const target = repoId || repos[0]?.id || "";
-  const dup = rules.some((r) => r.label.trim().toLowerCase() === label.trim().toLowerCase());
+  const off = disabled || saver.busy;
+  const canProjects = link.provider === "linear";
 
-  const add = () => {
-    if (!label.trim() || !target || dup) return;
-    onChange([...rules, { label: label.trim(), repoId: target }]);
+  const dup =
+    form?.kind === "label" &&
+    rules.some((r) => r.kind === "label" && r.value.trim().toLowerCase() === label.trim().toLowerCase());
+  const editing = form?.kind === "project" ? form.editing : null;
+  // Un proyecto va a un solo repo: fuera los que ya tienen regla (salvo la que se edita).
+  const taken = new Set(rules.filter((r) => r.kind === "project" && r.id !== editing).map((r) => r.value));
+  const options = projects.data?.filter((p) => !taken.has(p.project.id)).map((p) => p.project) ?? null;
+  const project = options?.find((p) => p.id === projectId) ?? null;
+
+  const open = (f: NonNullable<typeof form>, rule?: RepoRule) => {
+    setForm(f);
     setLabel("");
-    setAdding(false);
+    setProjectId(rule?.value ?? "");
+    setRepoId(rule?.repoId ?? "");
+  };
+
+  const addLabel = () => {
+    if (!label.trim() || !target || dup) return;
+    onChange([...rules, { id: "", kind: "label", value: label.trim(), name: label.trim(), repoId: target, createdAt: 0 }]);
+    setLabel("");
+    setForm(null);
+  };
+
+  const saveProject = async () => {
+    if (form?.kind !== "project" || !project || !target) return;
+    const prev = rules.find((r) => r.id === form.editing);
+    if (prev && prev.value === project.id && prev.repoId === target) {
+      setForm(null);
+      return;
+    }
+    // Nueva o cambiada: `id: ""` (el backend la trata como nueva) y se reemplaza en su lugar.
+    const rule = newProjectRule(project, target);
+    const next = prev ? rules.map((r) => (r === prev ? rule : r)) : [...rules, rule];
+    const backfill = { projectId: project.id, projectName: project.name, repoId: target, repoName: repoName(target) };
+    setForm(null);
+    await saver.save(link, next, backfill);
+  };
+
+  const remove = (i: number) => {
+    const next = rules.filter((_, j) => j !== i);
+    if (rules[i]?.kind === "project") void saver.save(link, next);
+    else onChange(next);
   };
 
   return (
     <div className="pv-rules">
-      {rules.map((r, i) => (
-        <div key={`${r.label}-${i}`} className="pv-rule">
-          <span className="pv-rule-label mono">label: {r.label}</span>
-          <span className="pv-map-arrow" aria-hidden>
-            →
-          </span>
-          <span>{repoName(r.repoId)}</span>
-          <button
-            type="button"
-            className="icon-btn pv-rule-rm"
-            aria-label={`Remove rule ${r.label}`}
-            disabled={disabled}
-            onClick={() => onChange(rules.filter((_, j) => j !== i))}
-          >
-            ✕
-          </button>
-        </div>
-      ))}
-      {rules.length === 0 && !adding && (
-        <span className="pv-hint">Issues with a label go to a specific repo. First match wins.</span>
+      {rules.map((r, i) =>
+        r.kind === "project" && editing === r.id ? null : (
+          <div key={r.id || `${r.kind}-${r.value}-${i}`} className="pv-rule">
+            <span className="pv-rule-label mono">
+              {r.kind}: {r.kind === "project" ? r.name || r.value : r.value}
+            </span>
+            <span className="pv-map-arrow" aria-hidden>
+              →
+            </span>
+            <span>{repoName(r.repoId)}</span>
+            {r.kind === "project" && (
+              <button
+                type="button"
+                className="btn btn-ghost btn-sm"
+                aria-label={`Edit rule project ${r.name}`}
+                disabled={off || form !== null}
+                onClick={() => open({ kind: "project", editing: r.id }, r)}
+              >
+                Edit
+              </button>
+            )}
+            <button
+              type="button"
+              className="icon-btn pv-rule-rm"
+              aria-label={`Remove rule ${r.kind} ${r.kind === "project" ? r.name : r.value}`}
+              disabled={off}
+              onClick={() => remove(i)}
+            >
+              ✕
+            </button>
+          </div>
+        ),
       )}
-      {adding ? (
+      {rules.length === 0 && !form && (
+        <span className="pv-hint">
+          {canProjects
+            ? "Issues in a Linear project or with a label go to a specific repo. Project rules win over label rules; among labels, first match wins."
+            : "Issues with a label go to a specific repo. First match wins."}
+        </span>
+      )}
+      {form?.kind === "label" && (
         <form
           className="pv-rule pv-rule-form"
           onSubmit={(e) => {
             e.preventDefault();
-            add();
+            addLabel();
           }}
         >
           <input
@@ -618,31 +683,96 @@ function RoutingRules({
           <span className="pv-map-arrow" aria-hidden>
             →
           </span>
-          <select className="input pv-select" aria-label="Repo" value={target} onChange={(e) => setRepoId(e.target.value)}>
-            {repos.map((r) => (
-              <option key={r.id} value={r.id}>
-                {r.name}
-              </option>
-            ))}
-          </select>
-          <button type="submit" className="btn btn-sm" disabled={!label.trim() || !target || dup || disabled}>
+          <RuleRepoSelect repos={repos} value={target} onChange={setRepoId} />
+          <button type="submit" className="btn btn-sm" disabled={!label.trim() || !target || dup || off}>
             Add
           </button>
-          <button type="button" className="btn btn-ghost btn-sm" onClick={() => setAdding(false)}>
+          <button type="button" className="btn btn-ghost btn-sm" onClick={() => setForm(null)}>
             Cancel
           </button>
           {dup && <span className="pv-hint pv-hint-warn">There is already a rule for that label.</span>}
         </form>
-      ) : (
-        <button
-          type="button"
-          className="btn btn-ghost btn-sm pv-rule-add"
-          disabled={disabled || repos.length === 0}
-          onClick={() => setAdding(true)}
+      )}
+      {form?.kind === "project" && (
+        <form
+          className="pv-rule pv-rule-form"
+          onSubmit={(e) => {
+            e.preventDefault();
+            void saveProject();
+          }}
         >
-          + Add rule
-        </button>
+          <select
+            className="input pv-select"
+            aria-label="Linear project"
+            value={project ? projectId : ""}
+            disabled={!options}
+            autoFocus
+            onChange={(e) => setProjectId(e.target.value)}
+          >
+            <option value="">{projects.loading && !options ? "Loading projects…" : "Pick a project"}</option>
+            {options?.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.name}
+              </option>
+            ))}
+          </select>
+          <span className="pv-map-arrow" aria-hidden>
+            →
+          </span>
+          <RuleRepoSelect repos={repos} value={target} onChange={setRepoId} />
+          <button type="submit" className="btn btn-sm" disabled={!project || !target || off}>
+            {form.editing ? "Save" : "Add"}
+          </button>
+          <button type="button" className="btn btn-ghost btn-sm" onClick={() => setForm(null)}>
+            Cancel
+          </button>
+          {projects.error && (
+            <span className="pv-hint pv-hint-error">
+              Couldn't load Linear projects. {projects.error}{" "}
+              <button type="button" className="btn btn-ghost btn-sm" onClick={projects.reload}>
+                Retry
+              </button>
+            </span>
+          )}
+          {options && options.length === 0 && (
+            <span className="pv-hint">Every project in this team already has a rule.</span>
+          )}
+        </form>
+      )}
+      {!form && (
+        <div className="pv-inline">
+          {canProjects && (
+            <button
+              type="button"
+              className="btn btn-ghost btn-sm pv-rule-add"
+              disabled={off || repos.length === 0}
+              onClick={() => open({ kind: "project", editing: null })}
+            >
+              + Project rule
+            </button>
+          )}
+          <button
+            type="button"
+            className="btn btn-ghost btn-sm pv-rule-add"
+            disabled={off || repos.length === 0}
+            onClick={() => open({ kind: "label" })}
+          >
+            + Label rule
+          </button>
+        </div>
       )}
     </div>
+  );
+}
+
+function RuleRepoSelect({ repos, value, onChange }: { repos: Repo[]; value: string; onChange: (id: string) => void }) {
+  return (
+    <select className="input pv-select" aria-label="Repo" value={value} onChange={(e) => onChange(e.target.value)}>
+      {repos.map((r) => (
+        <option key={r.id} value={r.id}>
+          {r.name}
+        </option>
+      ))}
+    </select>
   );
 }

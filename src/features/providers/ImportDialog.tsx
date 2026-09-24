@@ -345,9 +345,12 @@ function ImportRow({
   );
 }
 
-/** Mismo criterio que `suggest_repo` en Rust: label igual sin distinguir mayúsculas. */
+/**
+ * Mismo criterio que `suggest_repo` en Rust para las reglas de label: igual sin distinguir
+ * mayúsculas. Las de proyecto no se pueden evaluar acá (`ImportableItem` no trae el proyecto).
+ */
 function ruleMatches(link: SourceLink, item: ImportableItem): boolean {
-  return link.repoRules.some((r) =>
-    item.labels.some((l) => l.trim().toLowerCase() === r.label.trim().toLowerCase()),
+  return link.repoRules.some(
+    (r) => r.kind === "label" && item.labels.some((l) => l.trim().toLowerCase() === r.value.trim().toLowerCase()),
   );
 }

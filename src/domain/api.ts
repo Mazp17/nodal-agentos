@@ -55,7 +55,7 @@ export interface RepoTrust {
 
 /**
  * `running`/`capacity`: slots ocupados de la concurrencia global (regla del pump). `needYou`:
- * tareas Blocked + runs migrados sin confirmar + sesiones esperando permiso/input, sin contar
+ * tareas Blocked o movidas de proyecto en el proveedor + runs migrados sin confirmar + sesiones esperando permiso/input, sin contar
  * dos veces la misma tarea. `queued`: listos para salir. `pumpError`: error de la última
  * pasada de la cola (p. ej. `claude agents` falla en cada tick), o `null`.
  */
@@ -265,6 +265,18 @@ export interface ImportResult {
   skipped: { externalId: string; reason: string }[];
 }
 
+/** Backfill de una regla de proyecto (`previewRuleImport`). */
+export interface RulePreview {
+  /** Ítems que se importarían al repo de la regla (abiertos + cerrados en los últimos 14 días). */
+  count: number;
+  /** Ya importados en el repo de la regla. */
+  alreadyImported: number;
+  /** Ya importados en otro repo: se quedan donde están. */
+  inOtherRepos: number;
+}
+
+export type MovedAction = "move" | "keep";
+
 export interface SyncReport {
   /** Tareas refrescadas desde el proveedor. */
   pulled: number;
@@ -448,6 +460,16 @@ export const syncNow = (linkId: string | null = null) => invoke<SyncReport>("syn
 export const sourceStates = (linkId: string) => invoke<SourceStatesReport>("source_states", { linkId });
 /** Guarda y confirma el mapeo (fija `confirmedAt` y `knownStates`). */
 export const saveStateMap = (linkId: string, map: StateMap) => invoke<SourceLink>("save_state_map", { linkId, map });
+/** Proyectos del proveedor elegibles como regla del link (Linear: los activos de su team). */
+export const sourceRuleProjects = (linkId: string) => invoke<ScopeRef[]>("source_rule_projects", { linkId });
+/** Cuántos ítems traería el backfill de la regla de proyecto `ruleId` (ya guardada). */
+export const previewRuleImport = (linkId: string, ruleId: string) =>
+  invoke<RulePreview>("preview_rule_import", { linkId, ruleId });
+/** Backfill: importa al repo de la regla los ítems del proyecto; los ya importados en otro repo van en `skipped`. */
+export const importRule = (linkId: string, ruleId: string) => invoke<ImportResult>("import_rule", { linkId, ruleId });
+/** `move`: al repo sugerido (falla con run activo o worktree); `keep`: se queda en su repo. */
+export const resolveMovedTask = (taskId: string, action: MovedAction) =>
+  invoke<Task>("resolve_moved_task", { taskId, action });
 
 // ---------- Migración ----------
 

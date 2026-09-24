@@ -4,7 +4,7 @@ import { taskKey, type Executor, type Project, type Repo, type RunLight, type Ta
 import { ExecutorAvatar, executorLabel } from "../executors";
 import { RunBadge } from "../runs";
 import { PriorityBars } from "../tasks/bits";
-import { isClosed } from "../tasks/status";
+import { isClosed, providerLabel } from "../tasks/status";
 import type { PhaseProgress } from "./usePhases";
 
 export type CardAction = "run" | "retry" | "open-run" | "choose-repo";
@@ -144,6 +144,14 @@ export function TaskCard({ model, showProject, busy, dragging, onOpen, onAction,
       )}
 
       <div className="bd-card-foot">
+        {src?.moved && (
+          <span
+            className="badge badge-sm tone-warn"
+            title={`Moved from ${src.moved.fromProject.name} to ${src.moved.toProject?.name ?? "no project"}. Open the task to decide.`}
+          >
+            Moved in {providerLabel(src.provider)}
+          </span>
+        )}
         {reviewing ? (
           <span className="badge tone-warn" title="The reviewer is checking the acceptance criteria">
             <span className="dot dot-sm pulse" aria-hidden />

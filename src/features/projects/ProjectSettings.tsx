@@ -1,7 +1,9 @@
 import { useEffect, useId, useState, type ReactNode } from "react";
 import { useProjects } from "../../domain/hooks/projects";
-import type { Finish, Isolation, Project, Repo } from "../../domain/types";
+import type { Finish, Isolation, Project, Repo, RepoRule, SourceLink } from "../../domain/types";
 import { ProjectSourcesSettings } from "../providers";
+import { useRuleProjects, useSourceLinks, type Loaded, type RuleProject } from "../../domain/hooks/providers";
+import { newProjectRule, useRuleBackfill } from "../providers/ruleBackfill";
 import { SectionHead } from "../settings/SettingsView";
 import type { ProjectSection } from "../../shell/useNav";
 import { useToast } from "../../ui/Toasts";
@@ -45,7 +47,7 @@ export function ProjectSettings({ project, section, onSection, onDeleted, onOpen
       <div className="settings-scroll">
         <div className="settings-col">
           {section === "general" && <GeneralSection key={project.id} project={project} onDeleted={onDeleted} />}
-          {section === "repos" && <ReposSection key={project.id} project={project} />}
+          {section === "repos" && <ReposSection key={project.id} project={project} onOpenSources={() => onSection("sources")} />}
           {section === "sources" && <ProjectSourcesSettings projectId={project.id} onOpenIntegrations={onOpenIntegrations} />}
         </div>
       </div>
@@ -215,11 +217,15 @@ function GeneralSection({ project, onDeleted }: { project: Project; onDeleted: (
 
 // ---------- Repos ----------
 
-function ReposSection({ project }: { project: Project }) {
+function ReposSection({ project, onOpenSources }: { project: Project; onOpenSources: () => void }) {
   const ctx = useProjects();
   const toast = useToast();
   const repos = ctx.reposOf(project.id);
   const [editing, setEditing] = useState<string | null>(null);
+  const links = useSourceLinks(project.id);
+  const linearLinks = (links.data ?? []).filter((l) => l.provider === "linear");
+  const ruleProjects = useRuleProjects(linearLinks.map((l) => l.id));
+  const linear: LinearCtx = { links, linearLinks, projects: ruleProjects, repos, onOpenSources };
 
   const picker = useRepoPicker({
     whereAdded: (root) => {
@@ -250,6 +256,7 @@ function ReposSection({ project }: { project: Project }) {
         <RepoCard
           key={r.id}
           repo={r}
+          linear={linear}
           editing={editing === r.id}
           onEdit={() => setEditing(editing === r.id ? null : r.id)}
         />
@@ -318,7 +325,17 @@ function repoSummary(r: Repo): string {
   ].join(" · ");
 }
 
-function RepoCard({ repo, editing, onEdit }: { repo: Repo; editing: boolean; onEdit: () => void }) {
+function RepoCard({
+  repo,
+  linear,
+  editing,
+  onEdit,
+}: {
+  repo: Repo;
+  linear: LinearCtx;
+  editing: boolean;
+  onEdit: () => void;
+}) {
   const ctx = useProjects();
   const toast = useToast();
   const execId = useId();
@@ -403,6 +420,7 @@ function RepoCard({ repo, editing, onEdit }: { repo: Repo; editing: boolean; onE
         </span>
         <span className="faint">{repoSummary(repo)}</span>
       </div>
+      <LinearProjectRow repo={repo} ctx={linear} />
       {editing && (
         <div className="repo-opts">
           <OptRow label="Model">
@@ -470,6 +488,134 @@ function RepoCard({ repo, editing, onEdit }: { repo: Repo; editing: boolean; onE
         </div>
       )}
     </div>
+  );
+}
+
+// ---------- Proyecto de Linear del repo ----------
+
+/** Fuentes de Linear del proyecto y sus proyectos elegibles, cargados una vez para todas las cards. */
+interface LinearCtx {
+  links: Loaded<SourceLink[]>;
+  linearLinks: SourceLink[];
+  projects: Loaded<RuleProject[]>;
+  repos: Repo[];
+  onOpenSources: () => void;
+}
+
+/** Regla de proyecto → repo (Linear project del repo). Se guarda en el link del que sale el proyecto. */
+function LinearProjectRow({ repo, ctx }: { repo: Repo; ctx: LinearCtx }) {
+  const toast = useToast();
+  const saver = useRuleBackfill();
+  const selId = useId();
+  const { links, linearLinks, projects } = ctx;
+
+  const owned: { rule: RepoRule; link: SourceLink }[] = linearLinks.flatMap((link) =>
+    link.repoRules.filter((r) => r.kind === "project" && r.repoId === repo.id).map((rule) => ({ rule, link })),
+  );
+  const current = owned[0] ?? null;
+  /** Proyecto → repo que ya lo tiene (otro repo): no se ofrece. */
+  const takenBy = new Map<string, string>();
+  for (const l of linearLinks)
+    for (const r of l.repoRules)
+      if (r.kind === "project" && r.repoId !== repo.id)
+        takenBy.set(r.value, ctx.repos.find((x) => x.id === r.repoId)?.name ?? "another repo");
+
+  const pick = async (projectId: string) => {
+    if (projectId === (current?.rule.value ?? "")) return;
+    if (!projectId) {
+      if (!current) return;
+      const ok = await saver.save(current.link, current.link.repoRules.filter((r) => r !== current.rule));
+      if (ok) toast("Linear project removed", `New issues in ${current.rule.name} no longer go to ${repo.name}.`, "ok");
+      return;
+    }
+    const choice = projects.data?.find((p) => p.project.id === projectId);
+    const link = linearLinks.find((l) => l.id === choice?.linkId);
+    if (!choice || !link) return;
+    let base = link.repoRules;
+    if (current) {
+      if (current.link.id === link.id) base = base.filter((r) => r !== current.rule);
+      else if (!(await saver.save(current.link, current.link.repoRules.filter((r) => r !== current.rule)))) return;
+    }
+    await saver.save(link, [...base, newProjectRule(choice.project, repo.id)], {
+      projectId: choice.project.id,
+      projectName: choice.project.name,
+      repoId: repo.id,
+      repoName: repo.name,
+    });
+  };
+
+  if (!links.data) {
+    return (
+      <OptRow label="Linear project">
+        {links.error ? (
+          <span className="field-hint">
+            Couldn't load sources.{" "}
+            <button type="button" className="btn btn-ghost btn-sm" onClick={links.reload}>
+              Retry
+            </button>
+          </span>
+        ) : (
+          <span className="field-hint">Loading…</span>
+        )}
+      </OptRow>
+    );
+  }
+
+  if (linearLinks.length === 0) {
+    return (
+      <OptRow label="Linear project" htmlFor={selId}>
+        <select id={selId} className="input repo-opt-input" disabled value="">
+          <option value="">No Linear source</option>
+        </select>
+        <span className="field-hint">Connect Linear to this project to route a Linear project here.</span>
+        <button type="button" className="btn btn-ghost btn-sm" onClick={ctx.onOpenSources}>
+          Connect in Sources
+        </button>
+      </OptRow>
+    );
+  }
+
+  const options = projects.data?.map((p) => p.project) ?? [];
+  const hasCurrent = !!current && options.some((p) => p.id === current.rule.value);
+
+  return (
+    <OptRow label="Linear project" htmlFor={selId}>
+      <select
+        id={selId}
+        className="input repo-opt-input"
+        value={current?.rule.value ?? ""}
+        disabled={saver.busy || (!projects.data && !current)}
+        onChange={(e) => void pick(e.target.value)}
+      >
+        <option value="">{projects.loading && !projects.data && !current ? "Loading projects…" : "None"}</option>
+        {current && !hasCurrent && <option value={current.rule.value}>{current.rule.name || current.rule.value}</option>}
+        {options.map((p) => {
+          const other = takenBy.get(p.id);
+          return (
+            <option key={p.id} value={p.id} disabled={!!other}>
+              {other ? `${p.name} · in ${other}` : p.name}
+            </option>
+          );
+        })}
+      </select>
+      {projects.error ? (
+        <span className="field-hint">
+          Couldn't load Linear projects.{" "}
+          <button type="button" className="btn btn-ghost btn-sm" onClick={projects.reload}>
+            Retry
+          </button>
+        </span>
+      ) : owned.length > 1 ? (
+        <span className="field-hint">
+          +{owned.length - 1} more ({owned.slice(1).map((o) => o.rule.name).join(", ")}).{" "}
+          <button type="button" className="btn btn-ghost btn-sm" onClick={ctx.onOpenSources}>
+            Manage in Sources
+          </button>
+        </span>
+      ) : (
+        <span className="field-hint">New issues in this project are imported here.</span>
+      )}
+    </OptRow>
   );
 }
 

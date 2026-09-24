@@ -5,6 +5,7 @@ import {
   cleanupWorktree,
   deleteTask,
   removeTaskRelation,
+  resolveMovedTask,
   unlinkTask,
   updateTask,
   worktreeStatus,
@@ -370,6 +371,23 @@ export function TaskPanel({ taskId, onClose, onOpenRun, onOpenDiff, onOpenTask, 
           <div className="banner banner-error tp-banner" role="alert">
             {providerLabel(src.provider)} sync failed: {src.syncError}
           </div>
+        )}
+        {src?.moved && (
+          <MovedBanner
+            provider={providerLabel(src.provider)}
+            from={src.moved.fromProject.name}
+            to={src.moved.toProject?.name ?? "no project"}
+            suggested={projectRepos.find((r) => r.id === src.moved?.suggestedRepoId)?.name ?? null}
+            current={repo?.name ?? null}
+            busy={busy !== null}
+            onMove={() =>
+              void act("move the task", () => resolveMovedTask(task.id, "move"), [
+                `${key} moved`,
+                `Now runs in ${projectRepos.find((r) => r.id === src.moved?.suggestedRepoId)?.name ?? "the suggested repo"}`,
+              ])
+            }
+            onKeep={() => void act("keep the task", () => resolveMovedTask(task.id, "keep"))}
+          />
         )}
         {!repo && repos.data && (
           <div className="banner banner-warn tp-banner">
@@ -960,5 +978,43 @@ function WorktreeState({ status, error }: { status: WorktreeStatus | undefined; 
     <span className="tp-wt-state">
       {parts.flatMap((p, i) => (i ? [<span key={`sep-${i}`} className="tk-muted" aria-hidden>·</span>, p] : [p]))}
     </span>
+  );
+}
+
+/** La issue cambió de proyecto en el proveedor: mover la tarea al repo que le toca o dejarla. */
+function MovedBanner({
+  provider,
+  from,
+  to,
+  suggested,
+  current,
+  busy,
+  onMove,
+  onKeep,
+}: {
+  provider: string;
+  from: string;
+  to: string;
+  /** Repo que le tocaría por las reglas; `null` si ninguna aplica (o ya no existe). */
+  suggested: string | null;
+  current: string | null;
+  busy: boolean;
+  onMove: () => void;
+  onKeep: () => void;
+}) {
+  return (
+    <div className="banner banner-warn tp-banner tp-moved" role="status">
+      <span className="tp-moved-text">
+        Moved from {from} to {to} in {provider}
+      </span>
+      {suggested && (
+        <button type="button" className="btn btn-sm" disabled={busy} onClick={onMove}>
+          Move to {suggested}
+        </button>
+      )}
+      <button type="button" className="btn btn-sm btn-ghost" disabled={busy} onClick={onKeep}>
+        {current ? `Keep in ${current}` : "Keep here"}
+      </button>
+    </div>
   );
 }

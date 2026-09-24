@@ -9,6 +9,7 @@ import {
   providerListImportable,
   providerScopes,
   providerStatus,
+  sourceRuleProjects,
   sourceStates,
   type ImportableItem,
   type ProviderStatus,
@@ -227,6 +228,33 @@ export function useSourceLinks(projectId: string | null): Loaded<SourceLink[]> {
 /** Teams y proyectos del proveedor. `enabled: false` no consulta (sin key). */
 export function useProviderScopes(provider: string, enabled: boolean): Loaded<ScopeRef[]> {
   return useLoad(enabled ? `scopes:${provider}` : null, () => providerScopes(provider));
+}
+
+/** Proyecto del proveedor elegible como regla, con el link del que salió. */
+export interface RuleProject {
+  project: ScopeRef;
+  linkId: string;
+}
+
+/**
+ * Proyectos del proveedor para reglas de proyecto, unidos sobre `linkIds` (sin repetir: gana
+ * el primer link). Va a la red; `enabled: false` o sin links no consulta.
+ */
+export function useRuleProjects(linkIds: string[], enabled = true): Loaded<RuleProject[]> {
+  const key = enabled && linkIds.length ? `rule-projects:${linkIds.join(",")}` : null;
+  return useLoad(key, async () => {
+    const lists = await Promise.all(linkIds.map((id) => sourceRuleProjects(id)));
+    const seen = new Set<string>();
+    const out: RuleProject[] = [];
+    lists.forEach((ps, i) => {
+      for (const project of ps) {
+        if (seen.has(project.id)) continue;
+        seen.add(project.id);
+        out.push({ project, linkId: linkIds[i] ?? "" });
+      }
+    });
+    return out;
+  });
 }
 
 /** Estados actuales, propuesta de mapeo y altas/bajas contra lo conocido. Va a la red. */

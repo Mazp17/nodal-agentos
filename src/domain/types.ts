@@ -104,6 +104,25 @@ export interface TaskSource {
   syncError: string | null;
   /** El estado externo actual no está en el mapeo pull ("estado externo sin mapear"). */
   unmapped: boolean;
+  /** Proyecto del proveedor (proyecto de Linear) visto en el último import/pull. */
+  project: ExtProject | null;
+  /** Regla de proyecto por la que llegó a su repo. */
+  ruleId: string | null;
+  /** La issue cambió de proyecto en el proveedor: falta decidir (`resolveMovedTask`). */
+  moved: MovedInfo | null;
+}
+
+export interface ExtProject {
+  id: string;
+  name: string;
+}
+
+export interface MovedInfo {
+  fromProject: ExtProject;
+  /** `null`: quedó sin proyecto. */
+  toProject: ExtProject | null;
+  /** Repo que le tocaría por las reglas; `null` si ninguna aplica. */
+  suggestedRepoId: string | null;
 }
 
 export interface Task {
@@ -203,9 +222,24 @@ export interface ScopeRef {
   name: string;
 }
 
+export type RuleKind = "label" | "project";
+
+/**
+ * Ruteo al importar. Precedencia: regla de proyecto > regla de label > `defaultRepoId`.
+ * Al guardar, una regla sin `id` (o con otro `kind`/`value`) es nueva: el backend le da `id`
+ * y `createdAt` (desde ahí auto-importa; lo anterior lo trae `importRule`).
+ */
 export interface RepoRule {
-  label: string;
+  /** `""` en una regla nueva. */
+  id: string;
+  kind: RuleKind;
+  /** Label, o id del proyecto del proveedor. */
+  value: string;
+  /** Nombre visible (el del proyecto; en las de label, el label). */
+  name: string;
   repoId: string;
+  /** Lo fija el backend. */
+  createdAt: number;
 }
 
 export interface StateMap {
