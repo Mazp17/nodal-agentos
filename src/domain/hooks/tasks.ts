@@ -43,8 +43,13 @@ interface Entry {
   interval: number;
   listeners: Set<() => void>;
   timer: number | undefined;
+  /** Borrado diferido de la entrada sin suscriptores (se cancela si alguien vuelve). */
+  evict: number | undefined;
   seq: number;
 }
+
+/** Tiempo que se conserva en caché una clave sin nadie montado. */
+const EVICT_MS = 60_000;
 
 const store = new Map<string, Entry>();
 const EMPTY: Snapshot = { value: undefined, hasValue: false, error: null };
@@ -80,14 +85,14 @@ export function invalidate(...resources: Resource[]) {
 
 if (typeof document !== "undefined") {
   document.addEventListener("visibilitychange", () => {
-    if (!document.hidden) active().forEach(load);
+    if (!document.hidden) active().filter((k) => (store.get(k)?.interval ?? 0) > 0).forEach(load);
   });
 }
 
 function entry(key: string, fetcher: () => Promise<unknown>, resources: Resource[], interval: number): Entry {
   let e = store.get(key);
   if (!e) {
-    e = { snap: EMPTY, fetcher, resources, interval, listeners: new Set(), timer: undefined, seq: 0 };
+    e = { snap: EMPTY, fetcher, resources, interval, listeners: new Set(), timer: undefined, evict: undefined, seq: 0 };
     store.set(key, e);
   }
   return e;
@@ -115,6 +120,10 @@ export function usePolled<T>(
       if (key === null) return () => {};
       const e = entry(key, () => fetchRef.current(), resKey.split(",").filter(Boolean) as Resource[], intervalMs);
       e.listeners.add(notify);
+      if (e.evict !== undefined) {
+        window.clearTimeout(e.evict);
+        e.evict = undefined;
+      }
       if (e.listeners.size === 1) {
         load(key);
         if (intervalMs > 0) {
@@ -125,10 +134,14 @@ export function usePolled<T>(
       }
       return () => {
         e.listeners.delete(notify);
-        if (e.listeners.size === 0 && e.timer !== undefined) {
+        if (e.listeners.size > 0) return;
+        if (e.timer !== undefined) {
           window.clearInterval(e.timer);
           e.timer = undefined;
         }
+        e.evict = window.setTimeout(() => {
+          if (store.get(key) === e && e.listeners.size === 0) store.delete(key);
+        }, EVICT_MS);
       };
     },
     [key, intervalMs, resKey],
@@ -179,14 +192,9 @@ export const useTaskRelations = (taskId: string | null) =>
     0,
   );
 
-/** El plan se relee cuando cambia la tarea (`updatedAt`). */
-export const useTaskPlan = (taskId: string | null, version: number | null) =>
-  usePolled<string>(
-    taskId && version !== null ? `plan:${taskId}:${version}` : null,
-    () => readTaskPlan(taskId as string),
-    [],
-    0,
-  );
+/** Sin polling: se relee al invalidar tareas (o con `refresh` cuando cambia `updatedAt`). */
+export const useTaskPlan = (taskId: string | null) =>
+  usePolled<string>(taskId ? `plan:${taskId}` : null, () => readTaskPlan(taskId as string), ["tasks"], 0);
 
 /** Catálogo de ejecutores; lee disco, así que no se repite (solo al invalidar). */
 export const useExecutors = (repoId: string | null) =>

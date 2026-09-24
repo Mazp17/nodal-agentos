@@ -63,7 +63,7 @@ export function TasksView({ projectId, onOpenTask }: TasksViewProps) {
     return out;
   }, [list, repos.data]);
 
-  const loading = tasks.data === undefined && !tasks.error;
+  const loading = (tasks.data === undefined && !tasks.error) || (repos.data === undefined && !repos.error);
 
   return (
     <div className="tv-root">

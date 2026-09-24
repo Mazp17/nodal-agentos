@@ -1,7 +1,7 @@
 import { useEffect, useId, useMemo, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { createTask, getTask, readTaskPlan, updateTask, type NewTask, type PlanInput, type TaskPatch } from "../../domain/api";
-import { invalidate, useProjects, useRepos } from "../../domain/hooks/tasks";
+import { invalidate, useProjects, useRepos, useSettings } from "../../domain/hooks/tasks";
 import { taskKey, type Executor, type Finish, type Isolation, type Priority, type Task } from "../../domain/types";
 import { useFocusTrap } from "../../ui/useFocusTrap";
 import { useToast } from "../../ui/Toasts";
@@ -48,6 +48,8 @@ export function NewTaskDialog({ projectId, taskId, defaultRepoId, onClose, onSav
   const launch = useLaunch();
   const projects = useProjects();
   const allRepos = useRepos(null);
+  const settings = useSettings();
+  const titleRef = useRef<HTMLInputElement>(null);
 
   const [original, setOriginal] = useState<Task | null>(null);
   const [loaded, setLoaded] = useState(!taskId);
@@ -105,10 +107,17 @@ export function NewTaskDialog({ projectId, taskId, defaultRepoId, onClose, onSav
     };
   }, [taskId]);
 
-  // Sin proyecto (All projects): el primero.
+  // Sin proyecto (All projects): el del repo pedido o, si no, el primero.
   useEffect(() => {
-    if (!pid && projects.data?.length) setPid(projects.data[0].id);
-  }, [pid, projects.data]);
+    if (pid || !projects.data?.length || allRepos.data === undefined) return;
+    const fromRepo = allRepos.data.find((r) => r.id === defaultRepoId)?.projectId;
+    setPid(fromRepo ?? projects.data[0].id);
+  }, [pid, projects.data, allRepos.data, defaultRepoId]);
+
+  // Al editar, el foco va al título cuando termina de cargar (si se puede editar).
+  useEffect(() => {
+    if (loaded && taskId && !original?.source) titleRef.current?.focus();
+  }, [loaded, taskId, original]);
 
   const project = projects.data?.find((p) => p.id === pid) ?? null;
   const repos = useMemo(
@@ -119,11 +128,11 @@ export function NewTaskDialog({ projectId, taskId, defaultRepoId, onClose, onSav
 
   // Repo por defecto: el pedido o el primero del proyecto.
   useEffect(() => {
-    if (!loaded || taskId) return;
+    if (!loaded || taskId || !pid) return;
     if (repoId && repos.some((r) => r.id === repoId)) return;
     if (repos.length) setRepoId(repos[0].id);
     else if (allRepos.data) setRepoId(null);
-  }, [loaded, taskId, repoId, repos, allRepos.data]);
+  }, [loaded, taskId, pid, repoId, repos, allRepos.data]);
 
   useEffect(() => {
     if (focusAc === null) return;
@@ -374,8 +383,9 @@ export function NewTaskDialog({ projectId, taskId, defaultRepoId, onClose, onSav
 
             <Field label="Title" hint={imported ? `from ${providerLabel(original?.source?.provider ?? "")}` : undefined}>
               <input
+                ref={titleRef}
                 className="input"
-                data-autofocus
+                data-autofocus={taskId ? undefined : true}
                 value={title}
                 disabled={imported}
                 onChange={(e) => setTitle(e.target.value)}
@@ -574,7 +584,7 @@ export function NewTaskDialog({ projectId, taskId, defaultRepoId, onClose, onSav
                   </label>
                   <span className="tk-hint">
                     {effReview
-                      ? `${repo?.reviewer ?? project?.reviewer ?? "code-reviewer"} checks the criteria, read-only.`
+                      ? `${repo?.reviewer ?? project?.reviewer ?? settings.data?.reviewer ?? "code-reviewer"} checks the criteria, read-only.`
                       : "The task goes to In Review when the run ends."}
                     {review === null && repo ? " · repo default" : ""}
                   </span>

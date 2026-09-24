@@ -102,6 +102,7 @@ export function ExecutorPicker({ repoId, value, onChange, inherited, label = "Ex
       else items[i - 1]?.focus();
     } else if (e.key === "Tab") {
       setOpen(false);
+      setQ("");
     }
   };
 
@@ -112,7 +113,7 @@ export function ExecutorPicker({ repoId, value, onChange, inherited, label = "Ex
         type="button"
         className="ex-trigger"
         aria-label={`${label}: ${value ? executorLabel(shown) : `Default (${executorLabel(shown)})`}`}
-        aria-haspopup="menu"
+        aria-haspopup="dialog"
         aria-expanded={open}
         aria-controls={open ? menuId : undefined}
         disabled={disabled}
@@ -131,7 +132,7 @@ export function ExecutorPicker({ repoId, value, onChange, inherited, label = "Ex
         <div
           id={menuId}
           className={`menu ex-menu ${dropUp ? "ex-menu-up" : ""}`}
-          role="menu"
+          role="dialog"
           aria-label={label}
           onKeyDown={onKey}
           onClick={(e) => e.stopPropagation()}
@@ -150,6 +151,7 @@ export function ExecutorPicker({ repoId, value, onChange, inherited, label = "Ex
               }
             }}
           />
+          <div role="menu" aria-label={label}>
           {error && <div className="ex-note ex-error">{error}</div>}
           {!catalog && !error && <div className="ex-note">Loading executors…</div>}
           {groups.map((g) => (
@@ -191,6 +193,7 @@ export function ExecutorPicker({ repoId, value, onChange, inherited, label = "Ex
             </div>
           ))}
           {catalog && groups.length === 0 && <div className="ex-note">No executors match.</div>}
+          </div>
         </div>
       )}
     </div>

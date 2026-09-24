@@ -47,9 +47,11 @@ interface Props {
   onAction: (a: CardAction) => void;
   onDragStart: (e: DragEvent<HTMLElement>) => void;
   onDragEnd: () => void;
+  /** Alt+flechas sobre la card: reordenar o cambiar de columna sin mouse. */
+  onKeyMove: (key: "ArrowUp" | "ArrowDown" | "ArrowLeft" | "ArrowRight") => void;
 }
 
-export function TaskCard({ model, showProject, busy, dragging, onOpen, onAction, onDragStart, onDragEnd }: Props) {
+export function TaskCard({ model, showProject, busy, dragging, onOpen, onAction, onDragStart, onDragEnd, onKeyMove }: Props) {
   const { task, project, repo, assignee, run, phase } = model;
   const action = cardAction(model);
   const primary = action === "run" || action === "retry";
@@ -96,10 +98,23 @@ export function TaskCard({ model, showProject, busy, dragging, onOpen, onAction,
       </div>
 
       {/* Botón real para abrir con teclado; la card entera también abre con click. */}
-      <button type="button" className="bd-card-title" onClick={(e) => {
+      <button
+        type="button"
+        className="bd-card-title"
+        aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown Alt+ArrowLeft Alt+ArrowRight"
+        title="Alt+arrows to move"
+        onClick={(e) => {
           e.stopPropagation();
           onOpen();
-        }}>
+        }}
+        onKeyDown={(e) => {
+          if (!e.altKey) return;
+          if (e.key === "ArrowUp" || e.key === "ArrowDown" || e.key === "ArrowLeft" || e.key === "ArrowRight") {
+            e.preventDefault();
+            onKeyMove(e.key);
+          }
+        }}
+      >
         {task.title}
       </button>
 

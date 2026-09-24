@@ -199,28 +199,64 @@ export function BoardView({ projectId, onOpenTask, onOpenRun, onNewProject, onOp
     if (drag.status !== status || drag.index !== index) setDrag({ ...drag, status, index });
   };
 
-  const onDrop = (status: TaskStatus, list: Task[]) => async (e: DragEvent<HTMLElement>) => {
-    e.preventDefault();
-    const id = e.dataTransfer.getData(DRAG_TYPE) || drag?.id;
-    setDrag(null);
-    const task = id ? allTasks.find((t) => t.id === id) : undefined;
-    if (!task) return;
-    const index = dropIndex(e, list);
-    const position = positionAt(list, index);
-    if (task.status === status && task.position === position) return;
-    const optimistic: Task = { ...task, status, position };
-    setPatched((m) => new Map(m).set(task.id, optimistic));
+  const setPatch = (t: Task) => setPatched((m) => new Map(m).set(t.id, t));
+  const dropPatch = (id: string) =>
+    setPatched((m) => {
+      const n = new Map(m);
+      n.delete(id);
+      return n;
+    });
+
+  /**
+   * Coloca `task` en `status`, en el índice `index` de `others` (la columna destino ordenada,
+   * sin la tarea). Si el hueco entre vecinos se agotó, renumera la columna antes.
+   */
+  const place = async (task: Task, status: TaskStatus, others: Task[], index: number) => {
+    const from = byColumn(task.status).findIndex((t) => t.id === task.id);
+    if (task.status === status && from === index) return;
     try {
+      let column = others;
+      const before = column[index - 1];
+      const after = column[index];
+      if (before && after && after.position - before.position < 1e-6) {
+        const renumbered: Task[] = [];
+        for (const [k, t] of column.entries()) {
+          const saved = await moveTask(t.id, t.status, k + 1);
+          setPatch(saved);
+          renumbered.push(saved);
+        }
+        column = renumbered;
+      }
+      const position = positionAt(column, index);
+      setPatch({ ...task, status, position });
       const saved = await moveTask(task.id, status, position);
-      setPatched((m) => new Map(m).set(task.id, saved));
+      setPatch(saved);
       if (task.status !== status) invalidate("tasks");
     } catch (err) {
-      setPatched((m) => {
-        const n = new Map(m);
-        n.delete(task.id);
-        return n;
-      });
+      dropPatch(task.id);
       push("Couldn't move the task", String(err), "danger");
+    }
+  };
+
+  const onDrop = (status: TaskStatus, others: Task[]) => (e: DragEvent<HTMLElement>) => {
+    e.preventDefault();
+    const id = e.dataTransfer.getData(DRAG_TYPE) || drag?.id;
+    const index = dropIndex(e, others);
+    setDrag(null);
+    const task = id ? allTasks.find((t) => t.id === id) : undefined;
+    if (task) void place(task, status, others, index);
+  };
+
+  /** Teclado: Alt+↑/↓ reordena en la columna; Alt+←/→ la pasa a la columna vecina. */
+  const onKeyMove = (task: Task, key: string) => {
+    const others = byColumn(task.status).filter((t) => t.id !== task.id);
+    const from = byColumn(task.status).findIndex((t) => t.id === task.id);
+    if (key === "ArrowUp" && from > 0) void place(task, task.status, others, from - 1);
+    else if (key === "ArrowDown" && from < others.length) void place(task, task.status, others, from + 1);
+    else if (key === "ArrowLeft" || key === "ArrowRight") {
+      const i = columns.indexOf(task.status);
+      const to = columns[i + (key === "ArrowLeft" ? -1 : 1)];
+      if (i >= 0 && to) void place(task, to, byColumn(to), 0);
     }
   };
 
@@ -355,6 +391,7 @@ export function BoardView({ projectId, onOpenTask, onOpenRun, onNewProject, onOp
                         onAction={(a) => void onAction(m, a)}
                         onDragStart={onDragStart(t)}
                         onDragEnd={() => setDrag(null)}
+                        onKeyMove={(k) => onKeyMove(t, k)}
                       />
                     </div>
                   );

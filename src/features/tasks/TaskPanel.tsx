@@ -1,4 +1,4 @@
-import { useEffect, useId, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import {
   addTaskRelation,
@@ -89,7 +89,7 @@ export function TaskPanel({ taskId, onClose, onOpenRun, onOpenDiff, onOpenTask }
     setMenu(null);
   }, [taskId]);
 
-  const closeMenu = () => setMenu(null);
+  const closeMenu = useCallback(() => setMenu(null), []);
   const statusRef = useOutside(menu === "status", closeMenu);
   const repoRef = useOutside(menu === "repo", closeMenu);
 
@@ -106,6 +106,9 @@ export function TaskPanel({ taskId, onClose, onOpenRun, onOpenDiff, onOpenTask }
   if (!task) {
     return (
       <Shell refEl={ref} headingId={headingId} onClose={onClose}>
+        <h2 id={headingId} className="sr-only">
+          Task
+        </h2>
         <div className="tp-body">
           {taskQ.error ? (
             <div className="banner banner-error" role="alert">
@@ -211,7 +214,10 @@ export function TaskPanel({ taskId, onClose, onOpenRun, onOpenDiff, onOpenTask }
             {menu === "status" && (
               <MenuList
                 label="Status"
-                onEscape={closeMenu}
+                onEscape={() => {
+                  closeMenu();
+                  statusRef.current?.querySelector<HTMLElement>("button")?.focus();
+                }}
                 items={TASK_STATUSES.map((s) => ({
                   key: s,
                   label: STATUS_META[s].label,
@@ -254,7 +260,10 @@ export function TaskPanel({ taskId, onClose, onOpenRun, onOpenDiff, onOpenTask }
             {menu === "repo" && (
               <MenuList
                 label="Move to repo"
-                onEscape={closeMenu}
+                onEscape={() => {
+                  closeMenu();
+                  repoRef.current?.querySelector<HTMLElement>("button")?.focus();
+                }}
                 items={projectRepos.map((r) => ({
                   key: r.id,
                   label: r.name,
@@ -588,13 +597,22 @@ function MenuList({ label, items, onEscape }: { label: string; items: MenuItem[]
           <span className="ellipsis">{it.label}</span>
         </button>
       ))}
-      {items.length === 0 && <div className="menu-label">No other repos in this project</div>}
+      {items.length <= 1 && <div className="menu-label">No other repos in this project</div>}
     </div>
   );
 }
 
 function PlanSection({ task }: { task: Task }) {
-  const plan = useTaskPlan(task.id, task.updatedAt);
+  const plan = useTaskPlan(task.id);
+  const { refresh } = plan;
+  // El plan de una importada lo rematerializa el sync: se relee cuando cambia la tarea
+  // (no al montar: eso ya lo hace el hook).
+  const seen = useRef(task.updatedAt);
+  useEffect(() => {
+    if (seen.current === task.updatedAt) return;
+    seen.current = task.updatedAt;
+    refresh();
+  }, [task.updatedAt, refresh]);
   const label =
     task.plan.kind === "file"
       ? `Plan · ${task.plan.path}`
