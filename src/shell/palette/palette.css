@@ -30,6 +30,7 @@
 .palette-input::placeholder { color: var(--text-dim); }
 .palette-list { padding: var(--sp-2); max-height: 380px; overflow: auto; display: flex; flex-direction: column; gap: 1px; }
 .palette-item {
+  flex: none; /* keep 34px rows; the list scrolls instead of squeezing them */
   height: 34px;
   display: flex;
   align-items: center;
