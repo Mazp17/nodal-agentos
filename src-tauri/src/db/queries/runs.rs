@@ -50,6 +50,21 @@ pub fn latest_by_task(conn: &Connection, project_id: Option<&str>) -> Result<Vec
     )
 }
 
+/// Como `pending`, del proyecto (`None`: todos).
+pub fn pending_of(conn: &Connection, project_id: Option<&str>) -> Result<Vec<Run>, DbError> {
+    query(
+        conn,
+        &format!(
+            "SELECT r.* FROM runs r
+             LEFT JOIN tasks t ON t.id = r.task_id
+             LEFT JOIN repos rp ON rp.id = r.repo_id
+             WHERE {IN_PROJECT} AND r.status IN ('queued', 'launching', 'launched')
+             ORDER BY r.queue_position, r.queued_at, r.id"
+        ),
+        rusqlite::params![project_id],
+    )
+}
+
 /// Cola global en orden de salida.
 pub fn queue(conn: &Connection) -> Result<Vec<Run>, DbError> {
     query(conn, "SELECT * FROM runs WHERE status = 'queued' ORDER BY queue_position, queued_at, id", [])

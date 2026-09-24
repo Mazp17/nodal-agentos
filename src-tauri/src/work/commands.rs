@@ -327,6 +327,24 @@ pub async fn latest_runs_by_task(state: State<'_, WorkState>, project_id: Option
     Ok(runs.into_iter().map(RunLight::from).collect())
 }
 
+/// Slots ocupados/capacidad, cola y lo que espera al usuario (`project_id` null: todo, con
+/// las sesiones ajenas). Si `claude agents` falla, se calcula sin las sesiones vivas.
+#[tauri::command]
+pub async fn work_summary(state: State<'_, WorkState>, project_id: Option<String>) -> Result<super::queue::WorkSummary, String> {
+    let project_id = opt_id(project_id, "project")?;
+    let global = project_id.is_none();
+    let (runs, blocked, settings) = db(&state.0, move |c| {
+        let p = project_id.as_deref();
+        Ok((qruns::pending_of(c, p)?, tasks::blocked_ids(c, p)?, rows::load_settings(c)?))
+    })
+    .await?;
+    let live = crate::runs::list_runs().await.unwrap_or_else(|e| {
+        eprintln!("work_summary: {e}");
+        Vec::new()
+    });
+    Ok(super::queue::work_summary(&runs, &blocked, &live, settings.concurrency, global, now_ms()))
+}
+
 #[tauri::command]
 pub async fn list_queue(state: State<'_, WorkState>) -> Result<Vec<Run>, String> {
     db(&state.0, |c| Ok(qruns::queue(c)?)).await

@@ -41,6 +41,18 @@ import type { Transcript } from "../features/runs/types";
 
 // ---------- DTOs ----------
 
+/**
+ * `running`/`capacity`: slots ocupados de la concurrencia global (regla del pump). `needYou`:
+ * tareas Blocked + runs migrados sin confirmar + sesiones esperando permiso/input, sin contar
+ * dos veces la misma tarea. `queued`: listos para salir.
+ */
+export interface WorkSummary {
+  running: number;
+  capacity: number;
+  needYou: number;
+  queued: number;
+}
+
 /** Sesiones vivas trabajando/esperando y subagentes activos (mismo criterio que `activity_summary`). */
 export interface RepoActivityCount {
   repoId: string;
@@ -353,6 +365,8 @@ export const getRun = (runId: string) => invoke<Run>("get_run", { runId });
 /** El último run de cada tarea, sin límite de historial. */
 export const latestRunsByTask = (projectId: string | null = null) =>
   invoke<RunLight[]>("latest_runs_by_task", { projectId });
+/** `null`: global (incluye sesiones de Claude Code ajenas a la app); con proyecto, solo sus runs y tareas. */
+export const workSummary = (projectId: string | null = null) => invoke<WorkSummary>("work_summary", { projectId });
 /** Cola global: runs `queued`, en orden de salida. */
 export const listQueue = () => invoke<Run[]>("list_queue");
 /** Encola un run de trabajo (o lo lanza si hay slot). */

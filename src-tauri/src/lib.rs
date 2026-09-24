@@ -98,6 +98,7 @@ pub fn run() {
             work::commands::get_run,
             work::commands::latest_runs_by_task,
             work::commands::list_queue,
+            work::commands::work_summary,
             work::commands::launch_task,
             work::commands::hand_off,
             work::commands::review_now,
