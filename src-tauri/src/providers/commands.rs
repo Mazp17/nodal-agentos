@@ -39,12 +39,20 @@ pub struct ProviderStatus {
     /// Nombre del usuario si la key es válida.
     pub viewer: Option<String>,
     pub error: Option<String>,
+    /// Últimos 4 caracteres de la key guardada (nunca la key).
+    pub key_hint: Option<String>,
 }
 
 async fn status_of(app: &AppHandle, provider: &str) -> PResult<ProviderStatus> {
-    let p = resolve(app, provider).await?;
-    let mut out = ProviderStatus { provider: provider.into(), has_key: p.is_some(), viewer: None, error: None };
-    if let Some(p) = p {
+    let p = super::resolve_with_key(app, provider).await?;
+    let mut out = ProviderStatus {
+        provider: provider.into(),
+        has_key: p.is_some(),
+        viewer: None,
+        error: None,
+        key_hint: p.as_ref().and_then(|(_, k)| super::key_hint(k)),
+    };
+    if let Some((p, _)) = p {
         match p.status().await {
             Ok(v) => out.viewer = Some(v),
             Err(err) => out.error = Some(err.message),
@@ -72,14 +80,15 @@ pub async fn provider_set_key(app: AppHandle, provider: String, key: Option<Stri
     let p = Provider::Linear(super::linear::LinearProvider::new(linear.http().clone(), key.clone()));
     let viewer = p.status().await?;
     app.state::<Secrets>().set(&provider, &key).await?;
-    Ok(ProviderStatus { provider, has_key: true, viewer: Some(viewer), error: None })
+    let key_hint = super::key_hint(&key);
+    Ok(ProviderStatus { provider, has_key: true, viewer: Some(viewer), error: None, key_hint })
 }
 
 #[tauri::command]
 pub async fn provider_clear_key(app: AppHandle, provider: String) -> PResult<ProviderStatus> {
     check_provider(&provider)?;
     app.state::<Secrets>().delete(&provider).await?;
-    Ok(ProviderStatus { provider, has_key: false, viewer: None, error: None })
+    Ok(ProviderStatus { provider, has_key: false, viewer: None, error: None, key_hint: None })
 }
 
 #[tauri::command]
@@ -331,10 +340,25 @@ mod tests {
 
     #[test]
     fn provider_status_shape() {
-        let s = ProviderStatus { provider: "linear".into(), has_key: true, viewer: Some("Ana".into()), error: None };
+        let s = ProviderStatus {
+            provider: "linear".into(),
+            has_key: true,
+            viewer: Some("Ana".into()),
+            error: None,
+            key_hint: super::super::key_hint("lin_api_0000000000abcd"),
+        };
         let v = serde_json::to_value(s).unwrap();
         assert_eq!(v["hasKey"], true);
+        assert_eq!(v["keyHint"], "abcd");
         assert_eq!(v["viewer"], "Ana");
         assert!(v["error"].is_null());
+    }
+
+    #[test]
+    fn key_hint_never_reveals_the_key() {
+        use super::super::key_hint;
+        assert_eq!(key_hint("  lin_api_0123456789wxyz \n").as_deref(), Some("wxyz"));
+        assert_eq!(key_hint("short-key"), None, "keys cortas no dan pista");
+        assert_eq!(key_hint(""), None);
     }
 }

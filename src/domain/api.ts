@@ -169,6 +169,8 @@ export interface ProviderStatus {
   /** Nombre del usuario si la key es válida. */
   viewer: string | null;
   error: string | null;
+  /** Últimos 4 caracteres de la key guardada (nunca la key); `null` sin key o si es corta. */
+  keyHint: string | null;
 }
 
 export interface ImportableItem {
