@@ -266,7 +266,7 @@ fn folder_name(path: &str) -> String {
     Path::new(path).file_name().map(|s| s.to_string_lossy().into_owned()).unwrap_or_else(|| path.to_string())
 }
 
-/// `agent-desk` → `AD`, `payments` → `PAYM`. Siempre `[A-Z][A-Z0-9]*`.
+/// `my-app` → `MA`, `payments` → `PAYM`. Siempre `[A-Z][A-Z0-9]*`.
 pub fn key_base(name: &str) -> String {
     let words: Vec<&str> = name.split(|c: char| !c.is_ascii_alphanumeric()).filter(|w| !w.is_empty()).collect();
     let mut k: String = if words.len() >= 2 {

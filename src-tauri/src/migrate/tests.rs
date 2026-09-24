@@ -336,7 +336,7 @@ fn existing_repo_is_reused_and_keys_do_not_collide() {
 
 #[test]
 fn helpers() {
-    assert_eq!(key_base("agent-desk"), "AD");
+    assert_eq!(key_base("my-app"), "MA");
     assert_eq!(key_base("payments"), "PAYM");
     assert_eq!(key_base("2fa"), "P2FA");
     assert_eq!(key_base("--"), "P");

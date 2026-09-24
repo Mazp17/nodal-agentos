@@ -359,7 +359,7 @@ mod tests {
 
     #[test]
     fn tail_reads_only_the_end() {
-        let tmp = std::env::temp_dir().join(format!("agent-desk-activity-tail-{}.jsonl", std::process::id()));
+        let tmp = std::env::temp_dir().join(format!("nodal-activity-tail-{}.jsonl", std::process::id()));
         let mut s = String::new();
         for i in 0..2000 {
             s.push_str(&format!("{{\"type\":\"user\",\"n\":{i}}}\n"));

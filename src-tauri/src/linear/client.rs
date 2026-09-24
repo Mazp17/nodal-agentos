@@ -14,7 +14,7 @@ pub fn http_client() -> reqwest::Client {
     reqwest::Client::builder()
         .connect_timeout(Duration::from_secs(10))
         .timeout(Duration::from_secs(30))
-        .user_agent(concat!("agent-desk/", env!("CARGO_PKG_VERSION")))
+        .user_agent(concat!("nodal/", env!("CARGO_PKG_VERSION")))
         .build()
         .expect("valid reqwest config")
 }

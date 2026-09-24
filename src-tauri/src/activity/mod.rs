@@ -125,7 +125,7 @@ impl AppRuns {
 struct RepoRoots(Vec<PathBuf>);
 
 impl RepoRoots {
-    /// Por componentes: `/x/nodal-sandbox` NO está dentro de `/x/agent-desk`.
+    /// Por componentes: `/x/nodal-sandbox` NO está dentro de `/x/nodal`.
     fn contains(&self, path: &str) -> bool {
         let p = Path::new(path);
         p.is_absolute() && self.0.iter().any(|r| p.starts_with(r))
@@ -460,7 +460,7 @@ mod tests {
     /// Las ventanas de tiempo dependen del mtime: se copian los fixtures a un temporal
     /// (mtime = ahora) y se ajusta el de los que tienen que verse viejos.
     fn setup(name: &str) -> (PathBuf, i64) {
-        let dst = std::env::temp_dir().join(format!("agent-desk-activity-{}-{name}", std::process::id()));
+        let dst = std::env::temp_dir().join(format!("nodal-activity-{}-{name}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dst);
         copy_dir(&fixtures().join("projects"), &dst);
         let old = std::time::SystemTime::now() - Duration::from_secs(3 * 3600);
@@ -591,13 +591,14 @@ mod tests {
         assert!(!roots.contains("repo"));
     }
 
-    /// Contra los datos reales de esta máquina (solo lectura): `cargo test -- --ignored`.
+    /// Contra los datos reales de esta máquina (solo lectura):
+    /// `ACTIVITY_REPO=<ruta> cargo test -- --ignored`.
     #[test]
     #[ignore]
     fn real_repo_activity() {
         let agents = tauri::async_runtime::block_on(list_agents()).expect("claude agents");
         let projects = claude_fs::claude_config_dir().unwrap().join("projects");
-        let repo = std::env::var("ACTIVITY_REPO").unwrap_or_else(|_| "/Users/me/Code/agent-desk".into());
+        let repo = std::env::var("ACTIVITY_REPO").expect("ACTIVITY_REPO=<ruta de un repo>");
         let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis() as i64;
         let act = assemble(&[PathBuf::from(&repo)], &agents, &projects, &AppRuns::default(), now);
         for s in &act.sessions {

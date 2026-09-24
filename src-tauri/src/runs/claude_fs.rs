@@ -1480,7 +1480,7 @@ mod tests {
 
     #[test]
     fn session_without_workflows_has_no_detail() {
-        let tmp = std::env::temp_dir().join(format!("agent-desk-runs-test-{}", std::process::id()));
+        let tmp = std::env::temp_dir().join(format!("nodal-runs-test-{}", std::process::id()));
         fs::create_dir_all(&tmp).unwrap();
         assert_eq!(read_run_detail(&tmp), None);
         let _ = fs::remove_dir_all(&tmp);
@@ -1515,13 +1515,15 @@ mod tests {
         eprintln!("{n} transcripts; slowest {:?} {}", slowest.0, slowest.1.display());
     }
 
-    /// Contra los datos reales de esta máquina: `cargo test -- --ignored`.
+    /// Contra los datos reales de esta máquina:
+    /// `NODAL_SANDBOX=<ruta del repo sandbox> cargo test -- --ignored`.
     #[test]
     #[ignore]
     fn real_sessions_on_disk() {
+        let sandbox = std::env::var("NODAL_SANDBOX").expect("NODAL_SANDBOX=<ruta del repo sandbox>");
         let projects = claude_config_dir().unwrap().join("projects");
         for session in [DONE_SESSION, CUT_SESSION] {
-            let dir = find_session_dir(&projects, SANDBOX, session).expect("sesión real no encontrada");
+            let dir = find_session_dir(&projects, &sandbox, session).expect("sesión real no encontrada");
             let d = read_run_detail(&dir).expect("sin workflow");
             eprintln!("{session}: {d:#?}");
         }
