@@ -299,6 +299,9 @@ details > summary.tp-step-sub { cursor: pointer; }
 .tp-wt { display: flex; flex-direction: column; gap: var(--sp-2); font-size: var(--fs-md); }
 .tp-wt-row { display: flex; align-items: center; gap: var(--sp-3); min-width: 0; }
 .tp-wt-actions { display: flex; gap: var(--sp-2); }
+.tp-wt-state { display: inline-flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); }
+.tp-wt-blocked { display: flex; align-items: center; gap: var(--sp-3); justify-content: space-between; }
+.tp-warn { color: var(--amber-text); }
 
 .tp-launch {
   padding: var(--sp-6);

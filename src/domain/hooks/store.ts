@@ -18,8 +18,10 @@ import {
   listTaskRelations,
   listTasks,
   readTaskPlan,
+  worktreeStatus,
   type ChangedKind,
   type ExecutorInfo,
+  type WorktreeStatus,
 } from "../api";
 import type { Project, Repo, Settings, Task, TaskRelation } from "../types";
 
@@ -318,6 +320,10 @@ export const useTaskRelations = (taskId: string | null) =>
 /** Se relee al invalidar tareas (o con `refresh` cuando cambia `updatedAt`). */
 export const useTaskPlan = (taskId: string | null) =>
   usePolled<string>(taskId ? `plan:${taskId}` : null, () => readTaskPlan(taskId as string), ["tasks"], 0);
+
+/** Estado git del worktree de la tarea (ahead/unpushed/dirty); cambia mientras el agente trabaja. */
+export const useWorktreeStatus = (taskId: string | null) =>
+  usePolled<WorktreeStatus>(taskId ? `worktree:${taskId}` : null, () => worktreeStatus(taskId as string), ["tasks", "runs"], POLL.tasks);
 
 /** Catálogo de ejecutores; lee disco, así que no se repite (solo al invalidar). */
 export const useExecutors = (repoId: string | null) =>

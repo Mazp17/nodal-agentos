@@ -9,6 +9,7 @@ import {
   unlinkTask,
   updateTask,
   type TaskPatch,
+  type WorktreeStatus,
 } from "../../domain/api";
 import { isRunActive, useQueueSummary, useTaskRuns } from "../../domain/hooks/runs";
 import {
@@ -21,6 +22,7 @@ import {
   useTaskPlan,
   useTaskRelations,
   useTasks,
+  useWorktreeStatus,
 } from "../../domain/hooks/store";
 import { taskKey, TASK_STATUSES, type Executor, type RelationKind, type RunLight, type Task, type TaskStatus } from "../../domain/types";
 import { formatDateTime, formatDuration } from "../../lib/format";
@@ -81,12 +83,16 @@ export function TaskPanel({ taskId, onClose, onOpenRun, onOpenDiff, onOpenTask, 
   const [launchExec, setLaunchExec] = useState<Executor | null>(null);
   const [extra, setExtra] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
+  /** Motivo por el que el backend rechazó el "Clean up" sin forzar. */
+  const [cleanupBlocked, setCleanupBlocked] = useState<string | null>(null);
+  const wt = useWorktreeStatus(taskQ.data?.worktree ? taskId : null);
 
   useEffect(() => {
     setTab("overview");
     setLaunchExec(null);
     setExtra("");
     setMenu(null);
+    setCleanupBlocked(null);
   }, [taskId]);
 
   const closeMenu = useCallback(() => setMenu(null), []);
@@ -169,13 +175,40 @@ export function TaskPanel({ taskId, onClose, onOpenRun, onOpenDiff, onOpenTask, 
     }
   };
 
-  const cleanUp = () => {
-    const wt = task.worktree;
-    if (!wt) return;
+  /** Sin forzar, el backend rechaza si hay commits sin publicar o cambios sin commitear. */
+  const cleanUp = async () => {
+    const w = task.worktree;
+    if (!w) return;
+    if (!window.confirm(`Delete the worktree and the branch ${w.branch}?\n\n${w.path}`)) return;
+    setBusy("cleanup");
+    try {
+      await cleanupWorktree(task.id, false);
+      setCleanupBlocked(null);
+      push("Worktree cleaned up", w.branch, "ok");
+    } catch (e) {
+      setCleanupBlocked(String(e));
+    } finally {
+      setBusy(null);
+      void invalidate("tasks", "runs");
+    }
+  };
+
+  const cleanUpAnyway = () => {
+    const w = task.worktree;
+    if (!w) return;
+    const s = wt.data;
+    const losses = [
+      s && s.unpushed > 0 ? `${s.unpushed} commit${s.unpushed === 1 ? "" : "s"} that exist nowhere else` : null,
+      s?.dirty ? "uncommitted changes" : null,
+    ].filter(Boolean);
     const ok = window.confirm(
-      `Delete the worktree and the branch ${wt.branch}?\n\n${wt.path}\n\nUncommitted changes and commits that were not pushed or merged are lost. This can't be undone.`,
+      `Force clean up ${w.branch}?\n\nThis permanently deletes ${losses.length ? losses.join(" and ") : "any unpublished work"} in\n${w.path}\n\nThis can't be undone.`,
     );
-    if (ok) void act("clean up the worktree", () => cleanupWorktree(task.id), ["Worktree cleaned up", wt.branch]);
+    if (!ok) return;
+    void act("clean up the worktree", async () => {
+      await cleanupWorktree(task.id, true);
+      setCleanupBlocked(null);
+    }, ["Worktree cleaned up", w.branch]);
   };
 
   const remove = () => {
@@ -361,9 +394,13 @@ export function TaskPanel({ taskId, onClose, onOpenRun, onOpenDiff, onOpenTask, 
                 <div className="tp-wt">
                   <div className="tp-wt-row">
                     <span className="tk-muted">Branch</span>
-                    <span className="mono ellipsis">{task.worktree.branch}</span>
+                    <span className="mono ellipsis">{wt.data?.branch ?? task.worktree.branch}</span>
                     <span className="tk-muted">from</span>
-                    <span className="mono">{task.worktree.base}</span>
+                    <span className="mono">{wt.data?.base ?? task.worktree.base}</span>
+                  </div>
+                  <div className="tp-wt-row">
+                    <span className="tk-muted">State</span>
+                    <WorktreeState status={wt.data} error={wt.error} />
                   </div>
                   <div className="tp-wt-row">
                     <span className="tk-muted">Path</span>
@@ -382,11 +419,24 @@ export function TaskPanel({ taskId, onClose, onOpenRun, onOpenDiff, onOpenTask, 
                       className="btn btn-sm btn-danger"
                       disabled={!!activeRun || busy !== null}
                       title={activeRun ? "Cancel the running step first" : undefined}
-                      onClick={cleanUp}
+                      onClick={() => void cleanUp()}
                     >
                       Clean up
                     </button>
                   </div>
+                  {cleanupBlocked && (
+                    <div className="banner banner-warn tp-wt-blocked" role="alert">
+                      <span>{cleanupBlocked}</span>
+                      <button
+                        type="button"
+                        className="btn btn-sm btn-danger"
+                        disabled={!!activeRun || busy !== null}
+                        onClick={cleanUpAnyway}
+                      >
+                        Clean up anyway
+                      </button>
+                    </div>
+                  )}
                 </div>
               </section>
             )}
@@ -836,5 +886,37 @@ function StepRow({
         </button>
       </div>
     </li>
+  );
+}
+
+/** "2 ahead · 1 unpushed · Uncommitted changes" del worktree de la tarea. */
+function WorktreeState({ status, error }: { status: WorktreeStatus | undefined; error: string | null }) {
+  if (!status) return <span className="tk-muted">{error ? `Couldn't read git status: ${error}` : "Checking…"}</span>;
+  if (!status.exists) return <span className="tp-danger">Worktree folder is missing</span>;
+  const parts: ReactNode[] = [];
+  parts.push(
+    <span key="ahead" className="num">
+      {status.ahead} commit{status.ahead === 1 ? "" : "s"} ahead
+    </span>,
+  );
+  if (status.unpushed > 0) {
+    parts.push(
+      <span key="unpushed" className="tp-warn num">
+        {status.unpushed} unpushed
+      </span>,
+    );
+  }
+  if (status.dirty) {
+    parts.push(
+      <span key="dirty" className="tp-warn">
+        Uncommitted changes
+      </span>,
+    );
+  }
+  if (status.unpushed === 0 && !status.dirty) parts.push(<span key="clean" className="tk-muted">Clean</span>);
+  return (
+    <span className="tp-wt-state">
+      {parts.flatMap((p, i) => (i ? [<span key={`sep-${i}`} className="tk-muted" aria-hidden>·</span>, p] : [p]))}
+    </span>
   );
 }
