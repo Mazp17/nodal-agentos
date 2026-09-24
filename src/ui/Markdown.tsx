@@ -17,7 +17,23 @@ import "./markdown.css";
  */
 
 const components: Components = {
-  a: ({ href, children }) => <ExternalLink url={href} className="md-link">{children}</ExternalLink>,
+  a: ({ href, children, node }) => {
+    // `[![alt](img)](url)`: la imagen ya se muestra como link; anidar <a> abriría dos URLs.
+    const img = node?.children.find((c) => c.type === "element" && c.tagName === "img");
+    if (img && img.type === "element") {
+      const alt = typeof img.properties.alt === "string" ? img.properties.alt : "";
+      return (
+        <ExternalLink url={href} className="md-link">
+          {alt ? `Image: ${alt}` : "Image"} ↗
+        </ExternalLink>
+      );
+    }
+    return (
+      <ExternalLink url={href} className="md-link">
+        {children}
+      </ExternalLink>
+    );
+  },
   img: ({ src, alt }) => {
     const label = alt ? `Image: ${alt}` : "Image";
     const url = typeof src === "string" ? src : undefined;
