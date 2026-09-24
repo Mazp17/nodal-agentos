@@ -2,6 +2,7 @@ import { useCallback, useState } from "react";
 import { cancelRun, confirmRun, launchTask, reorderQueue } from "../../domain/api";
 import { refreshRuns } from "../../domain/hooks/runs";
 import type { Task } from "../../domain/types";
+import { useConfirm } from "../../ui/ConfirmDialog";
 import { useToast } from "../../ui/Toasts";
 import { attachRun } from "./api";
 import { launchErrorHint } from "./LaunchBlockerNotice";
@@ -10,10 +11,10 @@ import type { RunView } from "./status";
 export interface RunActions {
   /** Hay una acción en vuelo (para deshabilitar botones). */
   busy: boolean;
-  /** Detiene un run lanzado (pide confirmación). */
-  stop: (v: RunView, name: string) => Promise<boolean>;
-  /** Saca de la cola un run `queued`. */
-  remove: (v: RunView, name: string) => Promise<boolean>;
+  /** Detiene un run lanzado (pide confirmación). Sólo usa `v.run`. */
+  stop: (v: Pick<RunView, "run">, name: string) => Promise<boolean>;
+  /** Saca de la cola un run `queued` (confirmación liviana). Sólo usa `v.run`. */
+  remove: (v: Pick<RunView, "run">, name: string) => Promise<boolean>;
   confirm: (v: RunView, name: string) => Promise<boolean>;
   attach: (v: RunView) => Promise<void>;
   /** Encola otro run de la tarea con el mismo ejecutor. */
@@ -24,6 +25,7 @@ export interface RunActions {
 
 export function useRunActions(): RunActions {
   const toast = useToast();
+  const ask = useConfirm();
   const [busy, setBusy] = useState(false);
 
   const wrap = useCallback(
@@ -44,24 +46,35 @@ export function useRunActions(): RunActions {
   );
 
   const stop = useCallback(
-    async (v: RunView, name: string) => {
-      if (!window.confirm(`Stop ${name}? The agent is interrupted mid-task; its unfinished changes are saved as a patch.`)) {
-        return false;
-      }
-      const ok = await wrap(() => cancelRun(v.run.id), `Couldn't stop ${name}`);
-      if (ok) toast(`${name} stopped`, "The task moves to Blocked. The worktree is kept so you can inspect it.", "danger");
-      return ok;
+    async (v: Pick<RunView, "run">, name: string) => {
+      const ok = await ask({
+        title: `Stop ${name}?`,
+        body: "The agent is interrupted mid-task. Its unfinished changes are saved as a patch and the worktree is kept.",
+        confirmLabel: "Stop run",
+      });
+      if (!ok) return false;
+      const stopped = await wrap(() => cancelRun(v.run.id), `Couldn't stop ${name}`);
+      if (stopped) toast(`${name} stopped`, "The task moves to Blocked. The worktree is kept so you can inspect it.", "danger");
+      return stopped;
     },
-    [wrap, toast],
+    [wrap, toast, ask],
   );
 
   const remove = useCallback(
-    async (v: RunView, name: string) => {
+    async (v: Pick<RunView, "run">, name: string) => {
+      // Confirmación liviana, no undo: la cola no tiene "re-encolar en el mismo lugar";
+      // deshacer sería lanzar un run nuevo al final de la cola.
+      const confirmed = await ask({
+        title: `Remove ${name} from the queue?`,
+        body: "It won't run and loses its place in the queue. The task itself is kept; you can launch it again.",
+        confirmLabel: "Remove",
+      });
+      if (!confirmed) return false;
       const ok = await wrap(() => cancelRun(v.run.id), `Couldn't remove ${name} from the queue`);
       if (ok) toast(`${name} removed from queue`, "It will not run.", "muted");
       return ok;
     },
-    [wrap, toast],
+    [wrap, toast, ask],
   );
 
   const confirm = useCallback(

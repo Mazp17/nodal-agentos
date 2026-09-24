@@ -1,10 +1,13 @@
 import { AppShell } from "./shell/AppShell";
+import { ConfirmProvider } from "./ui/ConfirmDialog";
 import { ToastProvider } from "./ui/Toasts";
 
 export default function App() {
   return (
     <ToastProvider>
-      <AppShell />
+      <ConfirmProvider>
+        <AppShell />
+      </ConfirmProvider>
     </ToastProvider>
   );
 }

@@ -7,6 +7,7 @@
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
+    "lint:no-native-dialogs": "! grep -rnE '(window\\.|globalThis\\.|self\\.|^|[^.[:alnum:]_$])(confirm|alert|prompt)[[:space:]]*\\(' src || (echo 'Native dialogs do not work under Tauri (plugin-dialog makes them async). Use useConfirm() from src/ui/ConfirmDialog.' >&2 && false)",
     "tauri": "tauri"
   },
   "dependencies": {

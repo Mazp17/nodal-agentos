@@ -1,0 +1,34 @@
+/* Confirmación modal (useConfirm): por encima de drawers y diálogos, debajo de los toasts. */
+.confirm-scrim { position: fixed; inset: 0; z-index: 80; background: var(--scrim-strong); }
+.confirm {
+  position: fixed;
+  top: 96px;
+  /* Centrado sin transform: la animación `drop` lo pisaría. */
+  left: 0;
+  right: 0;
+  margin: 0 auto;
+  z-index: 81;
+  width: 420px;
+  max-width: calc(100vw - 32px);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-5);
+  padding: var(--sp-7) var(--sp-8);
+  border-radius: var(--r-3xl);
+  background: var(--surface-dialog);
+  border: 1px solid var(--border-3);
+  box-shadow: var(--shadow-dialog);
+  animation: drop 0.14s ease-out;
+}
+.confirm-title { font-size: var(--fs-xl); font-weight: var(--fw-semibold); }
+.confirm-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  font-size: var(--fs-md);
+  color: var(--text-2);
+  line-height: var(--lh-snug);
+  overflow-wrap: anywhere;
+}
+.confirm-path { font-family: var(--font-mono); font-size: var(--fs-sm); color: var(--text-3); }
+.confirm-foot { display: flex; justify-content: flex-end; gap: var(--sp-3); }
