@@ -1,5 +1,5 @@
-import { openUrl } from "@tauri-apps/plugin-opener";
 import type { IssueDetail, IssueRef, RelationKind, StateRef } from "./api";
+import { ExternalLink } from "../../ui/ExternalLink";
 import { SafeMarkdown } from "../../ui/Markdown";
 import "./issue-panel.css";
 
@@ -128,15 +128,7 @@ export function Comments({ detail, url }: { detail: IssueDetail; url: string }) 
       {detail.commentsTruncated && (
         <span className="ip-empty">
           Showing {detail.comments.length} comments.{" "}
-          <a
-            href={url}
-            onClick={(e) => {
-              e.preventDefault();
-              openUrl(url).catch((err) => console.error("openUrl", err));
-            }}
-          >
-            See all in Linear ↗
-          </a>
+          <ExternalLink url={url}>See all in Linear ↗</ExternalLink>
         </span>
       )}
       {detail.comments.map((c) => (

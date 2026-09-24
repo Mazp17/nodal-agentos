@@ -1,9 +1,9 @@
 import { useMemo, useState } from "react";
-import { openUrl } from "@tauri-apps/plugin-opener";
 import { getTask, syncNow, unlinkTask } from "../../domain/api";
 import type { Task, TaskSource } from "../../domain/types";
 import { errorText, useNow, useSourceLinks } from "../../domain/hooks/providers";
 import { useTasks } from "../../domain/hooks/store";
+import { ExternalLink } from "../../ui/ExternalLink";
 import { useToast } from "../../ui/Toasts";
 import { IssueDetailCache, useIssueDetail } from "../linear/issueDetail";
 import { Comments, DetailSections } from "../linear/IssueDetailSections";
@@ -102,23 +102,18 @@ function LinkedSource({
     }
   };
 
-  const open = (url: string) => openUrl(url).catch((err) => toast("Could not open the link", errorText(err), "danger"));
-
   return (
     <div className="pv-src">
       <div className="pv-src-head">
         <ProviderMark />
-        <a
-          href={src.url}
+        <ExternalLink
+          url={src.url}
           className="mono pv-src-id"
-          onClick={(e) => {
-            e.preventDefault();
-            void open(src.url);
-          }}
-          aria-label={`${src.identifier}, open in ${prov}`}
+          label={`${src.identifier}, open in ${prov}`}
+          onError={(err) => toast("Could not open the link", errorText(err), "danger")}
         >
           {src.identifier} ↗
-        </a>
+        </ExternalLink>
         {src.externalState && <ExtStateLabel state={src.externalState} />}
         <span className={`pv-sync tone-${syncTone}`} role="status">
           <span className={`dot dot-sm${syncing ? " pulse" : ""}`} aria-hidden />

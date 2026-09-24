@@ -1,7 +1,7 @@
-import { memo, type KeyboardEvent, type ReactNode } from "react";
+import { memo } from "react";
 import Markdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { openUrl } from "@tauri-apps/plugin-opener";
+import { EXTERNAL, ExternalLink } from "./ExternalLink";
 import "./markdown.css";
 
 /*
@@ -16,40 +16,13 @@ import "./markdown.css";
  *   hosts de terceros): se muestran como link externo.
  */
 
-const EXTERNAL = /^(https?:|mailto:)/i;
-
-function ExternalLink({ url, className, children }: { url: string | undefined; className?: string; children: ReactNode }) {
-  if (!url || !EXTERNAL.test(url)) return <span className={className}>{children}</span>;
-  const open = () => {
-    openUrl(url).catch((err) => console.error("openUrl", err));
-  };
-  return (
-    <a
-      role="link"
-      tabIndex={0}
-      title={url}
-      className={`md-link ${className ?? ""}`}
-      draggable={false}
-      onClick={open}
-      onKeyDown={(e: KeyboardEvent) => {
-        if (e.key === "Enter") {
-          e.preventDefault();
-          open();
-        }
-      }}
-    >
-      {children}
-    </a>
-  );
-}
-
 const components: Components = {
-  a: ({ href, children }) => <ExternalLink url={href}>{children}</ExternalLink>,
+  a: ({ href, children }) => <ExternalLink url={href} className="md-link">{children}</ExternalLink>,
   img: ({ src, alt }) => {
     const label = alt ? `Image: ${alt}` : "Image";
     const url = typeof src === "string" ? src : undefined;
     return (
-      <ExternalLink url={url} className="md-img-link">
+      <ExternalLink url={url} className="md-link md-img-link">
         {url && EXTERNAL.test(url) ? `${label} ↗` : label}
       </ExternalLink>
     );

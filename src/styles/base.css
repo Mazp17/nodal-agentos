@@ -17,6 +17,8 @@ button { cursor: default; }
 h1, h2, h3, p { margin: 0; }
 a { color: var(--accent); text-decoration: none; }
 a:hover { color: var(--accent-hover); text-decoration: underline; }
+/* ExternalLink: <a> sin href (no navega el webview), igual se ve clickeable. */
+.ext-link { cursor: pointer; }
 input::placeholder, textarea::placeholder { color: var(--text-dim); }
 
 ::-webkit-scrollbar { width: 8px; height: 8px; }
