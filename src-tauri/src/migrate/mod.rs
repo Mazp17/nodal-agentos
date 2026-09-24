@@ -1,7 +1,10 @@
 //! "Import data from a previous version…": importa la carpeta de datos de la versión
 //! anterior, que elige el usuario (la app no conoce ninguna ruta vieja).
 //!
-//! 1. Copia la carpeta a `<app_data_dir>/legacy-backup-<ts>/`. El origen solo se lee.
+//! 1. Copia los archivos de datos de la versión vieja (los JSON de abajo y
+//!    `tasks/<id>/plan.md`, nada más y con tope de tamaño) a
+//!    `<app_data_dir>/legacy-backup-<ts>/`, o reusa el último backup si es idéntico. Sin
+//!    ninguno de esos JSON es un error y no se copia nada. El origen solo se lee.
 //! 2. Importa desde la copia, en una sola transacción, `config.json`, `tasks.json`,
 //!    `task-runs.json`, `issue-runs.json` y `tasks/<id>/plan.md`.
 //! 3. Después del commit escribe los planes que falten en `<app_data_dir>/tasks/<id>/plan.md`.
@@ -21,7 +24,7 @@
 //!   sin outcome (no se reevalúa: no dispara transiciones); `queued` → sigue **Queued**: con
 //!   `legacy_label` la cola no lo lanza solo (`work::queue::awaiting_confirmation`) hasta
 //!   que se confirma (`confirm_run`) o se cancela;
-//! - `concurrency` → settings (solo la primera vez: no pisa un cambio posterior);
+//! - `concurrency` → settings (solo la primera vez, y nunca pisa uno ya configurado);
 //! - un JSON corrupto (archivo o registro) se saltea con aviso en `skipped`.
 
 pub mod legacy;
@@ -105,9 +108,115 @@ pub fn import_folder(conn: &mut Connection, src: &Path, data_dir: &Path, now: i6
 
 // ---------- Backup ----------
 
-/// Copia `src` a `<data_dir>/legacy-backup-<now>[-n]/` y devuelve esa ruta más los avisos.
-/// No sigue symlinks. Si `src` es la carpeta de datos actual, no copia los backups previos
-/// ni la base, y nunca entra en el backup que está creando.
+/// Tope de lo que se copia al backup: los JSON y planes de la versión vieja pesan KB, así
+/// que algo más grande es casi seguro una carpeta equivocada.
+pub const MAX_BACKUP_BYTES: u64 = 64 * 1024 * 1024;
+
+/// Archivos de datos de la versión vieja; la carpeta tiene que tener al menos uno.
+pub const LEGACY_JSON: [&str; 4] =
+    [legacy::CONFIG_FILE, legacy::TASKS_FILE, legacy::TASK_RUNS_FILE, legacy::ISSUE_RUNS_FILE];
+
+fn is_regular_file(p: &Path) -> Option<bool> {
+    fs::symlink_metadata(p).ok().map(|m| m.is_file())
+}
+
+/// (ruta relativa en el backup, ruta en el origen).
+type LegacyFile = (PathBuf, PathBuf);
+
+/// Lo que se copia: los `LEGACY_JSON` presentes y `tasks/<id>/plan.md`. Nada más de la
+/// carpeta (así elegir `~` no copia el disco). Sin ningún JSON conocido es un error. No
+/// sigue symlinks.
+fn legacy_files(src: &Path) -> Result<(Vec<LegacyFile>, Vec<String>), String> {
+    let mut files = Vec::new();
+    let mut skipped = Vec::new();
+    for name in LEGACY_JSON {
+        let p = src.join(name);
+        match is_regular_file(&p) {
+            Some(true) => files.push((PathBuf::from(name), p)),
+            Some(false) => skipped.push(format!("{}: not a regular file, not copied", p.display())),
+            None => {}
+        }
+    }
+    if files.is_empty() {
+        return Err(format!(
+            "{} doesn't look like a data folder from the previous version (it has none of {}). Nothing was copied.",
+            src.display(),
+            LEGACY_JSON.join(", ")
+        ));
+    }
+    let plans = src.join(legacy::PLANS_DIR);
+    if fs::symlink_metadata(&plans).is_ok_and(|m| m.is_dir()) {
+        let entries = fs::read_dir(&plans).map_err(|e| format!("Couldn't read {}: {e}", plans.display()))?;
+        let mut entries: Vec<_> = entries.collect::<Result<_, _>>().map_err(|e| e.to_string())?;
+        entries.sort_by_key(|e| e.file_name());
+        for entry in entries {
+            if !fs::symlink_metadata(entry.path()).is_ok_and(|m| m.is_dir()) {
+                continue;
+            }
+            let plan = entry.path().join(legacy::PLAN_FILE);
+            match is_regular_file(&plan) {
+                Some(true) => {
+                    let rel = PathBuf::from(legacy::PLANS_DIR).join(entry.file_name()).join(legacy::PLAN_FILE);
+                    files.push((rel, plan));
+                }
+                Some(false) => skipped.push(format!("{}: not a regular file, not copied", plan.display())),
+                None => {}
+            }
+        }
+    }
+    Ok((files, skipped))
+}
+
+/// `legacy-backup-<ts>[-n]` → `(ts, n)` para ordenar.
+fn backup_order(name: &str) -> Option<(i64, u32)> {
+    let rest = name.strip_prefix(BACKUP_PREFIX)?;
+    let (ts, n) = rest.split_once('-').unwrap_or((rest, "1"));
+    Some((ts.parse().ok()?, n.parse().ok()?))
+}
+
+/// El backup más reciente de la carpeta de datos.
+fn latest_backup(data_dir: &Path) -> Option<PathBuf> {
+    fs::read_dir(data_dir)
+        .ok()?
+        .filter_map(Result::ok)
+        .filter(|e| fs::symlink_metadata(e.path()).is_ok_and(|m| m.is_dir()))
+        .filter_map(|e| backup_order(&e.file_name().to_string_lossy()).map(|k| (k, e.path())))
+        .max_by_key(|(k, _)| *k)
+        .map(|(_, p)| p)
+}
+
+/// Archivos de un árbol (sin seguir symlinks), relativos a `root`.
+fn tree_files(root: &Path, dir: &Path, out: &mut Vec<PathBuf>) -> std::io::Result<()> {
+    for e in fs::read_dir(dir)? {
+        let p = e?.path();
+        if fs::symlink_metadata(&p)?.is_dir() {
+            tree_files(root, &p, out)?;
+        } else if let Ok(rel) = p.strip_prefix(root) {
+            out.push(rel.to_path_buf());
+        }
+    }
+    Ok(())
+}
+
+/// `backup` tiene exactamente estos archivos, con el mismo contenido.
+fn same_content(backup: &Path, files: &[LegacyFile]) -> bool {
+    let mut have = Vec::new();
+    if tree_files(backup, backup, &mut have).is_err() {
+        return false;
+    }
+    let mut want: Vec<&PathBuf> = files.iter().map(|(rel, _)| rel).collect();
+    have.sort();
+    want.sort();
+    have.iter().eq(want.iter().copied())
+        && files.iter().all(|(rel, from)| match (fs::read(backup.join(rel)), fs::read(from)) {
+            (Ok(a), Ok(b)) => a == b,
+            _ => false,
+        })
+}
+
+/// Copia los archivos de la versión vieja de `src` (ver `legacy_files`) a
+/// `<data_dir>/legacy-backup-<now>[-n]/` y devuelve esa ruta más los avisos. Si el backup
+/// más reciente ya tiene exactamente ese contenido, lo reusa en vez de copiar de nuevo.
 pub fn backup(src: &Path, data_dir: &Path, now: i64) -> Result<(PathBuf, Vec<String>), String> {
     let src = src
         .canonicalize()
@@ -115,7 +224,23 @@ pub fn backup(src: &Path, data_dir: &Path, now: i64) -> Result<(PathBuf, Vec<Str
     if !src.is_dir() {
         return Err(format!("{} is not a folder.", src.display()));
     }
+    let (files, skipped) = legacy_files(&src)?;
+    let mut total: u64 = 0;
+    for (_, from) in &files {
+        total += fs::symlink_metadata(from).map_err(|e| format!("Couldn't read {}: {e}", from.display()))?.len();
+    }
+    if total > MAX_BACKUP_BYTES {
+        return Err(format!(
+            "The data in {} takes {} MB, more than the {} MB an import can copy. Nothing was copied.",
+            src.display(),
+            total.div_ceil(1024 * 1024),
+            MAX_BACKUP_BYTES / (1024 * 1024)
+        ));
+    }
     fs::create_dir_all(data_dir).map_err(|e| format!("Couldn't create {}: {e}", data_dir.display()))?;
+    if let Some(prev) = latest_backup(data_dir).filter(|p| same_content(p, &files)) {
+        return Ok((prev, skipped));
+    }
     let mut dest = data_dir.join(format!("{BACKUP_PREFIX}{now}"));
     let mut n = 2;
     while dest.exists() {
@@ -123,49 +248,15 @@ pub fn backup(src: &Path, data_dir: &Path, now: i64) -> Result<(PathBuf, Vec<Str
         n += 1;
     }
     fs::create_dir(&dest).map_err(|e| format!("Couldn't create {}: {e}", dest.display()))?;
-    let dest_canon = dest.canonicalize().map_err(|e| e.to_string())?;
-    let data_canon = data_dir.canonicalize().map_err(|e| e.to_string())?;
-    let mut skipped = Vec::new();
-    copy_dir(&src, &dest, &Skip { dest: &dest_canon, data_dir: &data_canon }, &mut skipped)?;
-    Ok((dest, skipped))
-}
-
-/// Qué no se copia: el backup en curso y, dentro de la carpeta de datos actual (esté donde
-/// esté dentro del origen), los backups anteriores y la base.
-struct Skip<'a> {
-    dest: &'a Path,
-    data_dir: &'a Path,
-}
-
-fn copy_dir(from: &Path, to: &Path, skip: &Skip, skipped: &mut Vec<String>) -> Result<(), String> {
-    let in_data_dir = from.canonicalize().is_ok_and(|p| p == skip.data_dir);
-    let entries = fs::read_dir(from).map_err(|e| format!("Couldn't read {}: {e}", from.display()))?;
-    let mut entries: Vec<_> = entries.collect::<Result<_, _>>().map_err(|e| e.to_string())?;
-    entries.sort_by_key(|e| e.file_name());
-    for entry in entries {
-        let name = entry.file_name();
-        let name_s = name.to_string_lossy();
-        if in_data_dir && (name_s.starts_with(BACKUP_PREFIX) || name_s.starts_with(db::DB_FILE)) {
-            continue;
-        }
-        let path = entry.path();
-        let target = to.join(&name);
-        let meta = fs::symlink_metadata(&path).map_err(|e| format!("Couldn't read {}: {e}", path.display()))?;
-        if meta.file_type().is_symlink() {
-            skipped.push(format!("{}: symbolic link, not copied", path.display()));
-        } else if meta.is_dir() {
-            if path.canonicalize().is_ok_and(|p| p == skip.dest) {
-                continue;
-            }
-            fs::create_dir(&target).map_err(|e| format!("Couldn't create {}: {e}", target.display()))?;
-            copy_dir(&path, &target, skip, skipped)?;
-        } else if meta.is_file() {
-            fs::copy(&path, &target).map_err(|e| format!("Couldn't copy {}: {e}", path.display()))?;
-        } else {
-            skipped.push(format!("{}: not a regular file, not copied", path.display()));
+    for (rel, from) in &files {
+        let to = dest.join(rel);
+        let res = to.parent().map_or(Ok(()), fs::create_dir_all).and_then(|_| fs::copy(from, &to).map(|_| ()));
+        if let Err(e) = res {
+            let _ = fs::remove_dir_all(&dest);
+            return Err(format!("Couldn't copy {}: {e}. Nothing was imported.", from.display()));
         }
     }
-    Ok(())
+    Ok((dest, skipped))
 }
 
 // ---------- Importación ----------
@@ -449,8 +540,25 @@ impl Ctx<'_> {
         Ok(())
     }
 
-    fn create_repo(&mut self, project_id: &str, path: &str, launch: LaunchOptions, finish: Finish) -> Result<String, String> {
-        let id = det_id("lr_", path);
+    /// Id determinista del repo que la importación crea para `path`.
+    fn repo_id_for(path: &str) -> String {
+        det_id("lr_", path)
+    }
+
+    /// Crea el repo de `path` en el proyecto, o devuelve el que ya creó una importación
+    /// anterior (aunque después le cambiaran el path). Un choque con otro repo no aborta la
+    /// importación: se saltea con aviso (`None`).
+    fn ensure_repo(
+        &mut self,
+        project_id: &str,
+        path: &str,
+        launch: LaunchOptions,
+        finish: Finish,
+    ) -> Result<Option<(String, String)>, String> {
+        let id = Self::repo_id_for(path);
+        if let Some(found) = self.repo_by_id(&id)? {
+            return Ok(Some(found));
+        }
         let position: i64 = self
             .conn
             .query_row("SELECT COUNT(*) FROM repos WHERE project_id = ?1", [project_id], |r| r.get(0))
@@ -469,9 +577,23 @@ impl Ctx<'_> {
             position,
             created_at: self.now,
         };
-        rows::insert_repo(self.conn, &r).map_err(sql)?;
+        match rows::insert_repo(self.conn, &r) {
+            Ok(()) => {}
+            // Solo choques de unicidad (path o id tomados); cualquier otra restricción es un bug.
+            Err(DbError::Sqlite(rusqlite::Error::SqliteFailure(f, m)))
+                if matches!(
+                    f.extended_code,
+                    rusqlite::ffi::SQLITE_CONSTRAINT_UNIQUE | rusqlite::ffi::SQLITE_CONSTRAINT_PRIMARYKEY
+                ) =>
+            {
+                let why = m.unwrap_or_else(|| f.to_string());
+                self.skip(format!("repo {path}: conflicts with an existing repo ({why}), skipped"));
+                return Ok(None);
+            }
+            Err(e) => return Err(sql(e)),
+        }
         self.report.repos += 1;
-        Ok(id)
+        Ok(Some((id, project_id.to_string())))
     }
 
     /// Proyecto "Local" de la importación (se crea la primera vez que hace falta).
@@ -512,7 +634,7 @@ impl Ctx<'_> {
                 self.conn
                     .execute(
                         "INSERT INTO settings (key, value_json) VALUES ('concurrency', ?1)
-                         ON CONFLICT(key) DO UPDATE SET value_json = excluded.value_json",
+                         ON CONFLICT(key) DO NOTHING",
                         [c.to_string()],
                     )
                     .map_err(sql)?;
@@ -544,27 +666,42 @@ impl Ctx<'_> {
                     self.already(&repo_key);
                     found
                 }
-                None => match self.repo_by_path(&path)? {
-                    Some(found) => {
-                        // Ya lo tenía el usuario (o lo creó otra entrada): se reusa sin tocarlo.
-                        self.mark(&repo_key, "repo", Some(&found.0))?;
-                        found
+                None => {
+                    // Ya lo tenía el usuario, lo creó otra entrada o una importación anterior
+                    // (aunque después le cambiaran el path): se reusa sin tocarlo.
+                    let existing = match self.repo_by_path(&path)? {
+                        Some(found) => Some(found),
+                        None => self.repo_by_id(&Self::repo_id_for(&path))?,
+                    };
+                    match existing {
+                        Some(found) => {
+                            self.mark(&repo_key, "repo", Some(&found.0))?;
+                            found
+                        }
+                        None => {
+                            let name = scopes
+                                .iter()
+                                .find_map(|s| s.name.clone().filter(|n| !n.trim().is_empty()))
+                                .or_else(|| entry.name.clone().filter(|n| !n.trim().is_empty()))
+                                .unwrap_or_else(|| folder_name(&path));
+                            let project_id = det_id("lp_", &repo_key);
+                            let new_project = !self.exists("projects", &project_id)?;
+                            if new_project {
+                                self.create_project(&project_id, name.trim())?;
+                            }
+                            let Some(found) = self.ensure_repo(&project_id, &path, entry.launch(), finish)? else {
+                                // No dejar un proyecto vacío por un repo salteado.
+                                if new_project {
+                                    self.conn.execute("DELETE FROM projects WHERE id = ?1", [&project_id]).map_err(sql)?;
+                                    self.report.projects -= 1;
+                                }
+                                continue;
+                            };
+                            self.mark(&repo_key, "repo", Some(&found.0))?;
+                            found
+                        }
                     }
-                    None => {
-                    let name = scopes
-                        .iter()
-                        .find_map(|s| s.name.clone().filter(|n| !n.trim().is_empty()))
-                        .or_else(|| entry.name.clone().filter(|n| !n.trim().is_empty()))
-                        .unwrap_or_else(|| folder_name(&path));
-                    let project_id = det_id("lp_", &repo_key);
-                    if !self.exists("projects", &project_id)? {
-                        self.create_project(&project_id, name.trim())?;
-                    }
-                    let repo_id = self.create_repo(&project_id, &path, entry.launch(), finish)?;
-                    self.mark(&repo_key, "repo", Some(&repo_id))?;
-                    (repo_id, project_id)
-                    }
-                },
+                }
             };
 
             for s in scopes {
@@ -653,13 +790,23 @@ impl Ctx<'_> {
                 continue;
             }
             let path = canon_path(&t.repo_path);
-            let (repo_id, project_id) = match self.repo_by_path(&path)? {
+            let existing = match self.repo_by_path(&path)? {
+                Some(found) => Some(found),
+                // El repo que creó una importación anterior, aunque le hayan cambiado el path.
+                None => self.repo_by_id(&Self::repo_id_for(&path))?,
+            };
+            let (repo_id, project_id) = match existing {
                 Some(found) => found,
                 None => {
                     let project_id = self.local_project()?;
                     let finish = self.finish_by_path.get(&path).copied().unwrap_or(Finish::Pr);
-                    let repo_id = self.create_repo(&project_id, &path, LaunchOptions::default(), finish)?;
-                    (repo_id, project_id)
+                    match self.ensure_repo(&project_id, &path, LaunchOptions::default(), finish)? {
+                        Some(found) => found,
+                        None => {
+                            self.skip(format!("{file}: task {} skipped, its repository could not be created", t.id));
+                            continue;
+                        }
+                    }
                 }
             };
             let number: i64 = self

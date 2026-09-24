@@ -80,11 +80,8 @@ impl From<crate::linear::LinearError> for ProviderError {
         let kind = match &e {
             L::MissingKey | L::InvalidKey => ErrorKind::Auth,
             L::RateLimited => ErrorKind::RateLimited,
-            L::Network(_) | L::Keychain(_) => ErrorKind::Transient,
-            // 5xx y respuestas ilegibles son transitorios; el resto (GraphQL) es un rechazo.
-            L::Api(m) if m.contains("unavailable") || m.contains("unexpected") || m.contains("unreadable") => {
-                ErrorKind::Transient
-            }
+            // La clasificación viene del status HTTP / `extensions.code` (`linear::model`).
+            L::Network(_) | L::Keychain(_) | L::Unavailable(_) => ErrorKind::Transient,
             L::Api(_) => ErrorKind::Permanent,
         };
         ProviderError::new(kind, e.to_string())
@@ -193,6 +190,9 @@ pub trait TaskProvider {
     /// equivalente por nombre/tipo del grupo del ítem. Devuelve el estado resultante.
     async fn set_state(&self, external_id: &str, state_id: &str) -> ProviderResult<ExternalState>;
     async fn comment(&self, external_id: &str, body: &str) -> ProviderResult<()>;
+    /// Si el ítem ya tiene un comentario que contiene `marker` (el outbox lo usa para no
+    /// repostear un comentario que salió pero no llegó a marcarse como enviado).
+    async fn has_comment_with(&self, external_id: &str, marker: &str) -> ProviderResult<bool>;
 }
 
 /// Despacho estático de proveedores.
@@ -239,6 +239,9 @@ impl TaskProvider for Provider {
     }
     async fn comment(&self, external_id: &str, body: &str) -> ProviderResult<()> {
         dispatch!(self, p => p.comment(external_id, body).await)
+    }
+    async fn has_comment_with(&self, external_id: &str, marker: &str) -> ProviderResult<bool> {
+        dispatch!(self, p => p.has_comment_with(external_id, marker).await)
     }
 }
 
@@ -289,15 +292,59 @@ pub async fn require(app: &AppHandle, name: &str) -> PResult<Provider> {
 pub struct ProvidersState {
     /// `app_data_dir`: los planes van en `tasks/<id>/plan.md`.
     pub data_dir: PathBuf,
-    /// Un solo sync a la vez (worker y `sync_now`).
-    pub sync_lock: tokio::sync::Mutex<()>,
+    /// Un solo sync a la vez (worker y `sync_now`), con su memoria entre pasadas.
+    pub sync_lock: tokio::sync::Mutex<sync::SyncMemo>,
+    /// Proveedores en pausa por rate limit o key rechazada. Aparte del lock de sync para que
+    /// `provider_status` y el cambio de key no esperen a una pasada en curso.
+    pauses: std::sync::Mutex<std::collections::HashMap<String, sync::Pause>>,
+}
+
+impl ProvidersState {
+    pub fn paused(&self) -> std::collections::HashMap<String, sync::Pause> {
+        self.pauses.lock().map(|m| m.clone()).unwrap_or_default()
+    }
+
+    /// Aplica solo las pausas que una pasada puso, cambió o levantó (`before` → `after`).
+    pub fn merge_paused(
+        &self,
+        before: &std::collections::HashMap<String, sync::Pause>,
+        after: &std::collections::HashMap<String, sync::Pause>,
+    ) {
+        let Ok(mut m) = self.pauses.lock() else { return };
+        for (k, v) in after {
+            if before.get(k) != Some(v) {
+                m.insert(k.clone(), v.clone());
+            }
+        }
+        for k in before.keys() {
+            if !after.contains_key(k) {
+                m.remove(k);
+            }
+        }
+    }
+
+    /// Pausa vigente de un proveedor.
+    pub fn pause_of(&self, provider: &str, now: i64) -> Option<sync::Pause> {
+        self.paused().remove(provider).filter(|p| p.until > now)
+    }
+
+    /// Una key nueva (o borrada) levanta la pausa.
+    pub fn clear_pause(&self, provider: &str) {
+        if let Ok(mut m) = self.pauses.lock() {
+            m.remove(provider);
+        }
+    }
 }
 
 /// Registra el estado y arranca el worker de sync. Necesita `LinearState` y la base
 /// (`db::Db`) ya registrados; si la base no abrió, el worker no hace nada.
 pub fn init(app: &AppHandle) -> Result<(), String> {
     let data_dir = app.path().app_data_dir().map_err(|e| format!("Couldn't find the app data folder: {e}"))?;
-    app.manage(ProvidersState { data_dir, sync_lock: tokio::sync::Mutex::new(()) });
+    app.manage(ProvidersState {
+        data_dir,
+        sync_lock: tokio::sync::Mutex::new(sync::SyncMemo::default()),
+        pauses: Default::default(),
+    });
     sync::spawn_worker(app.clone());
     Ok(())
 }
@@ -332,6 +379,27 @@ mod tests {
         assert_eq!(iso_from_ms(0), "1970-01-01T00:00:00.000Z");
         assert_eq!(iso_from_ms(1_700_000_000_123), "2023-11-14T22:13:20.123Z");
         assert_eq!(iso_from_ms(951_782_400_000), "2000-02-29T00:00:00.000Z");
+    }
+
+    #[test]
+    fn linear_errors_classify_by_status_and_code() {
+        use crate::linear::model::interpret_response;
+        let kind = |status: u16, body: &str| {
+            ProviderError::from(interpret_response::<serde_json::Value>(status, body).unwrap_err()).kind
+        };
+        assert_eq!(kind(502, "<html>"), ErrorKind::Transient);
+        assert_eq!(kind(200, r#"{"data":null}"#), ErrorKind::Transient);
+        assert_eq!(kind(429, ""), ErrorKind::RateLimited);
+        assert_eq!(kind(401, ""), ErrorKind::Auth);
+        let gql = |code: &str, msg: &str| {
+            format!(r#"{{"errors":[{{"message":"{msg}","extensions":{{"code":"{code}"}}}}]}}"#)
+        };
+        assert_eq!(kind(400, &gql("AUTHENTICATION_ERROR", "x")), ErrorKind::Auth);
+        assert_eq!(kind(400, &gql("RATELIMITED", "x")), ErrorKind::RateLimited);
+        assert_eq!(kind(500, &gql("INTERNAL_SERVER_ERROR", "boom")), ErrorKind::Transient);
+        // El texto no decide: un rechazo que menciona "unavailable" sigue siendo permanente.
+        assert_eq!(kind(400, &gql("INVALID_INPUT", "state unavailable for this team")), ErrorKind::Permanent);
+        assert_eq!(kind(400, &gql("FORBIDDEN", "no")), ErrorKind::Permanent);
     }
 
     #[test]

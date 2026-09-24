@@ -387,6 +387,23 @@ pub struct CommentCreateData {
     pub comment_create: Success,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct IdNode {
+    #[allow(dead_code)] // Solo importa si hay nodos.
+    pub id: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct IssueComments {
+    pub comments: Connection<IdNode>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct CommentMarkerData {
+    /// `null` si la issue ya no existe o la key no la ve.
+    pub issue: Option<IssueComments>,
+}
+
 pub const PROJECTS_QUERY: &str = r#"query NodalProjects {
   projects(first: 100, filter: { status: { type: { nin: ["completed", "canceled"] } } }) {
     nodes { id name }
@@ -445,6 +462,11 @@ pub const COMMENT_MUTATION: &str = "mutation NodalComment($issueId: String!, $bo
   commentCreate(input: { issueId: $issueId, body: $body }) { success }
 }";
 
+/// Comentarios de la issue cuyo cuerpo contiene `marker` (idempotencia del outbox).
+pub const COMMENT_MARKER_QUERY: &str = "query NodalCommentMarker($id: String!, $marker: String!) {
+  issue(id: $id) { comments(first: 1, filter: { body: { contains: $marker } }) { nodes { id } } }
+}";
+
 /// Filtro del listado de importables: scope (`team` o `project`), tipos de estado, texto
 /// (título, o número si parece un identifier `ENG-12` / `12`) y creadas después de una fecha.
 pub fn importable_filter(
@@ -498,12 +520,19 @@ struct GqlErrorExt {
     user_presentable_message: Option<String>,
 }
 
+/// `extensions.code` de errores internos de Linear (reintentables). Linear no documenta la
+/// lista completa: estos son los códigos genéricos de GraphQL/Apollo para fallas del servidor.
+const SERVER_CODES: &[&str] = &["INTERNAL_SERVER_ERROR", "INTERNAL_ERROR", "SERVICE_UNAVAILABLE", "TIMEOUT"];
+
+/// Clasifica por `extensions.code`, nunca por el texto del mensaje.
 fn classify(errors: &[GqlError]) -> LinearError {
+    let mut server = false;
     for e in errors {
         let code = e.extensions.as_ref().and_then(|x| x.code.as_deref());
         match code {
             Some("AUTHENTICATION_ERROR") => return LinearError::InvalidKey,
             Some("RATELIMITED") => return LinearError::RateLimited,
+            Some(c) if SERVER_CODES.contains(&c) => server = true,
             _ => {}
         }
     }
@@ -515,6 +544,9 @@ fn classify(errors: &[GqlError]) -> LinearError {
         .unwrap_or_else(|| first.message.clone());
     if first.extensions.as_ref().and_then(|x| x.code.as_deref()) == Some("FORBIDDEN") {
         return LinearError::Api(format!("the API key lacks permission for this ({msg})"));
+    }
+    if server {
+        return LinearError::Unavailable(msg);
     }
     LinearError::Api(msg)
 }
@@ -530,8 +562,8 @@ pub fn interpret_response<T: DeserializeOwned>(status: u16, body: &str) -> Resul
         _ => Err(match status {
             401 | 403 => LinearError::InvalidKey,
             429 => LinearError::RateLimited,
-            s if s >= 500 => LinearError::Api(format!("Linear is unavailable (HTTP {s})")),
-            s if (200..300).contains(&s) => LinearError::Api("unexpected response".into()),
+            s if s >= 500 || s == 408 => LinearError::Unavailable(format!("Linear is unavailable (HTTP {s})")),
+            s if (200..300).contains(&s) => LinearError::Unavailable("unexpected response".into()),
             s => LinearError::Api(format!("HTTP {s}")),
         }),
     }
@@ -652,11 +684,11 @@ mod tests {
         assert_eq!(interpret_response::<ViewerData>(401, "no json").unwrap_err(), LinearError::InvalidKey);
         assert!(matches!(
             interpret_response::<ViewerData>(502, "<html>").unwrap_err(),
-            LinearError::Api(m) if m.contains("502")
+            LinearError::Unavailable(m) if m.contains("502")
         ));
         assert!(matches!(
             interpret_response::<ViewerData>(200, r#"{"data":{}}"#).unwrap_err(),
-            LinearError::Api(_)
+            LinearError::Unavailable(_)
         ));
     }
 

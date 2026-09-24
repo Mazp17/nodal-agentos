@@ -3,9 +3,11 @@
 //! - Pull (externo → Nodal): triage/backlog → Backlog, unstarted → Todo, started → In Review
 //!   o Blocked si el nombre dice "review"/"block" (si no, In Progress), completed → Done,
 //!   canceled → Canceled. Los `unknown` (proveedores sin tipos) van por nombre.
-//! - Push (Nodal → externo): solo In Progress, In Review y Blocked. Van al estado del mismo
-//!   nombre o, si no hay, al más parecido del mismo tipo (`started`) cuyo nombre lo
-//!   justifique; sin equivalente queda en "No sincronizar" (`None`: solo comentario).
+//! - Push (Nodal → externo): solo Todo, In Progress, In Review y Blocked. Van al estado del
+//!   mismo nombre o, si no hay, al más parecido del mismo tipo (`started`; `unstarted` para
+//!   Todo, que la cola empuja al cancelar un run en cola) cuyo nombre lo justifique; sin
+//!   equivalente queda en "No sincronizar" (`None`: solo comentario). Un mapeo confirmado
+//!   sin fila para un estado (p. ej. Todo en uno guardado antes) no empuja nada.
 //! - Cada fila del reporte marca su origen: sugerido, confirmado o sin mapear.
 
 use std::collections::BTreeMap;
@@ -15,7 +17,8 @@ use serde::Serialize;
 use crate::domain::{ExtKind, ExternalState, StateMap, TaskStatus};
 
 /// Estados Nodal que se empujan al proveedor.
-pub const PUSHED: [TaskStatus; 3] = [TaskStatus::InProgress, TaskStatus::InReview, TaskStatus::Blocked];
+pub const PUSHED: [TaskStatus; 4] =
+    [TaskStatus::Todo, TaskStatus::InProgress, TaskStatus::InReview, TaskStatus::Blocked];
 
 /// Minúsculas, sin acentos ni signos: "In-Review " → "inreview".
 fn norm(s: &str) -> String {
@@ -91,8 +94,9 @@ pub fn propose_push(status: TaskStatus, states: &[ExternalState]) -> Option<Stri
     if let Some(s) = states.iter().find(|s| norm(s.name.rsplit('·').next().unwrap_or(&s.name)) == want) {
         return Some(s.id.clone());
     }
-    // 2. El más parecido de su tipo. Para los tres estados empujados el tipo es `started`
-    //    (o `unknown` en proveedores sin tipos).
+    // 2. El más parecido de su tipo: `started` para In Progress, In Review y Blocked (o
+    //    `unknown` en proveedores sin tipos); Todo, el primero que el pull mapea a Todo
+    //    (`unstarted`).
     let candidates = states.iter().filter(|s| matches!(s.kind, ExtKind::Started | ExtKind::Unknown));
     let found = match status {
         TaskStatus::InReview => candidates.clone().find(|s| says_review(&norm(&s.name))),
@@ -300,7 +304,8 @@ pub mod tests {
         assert_eq!(pull("s-canceled"), TaskStatus::Canceled);
         assert_eq!(pull("s-dup"), TaskStatus::Canceled);
 
-        assert_eq!(m.push.len(), 3);
+        assert_eq!(m.push.len(), 4);
+        assert_eq!(m.push[&TaskStatus::Todo].as_deref(), Some("s-todo"));
         assert_eq!(m.push[&TaskStatus::InProgress].as_deref(), Some("s-progress"));
         assert_eq!(m.push[&TaskStatus::InReview].as_deref(), Some("s-review"));
         assert_eq!(m.push[&TaskStatus::Blocked].as_deref(), Some("s-blocked"));
@@ -321,6 +326,10 @@ pub mod tests {
         assert_eq!(propose_push(TaskStatus::InProgress, &states).as_deref(), Some("b"));
         assert_eq!(propose_push(TaskStatus::InReview, &states).as_deref(), Some("c"));
         assert_eq!(propose_push(TaskStatus::Blocked, &states), None);
+
+        let unstarted = vec![st("u", "Ready", ExtKind::Unstarted), st("b", "Doing", ExtKind::Started)];
+        assert_eq!(propose_push(TaskStatus::Todo, &unstarted).as_deref(), Some("u"));
+        assert_eq!(propose_push(TaskStatus::Todo, &[st("b", "Doing", ExtKind::Started)]), None);
 
         let only_review = vec![st("r", "Peer Review", ExtKind::Started)];
         assert_eq!(propose_push(TaskStatus::InProgress, &only_review), None);

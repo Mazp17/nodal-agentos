@@ -42,6 +42,20 @@ pub struct ProviderStatus {
     pub error: Option<String>,
     /// Últimos 4 caracteres de la key guardada (nunca la key).
     pub key_hint: Option<String>,
+    /// El sync automático está en pausa hasta este instante (epoch ms) por rate limit o key
+    /// rechazada; `pause_reason` dice por qué.
+    pub paused_until: Option<i64>,
+    pub pause_reason: Option<String>,
+}
+
+fn pause_of(app: &AppHandle, provider: &str) -> Option<super::sync::Pause> {
+    app.try_state::<ProvidersState>().and_then(|s| s.pause_of(provider, now_ms()))
+}
+
+fn clear_pause(app: &AppHandle, provider: &str) {
+    if let Some(s) = app.try_state::<ProvidersState>() {
+        s.clear_pause(provider);
+    }
 }
 
 async fn status_of(app: &AppHandle, provider: &str) -> PResult<ProviderStatus> {
@@ -52,7 +66,13 @@ async fn status_of(app: &AppHandle, provider: &str) -> PResult<ProviderStatus> {
         viewer: None,
         error: None,
         key_hint: p.as_ref().and_then(|(_, k)| super::key_hint(k)),
+        paused_until: None,
+        pause_reason: None,
     };
+    if let Some(pause) = pause_of(app, provider) {
+        out.paused_until = Some(pause.until);
+        out.pause_reason = Some(pause.reason);
+    }
     if let Some((p, _)) = p {
         match p.status().await {
             Ok(v) => out.viewer = Some(v),
@@ -81,15 +101,33 @@ pub async fn provider_set_key(app: AppHandle, provider: String, key: Option<Stri
     let p = Provider::Linear(super::linear::LinearProvider::new(linear.http().clone(), key.clone()));
     let viewer = p.status().await?;
     app.state::<Secrets>().set(&provider, &key).await?;
+    clear_pause(&app, &provider);
     let key_hint = super::key_hint(&key);
-    Ok(ProviderStatus { provider, has_key: true, viewer: Some(viewer), error: None, key_hint })
+    Ok(ProviderStatus {
+        provider,
+        has_key: true,
+        viewer: Some(viewer),
+        error: None,
+        key_hint,
+        paused_until: None,
+        pause_reason: None,
+    })
 }
 
 #[tauri::command]
 pub async fn provider_clear_key(app: AppHandle, provider: String) -> PResult<ProviderStatus> {
     check_provider(&provider)?;
     app.state::<Secrets>().delete(&provider).await?;
-    Ok(ProviderStatus { provider, has_key: false, viewer: None, error: None, key_hint: None })
+    clear_pause(&app, &provider);
+    Ok(ProviderStatus {
+        provider,
+        has_key: false,
+        viewer: None,
+        error: None,
+        key_hint: None,
+        paused_until: None,
+        pause_reason: None,
+    })
 }
 
 #[tauri::command]
@@ -328,7 +366,7 @@ pub async fn import_tasks(
 /// Una pasada de sync ahora (todas las fuentes, o solo `link_id`).
 #[tauri::command]
 pub async fn sync_now(app: AppHandle, link_id: Option<String>) -> PResult<SyncReport> {
-    run_for_app(&app, link_id.as_deref()).await
+    run_for_app(&app, link_id.as_deref(), true).await
 }
 
 #[cfg(test)]
@@ -354,12 +392,15 @@ mod tests {
             viewer: Some("Ana".into()),
             error: None,
             key_hint: super::super::key_hint("lin_api_0000000000abcd"),
+            paused_until: Some(5),
+            pause_reason: None,
         };
         let v = serde_json::to_value(s).unwrap();
         assert_eq!(v["hasKey"], true);
         assert_eq!(v["keyHint"], "abcd");
         assert_eq!(v["viewer"], "Ana");
         assert!(v["error"].is_null());
+        assert_eq!(v["pausedUntil"], 5);
     }
 
     #[test]

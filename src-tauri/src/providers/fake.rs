@@ -18,6 +18,8 @@ pub struct FakeData {
     pub fail_states: Option<ProviderError>,
     pub set_states: Vec<(String, String)>,
     pub comments: Vec<(String, String)>,
+    /// Llamadas a `states`.
+    pub states_calls: usize,
 }
 
 #[derive(Clone, Default)]
@@ -43,7 +45,8 @@ impl TaskProvider for FakeProvider {
     }
 
     async fn states(&self, _scope: &ScopeRef) -> ProviderResult<Vec<ExternalState>> {
-        let d = self.data();
+        let mut d = self.data();
+        d.states_calls += 1;
         match &d.fail_states {
             Some(e) => Err(e.clone()),
             None => Ok(d.states.clone()),
@@ -92,5 +95,10 @@ impl TaskProvider for FakeProvider {
         }
         d.comments.push((external_id.into(), body.into()));
         Ok(())
+    }
+
+    async fn has_comment_with(&self, external_id: &str, marker: &str) -> ProviderResult<bool> {
+        let d = self.data();
+        Ok(d.comments.iter().any(|(id, body)| id == external_id && body.contains(marker)))
     }
 }

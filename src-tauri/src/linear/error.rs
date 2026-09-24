@@ -11,7 +11,12 @@ pub enum LinearError {
     Network(String),
     RateLimited,
     Keychain(String),
+    /// Rechazo de la API (input inválido, sin permiso, entidad inexistente): reintentar no
+    /// sirve.
     Api(String),
+    /// Falla del lado de Linear (5xx, error interno de GraphQL, respuesta ilegible):
+    /// reintentable. Para la UI es un error de API más (`kind: "api"`).
+    Unavailable(String),
 }
 
 impl LinearError {
@@ -22,7 +27,7 @@ impl LinearError {
             LinearError::Network(_) => "network",
             LinearError::RateLimited => "rateLimited",
             LinearError::Keychain(_) => "keychain",
-            LinearError::Api(_) => "api",
+            LinearError::Api(_) | LinearError::Unavailable(_) => "api",
         }
     }
 }
@@ -43,7 +48,7 @@ impl fmt::Display for LinearError {
                 "Linear is rate limiting requests. Try again in a moment."
             ),
             LinearError::Keychain(m) => write!(f, "{m}"),
-            LinearError::Api(m) => write!(f, "Linear error: {m}"),
+            LinearError::Api(m) | LinearError::Unavailable(m) => write!(f, "Linear error: {m}"),
         }
     }
 }
@@ -69,7 +74,7 @@ impl From<reqwest::Error> for LinearError {
                 "Could not connect to Linear. Check your internet connection.".into(),
             )
         } else if e.is_decode() {
-            LinearError::Api("unreadable response".into())
+            LinearError::Unavailable("unreadable response".into())
         } else {
             // `without_url` por prolijidad; la key va en un header, nunca en la URL.
             LinearError::Network(format!("Network error talking to Linear: {}", e.without_url()))
