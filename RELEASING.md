@@ -1,83 +1,79 @@
 # Releasing Nodal
 
-## Versions
+This is how a new version of Nodal gets out, from deciding it's time to publishing the `.dmg`.
 
-Nodal follows [Semantic Versioning](https://semver.org/). While the version is `0.x`:
+## Version numbers
 
-- **MINOR** (`0.1.0` → `0.2.0`): new features, or anything that breaks what users already rely on (data, settings, behavior).
-- **PATCH** (`0.2.0` → `0.2.1`): fixes only.
-- `1.0.0` comes when the app is declared stable. Until then every GitHub release is marked as a pre-release.
+Versions follow [Semantic Versioning](https://semver.org/). Bump the patch number (`0.2.0` → `0.2.1`) when a release only fixes bugs, and the minor number (`0.2.0` → `0.3.0`) when it adds something new. Nodal hasn't reached 1.0 yet, so a minor release can also change or break existing behavior. When it does, the changelog says so.
 
-The version lives in `package.json` (`tauri.conf.json` reads it from there) and in `src-tauri/Cargo.toml`. `pnpm release:bump <x.y.z>` updates both, plus `Cargo.lock`.
+We'll move to 1.0 once the app is stable enough to promise compatibility between versions. Until then, GitHub releases are marked as pre-releases.
+
+The version is set in `package.json` and `src-tauri/Cargo.toml`. Don't edit them by hand: `pnpm release:bump x.y.z` updates both, along with `Cargo.lock`.
 
 ## When to release
 
-On demand, not on a schedule. Cut a release when all of these hold:
+There's no fixed schedule. We release when there's something worth shipping, which in practice means:
 
-1. `[Unreleased]` in `CHANGELOG.md` has changes a user would notice.
-2. CI is green on `main`.
-3. There are no known bugs that block normal use.
-4. The `.dmg` passes the smoke test below.
+- the `[Unreleased]` section of `CHANGELOG.md` has changes users will notice,
+- CI is green on `main`,
+- there are no known bugs that get in the way of normal use,
+- and the build passes the smoke test described below.
 
-Exception: a serious bug (data loss, the app does not start, a security issue) gets a PATCH release right away, even if it is the only change.
+A serious bug, like data loss, the app not starting or a security problem, is the exception: fix it and ship a patch release right away, even if nothing else has changed.
 
-Everything ships from `main`; there are no release branches while there is a single maintainer.
+All releases come from `main`. We don't keep release branches.
 
-## How to release
+## Cutting a release
 
-`main` only accepts squash-merged pull requests with green CI, so the release commit goes through a PR too.
+Since `main` only takes pull requests, the version bump goes through one too.
 
-1. Branch off `main`:
+Start a branch from an up-to-date `main`:
 
-   ```bash
-   git switch main && git pull
-   git switch -c release/vx.y.z
-   ```
+```bash
+git switch main && git pull
+git switch -c release/vx.y.z
+```
 
-2. In `CHANGELOG.md`, rename `## [Unreleased]` to `## [x.y.z] - YYYY-MM-DD` and add a new empty `## [Unreleased]` above it. If the release changes the database schema, say so.
-3. Bump the version:
+In `CHANGELOG.md`, rename `## [Unreleased]` to `## [x.y.z] - YYYY-MM-DD` and add an empty `## [Unreleased]` above it. If the release changes the database schema, mention it there. Then bump the version and open the PR:
 
-   ```bash
-   pnpm release:bump x.y.z
-   ```
+```bash
+pnpm release:bump x.y.z
+git commit -am "chore(release): vx.y.z"
+git push -u origin release/vx.y.z
+gh pr create --fill
+```
 
-4. Commit, push and open the PR. Squash-merge it once CI is green:
+Once CI passes, squash-merge it. Then tag the merge commit on `main` with a signed tag and push the tag:
 
-   ```bash
-   git commit -am "chore(release): vx.y.z"
-   git push -u origin release/vx.y.z
-   gh pr create --fill
-   ```
+```bash
+git switch main && git pull
+git tag -s vx.y.z -m "Nodal x.y.z"
+git push origin vx.y.z
+```
 
-5. Tag the merged commit on `main` with a signed tag and push only the tag:
+Pushing the tag starts the [release workflow](.github/workflows/release.yml). It makes sure the tag matches the version in `package.json` and that the changelog has a section for it, then builds a universal `.dmg` for Apple Silicon and Intel, computes its SHA-256 and creates a draft release. The draft's notes are that version's changelog section plus the install instructions.
 
-   ```bash
-   git switch main && git pull
-   git tag -s vx.y.z -m "Nodal x.y.z"
-   git push origin vx.y.z
-   ```
+Download the `.dmg` from the draft and go through the smoke test. If everything works, publish the draft. If something is wrong, delete the draft and then the tag, fix the problem on `main` with a regular PR and tag again:
 
-6. The tag starts the [Release workflow](.github/workflows/release.yml). It checks that the tag matches `package.json` and that the changelog has the section, builds a universal `.dmg` (Apple Silicon and Intel) with its SHA-256 checksum and creates a **draft** release with the changelog section and install instructions as notes.
-7. Download the `.dmg` from the draft and run the smoke test.
-8. If it passes, publish the draft. If not, delete the draft first and then the tag, fix on `main` through a PR and start again from step 5:
+```bash
+gh release delete vx.y.z --yes
+git push --delete origin vx.y.z && git tag -d vx.y.z
+```
 
-   ```bash
-   gh release delete vx.y.z --yes
-   git push --delete origin vx.y.z && git tag -d vx.y.z
-   ```
-
-Nothing is published automatically: the last step is always manual. Release tags (`v*`) can't be moved or deleted except by a repository admin.
+Release tags are protected: only a repository admin can move or delete them.
 
 ## Smoke test
 
-On a Mac, with the downloaded `.dmg`:
+Before publishing, check the downloaded build on a Mac:
 
-- [ ] Install it, run `xattr -dr com.apple.quarantine /Applications/Nodal.app` and open the app.
-- [ ] Nodal → About Nodal shows the release version.
-- [ ] Data from the previous version is still there (projects, tasks, runs).
-- [ ] Create a task in a test repo and run it to completion.
-- [ ] If Linear is connected: the task's status reaches Linear.
+- [ ] It installs, and opens after running `xattr -dr com.apple.quarantine /Applications/Nodal.app`.
+- [ ] Nodal → About Nodal shows the new version.
+- [ ] Projects, tasks and runs from the previous version are still there.
+- [ ] A task in a test repo runs to completion.
+- [ ] If Linear is connected, the task's status shows up in Linear.
 
-## Signing
+## About signing
 
-Releases are **not** signed with an Apple Developer ID nor notarized: the app is ad-hoc signed, which lets it run on Apple Silicon, and macOS blocks the first launch until the quarantine flag is removed. The release notes explain how. Adding Developer ID signing and notarization later only needs the certificates as repository secrets; the workflow and this process stay the same.
+The app isn't signed with an Apple Developer ID or notarized, because that requires a paid Apple developer account. It is ad-hoc signed, which is enough for it to run on Apple Silicon, but macOS still blocks the first launch until the quarantine flag is removed. The release notes and the README explain how to do that.
+
+If the project gets a Developer ID later, signing and notarization only need the certificates added as repository secrets. The rest of this process stays the same.
