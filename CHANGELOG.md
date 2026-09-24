@@ -8,6 +8,10 @@ All notable changes to Nodal are documented here. The format follows [Keep a Cha
 
 - Every run is launched with `--append-system-prompt` telling it it's unattended, so it reports and stops instead of ending on a question and leaving the task In Progress.
 
+### Fixed
+
+- The executor picker at the foot of the task panel no longer gets clipped, so you can search and pick an executor.
+
 ## [0.2.0] - 2026-09-24
 
 ### Added
