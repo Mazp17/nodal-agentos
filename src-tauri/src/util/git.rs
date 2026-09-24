@@ -88,3 +88,25 @@ pub fn toplevel(dir: &Path) -> Result<Option<PathBuf>, String> {
     let root = out.stdout.trim();
     Ok((out.ok && !root.is_empty()).then(|| PathBuf::from(root)))
 }
+
+/// Versión de `git` (`git version 2.x`), con el mismo resolutor que el resto de la app.
+#[tauri::command]
+pub async fn git_version() -> Result<String, String> {
+    crate::util::blocking(|| {
+        let out = ok(Path::new("/"), &["--version"])?;
+        Ok(out.trim().to_string())
+    })
+    .await
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn git_version_reports_git() {
+        if !crate::util::paths::tests::git_available() {
+            return;
+        }
+        let v = tauri::async_runtime::block_on(super::git_version()).unwrap();
+        assert!(v.starts_with("git version "), "{v}");
+    }
+}

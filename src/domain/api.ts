@@ -42,6 +42,18 @@ import type { Transcript } from "../features/runs/types";
 // ---------- DTOs ----------
 
 /**
+ * Confianza de Claude Code en una carpeta (solo lectura de `~/.claude.json`):
+ * `repo` = entrada de la raíz canónica del repo (el principal, para worktrees); `parent` =
+ * la carpeta o un padre dentro del repo; `notTrusted` = va a mostrar el diálogo; `unknown`
+ * (con `trusted: null`) = sin config legible.
+ */
+export interface RepoTrust {
+  trusted: boolean | null;
+  source: "repo" | "parent" | "notTrusted" | "unknown";
+  matchedPath: string | null;
+}
+
+/**
  * `running`/`capacity`: slots ocupados de la concurrencia global (regla del pump). `needYou`:
  * tareas Blocked + runs migrados sin confirmar + sesiones esperando permiso/input, sin contar
  * dos veces la misma tarea. `queued`: listos para salir.
@@ -345,6 +357,10 @@ export const removeTaskRelation = (taskId: string, otherId: string, kind: Relati
  */
 export const cleanupWorktree = (taskId: string, force = false) =>
   invoke<Task>("cleanup_worktree", { taskId, force });
+/** Ruta absoluta. No lanza nada ni escribe el config de Claude Code. */
+export const repoTrust = (path: string) => invoke<RepoTrust>("repo_trust", { path });
+/** `git version 2.x.y`; rechaza si no hay git en el PATH. */
+export const gitVersion = () => invoke<string>("git_version");
 /** Actividad de Claude Code por repo del proyecto (un solo `claude agents`). */
 export const projectActivity = (projectId: string) => invoke<ProjectActivity>("project_activity", { projectId });
 /** Todo en cero/false/null si la tarea no tiene worktree. */
