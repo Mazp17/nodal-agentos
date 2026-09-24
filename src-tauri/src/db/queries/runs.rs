@@ -158,15 +158,10 @@ pub fn transition(conn: &Connection, id: &str, from: RunStatus, to: RunStatus) -
     Ok(conn.execute("UPDATE runs SET status = ?3 WHERE id = ?1 AND status = ?2", rusqlite::params![id, from, to])? > 0)
 }
 
-/// Al arrancar: un `launching` que quedó de una sesión anterior no se sabe si llegó a
-/// lanzarse. Pasa a `failed` con explicación.
-pub fn fail_interrupted_launches(conn: &Connection, now: i64) -> Result<usize, DbError> {
-    Ok(conn.execute(
-        "UPDATE runs SET status = 'failed', finished_at = ?1,
-                         error = 'The app closed while the run was launching; check the runs list before retrying.'
-         WHERE status = 'launching'",
-        [now],
-    )?)
+/// Runs `launching`. Solo la pasada de la cola (con su turno) los pone así y los saca en
+/// la misma pasada: fuera de ella, uno que quedó `launching` está huérfano.
+pub fn launching(conn: &Connection) -> Result<Vec<Run>, DbError> {
+    query(conn, "SELECT * FROM runs WHERE status = 'launching' ORDER BY queued_at, id", [])
 }
 
 /// Nuevo orden de la cola: `ids` tiene que ser exactamente el conjunto de runs en cola.

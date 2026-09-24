@@ -115,8 +115,8 @@ pub fn init(app: &AppHandle, db: Db) -> Result<(), String> {
         claude_dir: crate::runs::claude_fs::claude_config_dir(),
     };
     // Un `launching` de una sesión anterior no se sabe si llegó a lanzarse.
-    if let Ok(conn) = db.lock() {
-        if let Err(e) = crate::db::queries::runs::fail_interrupted_launches(&conn, crate::util::now_ms()) {
+    if let Ok(mut conn) = db.lock() {
+        if let Err(e) = pump::fail_stale_launches(&mut conn, pump::NOTE_APP_CLOSED, crate::util::now_ms()) {
             eprintln!("work: {e}");
         }
     }

@@ -49,10 +49,8 @@ fn queue_order_reorder_and_pending() {
     // Compare-and-set.
     assert!(runs::transition(&c, "a", RunStatus::Queued, RunStatus::Launching).unwrap());
     assert!(!runs::transition(&c, "a", RunStatus::Queued, RunStatus::Launching).unwrap());
-    assert_eq!(runs::fail_interrupted_launches(&c, 5).unwrap(), 1);
-    let a = runs::get(&c, "a").unwrap();
-    assert_eq!(a.status, RunStatus::Failed);
-    assert!(a.error.unwrap().contains("closed while"));
+    assert_eq!(runs::launching(&c).unwrap().iter().map(|r| r.id.as_str()).collect::<Vec<_>>(), ["a"]);
+    assert!(runs::transition(&c, "a", RunStatus::Launching, RunStatus::Failed).unwrap());
 
     assert_eq!(runs::last_finished(&c, "t1").unwrap().unwrap().id, "d");
     assert_eq!(runs::list_filtered(&c, None, Some("t1")).unwrap().len(), 4);

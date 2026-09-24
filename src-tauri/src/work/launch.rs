@@ -26,7 +26,8 @@ use super::{diff, ops, validate, worktree, Cleaning, Env, CLEANING_ERR};
 pub const REVIEW_DISALLOWED: [&str; 3] = ["Edit", "Write", "NotebookEdit"];
 /// Permission mode del revisor, sea cual sea el del repo: `dontAsk` niega sin preguntar
 /// todo lo que no esté en `--allowedTools` (una sesión en background no queda esperando un
-/// permiso). `plan` no sirve: no deja correr los tests y termina pidiendo aprobar un plan.
+/// permiso). Con `plan`, los Bash que no son de solo lectura (los tests) piden aprobación y
+/// la sesión queda en "Needs input".
 pub const REVIEW_PERMISSION_MODE: &str = "dontAsk";
 /// Lo único que puede usar el revisor (`--allowedTools`), más los comandos de test del repo
 /// (`test_commands`): leer y git de consulta.
@@ -985,7 +986,14 @@ mod tests {
                 "--agent",
                 "code-reviewer",
                 "--allowedTools",
-                "Read,Grep,Glob,Bash(git diff:*),Bash(git status:*),Bash(git log:*),Bash(git show:*),Bash(npm test:*)",
+                "Read",
+                "Grep",
+                "Glob",
+                "Bash(git diff:*)",
+                "Bash(git status:*)",
+                "Bash(git log:*)",
+                "Bash(git show:*)",
+                "Bash(npm test:*)",
                 "--disallowedTools",
                 "Edit,Write,NotebookEdit"
             ]

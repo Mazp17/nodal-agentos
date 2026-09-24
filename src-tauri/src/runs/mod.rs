@@ -41,8 +41,8 @@ fn forward_lines<R: AsyncRead + Unpin + Send + 'static>(stream: R, tx: mpsc::Unb
 pub struct ExtraFlags {
     /// `--agent <name>`.
     pub agent: Option<String>,
-    /// `--allowedTools A,B,C` (mismo formato que `disallowed_tools`; un `Bash(npm test:*)`
-    /// con espacio adentro va entre paréntesis y no parte la lista).
+    /// `--allowedTools A B C`: cada regla como argumento propio, como indica la doc de
+    /// permisos (`Bash(npm test:*)` lleva un espacio); el `--` antes del prompt corta la lista.
     pub allowed_tools: Vec<String>,
     /// `--disallowedTools A,B,C` (separadas por coma: la opción es variádica y, con
     /// espacios, se come el prompt; verificado en el spike con 2.1.281).
@@ -58,7 +58,7 @@ impl ExtraFlags {
         }
         if !self.allowed_tools.is_empty() {
             out.push("--allowedTools".into());
-            out.push(self.allowed_tools.join(","));
+            out.extend(self.allowed_tools.iter().cloned());
         }
         if !self.disallowed_tools.is_empty() {
             out.push("--disallowedTools".into());
@@ -68,17 +68,42 @@ impl ExtraFlags {
     }
 }
 
+/// Por qué falló un `claude --bg`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LaunchError {
+    pub message: String,
+    /// No devolvió el id a tiempo: la sesión puede haber arrancado igual.
+    pub timed_out: bool,
+}
+
+impl From<String> for LaunchError {
+    fn from(message: String) -> Self {
+        LaunchError { message, timed_out: false }
+    }
+}
+
+impl From<&str> for LaunchError {
+    fn from(message: &str) -> Self {
+        message.to_string().into()
+    }
+}
+
+/// Como `launch_bg`, con el error como texto.
+pub async fn launch_with(cwd: String, prompt: String, opts: &LaunchOptions, extra: &ExtraFlags) -> Result<RunRef, String> {
+    launch_bg(cwd, prompt, opts, extra).await.map_err(|e| e.message)
+}
+
 /// Lanza `claude --bg [flags] -- <prompt>` en `cwd` y devuelve el id corto de la sesión.
 /// Todo va como argumentos propios (sin shell), así que no hay nada que escapar; los
 /// flags se validan contra las listas permitidas de `options`. El `--` corta las opciones
 /// variádicas antes del prompt.
-pub async fn launch_with(cwd: String, prompt: String, opts: &LaunchOptions, extra: &ExtraFlags) -> Result<RunRef, String> {
+pub async fn launch_bg(cwd: String, prompt: String, opts: &LaunchOptions, extra: &ExtraFlags) -> Result<RunRef, LaunchError> {
     let dir = Path::new(&cwd);
     if !dir.is_absolute() {
-        return Err(format!("The folder must be an absolute path: {cwd}"));
+        return Err(format!("The folder must be an absolute path: {cwd}").into());
     }
     if !dir.is_dir() {
-        return Err(format!("The folder doesn't exist or isn't a directory: {cwd}"));
+        return Err(format!("The folder doesn't exist or isn't a directory: {cwd}").into());
     }
     if prompt.trim().is_empty() {
         return Err("The prompt is empty.".into());
@@ -141,14 +166,17 @@ pub async fn launch_with(cwd: String, prompt: String, opts: &LaunchOptions, extr
                 _ => String::new(),
             };
             let seen: String = seen.trim().chars().take(500).collect();
-            Err(format!("`claude --bg` exited without returning the session id{code}: {seen}"))
+            Err(format!("`claude --bg` exited without returning the session id{code}: {seen}").into())
         }
         Err(_) => {
             let _ = child.start_kill();
-            Err(format!(
-                "`claude --bg` didn't return the session id within {} s. It may have launched anyway: check the runs list before retrying.",
-                LAUNCH_TIMEOUT.as_secs()
-            ))
+            Err(LaunchError {
+                message: format!(
+                    "`claude --bg` didn't return the session id within {} s. It may have launched anyway: check the runs list before retrying.",
+                    LAUNCH_TIMEOUT.as_secs()
+                ),
+                timed_out: true,
+            })
         }
     }
 }

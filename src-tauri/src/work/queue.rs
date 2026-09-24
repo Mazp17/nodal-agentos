@@ -191,6 +191,24 @@ pub fn fill_session_ids(runs: &mut [Run], live: &[RunSummary]) -> Vec<usize> {
     changed
 }
 
+/// Margen de reloj entre `started_at` de `claude agents` y el momento del launch.
+pub const ADOPT_SLACK_MS: i64 = 5_000;
+
+/// La sesión que probablemente arrancó un `claude --bg` que no devolvió su id a tiempo: la
+/// única en `cwd`, arrancada desde `since` y que ningún run tiene (`claimed`: sus
+/// `claude_run_id`). Con más de una candidata no se adivina.
+pub fn adoptable<'a>(cwd: &str, since: i64, live: &'a [RunSummary], claimed: &[String]) -> Option<&'a RunSummary> {
+    let norm = |p: &str| p.trim_end_matches('/').to_string();
+    let want = norm(cwd);
+    let mut found = live.iter().filter(|s| {
+        s.cwd.as_deref().map(norm).as_deref() == Some(want.as_str())
+            && s.started_at.is_some_and(|t| t >= since - ADOPT_SLACK_MS)
+            && !claimed.contains(&s.id)
+    });
+    let first = found.next()?;
+    found.next().is_none().then_some(first)
+}
+
 /// ¿Hay algo que requiera consultar `claude agents`? Runs en cola que se puedan lanzar, o
 /// lanzados (para detectar cuándo terminan).
 pub fn needs_tick(runs: &[Run]) -> bool {
@@ -231,6 +249,39 @@ pub fn ended(runs: &[Run], live: &[RunSummary], now: i64) -> Vec<(String, EndSig
             Some((r.id.clone(), signal))
         })
         .collect()
+}
+
+#[cfg(test)]
+mod adopt_tests {
+    use super::*;
+
+    fn session(id: &str, cwd: &str, started: i64) -> RunSummary {
+        RunSummary {
+            id: id.into(),
+            session_id: format!("sess-{id}"),
+            cwd: Some(cwd.into()),
+            name: None,
+            started_at: Some(started),
+            pid: None,
+            status: None,
+            state: Some("working".into()),
+            waiting_for: None,
+        }
+    }
+
+    #[test]
+    fn adopts_only_an_unambiguous_new_session_in_the_cwd() {
+        let live = vec![session("old", "/r/web", 100), session("other", "/r/api", 10_000), session("new", "/r/web/", 10_000)];
+        assert_eq!(adoptable("/r/web", 9_000, &live, &[]).map(|s| s.id.as_str()), Some("new"));
+        // Ya la tiene otro run.
+        assert!(adoptable("/r/web", 9_000, &live, &["new".into()]).is_none());
+        // Dos candidatas: no se adivina.
+        let mut two = live.clone();
+        two.push(session("new2", "/r/web", 11_000));
+        assert!(adoptable("/r/web", 9_000, &two, &[]).is_none());
+        // Anterior al launch (fuera del margen).
+        assert!(adoptable("/r/web", 20_000, &live, &[]).is_none());
+    }
 }
 
 #[cfg(test)]
