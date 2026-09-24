@@ -29,4 +29,4 @@ dist-ssr
 
 # worktrees de agentes de Claude Code
 .claude/
-!src-tauri/src/issue_runs/fixtures/workflows/repo/.claude/
+!src-tauri/src/runs/fixtures/workflows/repo/.claude/
