@@ -614,25 +614,32 @@ export function TaskPanel({ taskId, onClose, onOpenRun, onOpenDiff, onOpenTask, 
         <button type="button" className="btn btn-sm btn-danger" disabled={busy !== null || !!activeRun} onClick={() => void remove()}>
           Delete
         </button>
-        <span className="tp-spacer" />
-        {activeRun ? (
-          <button type="button" className="btn btn-sm btn-primary" onClick={() => onOpenRun(activeRun.id)}>
-            Open run
-          </button>
-        ) : current && !canLaunch ? (
-          <button type="button" className="btn btn-sm" onClick={() => onOpenRun(current.id)}>
-            Open last run
-          </button>
-        ) : null}
-        {closed ? (
-          <button type="button" className="btn btn-sm" disabled={busy !== null} onClick={() => setStatus("todo")}>
-            Reopen
-          </button>
-        ) : (
-          <button type="button" className="btn btn-sm" disabled={busy !== null} onClick={() => setStatus("done")}>
-            Mark done
-          </button>
-        )}
+        <div className="tp-foot-end">
+          {activeRun ? (
+            <button type="button" className="btn btn-sm btn-primary" onClick={() => onOpenRun(activeRun.id)}>
+              Open run
+            </button>
+          ) : current && !canLaunch ? (
+            <button type="button" className="btn btn-sm" onClick={() => onOpenRun(current.id)}>
+              Open last run
+            </button>
+          ) : null}
+          {/* Same condition as the Worktree section's button: no diff to show once the worktree is gone. */}
+          {lastWork && (task.worktree || lastWork.isolation !== "worktree") && (
+            <button type="button" className="btn btn-sm" onClick={() => onOpenDiff(lastWork.id)}>
+              View diff
+            </button>
+          )}
+          {closed ? (
+            <button type="button" className="btn btn-sm" disabled={busy !== null} onClick={() => setStatus("todo")}>
+              Reopen
+            </button>
+          ) : (
+            <button type="button" className="btn btn-sm" disabled={busy !== null} onClick={() => setStatus("done")}>
+              Mark done
+            </button>
+          )}
+        </div>
       </footer>
 
       {editing && (

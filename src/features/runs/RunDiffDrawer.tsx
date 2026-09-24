@@ -111,7 +111,7 @@ export function RunDiffDrawer({ runId, onClose }: RunDiffDrawerProps) {
 
   return (
     <>
-      <div className="scrim" onClick={onClose} aria-hidden />
+      <div className="scrim diff-scrim" onClick={onClose} aria-hidden />
       <div ref={ref} className="sheet diff-panel" role="dialog" aria-modal="true" aria-labelledby="diff-title" tabIndex={-1}>
         <header className="diff-head">
           <div className="diff-head-main">
@@ -131,7 +131,7 @@ export function RunDiffDrawer({ runId, onClose }: RunDiffDrawerProps) {
                   <span className="diff-ref">{branch ?? "HEAD"}</span>
                   <span>·</span>
                   <span>
-                    {commits.length} commit{commits.length === 1 ? "" : "s"} · {files.length} file{files.length === 1 ? "" : "s"} · +{adds} −{dels}
+                    {commits.length} commit{commits.length === 1 ? "" : "s"} · {files.length} file{files.length === 1 ? "" : "s"} · <span className="diff-add">+{adds}</span> <span className="diff-del">−{dels}</span>
                   </span>
                   {diff.includesWorkingTree && (
                     <>
