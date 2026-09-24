@@ -12,7 +12,8 @@ use crate::db::queries::{projects, relations, repos, runs as qruns, tasks};
 use crate::db::{rows, with_db, DbError};
 use crate::domain::*;
 use crate::events::Kind;
-use crate::runs::{claude_bin, terminal};
+use crate::runs::types::Transcript;
+use crate::runs::{claude_bin, claude_fs, terminal};
 use crate::util::{blocking, check_id, now_ms, paths};
 
 use super::diff::{self, RunDiff};
@@ -432,6 +433,38 @@ async fn cancel_run_inner(inner: &Arc<Inner>, run_id: String) -> Result<Run, Str
         }
         _ => Err("The run already finished.".into()),
     }
+}
+
+/// Transcript de un run de agente, Claude o revisor (la sesión principal). Los workflows
+/// tienen uno por agente: `get_agent_transcript`. `None` si la sesión todavía no tiene archivo.
+/// `limit`: items más recientes (default 200, máx. 2000).
+#[tauri::command]
+pub async fn get_run_transcript(
+    state: State<'_, WorkState>,
+    run_id: String,
+    limit: Option<u32>,
+) -> Result<Option<Transcript>, String> {
+    check_id(&run_id, "run")?;
+    let run = db(&state.0, move |c| Ok(qruns::get(c, &run_id)?)).await?;
+    let label = match &run.executor {
+        Executor::Workflow { .. } => {
+            return Err("Workflow runs have one transcript per agent: open it from the run detail.".into())
+        }
+        Executor::Agent { name, .. } => name.clone(),
+        Executor::Claude => "Claude".into(),
+    };
+    let Some(sid) = run.session_id.clone().filter(|s| claude_fs::is_valid_session_id(s)) else { return Ok(None) };
+    let Some(claude_dir) = state.0.env.claude_dir.clone() else {
+        return Err("Couldn't locate the Claude Code folder ($HOME is not set).".into());
+    };
+    let limit = limit.unwrap_or(claude_fs::TRANSCRIPT_DEFAULT_LIMIT).clamp(1, claude_fs::TRANSCRIPT_MAX_LIMIT) as usize;
+    blocking(move || {
+        let Some(path) = claude_fs::find_session_jsonl(&claude_dir.join("projects"), &run.cwd, &sid) else {
+            return Ok(None);
+        };
+        claude_fs::read_session_transcript(&path, &run.id, Some(label), run.options.model.clone(), limit)
+    })
+    .await
 }
 
 #[tauri::command]

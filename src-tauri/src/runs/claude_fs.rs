@@ -1036,6 +1036,42 @@ pub fn read_agent_transcript(
     }))
 }
 
+/// Sin las líneas de sidechain (subagentes lanzados con `Task` dentro de la sesión). Claude
+/// Code escribe JSON compacto, así que alcanza con buscar el literal.
+fn main_thread_lines(text: &str) -> String {
+    text.lines().filter(|l| !l.contains("\"isSidechain\":true")).collect::<Vec<_>>().join("\n")
+}
+
+/// Transcript principal de una sesión (`<sid>.jsonl`): runs de agente, Claude o revisor.
+/// `id`/`label`/`model` van tal cual al `Transcript`. `Ok(None)` si no hay archivo.
+pub fn read_session_transcript(
+    path: &Path,
+    id: &str,
+    label: Option<String>,
+    model: Option<String>,
+    limit: usize,
+) -> Result<Option<Transcript>, String> {
+    let (text, partial, bytes) = match read_transcript_text(path) {
+        Ok(r) => r,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(e) => return Err(format!("Couldn't read the transcript: {e}")),
+    };
+    let parsed = parse_transcript(&main_thread_lines(&text), limit);
+    Ok(Some(Transcript {
+        agent_id: id.to_string(),
+        label,
+        model,
+        phase: None,
+        prompt: parsed.prompt,
+        omitted: (parsed.total - parsed.items.len()) as u32,
+        total_items: parsed.total as u32,
+        items: parsed.items,
+        final_output: parsed.final_output,
+        partial,
+        bytes,
+    }))
+}
+
 // ---------------------------------------------------------------------------
 // Motivo por el que una sesión en background no llegó a arrancar su workflow
 // ---------------------------------------------------------------------------
@@ -1527,5 +1563,29 @@ mod tests {
             let d = read_run_detail(&dir).expect("sin workflow");
             eprintln!("{session}: {d:#?}");
         }
+    }
+
+    #[test]
+    fn session_transcript_skips_sidechains() {
+        let lines = [
+            r#"{"type":"user","message":{"role":"user","content":"Arreglá el bug del login"}}"#,
+            r#"{"type":"assistant","message":{"content":[{"type":"text","text":"Miro el código."}]}}"#,
+            r#"{"type":"assistant","isSidechain":true,"message":{"content":[{"type":"text","text":"subagente"}]}}"#,
+            r#"{"type":"assistant","message":{"content":[{"type":"tool_use","id":"t1","name":"Bash","input":{"command":"ls"}}]}}"#,
+            r#"{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"t1","content":"a.rs"}]}}"#,
+            r#"{"type":"assistant","message":{"content":[{"type":"text","text":"Listo."}]}}"#,
+        ];
+        let dir = std::env::temp_dir().join(format!("nodal-session-tx-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("s.jsonl");
+        fs::write(&path, lines.join("\n")).unwrap();
+        let t = read_session_transcript(&path, "run-1", Some("Claude".into()), None, 2).unwrap().unwrap();
+        assert_eq!(t.agent_id, "run-1");
+        assert_eq!(t.prompt.as_deref(), Some("Arreglá el bug del login"));
+        assert_eq!((t.total_items, t.omitted), (3, 1));
+        assert_eq!(t.final_output.as_deref(), Some("Listo."));
+        assert!(!t.items.iter().any(|i| matches!(i, TranscriptItem::Text { text, .. } if text == "subagente")));
+        assert!(read_session_transcript(&dir.join("nope.jsonl"), "x", None, None, 10).unwrap().is_none());
+        fs::remove_dir_all(&dir).ok();
     }
 }

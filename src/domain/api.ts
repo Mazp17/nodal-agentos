@@ -36,6 +36,7 @@ import type {
   TaskRelation,
   TaskStatus,
 } from "./types";
+import type { Transcript } from "../features/runs/types";
 
 // ---------- DTOs ----------
 
@@ -306,6 +307,13 @@ export const confirmRun = (runId: string) => invoke<Run>("confirm_run", { runId 
 /** Nuevo orden de la cola: ids de todos los runs `queued`. */
 export const reorderQueue = (runIds: string[]) => invoke<void>("reorder_queue", { runIds });
 export const runDiff = (runId: string) => invoke<RunDiff>("run_diff", { runId });
+/**
+ * Transcript de un run de agente, Claude o revisor (sesión principal; `agentId` = id del run).
+ * Rechaza para workflows (usar `getAgentTranscript`). `null` si la sesión aún no tiene archivo.
+ * `limit`: items más recientes (default 200, máx. 2000).
+ */
+export const getRunTranscript = (runId: string, limit?: number) =>
+  invoke<Transcript | null>("get_run_transcript", { runId, limit: limit ?? null });
 /** Abre la carpeta del run (o `file` dentro de ella) en el editor de Settings. */
 export const openInEditor = (runId: string, file: string | null = null) =>
   invoke<void>("open_in_editor", { runId, file });

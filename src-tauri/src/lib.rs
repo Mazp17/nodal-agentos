@@ -100,6 +100,7 @@ pub fn run() {
             work::commands::cancel_run,
             work::commands::reorder_queue,
             work::commands::run_diff,
+            work::commands::get_run_transcript,
             work::commands::open_in_editor,
             work::commands::open_worktree,
             work::commands::get_settings,
