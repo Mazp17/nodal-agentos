@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import type { ExecutorInfo } from "../../domain/api";
 import { useExecutors } from "../../domain/hooks/store";
 import type { Executor } from "../../domain/types";
+import { FOCUSABLE } from "../../ui/useFocusTrap";
 import { ExecutorAvatar } from "./ExecutorAvatar";
 import { CLAUDE, executorKey, executorLabel, sameExecutor } from "./executors";
 import "./executors.css";
@@ -134,6 +135,25 @@ export function ExecutorPicker({ repoId, value, onChange, inherited, label = "Ex
     setQ("");
     trigger.current?.focus();
   };
+  /**
+   * Tab from the menu follows the trigger's order: the menu lives in a portal, so native
+   * Tab would go to the end of the body. Wraps within the enclosing modal dialog.
+   */
+  const tabFrom = (back: boolean) => {
+    const t = trigger.current;
+    setOpen(false);
+    setQ("");
+    if (!t) return;
+    const scope = t.closest<HTMLElement>('[aria-modal="true"]') ?? document.body;
+    const list = [...scope.querySelectorAll<HTMLElement>(FOCUSABLE)].filter(
+      (el) => el.getClientRects().length > 0 && !menu.current?.contains(el),
+    );
+    const i = list.indexOf(t);
+    if (i < 0) return t.focus();
+    const next = back ? list[i - 1] : list[i + 1];
+    (next ?? (scope === document.body ? t : list[back ? list.length - 1 : 0]) ?? t).focus();
+  };
+
   const pick = (e: Executor | null) => {
     onChange(e);
     close();
@@ -154,9 +174,10 @@ export function ExecutorPicker({ repoId, value, onChange, inherited, label = "Ex
       if (i <= 0) search.current?.focus();
       else items[i - 1]?.focus();
     } else if (e.key === "Tab") {
-      // The menu lives outside the dialog: go back to the trigger so focus doesn't escape.
+      // Don't propagate: the dialog's focus trap would move focus again.
       e.preventDefault();
-      close();
+      e.stopPropagation();
+      tabFrom(e.shiftKey);
     }
   };
 
