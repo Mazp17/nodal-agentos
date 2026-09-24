@@ -714,13 +714,18 @@ pub async fn open_in_editor(state: State<'_, WorkState>, run_id: String, file: O
         }
         None => None,
     };
+    // (binary, name for errors)
     let editor = match db(&state.0, |c| Ok(rows::load_settings(c)?.editor)).await? {
-        Some(e) => Some(validate::editor(&e)?),
-        None => detect_editor(),
-    };
-    let mut cmd = match editor {
         Some(e) => {
+            let e = validate::editor(&e)?;
             let bin = claude_bin::resolve_bin(&e).ok_or_else(|| format!("Couldn't find `{e}` in PATH."))?;
+            Some((bin, format!("`{e}`")))
+        }
+        None => detect_editor().map(|(e, bin)| (bin, format!("`{e}` (picked automatically; choose one in Settings)"))),
+    };
+    let what = editor.as_ref().map_or_else(|| "the system text editor".to_string(), |(_, w)| w.clone());
+    let mut cmd = match editor {
+        Some((bin, _)) => {
             let mut cmd = tokio::process::Command::new(bin);
             cmd.env("PATH", claude_bin::augmented_path());
             cmd.arg(&dir);
@@ -746,12 +751,16 @@ pub async fn open_in_editor(state: State<'_, WorkState>, run_id: String, file: O
     if let Some(t) = target {
         cmd.arg(t);
     }
-    spawn_open(cmd, "the editor").await
+    spawn_open(cmd, &what).await
 }
 
-/// First editor in `validate::EDITORS` with its CLI installed (`code`, `cursor`, `zed`…).
-fn detect_editor() -> Option<String> {
-    validate::EDITORS.iter().find(|e| claude_bin::resolve_bin(e).is_some()).map(|e| e.to_string())
+/// First code editor from `validate::EDITORS` with its CLI installed, and where it is. Full IDEs
+/// (`idea`, `webstorm`, `fleet`) are left out: too heavy to open just to look at a file.
+fn detect_editor() -> Option<(&'static str, std::path::PathBuf)> {
+    validate::EDITORS
+        .iter()
+        .filter(|e| !matches!(**e, "idea" | "webstorm" | "fleet"))
+        .find_map(|e| claude_bin::resolve_bin(e).map(|bin| (*e, bin)))
 }
 
 // ---------- Settings ----------
