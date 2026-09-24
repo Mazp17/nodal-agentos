@@ -9,11 +9,11 @@ use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use tauri::{AppHandle, Manager};
 
+use crate::db::{with_db, Db};
 use crate::runs::{claude_bin, claude_fs};
-use crate::tasks::TasksState;
 use claude_sessions::{AgentSession, SubagentFile};
 
 const LIST_TIMEOUT: Duration = Duration::from_secs(15);
@@ -342,30 +342,19 @@ fn summarize(act: &RepoActivity) -> ActivitySummary {
     }
 }
 
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct RawIssueRun {
-    #[serde(default)]
-    run_id: Option<String>,
-    #[serde(default)]
-    session_id: Option<String>,
-}
-
-#[derive(Deserialize)]
-struct RawIssueRuns {
-    #[serde(default)]
-    runs: Vec<RawIssueRun>,
-}
-
-/// Runs de issues leídos del archivo de `issue_runs` (su estado es privado del módulo).
-/// Si el formato cambia, simplemente no se marcan.
-fn issue_run_refs(data_dir: &Path, out: &mut AppRuns) {
-    let Ok(text) = std::fs::read_to_string(data_dir.join("issue-runs.json")) else { return };
-    if let Ok(raw) = serde_json::from_str::<RawIssueRuns>(&text) {
-        for r in raw.runs {
-            out.add(r.run_id, r.session_id);
+/// Runs lanzados por la app (tabla `runs`). Si la base no está disponible, no se marca nada.
+async fn app_run_refs(app: &AppHandle) -> AppRuns {
+    let mut refs = AppRuns::default();
+    let Some(db) = app.try_state::<Db>() else { return refs };
+    match with_db(&db, |c| crate::db::queries::runs::launched_refs(c)).await {
+        Ok(list) => {
+            for (r, s) in list {
+                refs.add(r, s);
+            }
         }
+        Err(e) => eprintln!("activity: {e}"),
     }
+    refs
 }
 
 async fn list_agents() -> Result<Vec<AgentSession>, String> {
@@ -386,13 +375,7 @@ pub async fn repo_activity(app: AppHandle, repo_path: String) -> Result<RepoActi
         return Err(format!("The repository path must be absolute: {repo_path}"));
     }
     let agents = list_agents().await?;
-    let mut refs = AppRuns::default();
-    if let Some(tasks) = app.try_state::<TasksState>() {
-        for (r, s) in tasks.launched_refs().await {
-            refs.add(r, s);
-        }
-    }
-    let data_dir = app.path().app_data_dir().ok();
+    let refs = app_run_refs(&app).await;
     tauri::async_runtime::spawn_blocking(move || {
         let mut roots = vec![raw.clone()];
         if let Ok(c) = raw.canonicalize() {
@@ -402,9 +385,6 @@ pub async fn repo_activity(app: AppHandle, repo_path: String) -> Result<RepoActi
         }
         if !roots.iter().any(|r| r.is_dir()) {
             return Err(format!("The repository folder doesn't exist: {}", raw.display()));
-        }
-        if let Some(d) = data_dir {
-            issue_run_refs(&d, &mut refs);
         }
         let projects = claude_fs::claude_config_dir()
             .ok_or("Couldn't locate the Claude Code folder ($HOME is not set).")?

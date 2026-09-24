@@ -1,14 +1,15 @@
 //! Catálogo de workflows: `~/.claude/workflows/*.js` y `<repo>/.claude/workflows/*.js`.
 //!
 //! El `export const meta = {...}` es JS, no JSON, y no se ejecuta: se escanea el literal
-//! respetando strings y comentarios y se leen `name`, `description` y `whenToUse` del
-//! primer nivel. Si algo no se entiende, el workflow se lista igual con el nombre del archivo.
+//! respetando strings y comentarios y se leen `name`, `description`, `whenToUse`,
+//! `managesSource` (string) y `reviews` (booleano) del primer nivel. Si algo no se
+//! entiende, el workflow se lista igual con el nombre del archivo.
 
 use std::path::{Path, PathBuf};
 
 use serde::Serialize;
 
-use crate::runs::claude_fs::js_string_prop;
+use super::claude_fs::js_string_prop;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -23,6 +24,11 @@ pub struct WorkflowInfo {
     pub name: String,
     pub description: Option<String>,
     pub when_to_use: Option<String>,
+    /// Proveedor que el workflow sincroniza por su cuenta (`"linear"`): la app no le hace
+    /// push de estado ni comenta.
+    pub manages_source: Option<String>,
+    /// El workflow ya revisa (su resultado es el veredicto): se salta el gate de Nodal.
+    pub reviews: bool,
     pub source: WorkflowSource,
     pub path: String,
 }
@@ -32,6 +38,8 @@ pub struct Meta {
     pub name: Option<String>,
     pub description: Option<String>,
     pub when_to_use: Option<String>,
+    pub manages_source: Option<String>,
+    pub reviews: Option<bool>,
 }
 
 /// Recorre `s` y devuelve una copia del mismo largo en bytes donde los comentarios y
@@ -114,6 +122,32 @@ fn top_level_prop(flat: &str, key: &str) -> Option<String> {
         .filter(|v| !v.is_empty())
 }
 
+/// Valor booleano literal (`true`/`false`) de `key` en el primer nivel.
+fn top_level_bool(flat: &str, key: &str) -> Option<bool> {
+    for k in [key.to_string(), format!("\"{key}\""), format!("'{key}'")] {
+        let mut search = flat;
+        while let Some(pos) = search.find(&k) {
+            let before_ok = search[..pos]
+                .chars()
+                .next_back()
+                .is_none_or(|c| !(c.is_ascii_alphanumeric() || c == '_' || c == '$'));
+            let rest = search[pos + k.len()..].trim_start();
+            if before_ok {
+                if let Some(v) = rest.strip_prefix(':').map(str::trim_start) {
+                    let word: String = v.chars().take_while(|c| c.is_ascii_alphanumeric()).collect();
+                    match word.as_str() {
+                        "true" => return Some(true),
+                        "false" => return Some(false),
+                        _ => {}
+                    }
+                }
+            }
+            search = &search[pos + k.len()..];
+        }
+    }
+    None
+}
+
 /// Lee `export const meta = { ... }`. `None` si no hay meta reconocible.
 pub fn parse_meta(src: &str) -> Option<Meta> {
     let start = src.find("export const meta")?;
@@ -134,6 +168,8 @@ pub fn parse_meta(src: &str) -> Option<Meta> {
         name: top_level_prop(&flat, "name"),
         description: top_level_prop(&flat, "description"),
         when_to_use: top_level_prop(&flat, "whenToUse"),
+        manages_source: top_level_prop(&flat, "managesSource"),
+        reviews: top_level_bool(&flat, "reviews"),
     };
     Some(meta)
 }
@@ -157,6 +193,8 @@ fn read_dir_workflows(dir: &Path, source: WorkflowSource) -> Vec<WorkflowInfo> {
                 name: meta.name.unwrap_or(stem),
                 description: meta.description,
                 when_to_use: meta.when_to_use,
+                manages_source: meta.manages_source,
+                reviews: meta.reviews.unwrap_or(false),
                 source,
                 path: path.to_string_lossy().into_owned(),
             }
@@ -194,7 +232,7 @@ mod tests {
     use super::*;
 
     fn fixtures() -> PathBuf {
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src/issue_runs/fixtures/workflows")
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src/runs/fixtures/workflows")
     }
 
     #[test]
@@ -223,6 +261,23 @@ mod tests {
         assert_eq!(m.name.as_deref(), Some("real"));
         assert_eq!(m.description.as_deref(), Some("con 'escape' y ñandú"));
         assert_eq!(m.when_to_use, None);
+    }
+
+    #[test]
+    fn manages_source_and_reviews() {
+        let src = "export const meta = {\n  name: 'x',\n  managesSource: 'linear',\n  reviews: true,\n  phases: [{ reviews: false }],\n}\n";
+        let m = parse_meta(src).unwrap();
+        assert_eq!(m.manages_source.as_deref(), Some("linear"));
+        assert_eq!(m.reviews, Some(true));
+        let m = parse_meta("export const meta = { name: 'y', 'reviews': false, noreviews: true }").unwrap();
+        assert_eq!(m.reviews, Some(false));
+        assert_eq!(m.manages_source, None);
+        // Solo el anidado: no cuenta.
+        let m = parse_meta("export const meta = { name: 'z', opts: { reviews: true } }").unwrap();
+        assert_eq!(m.reviews, None);
+        // Las fixtures reales todavía no lo declaran.
+        let src = std::fs::read_to_string(fixtures().join("user/linear-issue.js")).unwrap();
+        assert_eq!(parse_meta(&src).unwrap().reviews, None);
     }
 
     #[test]

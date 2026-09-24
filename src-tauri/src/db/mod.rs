@@ -5,6 +5,7 @@
 // F0 fija los contratos; los usos llegan en F1.
 #![allow(dead_code)]
 
+pub mod queries;
 pub mod rows;
 pub mod schema;
 
