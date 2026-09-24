@@ -54,11 +54,3 @@ export interface RepoActivity {
   subagents: SubagentActivity[];
   generatedAt: number;
 }
-
-export interface ActivitySummary {
-  /** Sesiones vivas trabajando o esperando al usuario. */
-  sessions: number;
-  /** Subagentes activos. */
-  agents: number;
-  generatedAt: number;
-}

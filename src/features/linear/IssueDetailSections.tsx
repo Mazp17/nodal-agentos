@@ -4,7 +4,7 @@ import { SafeMarkdown } from "../../ui/Markdown";
 import "./issue-panel.css";
 
 // Secciones del detalle de una issue (descripción, padre, sub-issues, relaciones y
-// comentarios). Las usan IssuePanel y la pestaña Source del detalle de tarea.
+// comentarios). Las usa la pestaña Source del detalle de tarea.
 
 const FINISHED = new Set(["completed", "canceled"]);
 export function isFinished(state: StateRef): boolean {

@@ -24,8 +24,6 @@ export const PROVIDERS: readonly ProviderInfo[] = [
   { id: "github", name: "GitHub Issues", available: false },
 ];
 
-export const AVAILABLE_PROVIDERS = PROVIDERS.filter((p) => p.available);
-
 export function providerName(id: string): string {
   return PROVIDERS.find((p) => p.id === id)?.name ?? id;
 }

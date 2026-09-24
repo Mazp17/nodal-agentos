@@ -282,8 +282,6 @@ export const cleanupWorktree = (taskId: string) => invoke<Task>("cleanup_worktre
 export const listExecutors = (repoId: string | null) => invoke<ExecutorInfo[]>("list_executors", { repoId });
 /** Runs de la tarea (o todos con `null`), más recientes primero. */
 export const listTaskRuns = (taskId: string | null) => invoke<Run[]>("list_task_runs", { taskId });
-/** Cola global: runs `queued`, en orden de salida. */
-export const listQueue = () => invoke<Run[]>("list_queue");
 /** Encola un run de trabajo (o lo lanza si hay slot). */
 export const launchTask = (taskId: string, input: LaunchInput = {}) => invoke<Run>("launch_task", { taskId, input });
 /** Siguiente paso de la cadena con otro ejecutor, sobre la misma rama/worktree. */

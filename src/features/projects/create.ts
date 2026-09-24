@@ -2,6 +2,7 @@
 // onboarding y el diálogo "New project".
 
 import { addRepo, createSourceLink } from "../../domain/api";
+import { invalidateProviders } from "../../domain/hooks/providers";
 import { suggestProjectKey, type ProjectsState } from "../../domain/hooks/projects";
 import type { Project, ScopeRef } from "../../domain/types";
 const LINEAR = "linear";
@@ -70,6 +71,7 @@ export async function createProjectWithRepos(ctx: ProjectsState, d: ProjectDraft
     try {
       await createSourceLink({ projectId: project.id, provider: LINEAR, scope: d.scope, defaultRepoId: repoIds[0] ?? null });
       sourceConnected = true;
+      invalidateProviders("links");
     } catch (e) {
       failures.push(`Linear · ${d.scope.name}: ${String(e)}`);
     }
