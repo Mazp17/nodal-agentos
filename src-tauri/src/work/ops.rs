@@ -651,7 +651,7 @@ mod tests {
         assert_eq!(got.as_deref(), Some(p.id.as_str()));
         assert_eq!((pos(&c, &t3.id), pos(&c, &t1.id), pos(&c, &t2.id)), (1.0, 2.0, 3.0));
         assert!(reorder_tasks(&mut c, TaskStatus::Todo, &[t1.id.clone(), t1.id.clone()], 16).unwrap_err().contains("twice"));
-        assert!(reorder_tasks(&mut c, TaskStatus::Done, &[t1.id.clone()], 16).unwrap_err().contains("column"));
+        assert!(reorder_tasks(&mut c, TaskStatus::Done, std::slice::from_ref(&t1.id), 16).unwrap_err().contains("column"));
         assert!(reorder_tasks(&mut c, TaskStatus::Todo, &["t-no".into()], 16).is_err());
         // Un error no deja nada a medias.
         assert!(reorder_tasks(&mut c, TaskStatus::Todo, &[t2.id.clone(), "t-no".into()], 16).is_err());
