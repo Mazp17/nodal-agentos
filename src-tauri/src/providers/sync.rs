@@ -547,7 +547,15 @@ pub async fn run_for_app(app: &AppHandle, link_filter: Option<&str>) -> PResult<
         }
     }
     let data_dir: PathBuf = state.data_dir.clone();
-    Ok(sync_run(&db, &data_dir, &providers, link_filter, now_ms()).await)
+    let report = sync_run(&db, &data_dir, &providers, link_filter, now_ms()).await;
+    if !providers.is_empty() {
+        use crate::events::Kind;
+        // El estado de los links cambia en cada pasada; las tareas solo si hubo movimiento.
+        let kinds: &[Kind] =
+            if report.pulled + report.pushed + report.imported > 0 { &[Kind::Sources, Kind::Tasks] } else { &[Kind::Sources] };
+        crate::events::notify(app, kinds, None);
+    }
+    Ok(report)
 }
 
 pub fn spawn_worker(app: AppHandle) {

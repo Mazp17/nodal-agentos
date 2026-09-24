@@ -167,6 +167,17 @@ async fn finish_run(inner: &Arc<Inner>, run: Run, signal: EndSignal) -> Result<(
 
 /// Una pasada de la cola. Si no hay nada en cola ni lanzado, no consulta `claude agents`.
 pub async fn pump(inner: &Arc<Inner>) -> Result<(), String> {
+    let mut touched = false;
+    let r = pump_pass(inner, &mut touched).await;
+    if touched {
+        use crate::events::Kind;
+        inner.events.notify_all(&[Kind::Runs, Kind::Queue, Kind::Tasks], None);
+    }
+    r
+}
+
+/// `touched`: la pasada cambió algún run (para avisar a la UI aunque después falle).
+async fn pump_pass(inner: &Arc<Inner>, touched: &mut bool) -> Result<(), String> {
     let _turn = inner.pump.lock().await;
     let mut pending = with_db(&inner.db, |c| qruns::pending(c)).await?;
     if !queue::needs_tick(&pending) {
@@ -177,6 +188,7 @@ pub async fn pump(inner: &Arc<Inner>) -> Result<(), String> {
     let changed: Vec<Run> =
         queue::fill_session_ids(&mut pending, &live).into_iter().map(|i| pending[i].clone()).collect();
     if !changed.is_empty() {
+        *touched = true;
         with_db(&inner.db, move |c| {
             for r in &changed {
                 c.execute(
@@ -191,6 +203,7 @@ pub async fn pump(inner: &Arc<Inner>) -> Result<(), String> {
 
     for (id, signal) in queue::ended(&pending, &live, now_ms()) {
         let Some(run) = pending.iter().find(|r| r.id == id).cloned() else { continue };
+        *touched = true;
         if let Err(e) = finish_run(inner, run, signal).await {
             eprintln!("work: couldn't close run {id}: {e}");
         }
@@ -210,6 +223,7 @@ pub async fn pump(inner: &Arc<Inner>) -> Result<(), String> {
             .await?
         };
         let Some(run) = claimed else { continue };
+        *touched = true;
         let result = runs::launch_with(run.cwd.clone(), run.prompt.clone(), &run.options, &launch::extra_flags(&run)).await;
         let root = inner.env.worktrees_root.clone();
         with_db(&inner.db, move |c| {

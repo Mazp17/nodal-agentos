@@ -61,6 +61,8 @@ pub struct Inner {
     pub env: Env,
     /// Serializa las pasadas de la cola: una sola a la vez decide y lanza.
     pub pump: tokio::sync::Mutex<()>,
+    /// `nodal://changed` hacia la UI.
+    pub events: crate::events::Events,
 }
 
 #[derive(Clone)]
@@ -80,7 +82,8 @@ pub fn init(app: &AppHandle, db: Db) -> Result<(), String> {
             eprintln!("work: {e}");
         }
     }
-    let inner = Arc::new(Inner { db, env, pump: tokio::sync::Mutex::new(()) });
+    let events = app.try_state::<crate::events::Events>().map(|e| e.inner().clone()).unwrap_or_default();
+    let inner = Arc::new(Inner { db, env, pump: tokio::sync::Mutex::new(()), events });
     app.manage(WorkState(inner.clone()));
     tauri::async_runtime::spawn(async move {
         loop {

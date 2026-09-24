@@ -1,6 +1,7 @@
 mod activity;
 mod db;
 mod domain;
+mod events;
 mod linear;
 mod migrate;
 mod providers;
@@ -34,6 +35,7 @@ pub fn run() {
         .manage(secrets)
         .setup(|app| {
             use tauri::Manager;
+            app.manage(events::Events::new(app.handle().clone()));
             // Único lugar que arranca los workers de fondo: el pump de la cola (`work::init`)
             // y el sync de proveedores (`providers::init`). Sin base la app abre igual (para
             // mostrar el error): no hay pump, el sync no hace nada y los comandos fallan.

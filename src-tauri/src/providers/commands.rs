@@ -13,6 +13,7 @@ use crate::linear::LinearState;
 use super::import::{import_items, importable_rows, ImportRequest, ImportResult, ImportableItem, Skipped};
 use super::state_map::{self, SourceStatesReport};
 use super::sync::{run_for_app, SyncReport};
+use crate::events::{notify, Kind};
 use crate::secrets::Secrets;
 use crate::util::{new_id, now_ms};
 use super::{check_provider, require, resolve, store, ImportQuery, PResult, Provider, ProvidersState, TaskProvider};
@@ -180,10 +181,11 @@ pub async fn create_source_link(app: AppHandle, db: State<'_, Db>, input: NewSou
     })
     .await
     .map_err(e)
+    .inspect(|l| notify(&app, &[Kind::Sources], Some(&l.project_id)))
 }
 
 #[tauri::command]
-pub async fn update_source_link(db: State<'_, Db>, id: String, patch: SourceLinkPatch) -> PResult<SourceLink> {
+pub async fn update_source_link(app: AppHandle, db: State<'_, Db>, id: String, patch: SourceLinkPatch) -> PResult<SourceLink> {
     with_db(&db, move |c| {
         let mut link = store::get_link(c, &id)?;
         if let Some(r) = patch.default_repo_id {
@@ -201,17 +203,20 @@ pub async fn update_source_link(db: State<'_, Db>, id: String, patch: SourceLink
     })
     .await
     .map_err(e)
+    .inspect(|l| notify(&app, &[Kind::Sources], Some(&l.project_id)))
 }
 
 /// Disconnect: las tareas del link quedan locales y el link se borra (una transacción).
 #[tauri::command]
-pub async fn delete_source_link(db: State<'_, Db>, id: String) -> PResult<()> {
-    with_db(&db, move |c| store::disconnect_link(c, &id, now_ms()).map(|_| ())).await.map_err(e)
+pub async fn delete_source_link(app: AppHandle, db: State<'_, Db>, id: String) -> PResult<()> {
+    with_db(&db, move |c| store::disconnect_link(c, &id, now_ms()).map(|_| ())).await.map_err(e)?;
+    notify(&app, &[Kind::Sources, Kind::Tasks], None);
+    Ok(())
 }
 
 /// Unlink: la tarea pasa a ser local.
 #[tauri::command]
-pub async fn unlink_task(db: State<'_, Db>, task_id: String) -> PResult<Task> {
+pub async fn unlink_task(app: AppHandle, db: State<'_, Db>, task_id: String) -> PResult<Task> {
     with_db(&db, move |c| {
         let tx = c.transaction()?;
         let t = store::unlink_task(&tx, &task_id, now_ms())?;
@@ -220,6 +225,7 @@ pub async fn unlink_task(db: State<'_, Db>, task_id: String) -> PResult<Task> {
     })
     .await
     .map_err(e)
+    .inspect(|t| notify(&app, &[Kind::Tasks], Some(&t.project_id)))
 }
 
 // ---------- Mapeo de estados ----------
@@ -245,6 +251,7 @@ pub async fn save_state_map(app: AppHandle, db: State<'_, Db>, link_id: String, 
     })
     .await
     .map_err(e)
+    .inspect(|l| notify(&app, &[Kind::Sources], Some(&l.project_id)))
 }
 
 // ---------- Importación ----------
@@ -312,6 +319,7 @@ pub async fn import_tasks(
     let data_dir = app.state::<ProvidersState>().data_dir.clone();
     let mut result = with_db(&db, move |c| import_items(c, &data_dir, &link, pairs, now_ms())).await.map_err(e)?;
     result.skipped.extend(skipped);
+    notify(&app, &[Kind::Tasks], Some(&project_id));
     Ok(result)
 }
 

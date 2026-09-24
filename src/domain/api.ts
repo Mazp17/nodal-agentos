@@ -13,6 +13,7 @@
 // o `serde_with::double_option`): un `Option<Option<T>>` pelado lee `null` como "falta".
 
 import { invoke } from "@tauri-apps/api/core";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type {
   AgentSource,
   ExtKind,
@@ -348,3 +349,20 @@ export const importLegacyData = (folder: string) => invoke<LegacyImportReport>("
 
 export const getSettings = () => invoke<Settings>("get_settings");
 export const setSettings = (settings: Settings) => invoke<Settings>("set_settings", { settings });
+
+// ---------- Eventos ----------
+
+export type ChangedKind = "tasks" | "runs" | "queue" | "sources" | "projects";
+
+/** Payload de `nodal://changed`. Sin `projectId`: puede afectar a cualquier proyecto. */
+export interface ChangedEvent {
+  kind: ChangedKind;
+  projectId?: string;
+}
+
+/**
+ * Avisa cuando algo cambió en el backend (cola, sync o comandos que mutan), con debounce
+ * del lado Rust. No trae datos: volver a pedir lo que se muestra. Devuelve el unlisten.
+ */
+export const onChanged = (cb: (e: ChangedEvent) => void): Promise<UnlistenFn> =>
+  listen<ChangedEvent>("nodal://changed", (ev) => cb(ev.payload));

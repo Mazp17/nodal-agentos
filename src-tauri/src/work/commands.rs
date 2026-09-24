@@ -11,6 +11,7 @@ use tauri::State;
 use crate::db::queries::{projects, relations, repos, runs as qruns, tasks};
 use crate::db::{rows, with_db, DbError};
 use crate::domain::*;
+use crate::events::Kind;
 use crate::runs::{claude_bin, terminal};
 use crate::util::{blocking, check_id, now_ms, paths};
 
@@ -22,6 +23,8 @@ use super::transitions::{RunEnd, NOTE_STOPPED};
 use super::{kick, launch, ops, pump, validate, worktree, Inner, WorkState};
 
 const OPEN_TIMEOUT: Duration = Duration::from_secs(3);
+/// Lo que cambia al encolar, lanzar o cancelar un run.
+const RUN_KINDS: &[Kind] = &[Kind::Runs, Kind::Queue, Kind::Tasks];
 
 /// Corre `f` con la conexión; los errores de `ops` ya vienen listos para mostrar.
 async fn db<T, F>(inner: &Arc<Inner>, f: F) -> Result<T, String>
@@ -50,13 +53,17 @@ pub async fn list_projects(state: State<'_, WorkState>, include_archived: Option
 
 #[tauri::command]
 pub async fn create_project(state: State<'_, WorkState>, input: NewProject) -> Result<Project, String> {
-    db(&state.0, move |c| ops::create_project(c, &input, now_ms())).await
+    let p = db(&state.0, move |c| ops::create_project(c, &input, now_ms())).await?;
+    state.0.events.notify(Kind::Projects, None);
+    Ok(p)
 }
 
 #[tauri::command]
 pub async fn update_project(state: State<'_, WorkState>, id: String, patch: ProjectPatch) -> Result<Project, String> {
     check_id(&id, "project")?;
-    db(&state.0, move |c| ops::update_project(c, &id, &patch, now_ms())).await
+    let p = db(&state.0, move |c| ops::update_project(c, &id, &patch, now_ms())).await?;
+    state.0.events.notify(Kind::Projects, None);
+    Ok(p)
 }
 
 #[tauri::command]
@@ -64,6 +71,7 @@ pub async fn delete_project(state: State<'_, WorkState>, id: String) -> Result<(
     check_id(&id, "project")?;
     let env = state.0.env.clone();
     let task_ids = db(&state.0, move |c| ops::delete_project(c, &id)).await?;
+    state.0.events.notify_all(&[Kind::Projects, Kind::Tasks, Kind::Runs, Kind::Queue, Kind::Sources], None);
     blocking(move || {
         for t in task_ids {
             let _ = std::fs::remove_dir_all(env.plan_dir(&t));
@@ -87,19 +95,25 @@ pub async fn add_repo(state: State<'_, WorkState>, project_id: String, input: Ne
     check_id(&project_id, "project")?;
     let path = input.path.clone();
     let root = blocking(move || paths::require_git_root(&path)).await?;
-    db(&state.0, move |c| ops::add_repo(c, &project_id, &input, &root, now_ms())).await
+    let r = db(&state.0, move |c| ops::add_repo(c, &project_id, &input, &root, now_ms())).await?;
+    state.0.events.notify(Kind::Projects, Some(&r.project_id));
+    Ok(r)
 }
 
 #[tauri::command]
 pub async fn update_repo(state: State<'_, WorkState>, id: String, patch: RepoPatch) -> Result<Repo, String> {
     check_id(&id, "repo")?;
-    db(&state.0, move |c| ops::update_repo(c, &id, &patch)).await
+    let r = db(&state.0, move |c| ops::update_repo(c, &id, &patch)).await?;
+    state.0.events.notify(Kind::Projects, Some(&r.project_id));
+    Ok(r)
 }
 
 #[tauri::command]
 pub async fn delete_repo(state: State<'_, WorkState>, id: String) -> Result<(), String> {
     check_id(&id, "repo")?;
-    db(&state.0, move |c| ops::delete_repo(c, &id)).await
+    db(&state.0, move |c| ops::delete_repo(c, &id)).await?;
+    state.0.events.notify_all(&[Kind::Projects, Kind::Tasks], None);
+    Ok(())
 }
 
 // ---------- Tareas ----------
@@ -121,7 +135,9 @@ pub async fn create_task(state: State<'_, WorkState>, input: NewTask) -> Result<
     check_id(&input.project_id, "project")?;
     check_id(&input.repo_id, "repo")?;
     let env = state.0.env.clone();
-    db(&state.0, move |c| ops::create_task(c, &env, &input, now_ms())).await
+    let t = db(&state.0, move |c| ops::create_task(c, &env, &input, now_ms())).await?;
+    state.0.events.notify(Kind::Tasks, Some(&t.project_id));
+    Ok(t)
 }
 
 #[tauri::command]
@@ -131,20 +147,26 @@ pub async fn update_task(state: State<'_, WorkState>, id: String, patch: TaskPat
         check_id(r, "repo")?;
     }
     let env = state.0.env.clone();
-    db(&state.0, move |c| ops::update_task(c, &env, &id, &patch, now_ms())).await
+    let t = db(&state.0, move |c| ops::update_task(c, &env, &id, &patch, now_ms())).await?;
+    state.0.events.notify(Kind::Tasks, Some(&t.project_id));
+    Ok(t)
 }
 
 #[tauri::command]
 pub async fn delete_task(state: State<'_, WorkState>, id: String) -> Result<(), String> {
     check_id(&id, "task")?;
     let env = state.0.env.clone();
-    db(&state.0, move |c| ops::delete_task(c, &env, &id)).await
+    db(&state.0, move |c| ops::delete_task(c, &env, &id)).await?;
+    state.0.events.notify_all(&[Kind::Tasks, Kind::Runs, Kind::Queue], None);
+    Ok(())
 }
 
 #[tauri::command]
 pub async fn move_task(state: State<'_, WorkState>, id: String, status: TaskStatus, position: f64) -> Result<Task, String> {
     check_id(&id, "task")?;
-    db(&state.0, move |c| ops::move_task(c, &id, status, position, now_ms())).await
+    let t = db(&state.0, move |c| ops::move_task(c, &id, status, position, now_ms())).await?;
+    state.0.events.notify(Kind::Tasks, Some(&t.project_id));
+    Ok(t)
 }
 
 #[tauri::command]
@@ -169,7 +191,9 @@ pub async fn add_task_relation(
 ) -> Result<(), String> {
     check_id(&task_id, "task")?;
     check_id(&other_id, "task")?;
-    db(&state.0, move |c| ops::add_relation(c, &task_id, &other_id, kind)).await
+    db(&state.0, move |c| ops::add_relation(c, &task_id, &other_id, kind)).await?;
+    state.0.events.notify(Kind::Tasks, None);
+    Ok(())
 }
 
 #[tauri::command]
@@ -181,7 +205,9 @@ pub async fn remove_task_relation(
 ) -> Result<(), String> {
     check_id(&task_id, "task")?;
     check_id(&other_id, "task")?;
-    db(&state.0, move |c| ops::remove_relation(c, &task_id, &other_id, kind)).await
+    db(&state.0, move |c| ops::remove_relation(c, &task_id, &other_id, kind)).await?;
+    state.0.events.notify(Kind::Tasks, None);
+    Ok(())
 }
 
 /// "Clean up": borra el worktree y la rama de la tarea. Rechaza con runs en curso.
@@ -200,14 +226,16 @@ pub async fn cleanup_worktree(state: State<'_, WorkState>, task_id: String) -> R
     .await?;
     let Some(wt) = task.worktree.clone() else { return Ok(task) };
     blocking(move || worktree::cleanup(Path::new(&repo.path), &wt)).await?;
-    db(&state.0, move |c| {
+    let t = db(&state.0, move |c| {
         let mut t = tasks::get(c, &task_id)?;
         t.worktree = None;
         t.updated_at = now_ms();
         tasks::update(c, &t)?;
         Ok(t)
     })
-    .await
+    .await?;
+    state.0.events.notify(Kind::Tasks, Some(&t.project_id));
+    Ok(t)
 }
 
 // ---------- Ejecutores y runs ----------
@@ -241,6 +269,7 @@ pub async fn launch_task(state: State<'_, WorkState>, task_id: String, input: Op
     let input = input.unwrap_or_default();
     let run = db(&state.0, move |c| launch::enqueue_work(c, &env, &task_id, &input, false, now_ms())).await?;
     kick(&state.0);
+    state.0.events.notify_all(RUN_KINDS, None);
     Ok(run)
 }
 
@@ -256,6 +285,7 @@ pub async fn hand_off(
     let input = LaunchInput { executor: Some(executor), extra_instructions, ..Default::default() };
     let run = db(&state.0, move |c| launch::enqueue_work(c, &env, &task_id, &input, true, now_ms())).await?;
     kick(&state.0);
+    state.0.events.notify_all(RUN_KINDS, None);
     Ok(run)
 }
 
@@ -265,6 +295,7 @@ pub async fn review_now(state: State<'_, WorkState>, task_id: String, reviewer: 
     let env = state.0.env.clone();
     let run = db(&state.0, move |c| launch::enqueue_review(c, &env, &task_id, reviewer.as_deref(), now_ms())).await?;
     kick(&state.0);
+    state.0.events.notify_all(RUN_KINDS, None);
     Ok(run)
 }
 
@@ -275,6 +306,7 @@ pub async fn confirm_run(state: State<'_, WorkState>, run_id: String) -> Result<
     let env = state.0.env.clone();
     let run = db(&state.0, move |c| launch::confirm_legacy(c, &env, &run_id, now_ms())).await?;
     kick(&state.0);
+    state.0.events.notify_all(RUN_KINDS, None);
     Ok(run)
 }
 
@@ -283,7 +315,9 @@ pub async fn reorder_queue(state: State<'_, WorkState>, run_ids: Vec<String>) ->
     for id in &run_ids {
         check_id(id, "run")?;
     }
-    db(&state.0, move |c| Ok(qruns::reorder_queue(c, &run_ids)?)).await
+    db(&state.0, move |c| Ok(qruns::reorder_queue(c, &run_ids)?)).await?;
+    state.0.events.notify(Kind::Queue, None);
+    Ok(())
 }
 
 /// Base del diff de un run: la del worktree de la tarea si el run corrió ahí.
@@ -296,8 +330,14 @@ fn diff_base(task: Option<&Task>, run: &Run) -> Option<String> {
 /// patch en `<app_data>/runs/<id>/stopped.patch` y la tarea pasa a Blocked.
 #[tauri::command]
 pub async fn cancel_run(state: State<'_, WorkState>, run_id: String) -> Result<Run, String> {
+    let r = cancel_run_inner(&state.0, run_id).await;
+    state.0.events.notify_all(RUN_KINDS, None);
+    r
+}
+
+async fn cancel_run_inner(inner: &Arc<Inner>, run_id: String) -> Result<Run, String> {
     check_id(&run_id, "run")?;
-    let inner = state.0.clone();
+    let inner = inner.clone();
     // Con el turno de la cola: la pasada no puede cerrar este run en el medio (quedaría
     // `finished`, sin la nota del patch, y hasta con el revisor encolado).
     let _turn = inner.pump.lock().await;
@@ -554,6 +594,7 @@ pub async fn get_settings(state: State<'_, WorkState>) -> Result<Settings, Strin
 #[tauri::command]
 pub async fn set_settings(state: State<'_, WorkState>, settings: Settings) -> Result<Settings, String> {
     let s = db(&state.0, move |c| ops::set_settings(c, &settings)).await?;
+    state.0.events.notify(Kind::Projects, None);
     // Más concurrencia puede liberar lugar para lo encolado.
     kick(&state.0);
     Ok(s)
