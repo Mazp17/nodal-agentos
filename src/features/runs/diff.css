@@ -41,6 +41,8 @@
 .diff-add, .diff-del { flex: none; font-family: var(--font-mono); font-size: var(--fs-2xs); }
 .diff-add { color: var(--green); }
 .diff-del { color: var(--red); }
+/* Totals in the header: same color, surrounding text size. */
+.diff-sub .diff-add, .diff-sub .diff-del { font-family: inherit; font-size: inherit; }
 
 .diff-view { min-width: 0; display: flex; flex-direction: column; }
 .diff-view-head { display: flex; align-items: center; gap: var(--sp-4); padding: var(--sp-3) var(--sp-6); border-bottom: 1px solid var(--border); }
