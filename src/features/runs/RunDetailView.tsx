@@ -622,7 +622,7 @@ function CriteriaList({ unmet, label = "Acceptance criteria" }: { unmet: string[
               <span className="rd-res-mark tone-danger" aria-hidden>
                 ✕
               </span>
-              <SafeMarkdown text={u} className="md-compact" />
+              <SafeMarkdown text={u} className="md-compact" breaks />
             </li>
           ))}
         </ul>
@@ -642,7 +642,7 @@ function NitsList({ nits }: { nits: string[] }) {
             <span className="rd-res-mark tone-muted" aria-hidden>
               ·
             </span>
-            <SafeMarkdown text={n} className="md-compact" />
+            <SafeMarkdown text={n} className="md-compact" breaks />
           </li>
         ))}
       </ul>
@@ -654,7 +654,7 @@ function VerdictBody({ verdict }: { verdict: Verdict }) {
   return (
     <>
       <StatusLine tone={verdict.pass ? "ok" : "danger"} label={verdict.pass ? "Review passed" : "Review failed"} />
-      {verdict.summary && <SafeMarkdown text={verdict.summary} />}
+      {verdict.summary && <SafeMarkdown text={verdict.summary} breaks />}
       <CriteriaList unmet={verdict.unmet} />
       <NitsList nits={verdict.nits} />
     </>
@@ -714,7 +714,7 @@ function ResultCard({
               tone={view.tab === "failed" && !run.outcome ? "danger" : OUTCOME_TONE[outcome]}
               label={view.tab === "failed" && !run.outcome ? view.label : OUTCOME_LABEL[outcome]}
             />
-            {run.summary && <SafeMarkdown text={run.summary} />}
+            {run.summary && <SafeMarkdown text={run.summary} breaks />}
           </>
         )}
         {run.error && view.phase !== "failed" && <p className="rd-result-note">{run.error}</p>}

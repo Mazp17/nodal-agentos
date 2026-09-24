@@ -1,5 +1,6 @@
 import { memo } from "react";
 import Markdown, { type Components } from "react-markdown";
+import remarkBreaks from "remark-breaks";
 import remarkGfm from "remark-gfm";
 import { EXTERNAL, ExternalLink } from "./ExternalLink";
 import "./markdown.css";
@@ -46,11 +47,22 @@ const components: Components = {
 };
 
 const plugins = [remarkGfm];
+// Agent output is often plain text with single line breaks; keep them.
+const pluginsWithBreaks = [remarkGfm, remarkBreaks];
 
-export const SafeMarkdown = memo(function SafeMarkdown({ text, className }: { text: string; className?: string }) {
+export const SafeMarkdown = memo(function SafeMarkdown({
+  text,
+  className,
+  breaks = false,
+}: {
+  text: string;
+  className?: string;
+  /** Render single line breaks as <br>, for plain-text agent output. */
+  breaks?: boolean;
+}) {
   return (
     <div className={`md ${className ?? ""}`}>
-      <Markdown remarkPlugins={plugins} skipHtml components={components}>
+      <Markdown remarkPlugins={breaks ? pluginsWithBreaks : plugins} skipHtml components={components}>
         {text}
       </Markdown>
     </div>

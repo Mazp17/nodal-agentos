@@ -7,9 +7,6 @@
   overflow-wrap: anywhere;
   min-width: 0;
 }
-/* Inside a list item or a card line: take the surrounding text size and color. */
-.md-compact { font-size: inherit; line-height: inherit; color: inherit; }
-.md-compact p { margin: 0 0 var(--sp-1); }
 .md > :first-child { margin-top: 0; }
 .md > :last-child { margin-bottom: 0; }
 .md p, .md ul, .md ol, .md pre, .md blockquote, .md table { margin: 0 0 var(--sp-3); }
@@ -54,3 +51,9 @@
 .md th, .md td { border: 1px solid var(--border-2); padding: var(--sp-1) var(--sp-3); text-align: left; }
 .md th { font-weight: var(--fw-semibold); color: var(--text-2); }
 .md-img-link { font-size: var(--fs-md); color: var(--text-subtle); }
+
+/* Inside a list item or a card line: take the surrounding text size and color. */
+.md.md-compact { font-size: inherit; line-height: inherit; color: inherit; }
+.md.md-compact :is(p, ul, ol, pre, blockquote, table) { margin: 0 0 var(--sp-1); }
+.md.md-compact :is(h1, h2, h3, h4, h5, h6) { margin: 0 0 var(--sp-1); font-size: inherit; }
+.md.md-compact :is(ul, ol) { padding-left: var(--sp-5); }
