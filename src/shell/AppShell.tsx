@@ -327,13 +327,11 @@ export function AppShell() {
         );
         break;
       case "settings":
-        content = (
-<SettingsView section={nav.settingsSection} onSection={nav.setSettingsSection} />
-        );
+        content = <SettingsView section={nav.settingsSection} onSection={nav.setSettingsSection} />;
         break;
       case "run":
         content = route.runId ? (
-          <RunDetailView key={route.runId} runId={route.runId} onBack={nav.back} onOpenTask={openTask} onOpenRun={openRun} />
+          <RunDetailView key={route.runId} runId={route.runId} onBack={nav.back} onOpenTask={openTask} onOpenRun={openRun} onOpenDiff={setDiffRunId} />
         ) : null;
         break;
     }

@@ -7,7 +7,6 @@ import { useRunActions } from "./actions";
 import { AGENT_STATUS, AgentTranscript, modelName } from "./AgentTranscript";
 import { classifyLaunchError, LaunchBlockerNotice, useLaunchBlocker } from "./LaunchBlockerNotice";
 import { RunBadge } from "./RunBadge";
-import { RunDiffDrawer } from "./RunDiffDrawer";
 import {
   executorKindLabel,
   executorLabel,
@@ -28,6 +27,8 @@ export interface RunDetailViewProps {
   onOpenTask: (taskId: string) => void;
   /** Para saltar al revisor de este run (o al run que revisa). */
   onOpenRun?: (runId: string) => void;
+  /** Abre el diff en el drawer que monta el shell. */
+  onOpenDiff: (runId: string) => void;
 }
 
 function openPr(url: string) {
@@ -40,11 +41,10 @@ function lastAction(a: AgentInfo): string {
 }
 
 /** Pantalla "Run detail": cabecera, avisos, fases y subagentes (o sesión), y resultado. */
-export function RunDetailView({ runId, onBack, onOpenTask, onOpenRun }: RunDetailViewProps) {
+export function RunDetailView({ runId, onBack, onOpenTask, onOpenRun, onOpenDiff }: RunDetailViewProps) {
   const { view, state } = useRun(runId);
   const actions = useRunActions();
   const [agentIdx, setAgentIdx] = useState<number | null>(null);
-  const [diffOpen, setDiffOpen] = useState(false);
   const blocker = useLaunchBlocker(view);
 
   if (!view) {
@@ -150,7 +150,7 @@ export function RunDetailView({ runId, onBack, onOpenTask, onOpenRun }: RunDetai
             state={state}
             name={name}
             actions={actions}
-            onDiff={() => setDiffOpen(true)}
+            onDiff={() => onOpenDiff(run.id)}
             onBack={onBack}
           />
         </div>
@@ -236,7 +236,6 @@ export function RunDetailView({ runId, onBack, onOpenTask, onOpenRun }: RunDetai
           onClose={() => setAgentIdx(null)}
         />
       )}
-      {diffOpen && <RunDiffDrawer runId={run.id} onClose={() => setDiffOpen(false)} />}
     </div>
   );
 }
