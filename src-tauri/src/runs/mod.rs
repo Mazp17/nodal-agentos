@@ -47,7 +47,8 @@ pub struct ExtraFlags {
     /// `--disallowedTools A,B,C` (separadas por coma: la opción es variádica y, con
     /// espacios, se come el prompt; verificado en el spike con 2.1.281).
     pub disallowed_tools: Vec<String>,
-    /// `--append-system-prompt <text>`: un solo argumento, sin escapar (no hay shell).
+    /// `--append-system-prompt <text>`: un solo argumento, sin escapar (no hay shell);
+    /// verificado con 2.1.282, también con `--agent` (`real_launch_with_append_system_prompt`).
     pub append_system_prompt: Option<String>,
 }
 
@@ -372,6 +373,23 @@ mod tests {
         let err = tauri::async_runtime::block_on(launch_with("/no/existe".into(), "x".into(), &LaunchOptions::default(), &ExtraFlags::default()))
             .unwrap_err();
         assert_eq!(err, "The folder doesn't exist or isn't a directory: /no/existe");
+    }
+
+    /// Contra el `claude` real: `cargo test -- --ignored`. Lanza dos runs (solo y con
+    /// `--agent code-reviewer`, que tiene que existir en `~/.claude/agents`) y los detiene.
+    #[test]
+    #[ignore]
+    fn real_launch_with_append_system_prompt() {
+        let cwd = env!("CARGO_MANIFEST_DIR").to_string();
+        let prompt = "Reply with the single word OK.".to_string();
+        let sp = Some(crate::work::launch::UNATTENDED_SYSTEM_PROMPT.to_string());
+        for agent in [None, Some("code-reviewer".to_string())] {
+            let extra = ExtraFlags { agent: agent.clone(), append_system_prompt: sp.clone(), ..Default::default() };
+            let run = tauri::async_runtime::block_on(launch_with(cwd.clone(), prompt.clone(), &LaunchOptions::default(), &extra))
+                .unwrap_or_else(|e| panic!("launch with agent {agent:?}: {e}"));
+            eprintln!("agent {agent:?} -> backgrounded · {}", run.id);
+            tauri::async_runtime::block_on(terminal::stop(&run.id)).expect("stop");
+        }
     }
 
     #[test]
