@@ -1,0 +1,9 @@
+{
+  "repos": [
+    { "teamId": "team-eng", "path": "/Users/me/Code/acme-api", "model": "opus", "effort": "high", "finish": "branch" },
+    { "teamId": "team-eng", "projectId": "proj-web", "path": "/Users/me/Code/acme-web/" },
+    { "projectId": "proj-mobile", "path": "/Users/me/Code/acme-mobile", "permissionMode": "acceptEdits" },
+    { "teamId": "team-x", "path": 5 }
+  ],
+  "concurrency": 5
+}
