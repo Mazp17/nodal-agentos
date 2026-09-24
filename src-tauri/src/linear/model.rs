@@ -97,7 +97,7 @@ pub struct Board {
 
 // ---- Formas crudas de la respuesta GraphQL ----
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize)]
 pub struct Connection<T> {
     pub nodes: Vec<T>,
 }
@@ -219,6 +219,260 @@ pub fn team_filter(team_ids: Option<&[String]>) -> Value {
         Some(ids) => json!({ "id": { "in": ids } }),
         None => Value::Null,
     }
+}
+
+// ---- Sync con Nodal (providers::linear) ----
+//
+// Campos y argumentos verificados contra el schema oficial del SDK
+// (github.com/linear/linear, packages/sdk/src/schema.graphql, 2026-09):
+// - `Query.issues(filter: IssueFilter, first, after, includeArchived, orderBy)`,
+//   `Query.workflowStates(filter: WorkflowStateFilter, first)`, `Query.project(id: String!)`,
+//   `Query.projects(filter: ProjectFilter, first)`;
+// - `IssueFilter.{id: IssueIDComparator{in: [ID!]}, team: TeamFilter, project:
+//   NullableProjectFilter{id}, state: WorkflowStateFilter{type}, title: StringComparator
+//   {containsIgnoreCase}, number: NumberComparator{eq}, createdAt: DateComparator{gt}, or}`;
+// - `ProjectFilter.status: ProjectStatusFilter{type}` (`ProjectStatusType`: backlog, planned,
+//   started, paused, completed, canceled);
+// - `Issue.{id, identifier, title, url, description (markdown), priority: Float!, updatedAt,
+//   state, team, project, assignee, parent, labels(first), children(first)}`;
+// - `Mutation.issueUpdate(id: String!, input: IssueUpdateInput{stateId})` y
+//   `Mutation.commentCreate(input: CommentCreateInput{issueId, body})`, ambos con `success`
+//   (`IssuePayload.issue` trae el estado resultante);
+// - `Query.workflowState(id: String!)` y `Team.states(first)` para resolver el push.
+
+/// Página del listado de importables. Chico a propósito: cada issue trae `labels(first: 20)`.
+pub const SYNC_PAGE_SIZE: u32 = 25;
+/// Ids por query de `issues_by_ids`. Con `children(50)` + `labels(20)` por issue la query
+/// queda en unos miles de puntos de complejidad (estimado, sin medir), bajo el límite de 10k.
+pub const PULL_BATCH: usize = 25;
+
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+pub struct NameNode {
+    pub name: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SyncIssueRef {
+    pub id: String,
+    pub identifier: String,
+    pub title: String,
+    pub url: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SyncChild {
+    pub id: String,
+    pub identifier: String,
+    pub title: String,
+    pub url: String,
+    pub state: WorkflowState,
+}
+
+/// Issue tal como la usa el sync. El listado no pide `description`, `parent`, `children` ni
+/// `assignee`: llegan vacíos.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SyncIssue {
+    pub id: String,
+    pub identifier: String,
+    pub title: String,
+    pub url: String,
+    pub priority: f64,
+    pub updated_at: String,
+    #[serde(default)]
+    pub description: Option<String>,
+    pub state: WorkflowState,
+    pub team: Team,
+    #[serde(default)]
+    pub project: Option<ProjectRef>,
+    #[serde(default)]
+    pub assignee: Option<UserRef>,
+    #[serde(default)]
+    pub parent: Option<SyncIssueRef>,
+    pub labels: Connection<NameNode>,
+    #[serde(default)]
+    pub children: Option<Connection<SyncChild>>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct SyncIssuesData {
+    pub issues: PagedConnection<SyncIssue>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ProjectsData {
+    pub projects: Connection<ProjectRef>,
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+pub struct ScopedState {
+    #[serde(flatten)]
+    pub state: WorkflowState,
+    pub team: Team,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkflowStatesData {
+    pub workflow_states: Connection<ScopedState>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ProjectTeams {
+    pub teams: Connection<Team>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ProjectTeamsData {
+    pub project: ProjectTeams,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct Success {
+    pub success: bool,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct IssueStateRef {
+    pub state: WorkflowState,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct IssueUpdatePayload {
+    pub success: bool,
+    pub issue: Option<IssueStateRef>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct IssueUpdateData {
+    pub issue_update: IssueUpdatePayload,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct TeamWithStates {
+    pub states: Connection<WorkflowState>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct IssueTeam {
+    pub team: TeamWithStates,
+}
+
+/// Estados del team de la issue y el estado destino, para resolver el push (ver
+/// `pick_team_state`).
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct IssueTeamStatesData {
+    pub issue: IssueTeam,
+    pub workflow_state: WorkflowState,
+}
+
+/// Estado del team de la issue equivalente a `target`: el mismo id; si no (el mapeo es de
+/// otro team, en un proyecto multi-team), el del mismo nombre y tipo; si no, el del mismo
+/// nombre.
+pub fn pick_team_state<'a>(team: &'a [WorkflowState], target: &WorkflowState) -> Option<&'a WorkflowState> {
+    let same_name = |s: &&WorkflowState| s.name.trim().eq_ignore_ascii_case(target.name.trim());
+    team.iter()
+        .find(|s| s.id == target.id)
+        .or_else(|| team.iter().filter(same_name).find(|s| s.state_type == target.state_type))
+        .or_else(|| team.iter().find(same_name))
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CommentCreateData {
+    pub comment_create: Success,
+}
+
+pub const PROJECTS_QUERY: &str = r#"query NodalProjects {
+  projects(first: 100, filter: { status: { type: { nin: ["completed", "canceled"] } } }) {
+    nodes { id name }
+  }
+}"#;
+
+pub const PROJECT_TEAMS_QUERY: &str = "query NodalProjectTeams($id: String!) {
+  project(id: $id) { teams(first: 20) { nodes { id key name } } }
+}";
+
+pub const WORKFLOW_STATES_QUERY: &str = "query NodalStates($teamIds: [ID!]) {
+  workflowStates(first: 100, filter: { team: { id: { in: $teamIds } } }) {
+    nodes { id name type position color team { id key name } }
+  }
+}";
+
+pub const IMPORTABLE_QUERY: &str = "query NodalImportable($filter: IssueFilter, $first: Int!, $after: String) {
+  issues(filter: $filter, first: $first, after: $after, orderBy: updatedAt) {
+    nodes {
+      id identifier title url priority updatedAt
+      state { id name type position color }
+      team { id key name }
+      project { id name }
+      labels(first: 20) { nodes { name } }
+    }
+    pageInfo { hasNextPage endCursor }
+  }
+}";
+
+pub const ISSUES_BY_IDS_QUERY: &str = "query NodalIssues($ids: [ID!], $first: Int!) {
+  issues(filter: { id: { in: $ids } }, first: $first, includeArchived: true) {
+    nodes {
+      id identifier title url priority updatedAt description
+      state { id name type position color }
+      team { id key name }
+      project { id name }
+      assignee { id name displayName }
+      parent { id identifier title url }
+      labels(first: 20) { nodes { name } }
+      children(first: 50) { nodes { id identifier title url state { id name type position color } } }
+    }
+    pageInfo { hasNextPage endCursor }
+  }
+}";
+
+pub const ISSUE_TEAM_STATES_QUERY: &str = "query NodalIssueTeamStates($id: String!, $stateId: String!) {
+  issue(id: $id) { team { states(first: 100) { nodes { id name type position color } } } }
+  workflowState(id: $stateId) { id name type position color }
+}";
+
+pub const SET_STATE_MUTATION: &str = "mutation NodalSetState($id: String!, $stateId: String!) {
+  issueUpdate(id: $id, input: { stateId: $stateId }) { success issue { state { id name type position color } } }
+}";
+
+pub const COMMENT_MUTATION: &str = "mutation NodalComment($issueId: String!, $body: String!) {
+  commentCreate(input: { issueId: $issueId, body: $body }) { success }
+}";
+
+/// Filtro del listado de importables: scope (`team` o `project`), tipos de estado, texto
+/// (título, o número si parece un identifier `ENG-12` / `12`) y creadas después de una fecha.
+pub fn importable_filter(
+    scope_kind: &str,
+    scope_id: &str,
+    state_types: &[&str],
+    text: Option<&str>,
+    created_after_iso: Option<&str>,
+) -> Value {
+    let mut and = vec![match scope_kind {
+        "project" => json!({ "project": { "id": { "eq": scope_id } } }),
+        _ => json!({ "team": { "id": { "eq": scope_id } } }),
+    }];
+    if !state_types.is_empty() {
+        and.push(json!({ "state": { "type": { "in": state_types } } }));
+    }
+    if let Some(t) = text.map(str::trim).filter(|t| !t.is_empty()) {
+        let mut or = vec![json!({ "title": { "containsIgnoreCase": t } })];
+        let digits = t.rsplit_once('-').map(|(_, n)| n).unwrap_or(t);
+        if let Ok(n) = digits.parse::<u32>() {
+            or.push(json!({ "number": { "eq": n } }));
+        }
+        and.push(json!({ "or": or }));
+    }
+    if let Some(iso) = created_after_iso {
+        and.push(json!({ "createdAt": { "gt": iso } }));
+    }
+    json!({ "and": and })
 }
 
 // ---- Interpretación de respuestas ----

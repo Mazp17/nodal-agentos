@@ -15,6 +15,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import type {
   AgentSource,
+  ExtKind,
   Executor,
   ExternalState,
   Finish,
@@ -188,9 +189,15 @@ export interface ImportResult {
 }
 
 export interface SyncReport {
+  /** Tareas refrescadas desde el proveedor. */
   pulled: number;
+  /** Escrituras en el proveedor (estados y comentarios). */
   pushed: number;
+  /** Tareas nuevas por auto-import. */
+  imported: number;
   errors: string[];
+  /** Avisos: estados nuevos/desaparecidos, ítems sin repo para el auto-import, pushes descartados. */
+  notices: string[];
 }
 
 export type MapOrigin = "suggested" | "confirmed" | "unmapped";
@@ -303,41 +310,30 @@ export const openWorktree = (runId: string) => invoke<void>("open_worktree", { r
 
 // ---------- Proveedores ----------
 
-// TODO(F1-C)
 export const providerStatus = (provider: string) => invoke<ProviderStatus>("provider_status", { provider });
-/** `null` borra la key del keychain. */
-// TODO(F1-C)
+/** Valida la key y la guarda en el keychain; `null` la borra. */
 export const providerSetKey = (provider: string, key: string | null) =>
   invoke<ProviderStatus>("provider_set_key", { provider, key });
-// TODO(F1-C)
+export const providerClearKey = (provider: string) => invoke<ProviderStatus>("provider_clear_key", { provider });
 export const providerScopes = (provider: string) => invoke<ScopeRef[]>("provider_scopes", { provider });
-// TODO(F1-C)
 export const listSourceLinks = (projectId: string | null) => invoke<SourceLink[]>("list_source_links", { projectId });
 /** Arma la propuesta de mapeo de estados; queda "pendiente" hasta `saveStateMap`. */
-// TODO(F1-C)
 export const createSourceLink = (input: NewSourceLink) => invoke<SourceLink>("create_source_link", { input });
-// TODO(F1-C)
 export const updateSourceLink = (id: string, patch: SourceLinkPatch) =>
   invoke<SourceLink>("update_source_link", { id, patch });
 /** Disconnect: desvincula sus tareas (quedan locales) y borra el link, en una transacción. */
-// TODO(F1-C)
 export const deleteSourceLink = (id: string) => invoke<void>("delete_source_link", { id });
 /** Unlink: la tarea pasa a ser local. */
-// TODO(F1-C)
 export const unlinkTask = (taskId: string) => invoke<Task>("unlink_task", { taskId });
-// TODO(F1-C)
-export const providerListImportable = (linkId: string, query: string | null = null) =>
-  invoke<ImportableItem[]>("provider_list_importable", { linkId, query });
-// TODO(F1-C)
+/** Hasta 100 ítems del scope. `stateKinds` null o vacío = abiertos (triage, backlog, unstarted, started). */
+export const providerListImportable = (linkId: string, query: string | null = null, stateKinds: ExtKind[] | null = null) =>
+  invoke<ImportableItem[]>("provider_list_importable", { linkId, query, stateKinds });
 export const importTasks = (projectId: string, linkId: string, items: { externalId: string; repoId: string }[]) =>
   invoke<ImportResult>("import_tasks", { projectId, linkId, items });
 /** `null`: todas las fuentes. */
-// TODO(F1-C)
 export const syncNow = (linkId: string | null = null) => invoke<SyncReport>("sync_now", { linkId });
-// TODO(F1-C)
 export const sourceStates = (linkId: string) => invoke<SourceStatesReport>("source_states", { linkId });
 /** Guarda y confirma el mapeo (fija `confirmedAt` y `knownStates`). */
-// TODO(F1-C)
 export const saveStateMap = (linkId: string, map: StateMap) => invoke<SourceLink>("save_state_map", { linkId, map });
 
 // ---------- Migración ----------

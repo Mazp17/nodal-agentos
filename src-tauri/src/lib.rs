@@ -3,6 +3,7 @@ mod db;
 mod domain;
 mod linear;
 mod migrate;
+mod providers;
 mod runs;
 mod secrets;
 mod util;
@@ -42,6 +43,8 @@ pub fn run() {
                 }
                 Err(e) => eprintln!("nodal.db: {e}"),
             }
+            // F1-C: sync de proveedores (worker cada 60 s). Sin base, el worker no hace nada.
+            providers::init(app.handle())?;
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -95,6 +98,20 @@ pub fn run() {
             work::commands::open_worktree,
             work::commands::get_settings,
             work::commands::set_settings,
+            providers::commands::provider_status,
+            providers::commands::provider_set_key,
+            providers::commands::provider_clear_key,
+            providers::commands::provider_scopes,
+            providers::commands::list_source_links,
+            providers::commands::create_source_link,
+            providers::commands::update_source_link,
+            providers::commands::delete_source_link,
+            providers::commands::unlink_task,
+            providers::commands::source_states,
+            providers::commands::save_state_map,
+            providers::commands::provider_list_importable,
+            providers::commands::import_tasks,
+            providers::commands::sync_now,
             activity::repo_activity,
             activity::activity_summary,
             migrate::import_legacy_data,
