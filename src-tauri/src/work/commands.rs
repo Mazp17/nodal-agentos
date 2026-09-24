@@ -238,27 +238,37 @@ pub async fn worktree_status(state: State<'_, WorkState>, task_id: String) -> Re
 
 /// "Clean up": borra el worktree y la rama de la tarea. Rechaza con runs en curso y, sin
 /// `force`, si hay commits sin publicar o cambios sin commitear.
+///
+/// La tarea queda marcada en `cleaning` (en la misma sección que chequea los pendientes,
+/// con la base tomada) hasta el final: mientras tanto `enqueue_work` la rechaza, así un
+/// launch no reusa el worktree que se está borrando.
 #[tauri::command]
 pub async fn cleanup_worktree(state: State<'_, WorkState>, task_id: String, force: Option<bool>) -> Result<Task, String> {
     check_id(&task_id, "task")?;
     let force = force.unwrap_or(false);
-    let id = task_id.clone();
-    let (task, repo) = db(&state.0, move |c| {
+    let (id, cleaning) = (task_id.clone(), state.0.cleaning.clone());
+    let (task, repo, _guard) = db(&state.0, move |c| {
         let t = tasks::get(c, &id)?;
+        let guard = cleaning.mark(&id).ok_or("The task's worktree is already being cleaned up.")?;
         if !qruns::pending_for_task(c, &id)?.is_empty() {
-            return Err("The task has a queued or running run: cancel it first.".into());
+            return Err(PENDING_ERR.into());
         }
         let r = repos::get(c, &t.repo_id)?;
-        Ok((t, r))
+        Ok((t, r, guard))
     })
     .await?;
     let Some(wt) = task.worktree.clone() else { return Ok(task) };
+    let (dbh, id) = (state.0.db.clone(), task_id.clone());
     blocking(move || {
         let repo = Path::new(&repo.path);
         if !force {
             if let Some(why) = worktree::cleanup_blocker(&worktree::status(repo, Some(&wt))?) {
                 return Err(why);
             }
+        }
+        // Con la marca puesta no puede aparecer un run nuevo; se vuelve a mirar por las dudas.
+        if !qruns::pending_for_task(&launch::lock(&dbh), &id)?.is_empty() {
+            return Err(PENDING_ERR.into());
         }
         worktree::cleanup(repo, &wt)
     })
@@ -274,6 +284,8 @@ pub async fn cleanup_worktree(state: State<'_, WorkState>, task_id: String, forc
     state.0.events.notify(Kind::Tasks, Some(&t.project_id));
     Ok(t)
 }
+
+const PENDING_ERR: &str = "The task has a queued or running run: cancel it first.";
 
 // ---------- Ejecutores y runs ----------
 
@@ -357,7 +369,8 @@ pub async fn launch_task(state: State<'_, WorkState>, task_id: String, input: Op
     check_id(&task_id, "task")?;
     let env = state.0.env.clone();
     let input = input.unwrap_or_default();
-    let run = db(&state.0, move |c| launch::enqueue_work(c, &env, &task_id, &input, false, now_ms())).await?;
+    let (dbh, cleaning) = (state.0.db.clone(), state.0.cleaning.clone());
+    let run = blocking(move || launch::enqueue_work(&dbh, &env, &cleaning, &task_id, &input, false, now_ms())).await?;
     kick(&state.0);
     state.0.events.notify_all(RUN_KINDS, None);
     Ok(run)
@@ -373,7 +386,8 @@ pub async fn hand_off(
     check_id(&task_id, "task")?;
     let env = state.0.env.clone();
     let input = LaunchInput { executor: Some(executor), extra_instructions, ..Default::default() };
-    let run = db(&state.0, move |c| launch::enqueue_work(c, &env, &task_id, &input, true, now_ms())).await?;
+    let (dbh, cleaning) = (state.0.db.clone(), state.0.cleaning.clone());
+    let run = blocking(move || launch::enqueue_work(&dbh, &env, &cleaning, &task_id, &input, true, now_ms())).await?;
     kick(&state.0);
     state.0.events.notify_all(RUN_KINDS, None);
     Ok(run)
@@ -383,7 +397,8 @@ pub async fn hand_off(
 pub async fn review_now(state: State<'_, WorkState>, task_id: String, reviewer: Option<String>) -> Result<Run, String> {
     check_id(&task_id, "task")?;
     let env = state.0.env.clone();
-    let run = db(&state.0, move |c| launch::enqueue_review(c, &env, &task_id, reviewer.as_deref(), now_ms())).await?;
+    let (dbh, cleaning) = (state.0.db.clone(), state.0.cleaning.clone());
+    let run = blocking(move || launch::enqueue_review(&dbh, &env, &cleaning, &task_id, reviewer.as_deref(), now_ms())).await?;
     kick(&state.0);
     state.0.events.notify_all(RUN_KINDS, None);
     Ok(run)
@@ -394,7 +409,8 @@ pub async fn review_now(state: State<'_, WorkState>, task_id: String, reviewer: 
 pub async fn confirm_run(state: State<'_, WorkState>, run_id: String) -> Result<Run, String> {
     check_id(&run_id, "run")?;
     let env = state.0.env.clone();
-    let run = db(&state.0, move |c| launch::confirm_legacy(c, &env, &run_id, now_ms())).await?;
+    let (dbh, cleaning) = (state.0.db.clone(), state.0.cleaning.clone());
+    let run = blocking(move || launch::confirm_legacy(&dbh, &env, &cleaning, &run_id, now_ms())).await?;
     kick(&state.0);
     state.0.events.notify_all(RUN_KINDS, None);
     Ok(run)
@@ -522,9 +538,10 @@ async fn cancel_run_inner(inner: &Arc<Inner>, run_id: String) -> Result<Run, Str
             let id = run.id.clone();
             let (env2, executor) = (env.clone(), run.executor.clone());
             let (_, manages) = blocking(move || Ok(pump::workflow_meta(&env2, repo_path.as_deref(), &executor))).await?;
-            db(&inner, move |c| {
-                pump::apply_end(c, &env, &run, &end, RunStatus::Canceled, manages.as_deref(), now_ms())?;
-                Ok(qruns::get(c, &id)?)
+            let dbh = inner.db.clone();
+            blocking(move || {
+                pump::apply_end(&dbh, &env, &run, &end, RunStatus::Canceled, manages.as_deref(), now_ms())?;
+                Ok(qruns::get(&launch::lock(&dbh), &id)?)
             })
             .await
         }

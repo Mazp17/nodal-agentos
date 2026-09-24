@@ -6,12 +6,13 @@
 //! Los prompts no empiezan con `#` ni `/` (Claude Code los tomaría como atajo o comando).
 
 use std::path::Path;
+use std::sync::MutexGuard;
 
 use rusqlite::Connection;
 use serde::Serialize;
 
 use crate::db::queries::{projects, repos, runs as qruns, tasks};
-use crate::db::rows;
+use crate::db::{rows, Db};
 use crate::domain::*;
 use crate::runs::ExtraFlags;
 use crate::util::new_id;
@@ -19,7 +20,7 @@ use crate::util::new_id;
 use super::dto::LaunchInput;
 use super::executors::{self, ExecutorInfo};
 use super::transitions::executor_label;
-use super::{diff, ops, validate, worktree, Env};
+use super::{diff, ops, validate, worktree, Cleaning, Env, CLEANING_ERR};
 
 /// Tools que el revisor no puede usar (`--disallowedTools`).
 pub const REVIEW_DISALLOWED: [&str; 3] = ["Edit", "Write", "NotebookEdit"];
@@ -408,9 +409,10 @@ fn lookup(env: &Env, repo: &Repo, executor: &Executor) -> Result<Option<Executor
     }
 }
 
-fn check_no_pending(conn: &Connection, task_id: &str) -> Result<(), String> {
+/// Sin runs pendientes para la tarea (salvo `ignore`: el run migrado que se reemplaza).
+fn check_no_pending(conn: &Connection, task_id: &str, ignore: Option<&str>) -> Result<(), String> {
     let pending = qruns::pending_for_task(conn, task_id)?;
-    match pending.first() {
+    match pending.iter().find(|r| Some(r.id.as_str()) != ignore) {
         None => Ok(()),
         Some(r) if super::queue::awaiting_confirmation(r) => Err(
             "This task has a run migrated from a previous version waiting for confirmation: confirm or cancel it first."
@@ -419,6 +421,13 @@ fn check_no_pending(conn: &Connection, task_id: &str) -> Result<(), String> {
         Some(r) if r.status == RunStatus::Queued => Err("This task already has a queued run.".into()),
         Some(_) => Err("This task already has a run in progress.".into()),
     }
+}
+
+pub const TASK_CHANGED_ERR: &str = "The task changed while the run was being prepared: try again.";
+
+/// La conexión (un panic con el lock tomado no la deja inconsistente: ver `with_db`).
+pub fn lock(db: &Db) -> MutexGuard<'_, Connection> {
+    db.lock().unwrap_or_else(|p| p.into_inner())
 }
 
 fn previous_step(prev: &Run, cwd: &str, base: Option<&str>) -> PreviousStep {
@@ -434,7 +443,7 @@ fn previous_step(prev: &Run, cwd: &str, base: Option<&str>) -> PreviousStep {
     }
 }
 
-fn blank_run(id: String, task: &Task, repo: &Repo, now: i64, queue_position: f64) -> Run {
+fn blank_run(id: String, task: &Task, repo: &Repo, now: i64) -> Run {
     Run {
         id,
         task_id: Some(task.id.clone()),
@@ -451,7 +460,8 @@ fn blank_run(id: String, task: &Task, repo: &Repo, now: i64, queue_position: f64
         review: false,
         verdict: None,
         status: RunStatus::Queued,
-        queue_position,
+        // Se asigna en la transacción que lo inserta.
+        queue_position: 0.0,
         claude_run_id: None,
         session_id: None,
         queued_at: now,
@@ -468,15 +478,54 @@ fn blank_run(id: String, task: &Task, repo: &Repo, now: i64, queue_position: f64
 }
 
 /// Encola un run de trabajo: resuelve ejecutor y opciones, crea o reusa el worktree, arma
-/// el prompt e inserta el run con la tarea en In Progress (y el outbox) en una transacción.
-/// Con `handoff`, el prompt lleva el resumen y el diff del paso anterior.
-pub fn enqueue_work(conn: &mut Connection, env: &Env, task_id: &str, input: &LaunchInput, handoff: bool, now: i64) -> Result<Run, String> {
-    let mut task = tasks::get(conn, task_id)?;
-    let repo = repos::get(conn, &task.repo_id)?;
-    let project = projects::get(conn, &task.project_id)?;
-    check_no_pending(conn, task_id)?;
+/// el prompt e inserta el run con la tarea en In Progress (y el outbox). Con `handoff`, el
+/// prompt lleva el resumen y el diff del paso anterior.
+///
+/// En tres pasos para no tener la base tomada durante git y las lecturas de disco: lectura
+/// → armado (sin lock) → transacción corta que vuelve a chequear que no haya runs
+/// pendientes, que la tarea no haya cambiado (`updated_at`) y que su worktree no se esté
+/// limpiando.
+pub fn enqueue_work(
+    db: &Db,
+    env: &Env,
+    cleaning: &Cleaning,
+    task_id: &str,
+    input: &LaunchInput,
+    handoff: bool,
+    now: i64,
+) -> Result<Run, String> {
+    enqueue_work_replacing(db, env, cleaning, task_id, input, handoff, now, None)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn enqueue_work_replacing(
+    db: &Db,
+    env: &Env,
+    cleaning: &Cleaning,
+    task_id: &str,
+    input: &LaunchInput,
+    handoff: bool,
+    now: i64,
+    replaces: Option<&Run>,
+) -> Result<Run, String> {
+    let ignore = replaces.map(|r| r.id.as_str());
+    // 1. Lectura.
+    let (task, repo, project, settings, prev) = {
+        let conn = lock(db);
+        let task = tasks::get(&conn, task_id)?;
+        if cleaning.contains(task_id) {
+            return Err(CLEANING_ERR.into());
+        }
+        check_no_pending(&conn, task_id, ignore)?;
+        let repo = repos::get(&conn, &task.repo_id)?;
+        let project = projects::get(&conn, &task.project_id)?;
+        let settings = rows::load_settings(&conn)?;
+        let prev = if handoff { qruns::last_finished(&conn, task_id)? } else { None };
+        (task, repo, project, settings, prev)
+    };
+
+    // 2. Armado: catálogo, worktree, plan y diff (disco y git, sin la base).
     let extra = validate::extra_instructions(input.extra_instructions.as_deref())?;
-    let settings = rows::load_settings(conn)?;
     let executor = pick_executor(&task, &repo, &project, &settings, input);
     let info = lookup(env, &repo, &executor)?;
     let executor = info.as_ref().map(|i| i.executor.clone()).unwrap_or(executor);
@@ -484,21 +533,16 @@ pub fn enqueue_work(conn: &mut Connection, env: &Env, task_id: &str, input: &Lau
     let manages_source = info.as_ref().and_then(|i| i.manages_source.clone());
     let res = resolve(&task, &repo, input, &executor, reviews);
     let options = crate::runs::options::normalize(&res.options).map_err(|e| e.join("\n"))?;
-
-    // Carpeta de trabajo.
-    let mut worktree_changed = false;
     let (cwd, wt) = if res.isolation == Some(Isolation::Worktree) {
         let slug = worktree::task_slug(&project.key, task.number, &task.title);
         let dir = worktree::dir_for(&env.worktrees_root, &repo.name, &slug);
         let wt = worktree::ensure(Path::new(&repo.path), &dir, &worktree::branch_for(&slug), task.worktree.as_ref())?;
-        worktree_changed = task.worktree.as_ref() != Some(&wt);
         (wt.path.clone(), Some(wt))
     } else {
         (repo.path.clone(), None)
     };
-
+    let worktree_changed = wt.is_some() && task.worktree != wt;
     let ctx = task_context(env, &project, &task, &repo, &cwd, wt.as_ref())?;
-    let prev = if handoff { qruns::last_finished(conn, task_id)? } else { None };
     let prompt = match &executor {
         Executor::Workflow { name } => workflow_prompt(
             name,
@@ -512,15 +556,7 @@ pub fn enqueue_work(conn: &mut Connection, env: &Env, task_id: &str, input: &Lau
             work_prompt(&ctx, res.finish, extra.as_deref(), step.as_ref())
         }
     };
-
-    let tx = conn.transaction().map_err(|e| e.to_string())?;
-    check_no_pending(&tx, task_id)?;
-    if worktree_changed {
-        task.worktree = wt.clone();
-        task.updated_at = now;
-        tasks::update(&tx, &task)?;
-    }
-    let mut run = blank_run(new_id('u', now), &task, &repo, now, qruns::next_queue_position(&tx)?);
+    let mut run = blank_run(new_id('u', now), &task, &repo, now);
     run.cwd = cwd;
     run.executor = executor;
     run.parent_run_id = prev.map(|p| p.id);
@@ -530,32 +566,76 @@ pub fn enqueue_work(conn: &mut Connection, env: &Env, task_id: &str, input: &Lau
     run.finish = res.finish;
     run.isolation = res.isolation;
     run.review = res.review;
+
+    // 3. Transacción corta.
+    let mut conn = lock(db);
+    let tx = conn.transaction().map_err(|e| e.to_string())?;
+    if cleaning.contains(task_id) {
+        return Err(CLEANING_ERR.into());
+    }
+    check_no_pending(&tx, task_id, ignore)?;
+    let mut current = tasks::get(&tx, task_id)?;
+    if current.updated_at != task.updated_at {
+        return Err(TASK_CHANGED_ERR.into());
+    }
+    if worktree_changed {
+        current.worktree = wt;
+        current.updated_at = now;
+        tasks::update(&tx, &current)?;
+    }
+    if let Some(old) = replaces {
+        let mut closed = qruns::get(&tx, &old.id)?;
+        if !super::queue::awaiting_confirmation(&closed) {
+            return Err("That run isn't waiting for confirmation.".into());
+        }
+        closed.status = RunStatus::Canceled;
+        closed.finished_at = Some(now);
+        closed.error = Some(format!("Confirmed and re-queued as {}.", run.id));
+        qruns::update(&tx, &closed)?;
+    }
+    run.queue_position = qruns::next_queue_position(&tx)?;
     qruns::insert(&tx, &run)?;
-    let next = super::transitions::on_enqueue_work(task.status);
-    ops::apply_task_transition(&tx, &task, next, None, manages_source.as_deref(), now)?;
+    let next = super::transitions::on_enqueue_work(current.status);
+    ops::apply_task_transition(&tx, &current, next, None, manages_source.as_deref(), now)?;
     tx.commit().map_err(|e| e.to_string())?;
     Ok(run)
 }
 
-/// Arma (sin insertar) el run del revisor para la tarea. `parent`: el run de trabajo que
-/// revisa (si hay). `reviewer`: override; si no, el configurado.
-pub fn prepare_review(
-    conn: &Connection,
+/// Lo que `build_review` necesita de la base.
+pub struct ReviewInputs {
+    pub repo: Repo,
+    pub project: Project,
+    pub settings: Settings,
+}
+
+impl ReviewInputs {
+    pub fn read(conn: &Connection, task: &Task) -> Result<Self, String> {
+        Ok(ReviewInputs {
+            repo: repos::get(conn, &task.repo_id)?,
+            project: projects::get(conn, &task.project_id)?,
+            settings: rows::load_settings(conn)?,
+        })
+    }
+}
+
+/// Arma (sin insertar ni tocar la base: lee disco y git) el run del revisor para la tarea.
+/// `parent`: el run de trabajo que revisa (si hay). `reviewer`: override; si no, el
+/// configurado. `queue_position` se asigna al insertarlo.
+pub fn build_review(
     env: &Env,
+    inputs: &ReviewInputs,
     task: &Task,
     parent: Option<&Run>,
     reviewer: Option<&str>,
     extra: Option<&str>,
     now: i64,
 ) -> Result<Run, String> {
-    let repo = repos::get(conn, &task.repo_id)?;
-    let project = projects::get(conn, &task.project_id)?;
-    let settings = rows::load_settings(conn)?;
+    let ReviewInputs { repo, project, settings } = inputs;
     let name = match reviewer.map(str::trim).filter(|r| !r.is_empty()) {
         Some(r) => validate::reviewer(r)?,
-        None => reviewer_name(&repo, &project, &settings),
+        None => reviewer_name(repo, project, settings),
     };
-    let executor = lookup(env, &repo, &Executor::Agent { name: name.clone(), source: AgentSource::User })?
+    let executor = lookup(env, repo, &Executor::Agent { name: name.clone(), source: AgentSource::User })?
         .map(|i| i.executor)
         .unwrap_or(Executor::Agent { name, source: AgentSource::User });
 
@@ -585,11 +665,14 @@ pub fn prepare_review(
             "The changes for this task are in the repository folder: run `git diff HEAD` and `git status` for uncommitted work, and `git log` for recent commits of this task.".into(),
         ),
     };
-    let ctx = task_context(env, &project, task, &repo, &cwd, live_wt)?;
+    let ctx = task_context(env, project, task, repo, &cwd, live_wt)?;
     let work = parent.map(|p| (executor_label(&p.executor), p.summary.clone()));
     let prompt = review_prompt(&ctx, &hint, work.as_ref().map(|(l, s)| (l.as_str(), s.as_deref())), extra);
 
-    let mut run = blank_run(new_id('u', now), task, &repo, now, qruns::next_queue_position(conn)?);
+    let mut run = blank_run(new_id('u', now), task, repo, now);
+    // Mismo lock que el trabajo según dónde corre de verdad: un `in_place` no arranca
+    // mientras se revisa la carpeta del repo.
+    run.isolation = Some(review_isolation(&cwd, &repo.path));
     run.cwd = cwd;
     run.executor = executor;
     run.kind = RunKind::Review;
@@ -597,61 +680,84 @@ pub fn prepare_review(
     run.prompt = prompt;
     run.extra_instructions = extra.map(String::from);
     run.finish = parent.map(|p| p.finish).unwrap_or(task.finish.unwrap_or(repo.default_finish));
-    // Mismo lock que el trabajo: un `in_place` no arranca mientras se revisa esa carpeta.
-    run.isolation = parent.and_then(|p| p.isolation).or(Some(task.isolation.unwrap_or(repo.default_isolation)));
     Ok(run)
 }
 
-/// "Review now": encola el revisor sobre el último run de trabajo de la tarea.
-pub fn enqueue_review(conn: &mut Connection, env: &Env, task_id: &str, reviewer: Option<&str>, now: i64) -> Result<Run, String> {
-    let task = tasks::get(conn, task_id)?;
-    check_no_pending(conn, task_id)?;
-    let parent = qruns::last_work(conn, task_id)?;
-    let run = prepare_review(conn, env, &task, parent.as_ref(), reviewer, None, now)?;
+/// Isolation del revisor según dónde corre: en la carpeta del repo es `in_place` (toma el
+/// lock del repo); en el worktree de la tarea, `worktree`.
+pub fn review_isolation(cwd: &str, repo_path: &str) -> Isolation {
+    if Path::new(cwd.trim_end_matches('/')) == Path::new(repo_path.trim_end_matches('/')) {
+        Isolation::InPlace
+    } else {
+        Isolation::Worktree
+    }
+}
+
+/// "Review now": encola el revisor sobre el último run de trabajo de la tarea. Mismos tres
+/// pasos que `enqueue_work`.
+pub fn enqueue_review(
+    db: &Db,
+    env: &Env,
+    cleaning: &Cleaning,
+    task_id: &str,
+    reviewer: Option<&str>,
+    now: i64,
+) -> Result<Run, String> {
+    let (task, parent, inputs) = {
+        let conn = lock(db);
+        let task = tasks::get(&conn, task_id)?;
+        if cleaning.contains(task_id) {
+            return Err(CLEANING_ERR.into());
+        }
+        check_no_pending(&conn, task_id, None)?;
+        let parent = qruns::last_work(&conn, task_id)?;
+        let inputs = ReviewInputs::read(&conn, &task)?;
+        (task, parent, inputs)
+    };
+    let mut run = build_review(env, &inputs, &task, parent.as_ref(), reviewer, None, now)?;
+    let mut conn = lock(db);
     let tx = conn.transaction().map_err(|e| e.to_string())?;
-    check_no_pending(&tx, task_id)?;
+    if cleaning.contains(task_id) {
+        return Err(CLEANING_ERR.into());
+    }
+    check_no_pending(&tx, task_id, None)?;
+    if tasks::get(&tx, task_id)?.updated_at != task.updated_at {
+        return Err(TASK_CHANGED_ERR.into());
+    }
+    run.queue_position = qruns::next_queue_position(&tx)?;
     qruns::insert(&tx, &run)?;
     tx.commit().map_err(|e| e.to_string())?;
     Ok(run)
 }
 
-/// Confirma un run migrado que quedó en cola. El viejo queda cancelado como historial.
+/// Confirma un run migrado que quedó en cola. El viejo queda cancelado como historial, en
+/// la misma transacción que encola el nuevo (si algo falla, sigue esperando confirmación).
 /// - Con tarea: se encola de nuevo con `enqueue_work` (mismo ejecutor), así el prompt, el
 ///   worktree y la transición a In Progress salen de la tarea migrada y no del prompt viejo.
-///   Si eso falla, el viejo vuelve a quedar en espera de confirmación.
 /// - Sin tarea (issue run viejo): se clona tal cual al final de la cola.
-pub fn confirm_legacy(conn: &mut Connection, env: &Env, run_id: &str, now: i64) -> Result<Run, String> {
-    let old = qruns::get(conn, run_id)?;
+pub fn confirm_legacy(db: &Db, env: &Env, cleaning: &Cleaning, run_id: &str, now: i64) -> Result<Run, String> {
+    let old = qruns::get(&lock(db), run_id)?;
     if !super::queue::awaiting_confirmation(&old) {
         return Err("That run isn't waiting for confirmation.".into());
     }
-    let mut closed = old.clone();
-    closed.status = RunStatus::Canceled;
-    closed.finished_at = Some(now);
-
     if let Some(task_id) = old.task_id.clone() {
-        closed.error = Some("Confirmed and re-queued.".into());
-        qruns::update(conn, &closed)?;
         let input = LaunchInput { executor: Some(old.executor.clone()), ..Default::default() };
-        return match enqueue_work(conn, env, &task_id, &input, false, now) {
-            Ok(run) => {
-                closed.error = Some(format!("Confirmed and re-queued as {}.", run.id));
-                qruns::update(conn, &closed)?;
-                Ok(run)
-            }
-            Err(e) => {
-                qruns::update(conn, &old)?;
-                Err(e)
-            }
-        };
+        return enqueue_work_replacing(db, env, cleaning, &task_id, &input, false, now, Some(&old));
     }
 
+    let mut conn = lock(db);
     let tx = conn.transaction().map_err(|e| e.to_string())?;
-    let mut run = old.clone();
+    let mut closed = qruns::get(&tx, run_id)?;
+    if !super::queue::awaiting_confirmation(&closed) {
+        return Err("That run isn't waiting for confirmation.".into());
+    }
+    let mut run = closed.clone();
     run.id = new_id('u', now);
     run.legacy_label = None;
     run.queued_at = now;
     run.queue_position = qruns::next_queue_position(&tx)?;
+    closed.status = RunStatus::Canceled;
+    closed.finished_at = Some(now);
     closed.error = Some(format!("Confirmed and re-queued as {}.", run.id));
     qruns::update(&tx, &closed)?;
     qruns::insert(&tx, &run)?;
