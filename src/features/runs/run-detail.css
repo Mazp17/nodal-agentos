@@ -9,6 +9,9 @@
   flex-direction: column;
   gap: var(--sp-7);
 }
+/* .rd scrolls, so its sections keep their height. Without this, a section with overflow
+   (the phase timeline) shrinks to almost nothing when the window is short. */
+.rd > * { flex-shrink: 0; }
 
 .rd-head { display: flex; align-items: flex-start; gap: var(--sp-7); }
 .rd-head-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: var(--sp-2); }
