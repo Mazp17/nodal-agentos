@@ -75,6 +75,8 @@ Tests that hit real services or real local data are `#[ignore]`. Linear live tes
 
 Open an issue with your macOS and Claude Code versions (`claude --version`), what you did, what you expected and what happened. Remove API keys, private paths and company data from logs before posting.
 
+Security issues go through a private report, not a public issue: see [SECURITY.md](SECURITY.md).
+
 ## License
 
 By contributing, you agree that your contributions are licensed under the [MIT License](LICENSE.md).
