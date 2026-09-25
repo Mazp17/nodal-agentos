@@ -4,9 +4,15 @@ All notable changes to Nodal are documented here. The format follows [Keep a Cha
 
 ## [Unreleased]
 
+### Added
+
+- MCP server for agents: while Nodal is open, `nodal-mcp` (`claude mcp add nodal -- nodal-mcp`) lists projects and tasks, creates and updates tasks and reads run results, through a local Unix socket readable only by you. Launching runs stays in the app.
+- `nodal-tasks` agent skill (`skills/nodal-tasks`, `npx skills add Mazp17/nodal-agentos --skill nodal-tasks`): when to create a task instead of doing the work, how to write its plan and acceptance criteria, how to pick the repo and the executor, and how to read a run's result.
+
 ### Changed
 
 - Every run is launched with `--append-system-prompt` telling it it's unattended, so it reports and stops instead of ending on a question and leaving the task In Progress.
+- New Nodal logo: app icon and in-app mark.
 
 ### Fixed
 

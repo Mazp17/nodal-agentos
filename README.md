@@ -40,7 +40,23 @@ You need [Claude Code](https://docs.claude.com/en/docs/claude-code) installed an
 
 Nodal drives the `claude` CLI you already have (`claude --bg`, `--agent`, `/<workflow>`) and reads progress from `claude agents --json` and the session files under `~/.claude/projects`. Those files are an undocumented internal format, so a Claude Code update can break the parsing.
 
-Everything stays on your Mac: an SQLite database, worktrees under `~/.nodal`, API keys in the Keychain. No server, no telemetry.
+Everything stays on your Mac: an SQLite database, worktrees under `~/.nodal`, API keys in the Keychain. No network server, no telemetry.
+
+### Agents (MCP)
+
+While Nodal is open, agents can list projects and tasks, create and update tasks and read run results through MCP. The app listens on a Unix socket in its data folder (readable only by you, no network port) and `nodal-mcp` bridges it to stdio. Build it from source (`pnpm build`, then `cargo build --release --bin nodal-mcp` in `src-tauri`), put `src-tauri/target/release/nodal-mcp` on your `PATH` and register it:
+
+```bash
+claude mcp add nodal -- nodal-mcp
+```
+
+Tools: `list_projects`, `list_tasks`, `get_task`, `create_task`, `update_task` and `get_run`. Runs are launched from the app. A debug build of `nodal-mcp` talks to a debug build of the app.
+
+The [`nodal-tasks` skill](skills/nodal-tasks/SKILL.md) teaches agents when to create a task instead of doing the work, how to write its plan and acceptance criteria, how to pick the repo and the executor, and how to read a run's result. Install it with [skills](https://skills.sh):
+
+```bash
+npx skills add Mazp17/nodal-agentos --skill nodal-tasks
+```
 
 ## Build from source
 

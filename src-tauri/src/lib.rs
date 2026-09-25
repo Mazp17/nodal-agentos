@@ -3,6 +3,7 @@ mod db;
 mod domain;
 mod events;
 mod linear;
+pub mod mcp;
 mod migrate;
 mod providers;
 mod runs;
@@ -46,13 +47,15 @@ pub fn run() {
                 }
             }
             // Único lugar que arranca los workers de fondo: el pump de la cola (`work::init`)
-            // y el sync de proveedores (`providers::init`). Sin base la app abre igual (para
+            // con el socket MCP (`mcp::server`) y el sync de proveedores (`providers::init`). Sin base la app abre igual (para
             // mostrar el error): no hay pump, el sync no hace nada y los comandos fallan.
             match db::open(&util::paths::data_dir(app.handle())?.join(db::DB_FILE)) {
                 Ok(db) => {
                     app.manage(db.clone());
                     if let Err(e) = work::init(app.handle(), db) {
                         eprintln!("work: {e}");
+                    } else if let Err(e) = mcp::server::start(app.state::<work::WorkState>().0.clone()) {
+                        eprintln!("mcp: {e}");
                     }
                 }
                 Err(e) => eprintln!("nodal.db: {e}"),
