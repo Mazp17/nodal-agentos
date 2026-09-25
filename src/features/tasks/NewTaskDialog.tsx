@@ -1,11 +1,23 @@
-import { useEffect, useId, useMemo, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode } from "react";
+import {
+  useCallback,
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+  type ClipboardEvent,
+  type FormEvent,
+  type KeyboardEvent,
+} from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { createTask, getTask, readTaskPlan, updateTask, type NewTask, type PlanInput, type TaskPatch } from "../../domain/api";
 import { invalidate, useProjectList, useRepos, useSettings } from "../../domain/hooks/store";
 import { taskKey, type Executor, type Finish, type Isolation, type Priority, type Task } from "../../domain/types";
+import { SafeMarkdown } from "../../ui/Markdown";
 import { useFocusTrap } from "../../ui/useFocusTrap";
 import { useToast } from "../../ui/Toasts";
 import { ExecutorPicker, executorLabel, inheritedExecutor, sameExecutor } from "../executors";
+import { PriorityBars } from "./bits";
 import {
   FINISH_HINT,
   FINISH_LABEL,
@@ -19,28 +31,66 @@ import { useLaunch } from "./useLaunch";
 import "./tasks.css";
 
 export interface NewTaskDialogProps {
-  /** Proyecto de la vista; `null` (All projects) pide elegirlo. Al editar manda el de la tarea. */
+  /** The view's project; `null` (All projects) lets the user pick one. When editing, the task's wins. */
   projectId: string | null;
-  /** Si viene, edita esa tarea. */
+  /** When set, edits that task. */
   taskId?: string;
-  /** Repo preseleccionado (p. ej. el filtro activo del board). */
+  /** Preselected repo (e.g. the board's active filter). */
   defaultRepoId?: string | null;
   onClose: () => void;
   onSaved: (task: Task) => void;
-  /** Si viene, muestra "Add repo…" (lo resuelve Settings del proyecto). */
+  /** When set, offers "Add repo…" (handled by the project's Settings). */
   onAddRepo?: (projectId: string) => void;
 }
 
 type PlanKind = PlanInput["kind"];
+type Menu = "repo" | "prio" | null;
 
 const FINISHES: Finish[] = ["changes", "commit", "pr"];
 const ISOLATIONS: Isolation[] = ["worktree", "in_place"];
-const PRIO_ORDER: Priority[] = PRIORITIES.filter((p) => p !== "none");
+const FINISH_OUTCOME: Record<Finish, string> = { changes: "leaves the changes", commit: "commits", pr: "opens a PR" };
+const PLAN_TEMPLATE = "## Goal\n\n\n## Steps\n\n1. \n\n## Acceptance criteria\n\n- ";
 
 const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
 const cleanList = (l: string[]) => l.map((s) => s.trim()).filter(Boolean);
+/** Strips a list marker (`-`, `*`, `1.`) and a checkbox (`[ ]`, `[x]`). */
+const stripBullet = (l: string) => l.replace(/^\s*(?:[-*]|\d+\.)\s*(?:\[[ xX]\]\s*)?/, "").trim();
 
-/** Crear o editar una tarea: repo obligatorio, plan, criterios, ejecutor y opciones de ejecución. */
+/** Bullets under a "Done when" / "Acceptance criteria" heading of the plan. */
+function planCriteria(text: string): string[] {
+  let inside = false;
+  const out: string[] = [];
+  for (const line of text.split("\n")) {
+    if (/^#{1,4}\s/.test(line)) {
+      inside = /acceptance|done when|criteria/i.test(line);
+      continue;
+    }
+    const m = inside && line.match(/^\s*(?:[-*]|\d+\.)\s+(?:\[[ xX]\]\s*)?(.+)/);
+    if (m) out.push(m[1].trim());
+  }
+  return out;
+}
+
+/** Too short or too vague for a reviewer to check. */
+function isVague(c: string) {
+  const x = c.trim();
+  return !!x && (x.split(/\s+/).length < 3 || /\b(works?|properly|correctly|better|good|nice|clean|fine)\b/i.test(x));
+}
+
+function useOutside(active: boolean, close: () => void) {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!active) return;
+    const onDown = (e: MouseEvent) => {
+      if (!ref.current?.contains(e.target as Node)) close();
+    };
+    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);
+  }, [active, close]);
+  return ref;
+}
+
+/** Create or edit a task: repo (required), title, plan, done-when criteria and execution options. */
 export function NewTaskDialog({ projectId, taskId, defaultRepoId, onClose, onSaved, onAddRepo }: NewTaskDialogProps) {
   const ref = useFocusTrap<HTMLFormElement>(onClose);
   const titleId = useId();
@@ -57,6 +107,7 @@ export function NewTaskDialog({ projectId, taskId, defaultRepoId, onClose, onSav
   const [repoId, setRepoId] = useState<string | null>(defaultRepoId ?? null);
   const [title, setTitle] = useState("");
   const [kind, setKind] = useState<PlanKind>("text");
+  const [tab, setTab] = useState<"write" | "preview">("write");
   const [text, setText] = useState("");
   const [origText, setOrigText] = useState("");
   const [path, setPath] = useState("");
@@ -64,16 +115,22 @@ export function NewTaskDialog({ projectId, taskId, defaultRepoId, onClose, onSav
   const [labels, setLabels] = useState<string[]>([]);
   const [labelDraft, setLabelDraft] = useState("");
   const [acceptance, setAcceptance] = useState<string[]>([]);
+  const [critDraft, setCritDraft] = useState("");
   const [assignee, setAssignee] = useState<Executor | null>(null);
   const [isolation, setIsolation] = useState<Isolation | null>(null);
   const [finish, setFinish] = useState<Finish | null>(null);
   const [review, setReview] = useState<boolean | null>(null);
+  const [execOpen, setExecOpen] = useState(false);
+  const [menu, setMenu] = useState<Menu>(null);
+  const [tried, setTried] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const acRefs = useRef<(HTMLInputElement | null)[]>([]);
-  const [focusAc, setFocusAc] = useState<number | null>(null);
 
-  // Editar: precarga la tarea y, si el plan es texto, su contenido.
+  const closeMenu = useCallback(() => setMenu(null), []);
+  const repoMenuRef = useOutside(menu === "repo", closeMenu);
+  const prioMenuRef = useOutside(menu === "prio", closeMenu);
+
+  // Editing: preload the task and, for a text plan, its content.
   useEffect(() => {
     if (!taskId) return;
     let alive = true;
@@ -107,38 +164,41 @@ export function NewTaskDialog({ projectId, taskId, defaultRepoId, onClose, onSav
     };
   }, [taskId]);
 
-  // Sin proyecto (All projects): el del repo pedido o, si no, el primero.
+  // No project (All projects): the requested repo's, or else the first one.
   useEffect(() => {
     if (pid || !projects.data?.length || allRepos.data === undefined) return;
     const fromRepo = allRepos.data.find((r) => r.id === defaultRepoId)?.projectId;
     setPid(fromRepo ?? projects.data[0].id);
   }, [pid, projects.data, allRepos.data, defaultRepoId]);
 
-  // Al editar, el foco va al título cuando termina de cargar (si se puede editar).
+  // Editing: focus the title once loaded (when it can be edited).
   useEffect(() => {
     if (loaded && taskId && !original?.source) titleRef.current?.focus();
   }, [loaded, taskId, original]);
 
   const project = projects.data?.find((p) => p.id === pid) ?? null;
-  const repos = useMemo(
-    () => (allRepos.data ?? []).filter((r) => r.projectId === pid).sort((a, b) => a.position - b.position),
-    [allRepos.data, pid],
+  const sortedRepos = useMemo(
+    () => [...(allRepos.data ?? [])].sort((a, b) => a.position - b.position),
+    [allRepos.data],
   );
+  const repos = useMemo(() => sortedRepos.filter((r) => r.projectId === pid), [sortedRepos, pid]);
   const repo = repos.find((r) => r.id === repoId) ?? null;
+  // Creating from All projects: the repo menu lists every project's repos.
+  const pickProject = projectId === null && !original && (projects.data?.length ?? 0) > 1;
+  const menuGroups = useMemo(() => {
+    const list = pickProject ? (projects.data ?? []) : project ? [project] : [];
+    return list
+      .map((p) => ({ project: p, repos: sortedRepos.filter((r) => r.projectId === p.id) }))
+      .filter((g) => g.repos.length > 0 || pickProject || g.project.id === pid);
+  }, [pickProject, projects.data, project, sortedRepos, pid]);
 
-  // Repo por defecto: el pedido o el primero del proyecto.
+  // Default repo: the requested one, or the project's first.
   useEffect(() => {
     if (!loaded || taskId || !pid) return;
     if (repoId && repos.some((r) => r.id === repoId)) return;
     if (repos.length) setRepoId(repos[0].id);
     else if (allRepos.data) setRepoId(null);
   }, [loaded, taskId, pid, repoId, repos, allRepos.data]);
-
-  useEffect(() => {
-    if (focusAc === null) return;
-    acRefs.current[focusAc]?.focus();
-    setFocusAc(null);
-  }, [focusAc]);
 
   const imported = !!original?.source;
   const inherited = inheritedExecutor(repo, project, settings.data?.defaultExecutor);
@@ -147,12 +207,29 @@ export function NewTaskDialog({ projectId, taskId, defaultRepoId, onClose, onSav
   const effIsolation = isolation ?? repo?.defaultIsolation ?? "worktree";
   const effFinish = finish ?? repo?.defaultFinish ?? "pr";
   const effReview = review ?? repo?.defaultReview ?? true;
+  const execCustom = assignee !== null || isolation !== null || finish !== null || review !== null;
 
-  const pickRepo = (id: string) => {
+  const titleErr = tried && !title.trim();
+  const planErr = tried && (kind === "text" ? !text.trim() : !path.trim());
+  const repoErr = tried && !repo;
+  const missing = [!repo && "repo", !title.trim() && "title", (kind === "text" ? !text.trim() : !path.trim()) && "plan"].filter(
+    Boolean,
+  ) as string[];
+
+  const suggestions = useMemo(() => {
+    if (kind !== "text") return [];
+    const have = new Set(acceptance.map((c) => c.trim().toLowerCase()));
+    return [...new Set(planCriteria(text))].filter((c) => !have.has(c.toLowerCase()));
+  }, [kind, text, acceptance]);
+  const critCount = acceptance.filter((c) => c.trim()).length;
+
+  const pickRepo = (id: string, projectOf: string) => {
+    setMenu(null);
     if (id === repoId) return;
+    if (projectOf !== pid) setPid(projectOf);
     setRepoId(id);
-    // El `.md` es relativo al repo anterior.
-    if (kind === "file") setPath("");
+    // The `.md` is relative to the previous repo.
+    setPath("");
     setError(null);
   };
 
@@ -184,7 +261,7 @@ export function NewTaskDialog({ projectId, taskId, defaultRepoId, onClose, onSav
   };
 
   const addLabel = () => {
-    const parts = cleanList(labelDraft.split(","));
+    const parts = cleanList(labelDraft.toLowerCase().split(","));
     if (parts.length) setLabels((l) => [...l, ...parts.filter((p) => !l.includes(p))]);
     setLabelDraft("");
   };
@@ -198,41 +275,48 @@ export function NewTaskDialog({ projectId, taskId, defaultRepoId, onClose, onSav
     }
   };
 
-  const setAc = (i: number, v: string) => setAcceptance((a) => a.map((x, k) => (k === i ? v : x)));
-  const addAc = (at = acceptance.length) => {
-    setAcceptance((a) => [...a.slice(0, at), "", ...a.slice(at)]);
-    setFocusAc(at);
+  const addCriteria = (items: string[]) => {
+    const add = cleanList(items);
+    if (add.length) setAcceptance((a) => [...a, ...add]);
   };
+  const setAc = (i: number, v: string) => setAcceptance((a) => a.map((x, k) => (k === i ? v : x)));
+  const acRefs = useRef<(HTMLInputElement | null)[]>([]);
+  const draftRef = useRef<HTMLInputElement>(null);
   const removeAc = (i: number) => {
     setAcceptance((a) => a.filter((_, k) => k !== i));
-    setFocusAc(Math.max(0, i - 1));
+    // Keep focus in the list: the previous row, or the draft when the first one goes.
+    const prev = i > 0 ? acRefs.current[i - 1] : draftRef.current;
+    prev?.focus();
   };
 
-  /** `null` = heredar: elegir el mismo valor que el default del repo vuelve a heredar. */
+  const onDraftKey = (e: KeyboardEvent<HTMLInputElement>) => {
+    if (e.key !== "Enter" || e.metaKey) return;
+    e.preventDefault();
+    addCriteria([stripBullet(critDraft)]);
+    setCritDraft("");
+  };
+  // A pasted list becomes one criterion per line.
+  const onDraftPaste = (e: ClipboardEvent<HTMLInputElement>) => {
+    const pasted = e.clipboardData.getData("text");
+    if (!pasted.includes("\n")) return;
+    e.preventDefault();
+    addCriteria([stripBullet(critDraft), ...pasted.split("\n").map(stripBullet)]);
+    setCritDraft("");
+  };
+
+  /** `null` = inherit: picking the repo's default goes back to inheriting. */
   const choose = <T,>(value: T, def: T | undefined, set: (v: T | null) => void) => set(value === def ? null : value);
-
-  const validate = (): string | null => {
-    if (!pid) return "Choose a project.";
-    if (!repo) return "Choose a repo from this project.";
-    if (!title.trim()) return "Give the task a title.";
-    if (kind === "text" && !text.trim()) return "Write a plan in markdown.";
-    if (kind === "file" && !path.trim()) return "Choose a .md file from the repo.";
-    return null;
-  };
 
   const planInput = (): PlanInput => (kind === "text" ? { kind: "text", text } : { kind: "file", path: path.trim() });
 
   const submit = async (run: boolean) => {
-    const err = validate();
-    if (err) {
-      setError(err);
-      return;
-    }
-    if (saving || !repo || !pid) return;
+    setTried(true);
+    if (!pid || missing.length) return;
+    if (saving || !repo) return;
     setSaving(true);
     setError(null);
-    const ac = cleanList(acceptance);
-    const pendingLabel = cleanList(labelDraft.split(",")).filter((l) => !labels.includes(l));
+    const ac = cleanList([...acceptance, stripBullet(critDraft)]);
+    const pendingLabel = cleanList(labelDraft.toLowerCase().split(",")).filter((l) => !labels.includes(l));
     const allLabels = [...labels, ...pendingLabel];
     try {
       let saved: Task;
@@ -274,7 +358,7 @@ export function NewTaskDialog({ projectId, taskId, defaultRepoId, onClose, onSav
         if (run) await launch(saved.id, key, { kind: "run" });
         else push("Task created", `${key} · ${saved.title}`, "ok");
       }
-      // Esperar la relectura: el panel que se abre busca la tarea en la lista compartida.
+      // Wait for the refetch: the panel that opens looks the task up in the shared list.
       await invalidate("tasks");
       onSaved(saved);
     } catch (e) {
@@ -288,7 +372,46 @@ export function NewTaskDialog({ projectId, taskId, defaultRepoId, onClose, onSav
     void submit(false);
   };
 
+  // ⌘↵ saves from anywhere; a plain Enter in a text field never submits the form.
+  const onFormKey = (e: KeyboardEvent<HTMLFormElement>) => {
+    // Escape closes an open menu first, not the dialog (the focus trap listens on document).
+    if (e.key === "Escape" && menu) {
+      e.preventDefault();
+      e.stopPropagation();
+      setMenu(null);
+      return;
+    }
+    if (e.key !== "Enter") return;
+    if (e.metaKey) {
+      e.preventDefault();
+      if (loaded) void submit(false);
+    } else if (e.target instanceof HTMLInputElement) {
+      e.preventDefault();
+    }
+  };
+
   const noRepos = allRepos.data !== undefined && pid !== null && repos.length === 0;
+  const lines = text.split("\n").length;
+  const planHeight = Math.min(340, Math.max(150, lines * 19 + 24));
+  const repoDefault = (custom: boolean) => (repo ? (custom ? "differs from repo default" : "repo default") : "");
+
+  const footNote =
+    tried && missing.length
+      ? `Missing: ${missing.join(", ")}`
+      : original
+        ? "Changes apply to the next run"
+        : repo
+          ? `${executorLabel(effExecutor)} runs ${isWorkflow || effIsolation === "worktree" ? "in a worktree" : "in your checkout"} → ${FINISH_OUTCOME[effFinish]}`
+          : "";
+
+  const execSummary = [
+    executorLabel(effExecutor),
+    isWorkflow ? null : ISOLATION_LABEL[effIsolation],
+    FINISH_LABEL[effFinish],
+    effReview ? "Review" : null,
+  ]
+    .filter(Boolean)
+    .join(" · ");
 
   return (
     <>
@@ -301,17 +424,77 @@ export function NewTaskDialog({ projectId, taskId, defaultRepoId, onClose, onSav
         aria-labelledby={titleId}
         tabIndex={-1}
         onSubmit={onSubmit}
+        onKeyDown={onFormKey}
       >
         <header className="dlg-head">
           <h2 id={titleId} className="dlg-title">
             {original ? "Edit task" : "New task"}
           </h2>
-          {project && (
-            <span className="dlg-proj">
-              <span className="dlg-proj-dot" style={{ background: project.color }} aria-hidden />
-              {project.name}
-            </span>
-          )}
+          <span className="nt-in">in</span>
+          <div className="nt-anchor" ref={repoMenuRef}>
+            <button
+              type="button"
+              className={`nt-repo ${repoErr ? "err" : ""}`}
+              aria-haspopup="menu"
+              aria-expanded={menu === "repo"}
+              aria-label={`Repo: ${repo ? `${project?.name ?? ""} / ${repo.name}` : "none"}`}
+              disabled={!loaded}
+              onClick={() => setMenu(menu === "repo" ? null : "repo")}
+            >
+              {project && <span className="dlg-proj-dot" style={{ background: project.color }} aria-hidden />}
+              {project && <span className="nt-repo-proj">{project.name} /</span>}
+              <span className={`nt-repo-name ${repo ? "" : "empty"}`}>{repo?.name ?? "Choose repo"}</span>
+              <span className="nt-caret" aria-hidden>
+                ▼
+              </span>
+            </button>
+            {menu === "repo" && (
+              <div className="menu nt-menu nt-repo-menu" role="menu" aria-label="Repo">
+                {menuGroups.map((g) => (
+                  <div key={g.project.id} role="group" aria-label={g.project.name}>
+                    {pickProject && (
+                      <div className="menu-label nt-menu-proj">
+                        <span className="dlg-proj-dot" style={{ background: g.project.color }} aria-hidden />
+                        {g.project.name}
+                      </div>
+                    )}
+                    {g.repos.map((r) => (
+                      <button
+                        key={r.id}
+                        type="button"
+                        role="menuitemradio"
+                        aria-checked={r.id === repoId}
+                        className="menu-item nt-repo-item"
+                        onClick={() => pickRepo(r.id, g.project.id)}
+                      >
+                        <span className="menu-mark" aria-hidden>
+                          {r.id === repoId ? "✓" : ""}
+                        </span>
+                        <span className="mono">{r.name}</span>
+                        <span className="nt-repo-path mono ellipsis">{r.path}</span>
+                      </button>
+                    ))}
+                  </div>
+                ))}
+                {onAddRepo && pid && (
+                  <>
+                    <div className="nt-sep" />
+                    <button
+                      type="button"
+                      role="menuitem"
+                      className="menu-item nt-add-repo"
+                      onClick={() => {
+                        setMenu(null);
+                        onAddRepo(pid);
+                      }}
+                    >
+                      Add repo…
+                    </button>
+                  </>
+                )}
+              </div>
+            )}
+          </div>
           <span className="dlg-spacer" />
           <button type="button" className="icon-btn" aria-label="Close" onClick={onClose}>
             ✕
@@ -323,275 +506,346 @@ export function NewTaskDialog({ projectId, taskId, defaultRepoId, onClose, onSav
             {error ? <div className="banner banner-error">{error}</div> : <span className="tk-muted">Loading task…</span>}
           </div>
         ) : (
-          <div className="dlg-body">
-            {projectId === null && !original && (projects.data?.length ?? 0) > 1 && (
-              <Field label="Project">
-                <div className="tk-pills" role="radiogroup" aria-label="Project">
-                  {projects.data?.map((p) => (
-                    <button
-                      key={p.id}
-                      type="button"
-                      role="radio"
-                      aria-checked={p.id === pid}
-                      className={`tk-pill ${p.id === pid ? "on" : ""}`}
-                      onClick={() => {
-                        setPid(p.id);
-                        setRepoId(null);
-                        setPath("");
-                      }}
-                    >
-                      <span className="dlg-proj-dot" style={{ background: p.color }} aria-hidden />
-                      {p.name}
-                    </button>
-                  ))}
-                </div>
-              </Field>
+          <div className="dlg-body nt-body">
+            {(repoErr || noRepos) && (
+              <div className="nt-err nt-repo-err">
+                {noRepos ? "This project has no repos yet. Add one from the repo menu." : "Choose which repo this task runs in."}
+              </div>
             )}
 
-            <Field label="Repo" hint="required">
-              {noRepos ? (
-                <div className="tk-inline-note">
-                  <span>This project has no repos yet.</span>
-                  {onAddRepo && pid && (
-                    <button type="button" className="btn btn-sm" onClick={() => onAddRepo(pid)}>
-                      Add repo…
-                    </button>
-                  )}
-                </div>
-              ) : (
-                <div className="tk-pills" role="radiogroup" aria-label="Repo">
-                  {repos.map((r) => (
-                    <button
-                      key={r.id}
-                      type="button"
-                      role="radio"
-                      aria-checked={r.id === repoId}
-                      title={r.path}
-                      className={`tk-pill ${r.id === repoId ? "on" : ""}`}
-                      onClick={() => pickRepo(r.id)}
-                    >
-                      {r.name}
-                    </button>
-                  ))}
-                  {onAddRepo && pid && (
-                    <button type="button" className="tk-pill tk-pill-dashed" onClick={() => onAddRepo(pid)}>
-                      Add repo…
-                    </button>
-                  )}
-                </div>
-              )}
-            </Field>
-
-            <Field label="Title" hint={imported ? `from ${providerLabel(original?.source?.provider ?? "")}` : undefined}>
+            <section className="nt-sec nt-top">
               <input
                 ref={titleRef}
-                className="input"
+                className="nt-title"
                 data-autofocus={taskId ? undefined : true}
                 value={title}
                 disabled={imported}
                 onChange={(e) => setTitle(e.target.value)}
-                placeholder="e.g. Cache launch-blocker lookups per session"
+                placeholder="Task title"
                 aria-label="Title"
+                aria-invalid={titleErr || undefined}
               />
-            </Field>
-
-            <Field
-              label="Plan"
-              aside={
-                <div className="segmented tk-seg" role="radiogroup" aria-label="Plan source">
-                  {(
-                    [
-                      ["text", "Write markdown"],
-                      ["file", "Pick .md from repo"],
-                    ] as const
-                  ).map(([k, l]) => (
-                    <button
-                      key={k}
-                      type="button"
-                      role="radio"
-                      aria-checked={kind === k}
-                      className={`tk-seg-opt ${kind === k ? "on" : ""}`}
-                      onClick={() => setKind(k)}
-                    >
-                      {l}
-                    </button>
-                  ))}
-                </div>
-              }
-            >
-              {kind === "text" ? (
-                <textarea
-                  className="textarea tk-plan"
-                  value={text}
-                  onChange={(e) => setText(e.target.value)}
-                  placeholder="## Goal · ## Steps · ## Done when"
-                  aria-label="Plan (markdown)"
-                  rows={7}
-                />
-              ) : (
-                <div className="tk-file">
-                  <button type="button" className="tk-file-btn" onClick={browse} disabled={!repo}>
-                    <span className={`mono ellipsis ${path ? "" : "tk-muted"}`}>{path || "Choose a .md file…"}</span>
-                    <span className="tk-file-browse">Browse…</span>
-                  </button>
-                  <span className="tk-hint">Stored relative to the repo and read at launch time.</span>
-                </div>
+              {titleErr && <span className="nt-err nt-title-err">Give the task a title.</span>}
+              {imported && (
+                <span className="tk-hint">Title, priority and labels come from {providerLabel(original?.source?.provider ?? "")}.</span>
               )}
-              {imported && <span className="tk-hint">Saving a new plan overrides the synced description.</span>}
-            </Field>
-
-            <Field label="Acceptance criteria" hint="the reviewer checks these">
-              <div className="tk-ac-list">
-                {acceptance.map((a, i) => (
-                  <div key={i} className="tk-ac-row">
-                    <span className="tk-ac-bullet" aria-hidden>
-                      {i + 1}.
+              <div className="nt-meta">
+                <div className="nt-anchor" ref={prioMenuRef}>
+                  <button
+                    type="button"
+                    className="nt-chip"
+                    aria-haspopup="menu"
+                    aria-expanded={menu === "prio"}
+                    aria-label={`Priority: ${PRIORITY_LABEL[priority]}`}
+                    disabled={imported}
+                    onClick={() => setMenu(menu === "prio" ? null : "prio")}
+                  >
+                    <PriorityBars priority={priority} />
+                    {priority === "none" ? "Priority" : PRIORITY_LABEL[priority]}
+                    <span className="nt-caret" aria-hidden>
+                      ▼
                     </span>
-                    <input
-                      ref={(el) => {
-                        acRefs.current[i] = el;
-                      }}
-                      className="input"
-                      value={a}
-                      aria-label={`Criterion ${i + 1}`}
-                      placeholder="Observable outcome, e.g. retries stop after 5 attempts"
-                      onChange={(e) => setAc(i, e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter") {
-                          e.preventDefault();
-                          addAc(i + 1);
-                        } else if (e.key === "Backspace" && a === "") {
-                          e.preventDefault();
-                          removeAc(i);
-                        }
-                      }}
-                    />
-                    <button type="button" className="icon-btn" aria-label={`Remove criterion ${i + 1}`} onClick={() => removeAc(i)}>
-                      ✕
-                    </button>
-                  </div>
+                  </button>
+                  {menu === "prio" && (
+                    <div className="menu nt-menu nt-prio-menu" role="menu" aria-label="Priority">
+                      {PRIORITIES.map((p) => (
+                        <button
+                          key={p}
+                          type="button"
+                          role="menuitemradio"
+                          aria-checked={priority === p}
+                          className="menu-item"
+                          onClick={() => {
+                            setPriority(p);
+                            setMenu(null);
+                          }}
+                        >
+                          <PriorityBars priority={p} />
+                          <span className="nt-grow">{PRIORITY_LABEL[p]}</span>
+                          <span className="menu-mark" aria-hidden>
+                            {priority === p ? "✓" : ""}
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                {labels.map((l) => (
+                  <span key={l} className="nt-label">
+                    {l}
+                    {!imported && (
+                      <button
+                        type="button"
+                        aria-label={`Remove label ${l}`}
+                        onClick={() => setLabels((x) => x.filter((y) => y !== l))}
+                      >
+                        ✕
+                      </button>
+                    )}
+                  </span>
                 ))}
-                <button type="button" className="btn btn-ghost btn-sm tk-ac-add" onClick={() => addAc()}>
-                  + Add criterion
-                </button>
-                {acceptance.length === 0 && (
-                  <span className="tk-hint">Empty: the reviewer infers them from the plan and says so.</span>
+                {!imported && (
+                  <input
+                    className="nt-label-input"
+                    value={labelDraft}
+                    onChange={(e) => setLabelDraft(e.target.value)}
+                    onKeyDown={onLabelKey}
+                    onBlur={addLabel}
+                    placeholder="+ Label"
+                    aria-label="Add label"
+                  />
                 )}
               </div>
-            </Field>
+            </section>
 
-            <div className="tk-grid">
-              <Field label="Priority">
-                <div className="segmented tk-seg" role="radiogroup" aria-label="Priority">
-                  {PRIO_ORDER.map((p) => (
-                    <button
-                      key={p}
-                      type="button"
-                      role="radio"
-                      aria-checked={priority === p}
-                      disabled={imported}
-                      className={`tk-seg-opt ${priority === p ? "on" : ""}`}
-                      onClick={() => setPriority(priority === p ? "none" : p)}
-                    >
-                      {PRIORITY_LABEL[p]}
-                    </button>
-                  ))}
+            <section className="nt-sec">
+              <div className="nt-sec-head">
+                <span className="nt-sec-title">Plan</span>
+                {kind === "text" && (
+                  <div className="nt-tabs" role="tablist" aria-label="Plan view">
+                    {(
+                      [
+                        ["write", "Write"],
+                        ["preview", "Preview"],
+                      ] as const
+                    ).map(([k, l]) => (
+                      <button
+                        key={k}
+                        type="button"
+                        role="tab"
+                        aria-selected={tab === k}
+                        className={`nt-tab ${tab === k ? "on" : ""}`}
+                        onClick={() => setTab(k)}
+                      >
+                        {l}
+                      </button>
+                    ))}
+                  </div>
+                )}
+                <span className="nt-grow" />
+                {kind === "text" && !text.trim() && (
+                  <button
+                    type="button"
+                    className="nt-soft-btn"
+                    onClick={() => {
+                      setText(PLAN_TEMPLATE);
+                      setTab("write");
+                    }}
+                  >
+                    Insert template
+                  </button>
+                )}
+                <button type="button" className="nt-link" onClick={() => setKind(kind === "text" ? "file" : "text")}>
+                  {kind === "text" ? "Use a .md from the repo" : "Write it here instead"}
+                </button>
+              </div>
+              {kind === "text" && tab === "write" && (
+                <textarea
+                  className={`nt-plan ${planErr ? "err" : ""}`}
+                  style={{ height: planHeight }}
+                  value={text}
+                  onChange={(e) => setText(e.target.value)}
+                  placeholder="What should change, and how? Steps, files, constraints."
+                  aria-label="Plan (markdown)"
+                  aria-invalid={planErr || undefined}
+                />
+              )}
+              {kind === "text" && tab === "preview" && (
+                <div className="nt-preview">
+                  {text.trim() ? <SafeMarkdown text={text} /> : <span className="tk-muted">Nothing to preview yet.</span>}
                 </div>
-              </Field>
-              <Field label="Labels">
-                <div className="tk-labels">
-                  {labels.map((l) => (
-                    <span key={l} className="tk-label">
-                      {l}
-                      {!imported && (
+              )}
+              {kind === "file" && (
+                <div className="nt-file">
+                  <button type="button" className={`nt-file-btn ${planErr ? "err" : ""}`} onClick={browse} disabled={!repo}>
+                    <span className={`mono ellipsis nt-grow ${path ? "" : "tk-muted"}`}>{path || "Choose a .md file…"}</span>
+                    <span className="nt-file-browse">Browse…</span>
+                  </button>
+                  <span className="tk-hint">Read from the repo each time the task runs.</span>
+                </div>
+              )}
+              {planErr && (
+                <span className="nt-err">
+                  {kind === "text" ? "Write a plan, or use a .md from the repo." : "Choose a .md file from the repo."}
+                </span>
+              )}
+              {imported && <span className="tk-hint">Saving a new plan overrides the synced description.</span>}
+            </section>
+
+            <section className="nt-sec">
+              <div className="nt-sec-head nt-sec-head-base">
+                <span className="nt-sec-title">Done when</span>
+                <span className="nt-sec-sub ellipsis">· the reviewer checks each one</span>
+                <span className="nt-count">
+                  {critCount ? `${critCount} criteri${critCount === 1 ? "on" : "a"}` : ""}
+                </span>
+              </div>
+              {suggestions.length > 0 && (
+                <div className="nt-sugg">
+                  <div className="nt-sugg-head">
+                    <span>Found {suggestions.length} in your plan</span>
+                    <button type="button" className="nt-soft-btn" onClick={() => addCriteria(suggestions)}>
+                      Add all
+                    </button>
+                  </div>
+                  <div className="nt-sugg-list">
+                    {suggestions.map((sg) => (
+                      <button key={sg} type="button" className="nt-sugg-item" onClick={() => addCriteria([sg])}>
+                        <span className="nt-plus" aria-hidden>
+                          +{" "}
+                        </span>
+                        {sg}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+              <div className="nt-crits">
+                {acceptance.map((c, i) => {
+                  const vague = isVague(c);
+                  return (
+                    <div key={i} className="nt-crit">
+                      <div className="nt-crit-row">
+                        <span className={`nt-box ${vague ? "warn" : ""}`} aria-hidden />
+                        <input
+                          ref={(el) => {
+                            acRefs.current[i] = el;
+                          }}
+                          className="nt-crit-input"
+                          value={c}
+                          aria-label={`Criterion ${i + 1}`}
+                          onChange={(e) => setAc(i, e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter" && !e.metaKey) e.currentTarget.blur();
+                            else if (e.key === "Backspace" && c === "") {
+                              e.preventDefault();
+                              removeAc(i);
+                            }
+                          }}
+                        />
                         <button
                           type="button"
-                          aria-label={`Remove label ${l}`}
-                          onClick={() => setLabels((x) => x.filter((y) => y !== l))}
+                          className="nt-x"
+                          aria-label={`Remove criterion ${i + 1}`}
+                          onClick={() => removeAc(i)}
                         >
                           ✕
                         </button>
+                      </div>
+                      {vague && (
+                        <div className="nt-vague">Hard to verify. Say what the reviewer would observe: a value, a test, a file.</div>
                       )}
-                    </span>
-                  ))}
-                  {!imported && (
-                    <input
-                      className="tk-label-input"
-                      value={labelDraft}
-                      onChange={(e) => setLabelDraft(e.target.value)}
-                      onKeyDown={onLabelKey}
-                      onBlur={addLabel}
-                      placeholder={labels.length ? "" : "Add labels"}
-                      aria-label="Add label"
-                    />
-                  )}
-                </div>
-              </Field>
-            </div>
-
-            <div className="tk-exec">
-              <span className="section-label">Execution</span>
-              <div className="tk-exec-grid">
-                <span className="tk-exec-label">Executor</span>
-                <div>
-                  <ExecutorPicker
-                    repoId={repo?.id ?? null}
-                    value={assignee}
-                    inherited={inherited}
-                    onChange={(v) => setAssignee(v && sameExecutor(v, inherited) ? null : v)}
-                    dropUp
-                  />
-                </div>
-
-                <span className="tk-exec-label">Isolation</span>
-                <div className="tk-exec-opt">
-                  <Seg
-                    label="Isolation"
-                    options={ISOLATIONS.map((i) => [i, ISOLATION_LABEL[i]])}
-                    value={effIsolation}
-                    disabled={isWorkflow}
-                    onPick={(v) => choose(v, repo?.defaultIsolation, setIsolation)}
-                  />
-                  <span className="tk-hint">
-                    {isWorkflow ? "Workflows manage their own worktree." : ISOLATION_HINT[effIsolation]}
-                    {isolation === null && repo && !isWorkflow ? " · repo default" : ""}
+                    </div>
+                  );
+                })}
+                <div className="nt-crit-row nt-crit-new">
+                  <span className="nt-box-plus" aria-hidden>
+                    +
                   </span>
-                </div>
-
-                <span className="tk-exec-label">Finish</span>
-                <div className="tk-exec-opt">
-                  <Seg
-                    label="Finish"
-                    options={FINISHES.map((f) => [f, FINISH_LABEL[f]])}
-                    value={effFinish}
-                    onPick={(v) => choose(v, repo?.defaultFinish, setFinish)}
+                  <input
+                    ref={draftRef}
+                    className="nt-crit-input"
+                    value={critDraft}
+                    onChange={(e) => setCritDraft(e.target.value)}
+                    onKeyDown={onDraftKey}
+                    onPaste={onDraftPaste}
+                    placeholder="Observable outcome, e.g. retries stop after 5 attempts"
+                    aria-label="New criterion"
                   />
-                  <span className="tk-hint">
-                    {FINISH_HINT[effFinish]}
-                    {finish === null && repo ? " · repo default" : ""}
-                  </span>
-                </div>
-
-                <span className="tk-exec-label">Review</span>
-                <div className="tk-exec-opt">
-                  <label className="tk-switch">
-                    <input
-                      type="checkbox"
-                      role="switch"
-                      checked={effReview}
-                      onChange={(e) => choose(e.target.checked, repo?.defaultReview, setReview)}
-                    />
-                    <span>{effReview ? "Review before In Review" : "No review"}</span>
-                  </label>
-                  <span className="tk-hint">
-                    {effReview
-                      ? `${repo?.reviewer ?? project?.reviewer ?? settings.data?.reviewer ?? "code-reviewer"} checks the criteria, read-only.`
-                      : "The task goes to In Review when the run ends."}
-                    {review === null && repo ? " · repo default" : ""}
+                  <span className="kbd" aria-hidden>
+                    ↵ add
                   </span>
                 </div>
               </div>
-            </div>
+              {critCount === 0 && (
+                <span className="tk-hint">
+                  Without criteria the reviewer only checks the plan steps. Paste a list and each line becomes one criterion.
+                </span>
+              )}
+            </section>
+
+            <section className="nt-exec">
+              <button
+                type="button"
+                className="nt-exec-head"
+                aria-expanded={execOpen}
+                onClick={() => setExecOpen(!execOpen)}
+              >
+                <span className="nt-sec-title">Execution</span>
+                <span className="nt-exec-sum ellipsis">{execSummary}</span>
+                {execCustom && <span className="nt-custom">custom</span>}
+                <span className="nt-exec-btn">{execOpen ? "Done" : "Change"}</span>
+              </button>
+              {execOpen && (
+                <div className="nt-exec-body">
+                  <span className="nt-exec-label">Executor</span>
+                  <div className="nt-exec-opt">
+                    <ExecutorPicker
+                      repoId={repo?.id ?? null}
+                      value={assignee}
+                      inherited={inherited}
+                      onChange={(v) => setAssignee(v && sameExecutor(v, inherited) ? null : v)}
+                      dropUp
+                    />
+                  </div>
+
+                  <span className="nt-exec-label">Isolation</span>
+                  <div className="nt-exec-opt">
+                    <Seg
+                      label="Isolation"
+                      options={ISOLATIONS.map((i) => [i, ISOLATION_LABEL[i]])}
+                      value={effIsolation}
+                      disabled={isWorkflow}
+                      onPick={(v) => choose(v, repo?.defaultIsolation, setIsolation)}
+                    />
+                    <Hint custom={!isWorkflow && isolation !== null}>
+                      {isWorkflow
+                        ? "Workflows manage their own worktree."
+                        : [ISOLATION_HINT[effIsolation], repoDefault(isolation !== null)].filter(Boolean).join(" · ")}
+                    </Hint>
+                  </div>
+
+                  <span className="nt-exec-label">Finish</span>
+                  <div className="nt-exec-opt">
+                    <Seg
+                      label="Finish"
+                      options={FINISHES.map((f) => [f, FINISH_LABEL[f]])}
+                      value={effFinish}
+                      onPick={(v) => choose(v, repo?.defaultFinish, setFinish)}
+                    />
+                    <Hint custom={finish !== null}>
+                      {[FINISH_HINT[effFinish], repoDefault(finish !== null)].filter(Boolean).join(" · ")}
+                    </Hint>
+                  </div>
+
+                  <span className="nt-exec-label">Review</span>
+                  <div className="nt-exec-opt">
+                    <button
+                      type="button"
+                      role="switch"
+                      aria-checked={effReview}
+                      className="nt-toggle"
+                      onClick={() => choose(!effReview, repo?.defaultReview, setReview)}
+                    >
+                      <span className={`nt-track ${effReview ? "on" : ""}`} aria-hidden>
+                        <span className="nt-knob" />
+                      </span>
+                      Review before In Review
+                    </button>
+                    <Hint custom={review !== null}>
+                      {[
+                        effReview
+                          ? `${repo?.reviewer ?? project?.reviewer ?? settings.data?.reviewer ?? "code-reviewer"} checks the criteria first, read-only`
+                          : "Goes straight to In Review",
+                        repoDefault(review !== null),
+                      ]
+                        .filter(Boolean)
+                        .join(" · ")}
+                    </Hint>
+                  </div>
+                </div>
+              )}
+            </section>
 
             {error && (
               <div className="banner banner-error" role="alert">
@@ -602,49 +856,29 @@ export function NewTaskDialog({ projectId, taskId, defaultRepoId, onClose, onSav
         )}
 
         <footer className="dlg-foot">
-          <span className="tk-hint dlg-foot-note">
-            {repo ? `Runs with ${executorLabel(effExecutor)}${assignee ? "" : " by default"}` : ""}
-          </span>
-          <button type="button" className="btn" onClick={onClose}>
+          <span className={`dlg-foot-note ${tried && missing.length ? "nt-err" : "tk-hint"}`}>{footNote}</span>
+          <button type="button" className="btn btn-ghost" onClick={onClose}>
             Cancel
           </button>
-          <button type="submit" className={`btn ${original ? "btn-primary" : ""}`} disabled={saving || !loaded}>
-            {original ? "Save" : "Create"}
-          </button>
           {!original && (
-            <button type="button" className="btn btn-primary" disabled={saving || !loaded} onClick={() => void submit(true)}>
+            <button type="button" className="btn" disabled={saving || !loaded} onClick={() => void submit(true)}>
               Create and run
             </button>
           )}
+          <button type="submit" className="btn btn-primary nt-save" disabled={saving || !loaded}>
+            {original ? "Save" : "Save as to-do"}
+            <span className="nt-kbd" aria-hidden>
+              ⌘↵
+            </span>
+          </button>
         </footer>
       </form>
     </>
   );
 }
 
-function Field({
-  label,
-  hint,
-  aside,
-  children,
-}: {
-  label: string;
-  hint?: string;
-  aside?: ReactNode;
-  children: ReactNode;
-}) {
-  return (
-    <div className="tk-field">
-      <div className="tk-field-head">
-        <span className="section-label">
-          {label}
-          {hint && <span className="tk-field-hint"> · {hint}</span>}
-        </span>
-        {aside}
-      </div>
-      {children}
-    </div>
-  );
+function Hint({ custom, children }: { custom: boolean; children: string }) {
+  return <span className={`tk-hint ${custom ? "nt-hint-custom" : ""}`}>{children}</span>;
 }
 
 function Seg<T extends string>({
