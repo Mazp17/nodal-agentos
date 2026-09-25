@@ -1,6 +1,6 @@
 [package]
 name = "nodal"
-version = "0.3.0"
+version = "0.3.1"
 description = "Nodal — Agent OS for Claude"
 authors = ["Nodal contributors"]
 license = "MIT"
