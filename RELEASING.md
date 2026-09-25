@@ -8,15 +8,15 @@ Versions follow [Semantic Versioning](https://semver.org/). Bump the patch numbe
 
 We'll move to 1.0 once the app is stable enough to promise compatibility between versions.
 
-Only versions with a suffix (`0.3.0-beta.1`) are marked as pre-releases on GitHub. Installed apps look for updates in the `latest.json` of the latest release, and GitHub skips pre-releases there, so a plain `x.y.z` reaches every user once it's published and a suffixed one reaches nobody until a plain version follows it.
+Only versions with a suffix (`0.3.0-beta.1`) are marked as pre-releases on GitHub. release-please doesn't pick those on its own: to cut one, set `"release-as": "0.3.0-beta.1"` on the package in `release-please-config.json` through a PR, and remove it once that release is out. Installed apps look for updates in the `latest.json` of the latest release, and GitHub skips pre-releases there, so a plain `x.y.z` reaches every user once it's published and a suffixed one reaches nobody until a plain version follows it.
 
-The version is set in `package.json` and `src-tauri/Cargo.toml`. Don't edit them by hand: `pnpm release:bump x.y.z` updates both, along with `Cargo.lock`.
+The next version is computed by [release-please](https://github.com/googleapis/release-please) from the Conventional Commit titles merged since the last release: a `fix` bumps the patch, a `feat` bumps the minor, and a breaking change (`feat!:` in the PR title) also bumps the minor until 1.0. PRs are squash-merged with the title only, so footers like `BREAKING CHANGE:` in a PR description don't reach `main`. It sets the version in `package.json`, `src-tauri/Cargo.toml` and `src-tauri/Cargo.lock`; don't edit them by hand.
 
 ## When to release
 
 There's no fixed schedule. We release when there's something worth shipping, which in practice means:
 
-- the `[Unreleased]` section of `CHANGELOG.md` has changes users will notice,
+- the open release PR has changes users will notice,
 - CI is green on `main`,
 - there are no known bugs that get in the way of normal use,
 - and the build passes the smoke test described below.
@@ -27,44 +27,21 @@ All releases come from `main`. We don't keep release branches.
 
 ## Cutting a release
 
-Since `main` only takes pull requests, the version bump goes through one too.
+[`release-please.yml`](.github/workflows/release-please.yml) runs on every push to `main` and keeps a pull request titled `chore(release): vx.y.z` open. It carries the version bump and the new `CHANGELOG.md` section, generated from the titles of the PRs merged since the last release, and it's updated as more PRs land. Since `main` is squash-merged, PR titles must follow [Conventional Commits](https://www.conventionalcommits.org/); the PR title check flags titles that don't. Pushes made by the workflow don't trigger CI on their own, so it dispatches CI on the release PR after each update.
 
-Start a branch from an up-to-date `main`:
+To release, review the release PR and squash-merge it once CI passes. release-please rewrites the PR whenever another PR lands, so edit its changelog (reword an entry, mention a database schema change, add something a `chore` PR changed for users) right before merging.
 
-```bash
-git switch main && git pull
-git switch -c release/vx.y.z
-```
-
-In `CHANGELOG.md`, rename `## [Unreleased]` to `## [x.y.z] - YYYY-MM-DD` and add an empty `## [Unreleased]` above it. If the release changes the database schema, mention it there. Then bump the version and open the PR:
-
-```bash
-pnpm release:bump x.y.z
-git commit -am "chore(release): vx.y.z"
-git push -u origin release/vx.y.z
-gh pr create --fill
-```
-
-Once CI passes, squash-merge it. Then tag the merge commit on `main` with a signed tag and push the tag:
-
-```bash
-git switch main && git pull
-git tag -s vx.y.z -m "Nodal x.y.z"
-git push origin vx.y.z
-```
-
-Pushing the tag starts the [release workflow](.github/workflows/release.yml). It makes sure the tag matches the version in `package.json` and that the changelog has a section for it, then builds a universal `.dmg` for Apple Silicon and Intel, computes its SHA-256 and creates a draft release. The draft's notes are that version's changelog section plus the install instructions.
+The workflow needs **Settings → Actions → General → Allow GitHub Actions to create and approve pull requests** turned on, or it can't open the release PR. The same workflow then creates a draft release with its tag `vx.y.z` and calls the [release workflow](.github/workflows/release.yml). It checks that the tag matches the version in `package.json` and that the changelog has a section for it, builds a universal `.dmg` for Apple Silicon and Intel, computes its SHA-256 and uploads everything to the draft. The draft's notes are that version's changelog section plus the install instructions.
 
 The draft also carries what the in-app updater needs: the update bundle (`Nodal_x.y.z_universal.app.tar.gz`), its signature (`.sig`) and `latest.json`, with the version, the changelog section as release notes, the date and the bundle's URL and signature. Installed apps only see it once the draft is published.
 
-Download the `.dmg` from the draft and go through the smoke test. If everything works, publish the draft. If something is wrong, delete the draft and then the tag, fix the problem on `main` with a regular PR and tag again:
+If the build fails for a reason outside the code (a runner or network hiccup), rebuild the tag from Actions → Release → Run workflow, with the tag as input. A failure that needs a code change is handled like a broken release, below.
+
+Download the `.dmg` from the draft and go through the smoke test. If everything works, publish the draft. If something is wrong, don't publish: fix it on `main` with a regular PR and ship it as the next version, which the release PR proposes as soon as the fix lands. To withdraw the broken version, delete the draft but keep the tag: release-please finds the last release through it, and without it the next changelog would list every commit since the start of the repo.
 
 ```bash
 gh release delete vx.y.z --yes
-git push --delete origin vx.y.z && git tag -d vx.y.z
 ```
-
-Release tags are protected: only a repository admin can move or delete them.
 
 ## Smoke test
 

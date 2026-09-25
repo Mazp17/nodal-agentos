@@ -1,18 +1,28 @@
 name: Release
 
-# Pushing a tag vX.Y.Z builds a universal, ad-hoc signed (not notarized) .dmg, the signed
-# update bundle and latest.json for the in-app updater, and creates a DRAFT release with the
-# notes from CHANGELOG.md. Only versions with a suffix (x.y.z-beta.1) are pre-releases: the
+# Builds a universal, ad-hoc signed (not notarized) .dmg, the signed update bundle and
+# latest.json for the in-app updater, and uploads them to the DRAFT release of a tag, with the
+# notes from CHANGELOG.md. Called by release-please.yml when a release PR is merged; run it by
+# hand to rebuild a tag. Only versions with a suffix (x.y.z-beta.1) are pre-releases: the
 # updater reads releases/latest, which skips them. Publishing is manual.
 on:
-  push:
-    tags: ["v*"]
+  workflow_call:
+    inputs:
+      tag:
+        type: string
+        required: true
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Tag to build, e.g. v0.3.0
+        type: string
+        required: true
 
 permissions:
   contents: read
 
 concurrency:
-  group: release-${{ github.ref }}
+  group: release-${{ inputs.tag }}
   cancel-in-progress: false
 
 jobs:
@@ -22,10 +32,11 @@ jobs:
     permissions:
       contents: write # create the draft release
     env:
-      TAG: ${{ github.ref_name }}
+      TAG: ${{ inputs.tag }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
+          ref: ${{ inputs.tag }}
           persist-credentials: false
 
       - name: Check tag, version and changelog
@@ -79,11 +90,13 @@ jobs:
             on && /^## \[/ { exit }
             on { print }
           ' CHANGELOG.md > notes.md
+          # The in-app updater shows plain notes: drop the PR and commit links.
+          sed -E 's/ \(\[[^]]*\]\([^)]*\)\)//g' notes.md > notes-app.md
           # Universal build: both architectures download the same bundle.
           url="https://github.com/$GITHUB_REPOSITORY/releases/download/$TAG/$update"
           jq -n \
             --arg version "$VERSION" \
-            --rawfile notes notes.md \
+            --rawfile notes notes-app.md \
             --arg pub_date "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
             --arg url "$url" \
             --rawfile sig "dist-release/$update.sig" \
@@ -93,12 +106,19 @@ jobs:
             > dist-release/latest.json
           cat .github/release-install-note.md >> notes.md
 
-      - name: Create draft release
+      # release-please already made the draft; a hand-run for an older tag may need to create it.
+      - name: Upload to the draft release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           prerelease=""
           case "$VERSION" in *-*) prerelease="--prerelease" ;; esac
-          gh release create "$TAG" dist-release/* \
-            --repo "$GITHUB_REPOSITORY" --draft $prerelease \
-            --title "Nodal $VERSION" --notes-file notes.md --verify-tag
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            gh release upload "$TAG" dist-release/* --repo "$GITHUB_REPOSITORY" --clobber
+            gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" $prerelease \
+              --title "Nodal $VERSION" --notes-file notes.md
+          else
+            gh release create "$TAG" dist-release/* \
+              --repo "$GITHUB_REPOSITORY" --draft $prerelease \
+              --title "Nodal $VERSION" --notes-file notes.md --verify-tag
+          fi

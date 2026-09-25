@@ -84,7 +84,7 @@ Tests that hit real services or real local data are `#[ignore]`. Linear live tes
 - **Database changes** are additive migrations: bump `PRAGMA user_version` and add a migration test from the previous version.
 - **Native dialogs don't work under Tauri.** Don't use `window.confirm`, `alert` or `prompt`; use `useConfirm()` from `src/ui/ConfirmDialog.tsx`. `pnpm build` fails if you do.
 - **Links** to external sites open through the opener plugin (`src/ui/ExternalLink.tsx`), never by navigating the webview.
-- **UI text is in English.** Code comments are currently mixed English/Spanish; new comments in English are preferred.
+- **English only.** UI text, code, comments and test data are in English.
 - Keep changes focused. Match the style of the surrounding code.
 
 ## Commits and pull requests
@@ -92,9 +92,9 @@ Tests that hit real services or real local data are `#[ignore]`. Linear live tes
 - Short commit messages; the subject line is usually enough (`feat(board): reorder tasks in one call`).
 - Pull request descriptions should be brief: what changed, why, and how you tested it. Long reasoning belongs in code comments or the changelog.
 - Include screenshots for UI changes.
-- Add user-visible changes to [CHANGELOG.md](CHANGELOG.md) under `[Unreleased]`.
+- PR titles follow [Conventional Commits](https://www.conventionalcommits.org/) (`feat:`, `fix:`, `docs:`, `chore:`…). They become the commit on `main` and the [CHANGELOG.md](CHANGELOG.md) entry, and `feat`/`fix` decide the next version. Write them for users when the change is user-visible.
 - `main` is protected: changes land through pull requests that are squash-merged once CI passes, so the PR title becomes the commit message.
-- Releases are cut by the maintainer following [RELEASING.md](RELEASING.md).
+- Releases are cut by the maintainer by merging the release PR, following [RELEASING.md](RELEASING.md).
 
 ## Reporting bugs
 
