@@ -1,6 +1,6 @@
-//! Persistencia en SQLite (`<app_data_dir>/nodal.db`).
-//! Una sola conexión detrás de un `Mutex`; los accesos async pasan por `with_db`, que
-//! corre el closure en un hilo bloqueante para no frenar el runtime.
+//! SQLite persistence (`<app_data_dir>/nodal.db`).
+//! A single connection behind a `Mutex`; async access goes through `with_db`, which
+//! runs the closure on a blocking thread so it doesn't stall the runtime.
 
 pub mod queries;
 pub mod rows;
@@ -21,7 +21,7 @@ pub type Db = Arc<Mutex<Connection>>;
 #[derive(Debug)]
 pub enum DbError {
     Sqlite(rusqlite::Error),
-    /// Error de validación o de estado, con un mensaje listo para mostrar (en inglés).
+    /// Validation or state error, with a message ready to display (in English).
     Invalid(String),
 }
 
@@ -42,7 +42,7 @@ impl From<rusqlite::Error> for DbError {
     }
 }
 
-/// Los comandos de Tauri rechazan con un string.
+/// Tauri commands reject with a string.
 impl From<DbError> for String {
     fn from(e: DbError) -> Self {
         e.to_string()
@@ -52,14 +52,14 @@ impl From<DbError> for String {
 fn configure(conn: &mut Connection) -> Result<(), DbError> {
     conn.busy_timeout(BUSY_TIMEOUT)?;
     conn.pragma_update(None, "foreign_keys", "ON")?;
-    // En `:memory:` devuelve "memory" y se ignora; `pragma_update` falla si el pragma
-    // devuelve fila, así que se lee con `query_row`.
+    // On `:memory:` it returns "memory" and is ignored; `pragma_update` fails if the pragma
+    // returns a row, so it's read with `query_row`.
     let _mode: String = conn.query_row("PRAGMA journal_mode = WAL", [], |r| r.get(0))?;
     conn.pragma_update(None, "synchronous", "NORMAL")?;
     schema::migrate(conn)
 }
 
-/// Abre (o crea) la base en `path`, con WAL, FKs activas y migraciones aplicadas.
+/// Opens (or creates) the database at `path`, with WAL, FKs on and migrations applied.
 pub fn open(path: &Path) -> Result<Db, DbError> {
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir)
@@ -70,7 +70,7 @@ pub fn open(path: &Path) -> Result<Db, DbError> {
     Ok(Arc::new(Mutex::new(conn)))
 }
 
-/// Base en memoria con el esquema aplicado (tests).
+/// In-memory database with the schema applied (tests).
 #[cfg(test)]
 pub fn open_in_memory() -> Result<Db, DbError> {
     let mut conn = Connection::open_in_memory()?;
@@ -78,7 +78,7 @@ pub fn open_in_memory() -> Result<Db, DbError> {
     Ok(Arc::new(Mutex::new(conn)))
 }
 
-/// Corre `f` con la conexión en un hilo bloqueante.
+/// Runs `f` with the connection on a blocking thread.
 pub async fn with_db<T, F>(db: &Db, f: F) -> Result<T, DbError>
 where
     T: Send + 'static,
@@ -86,8 +86,8 @@ where
 {
     let db = db.clone();
     tauri::async_runtime::spawn_blocking(move || {
-        // Un panic con el lock tomado no deja la conexión inconsistente: SQLite revierte
-        // la transacción abierta al soltarla, así que se sigue usando.
+        // A panic while holding the lock doesn't leave the connection inconsistent: SQLite
+        // rolls back the open transaction when it's dropped, so it keeps being used.
         let mut conn = db.lock().unwrap_or_else(|p| p.into_inner());
         f(&mut conn)
     })

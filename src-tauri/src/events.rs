@@ -1,8 +1,8 @@
-//! Aviso a la UI de que algo cambió en la base: evento `nodal://changed` con
-//! `{kind, projectId?}`. La UI vuelve a pedir lo que muestra; el evento no lleva datos.
+//! Notifies the UI that something changed in the database: event `nodal://changed` with
+//! `{kind, projectId?}`. The UI re-fetches what it shows; the event carries no data.
 //!
-//! Debounce simple: los avisos se juntan durante `DEBOUNCE` y se emiten sin repetir. Un
-//! aviso sin proyecto cubre a los del mismo `kind` con proyecto.
+//! Simple debounce: notices are collected for `DEBOUNCE` and emitted without duplicates. A
+//! notice without a project covers those of the same `kind` with a project.
 
 use std::collections::BTreeSet;
 use std::sync::{Arc, Mutex};
@@ -24,7 +24,7 @@ pub enum Kind {
     Projects,
 }
 
-/// Payload de `nodal://changed` (espejo de `ChangedEvent` en `api.ts`).
+/// Payload of `nodal://changed` (mirror of `ChangedEvent` in `api.ts`).
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Changed {
@@ -33,7 +33,7 @@ pub struct Changed {
     pub project_id: Option<String>,
 }
 
-/// Avisos acumulados entre emisiones.
+/// Notices accumulated between emissions.
 #[derive(Debug, Default)]
 struct Pending {
     items: BTreeSet<Changed>,
@@ -41,13 +41,13 @@ struct Pending {
 }
 
 impl Pending {
-    /// Agrega un aviso; `true` si hay que programar la emisión.
+    /// Adds a notice; `true` if the emission must be scheduled.
     fn push(&mut self, c: Changed) -> bool {
         self.items.insert(c);
         !std::mem::replace(&mut self.scheduled, true)
     }
 
-    /// Lo que hay que emitir, sin los avisos con proyecto cubiertos por uno global.
+    /// What must be emitted, minus the per-project notices covered by a global one.
     fn drain(&mut self) -> Vec<Changed> {
         self.scheduled = false;
         let items = std::mem::take(&mut self.items);
@@ -56,7 +56,7 @@ impl Pending {
     }
 }
 
-/// Emisor con debounce. Sin `AppHandle` (tests) no hace nada.
+/// Debounced emitter. Without an `AppHandle` (tests) it does nothing.
 #[derive(Clone, Default)]
 pub struct Events {
     app: Option<AppHandle>,
@@ -89,7 +89,7 @@ impl Events {
         }
     }
 
-    /// Varios `kind` para el mismo proyecto (o todos).
+    /// Several `kind`s for the same project (or all of them).
     pub fn notify_all(&self, kinds: &[Kind], project_id: Option<&str>) {
         for k in kinds {
             self.notify(*k, project_id);
@@ -97,7 +97,7 @@ impl Events {
     }
 }
 
-/// Desde cualquier lugar con `AppHandle` (el emisor vive como estado de Tauri).
+/// From anywhere with an `AppHandle` (the emitter lives as Tauri state).
 pub fn notify(app: &AppHandle, kinds: &[Kind], project_id: Option<&str>) {
     if let Some(ev) = app.try_state::<Events>() {
         ev.notify_all(kinds, project_id);
@@ -119,7 +119,7 @@ mod tests {
         assert!(!p.push(c(Kind::Tasks, Some("p1"))));
         assert!(!p.push(c(Kind::Runs, None)));
         assert_eq!(p.drain(), vec![c(Kind::Tasks, Some("p1")), c(Kind::Runs, None)]);
-        assert!(p.push(c(Kind::Queue, None)), "tras drenar se vuelve a programar");
+        assert!(p.push(c(Kind::Queue, None)), "after draining it schedules again");
     }
 
     #[test]

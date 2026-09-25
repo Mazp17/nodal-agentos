@@ -9,7 +9,7 @@ pub fn list(conn: &Connection, task_id: &str) -> Result<Vec<TaskRelation>, DbErr
     relations_of(conn, task_id)
 }
 
-/// Idempotente: agregar una relación que ya existe no falla.
+/// Idempotent: adding a relation that already exists doesn't fail.
 pub fn add(conn: &Connection, r: &TaskRelation) -> Result<(), DbError> {
     if r.task_id == r.other_id {
         return Err(DbError::Invalid("A task can't be related to itself.".into()));
@@ -17,7 +17,7 @@ pub fn add(conn: &Connection, r: &TaskRelation) -> Result<(), DbError> {
     match insert_relation(conn, r) {
         Ok(()) => Ok(()),
         Err(DbError::Sqlite(e)) if is_constraint(&e) => {
-            // PK repetida (ya existe) o FK (alguna tarea no existe).
+            // Duplicate PK (already exists) or FK (one of the tasks doesn't exist).
             let exists: i64 = conn.query_row(
                 "SELECT COUNT(*) FROM tasks WHERE id IN (?1, ?2)",
                 rusqlite::params![r.task_id, r.other_id],

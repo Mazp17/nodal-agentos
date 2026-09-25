@@ -1,7 +1,7 @@
-//! Actividad de Claude Code en un repo: sesiones (interactivas, en background, y
-//! headless que `claude agents` no lista) y subagentes de CUALQUIER sesión cuyo
-//! cwd/worktree cae dentro del repo. Solo lectura; el parseo del formato interno de
-//! Claude Code vive en `claude_sessions.rs`.
+//! Claude Code activity in a repo: sessions (interactive, background, and headless ones
+//! that `claude agents` doesn't list) and subagents of ANY session whose cwd/worktree
+//! falls inside the repo. Read-only; parsing of Claude Code's internal format lives in
+//! `claude_sessions.rs`.
 
 mod claude_sessions;
 
@@ -17,33 +17,33 @@ use crate::runs::{claude_bin, claude_fs};
 use claude_sessions::{AgentSession, SubagentFile};
 
 const LIST_TIMEOUT: Duration = Duration::from_secs(15);
-/// Cola leída de cada transcript.
+/// Tail read from each transcript.
 const TAIL_BYTES: u64 = 64 * 1024;
-/// Un subagente sin terminar y sin escribir en este tiempo se da por colgado/inactivo.
-/// Largo a propósito: una tool (p. ej. un build) puede tardar varios minutos sin escribir.
+/// An unfinished subagent that hasn't written in this long is considered hung/inactive.
+/// Long on purpose: a tool (e.g. a build) can take several minutes without writing.
 const STALE_MS: i64 = 10 * 60_000;
-/// Subagentes inactivos que se siguen mostrando.
+/// Inactive subagents that are still shown.
 const RECENT_SUBAGENT_MS: i64 = 60 * 60_000;
-/// Sesiones terminadas (background done/stopped) que se siguen mostrando.
+/// Finished sessions (background done/stopped) that are still shown.
 const RECENT_SESSION_MS: i64 = 12 * 60 * 60_000;
-/// Una sesión que `claude agents` no lista cuenta como activa si escribió hace menos de esto.
+/// A session `claude agents` doesn't list counts as active if it wrote less than this ago.
 const UNLISTED_ACTIVE_MS: i64 = 2 * 60_000;
 const MAX_SUBAGENTS: usize = 80;
-/// Un `.meta.json` más grande que esto no es el formato conocido: se ignora.
+/// A `.meta.json` larger than this isn't the known format: ignored.
 const META_MAX_BYTES: u64 = 64 * 1024;
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionActivity {
     pub session_id: String,
-    /// Id corto (solo background).
+    /// Short id (background only).
     pub id: Option<String>,
-    /// "interactive" | "background" | "unlisted" (transcript activo que `claude agents`
-    /// no lista: `claude -p`, SDK, …).
+    /// "interactive" | "background" | "unlisted" (an active transcript that `claude agents`
+    /// doesn't list: `claude -p`, SDK, …).
     pub kind: String,
     pub name: Option<String>,
     pub cwd: Option<String>,
-    /// "busy" | "idle" | "waiting" (procesos vivos).
+    /// "busy" | "idle" | "waiting" (live processes).
     pub status: Option<String>,
     /// "working" | "blocked" | "done" | "stopped" (background).
     pub state: Option<String>,
@@ -51,13 +51,13 @@ pub struct SessionActivity {
     pub started_at: Option<i64>,
     pub pid: Option<u32>,
     pub alive: bool,
-    /// Lanzada desde la app (issue o tarea).
+    /// Launched from the app (issue or task).
     pub is_app_run: bool,
-    /// mtime del transcript.
+    /// The transcript's mtime.
     pub last_activity_at: Option<i64>,
     pub last_tool: Option<String>,
     pub last_tool_summary: Option<String>,
-    /// "cli", "sdk-cli", … (del transcript).
+    /// "cli", "sdk-cli", … (from the transcript).
     pub entrypoint: Option<String>,
 }
 
@@ -68,7 +68,7 @@ pub struct SubagentActivity {
     pub agent_id: String,
     pub description: Option<String>,
     pub agent_type: Option<String>,
-    /// Worktree propio o heredado; si no, el último cwd del transcript.
+    /// Own or inherited worktree; otherwise, the transcript's last cwd.
     pub cwd: Option<String>,
     pub worktree: Option<String>,
     pub parent_agent_id: Option<String>,
@@ -76,13 +76,13 @@ pub struct SubagentActivity {
     pub workflow_phase: Option<String>,
     pub model: Option<String>,
     pub active: bool,
-    /// Terminó (último mensaje con `end_turn`). `active = false && !finished` = sin
-    /// actividad hace más de 10 min, o su sesión ya no corre.
+    /// Finished (last message with `end_turn`). `active = false && !finished` = no
+    /// activity for over 10 min, or its session is no longer running.
     pub finished: bool,
     pub last_activity_at: Option<i64>,
     pub last_tool: Option<String>,
     pub last_tool_summary: Option<String>,
-    /// Sesión dueña.
+    /// Owning session.
     pub session_name: Option<String>,
     pub session_kind: String,
     pub session_cwd: Option<String>,
@@ -95,11 +95,11 @@ pub struct RepoActivity {
     pub repo_path: String,
     pub sessions: Vec<SessionActivity>,
     pub subagents: Vec<SubagentActivity>,
-    /// Epoch ms del cálculo.
+    /// Epoch ms of the computation.
     pub generated_at: i64,
 }
 
-/// Runs lanzados por la app: ids cortos y sessionIds.
+/// Runs launched by the app: short ids and sessionIds.
 #[derive(Debug, Default, Clone)]
 pub struct AppRuns {
     pub run_ids: HashSet<String>,
@@ -120,12 +120,12 @@ impl AppRuns {
     }
 }
 
-/// Rutas equivalentes del repo (tal cual y canonicalizada) para comparar contra lo que
-/// escribe Claude Code, que no siempre canonicaliza.
+/// Equivalent repo paths (as is and canonicalized) to compare against what Claude Code
+/// writes, which doesn't always canonicalize.
 struct RepoRoots(Vec<PathBuf>);
 
 impl RepoRoots {
-    /// Por componentes: `/x/nodal-sandbox` NO está dentro de `/x/nodal`.
+    /// By components: `/x/nodal-sandbox` is NOT inside `/x/nodal`.
     fn contains(&self, path: &str) -> bool {
         let p = Path::new(path);
         p.is_absolute() && self.0.iter().any(|r| p.starts_with(r))
@@ -146,7 +146,7 @@ struct Owner {
 
 fn subagent_of(owner: &Owner, f: &SubagentFile, roots: &RepoRoots, now: i64) -> Option<SubagentActivity> {
     let mtime = claude_sessions::mtime_ms(&f.transcript)?;
-    // Sin actividad reciente: ni activo ni "reciente"; no vale la pena leerlo.
+    // No recent activity: neither active nor "recent"; not worth reading.
     if now - mtime > RECENT_SUBAGENT_MS {
         return None;
     }
@@ -190,7 +190,7 @@ fn subagent_of(owner: &Owner, f: &SubagentFile, roots: &RepoRoots, now: i64) -> 
     })
 }
 
-/// Arma la actividad del repo. Pura salvo lecturas de `projects` (testeable con fixtures).
+/// Builds the repo activity. Pure except for reads of `projects` (testable with fixtures).
 fn assemble(repo_paths: &[PathBuf], agents: &[AgentSession], projects: &Path, app: &AppRuns, now: i64) -> RepoActivity {
     let roots = RepoRoots(repo_paths.to_vec());
     let mut sessions = Vec::new();
@@ -202,15 +202,15 @@ fn assemble(repo_paths: &[PathBuf], agents: &[AgentSession], projects: &Path, ap
         let in_repo = a.cwd.as_deref().is_some_and(|c| roots.contains(c));
         let alive = a.alive();
         let started_at = a.started_at.map(|n| n as i64);
-        // Subagentes: se miran las sesiones vivas (de cualquier cwd) y las del repo.
+        // Subagents: look at live sessions (from any cwd) and the repo's own.
         if !alive && !in_repo {
             continue;
         }
-        // Un solo lookup por sesión: el transcript en `<slug(cwd)>/<sid>.jsonl`; solo si
-        // no está ahí se recorre `projects` (y la carpeta de subagentes es su hermana).
+        // A single lookup per session: the transcript at `<slug(cwd)>/<sid>.jsonl`; only if
+        // it's not there is `projects` scanned (and the subagents folder is its sibling).
         let jsonl = claude_sessions::find_session_jsonl(projects, a.cwd.as_deref(), &sid);
         let last_activity = jsonl.as_deref().and_then(claude_sessions::mtime_ms);
-        // "Reciente" por la última escritura (una sesión larga puede haber terminado recién).
+        // "Recent" by the last write (a long session may have just finished).
         let recent = last_activity.or(started_at).is_some_and(|t| now - t < RECENT_SESSION_MS);
         if !alive && !recent {
             continue;
@@ -255,8 +255,8 @@ fn assemble(repo_paths: &[PathBuf], agents: &[AgentSession], projects: &Path, ap
         });
     }
 
-    // Sesiones que `claude agents` no lista (headless `claude -p`, SDK, CLIs viejos):
-    // transcripts recién escritos en los proyectos del repo y sus worktrees.
+    // Sessions `claude agents` doesn't list (headless `claude -p`, SDK, old CLIs):
+    // freshly written transcripts in the projects of the repo and its worktrees.
     for root in &roots.0 {
         let Some(root) = root.to_str() else { continue };
         let prefix = claude_fs::project_slug(root);
@@ -317,18 +317,18 @@ fn assemble(repo_paths: &[PathBuf], agents: &[AgentSession], projects: &Path, ap
     }
 }
 
-/// Cuántas sesiones y subagentes están trabajando ahora en un conjunto de repos.
+/// How many sessions and subagents are working right now across a set of repos.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ActivitySummary {
-    /// Sesiones vivas trabajando o esperando al usuario.
+    /// Live sessions working or waiting on the user.
     pub sessions: u32,
-    /// Subagentes activos.
+    /// Active subagents.
     pub agents: u32,
     pub generated_at: i64,
 }
 
-/// Mismo criterio que el panel (`sessionState(...).live` en RepoActivityPanel).
+/// Same criterion as the panel (`sessionState(...).live` in RepoActivityPanel).
 fn summarize(act: &RepoActivity) -> ActivitySummary {
     let live = |s: &SessionActivity| {
         s.alive
@@ -342,7 +342,7 @@ fn summarize(act: &RepoActivity) -> ActivitySummary {
     }
 }
 
-/// Runs lanzados por la app (tabla `runs`). Si la base no está disponible, no se marca nada.
+/// Runs launched by the app (`runs` table). If the database isn't available, nothing is marked.
 async fn app_run_refs(app: &AppHandle) -> AppRuns {
     let mut refs = AppRuns::default();
     let Some(db) = app.try_state::<Db>() else { return refs };
@@ -367,7 +367,7 @@ async fn list_agents() -> Result<Vec<AgentSession>, String> {
     claude_sessions::parse_agents(&String::from_utf8_lossy(&out.stdout))
 }
 
-/// Sesiones y subagentes de Claude Code trabajando en `repo_path` (o sus worktrees).
+/// Claude Code sessions and subagents working in `repo_path` (or its worktrees).
 #[tauri::command]
 pub async fn repo_activity(app: AppHandle, repo_path: String) -> Result<RepoActivity, String> {
     let raw = PathBuf::from(repo_path.trim());
@@ -399,7 +399,7 @@ pub async fn repo_activity(app: AppHandle, repo_path: String) -> Result<RepoActi
     .map_err(|e| format!("Internal error reading activity: {e}"))?
 }
 
-/// Rutas existentes, cada una tal cual y canonicalizada, sin repetir.
+/// Existing paths, each one as is and canonicalized, without duplicates.
 fn existing_roots(raw: impl IntoIterator<Item = PathBuf>) -> Vec<PathBuf> {
     let mut roots: Vec<PathBuf> = Vec::new();
     for r in raw {
@@ -425,7 +425,7 @@ fn now_ms() -> i64 {
         .unwrap_or(0)
 }
 
-/// Actividad de un repo del proyecto (mismo criterio que `ActivitySummary`).
+/// Activity of one of the project's repos (same criterion as `ActivitySummary`).
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RepoActivityCount {
@@ -435,8 +435,8 @@ pub struct RepoActivityCount {
     pub agents: u32,
 }
 
-/// Actividad de los repos de un proyecto. Los totales cuentan una sola vez lo que cae en
-/// más de un repo (repos anidados).
+/// Activity of a project's repos. The totals count only once whatever falls in more
+/// than one repo (nested repos).
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ProjectActivity {
@@ -447,8 +447,8 @@ pub struct ProjectActivity {
     pub generated_at: i64,
 }
 
-/// Conteos por repo y totales con un solo listado de agentes. `roots` resuelve las rutas a
-/// comparar (en la app, `existing_roots`: un repo cuya carpeta no existe cuenta cero).
+/// Per-repo counts and totals from a single agent listing. `roots` resolves the paths to
+/// compare (in the app, `existing_roots`: a repo whose folder doesn't exist counts zero).
 fn project_counts(
     project_id: &str,
     repos: &[(String, PathBuf)],
@@ -486,7 +486,7 @@ fn project_counts(
     }
 }
 
-/// Sesiones y subagentes trabajando en cada repo del proyecto (un solo `claude agents`).
+/// Sessions and subagents working in each of the project's repos (a single `claude agents`).
 #[tauri::command]
 pub async fn project_activity(app: AppHandle, project_id: String) -> Result<ProjectActivity, String> {
     crate::util::check_id(&project_id, "project")?;
@@ -511,9 +511,9 @@ pub async fn project_activity(app: AppHandle, project_id: String) -> Result<Proj
     .map_err(|e| format!("Internal error reading activity: {e}"))?
 }
 
-/// Resumen de actividad de varios repos en una sola pasada (un `claude agents` y un
-/// recorrido de `projects`), para el indicador del sidebar. Las rutas que no existen se
-/// ignoran; sin rutas válidas devuelve ceros.
+/// Activity summary of several repos in a single pass (one `claude agents` and one scan
+/// of `projects`), for the sidebar indicator. Paths that don't exist are ignored; with
+/// no valid paths it returns zeros.
 #[tauri::command]
 pub async fn activity_summary(repo_paths: Vec<String>) -> Result<ActivitySummary, String> {
     let raw: Vec<PathBuf> = repo_paths
@@ -556,8 +556,8 @@ mod tests {
     const COORD: &str = "11111111-2222-3333-4444-555555555555";
     const BG: &str = "99999999-0000-0000-0000-000000000001";
 
-    /// Las ventanas de tiempo dependen del mtime: se copian los fixtures a un temporal
-    /// (mtime = ahora) y se ajusta el de los que tienen que verse viejos.
+    /// The time windows depend on mtime: the fixtures are copied to a temp dir
+    /// (mtime = now) and the ones that must look old get their mtime adjusted.
     fn setup(name: &str) -> (PathBuf, i64) {
         let dst = std::env::temp_dir().join(format!("nodal-activity-{}-{name}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dst);
@@ -578,15 +578,15 @@ mod tests {
                 copy_dir(&e.path(), &to);
             } else {
                 std::fs::copy(e.path(), &to).unwrap();
-                // En macOS `fs::copy` conserva el mtime del origen (el del checkout): se fija a
-                // ahora para que las ventanas de tiempo no dependan de cuándo se clonó el repo.
+                // On macOS `fs::copy` keeps the source mtime (the checkout's): set it to now so
+                // the time windows don't depend on when the repo was cloned.
                 let f = std::fs::File::options().append(true).open(&to).unwrap();
                 f.set_modified(std::time::SystemTime::now()).unwrap();
             }
         }
     }
 
-    /// `startedAt` relativo a `now`: la terminada del repo es de hace 1 h (reciente).
+    /// `startedAt` relative to `now`: the repo's finished one is from 1 h ago (recent).
     fn agents(now: i64) -> Vec<AgentSession> {
         let mut a =
             claude_sessions::parse_agents(&std::fs::read_to_string(fixtures().join("agents.json")).unwrap()).unwrap();
@@ -605,14 +605,15 @@ mod tests {
 
         let ids: Vec<(&str, &str, bool)> =
             act.sessions.iter().map(|s| (s.session_id.as_str(), s.kind.as_str(), s.alive)).collect();
-        // Background working del repo, interactiva en un worktree del repo, headless no
-        // listada, background terminada reciente. Nada de la sandbox ni del coordinador.
+        // The repo's working background session, an interactive one in a repo worktree, an
+        // unlisted headless one, a recently finished background one. Nothing from the sandbox
+        // or the coordinator.
         assert!(ids.contains(&(BG, "background", true)), "{ids:?}");
         assert!(ids.contains(&("77777777-0000-0000-0000-000000000003", "interactive", true)), "{ids:?}");
         assert!(ids.contains(&("88888888-aaaa-bbbb-cccc-000000000001", "unlisted", true)), "{ids:?}");
         assert!(ids.contains(&("43495c2e-056b-4f96-8cab-4dd89a61e005", "background", false)), "{ids:?}");
         assert_eq!(ids.len(), 4, "{ids:?}");
-        assert!(!ids[3].2, "vivas primero");
+        assert!(!ids[3].2, "live ones first");
 
         let bg = act.sessions.iter().find(|s| s.session_id == BG).unwrap();
         assert!(bg.is_app_run);
@@ -622,15 +623,16 @@ mod tests {
         assert!(!unlisted.is_app_run);
 
         let subs: Vec<(&str, bool)> = act.subagents.iter().map(|s| (s.agent_id.as_str(), s.active)).collect();
-        // Del coordinador (cwd fuera del repo): el del worktree, su hijo con worktree
-        // heredado y el que hizo cd al repo. No el terminado fuera del repo ni el viejo.
+        // From the coordinator (cwd outside the repo): the worktree one, its child with an
+        // inherited worktree and the one that cd'd into the repo. Not the finished one outside
+        // the repo, nor the old one.
         assert!(subs.contains(&("alive0000000001", true)), "{subs:?}");
         assert!(subs.contains(&("achild000000001", false)), "{subs:?}");
         assert!(subs.contains(&("acdrepo00000001", true)), "{subs:?}");
-        // Workflow agent de la sesión background del repo.
+        // Workflow agent of the repo's background session.
         assert!(subs.contains(&("aworkflow000000001", true)), "{subs:?}");
         assert_eq!(subs.len(), 4, "{subs:?}");
-        assert!(act.subagents[..3].iter().all(|s| s.active), "activos primero");
+        assert!(act.subagents[..3].iter().all(|s| s.active), "active ones first");
 
         let alive = act.subagents.iter().find(|s| s.agent_id == "alive0000000001").unwrap();
         assert_eq!(alive.session_id, COORD);
@@ -653,10 +655,10 @@ mod tests {
         let (projects, now) = setup("summary");
         let repo = PathBuf::from("/Users/me/Code/repo");
         let one = summarize(&assemble(std::slice::from_ref(&repo), &agents(now), &projects, &AppRuns::default(), now));
-        // alive0000000001, acdrepo00000001 y aworkflow000000001.
+        // alive0000000001, acdrepo00000001 and aworkflow000000001.
         assert_eq!(one.agents, 3, "{one:?}");
         assert_eq!(one.sessions, 2, "background working + headless: {one:?}");
-        // Sumar la sandbox agrega (al menos) su sesión bloqueada esperando permiso.
+        // Adding the sandbox adds (at least) its session blocked waiting for permission.
         let sandbox = PathBuf::from("/Users/me/Code/repo-sandbox");
         let both = summarize(&assemble(&[repo, sandbox], &agents(now), &projects, &AppRuns::default(), now));
         assert!(both.sessions > one.sessions, "{one:?} {both:?}");
@@ -677,13 +679,13 @@ mod tests {
         let one = count(std::slice::from_ref(&repo));
         assert_eq!((act.repos[0].repo_id.as_str(), act.repos[0].sessions, act.repos[0].agents), ("r1", one.sessions, one.agents));
         assert_eq!((one.sessions, one.agents), (2, 3));
-        // El total no cuenta dos veces lo del repo anidado.
+        // The total doesn't double-count the nested repo.
         let both = count(&[repo, sandbox]);
         assert_eq!((act.sessions, act.agents), (both.sessions, both.agents));
         assert!(act.repos[2].agents >= 1, "{act:?}");
         assert!(act.agents < act.repos.iter().map(|r| r.agents).sum::<u32>(), "{act:?}");
 
-        // En la app, una carpeta inexistente cuenta cero.
+        // In the app, a missing folder counts zero.
         let real = project_counts("p1", &repos[..1], &agents(now), &projects, now, existing_roots);
         assert_eq!((real.repos[0].sessions, real.repos[0].agents, real.sessions), (0, 0, 0));
         assert!(project_counts("p1", &[], &agents(now), &projects, now, id).repos.is_empty());
@@ -694,14 +696,14 @@ mod tests {
     fn dead_session_has_no_active_subagents_and_stale_ones_expire() {
         let (projects, now) = setup("dead");
         let mut agents = agents(now);
-        // El coordinador murió: sus subagentes quedan, pero inactivos.
+        // The coordinator died: its subagents remain, but inactive.
         let coord = agents.iter_mut().find(|a| a.session_id.as_deref() == Some(COORD)).unwrap();
         coord.pid = None;
         coord.status = None;
         let act = assemble(&[PathBuf::from("/Users/me/Code/repo")], &agents, &projects, &AppRuns::default(), now);
-        assert!(act.subagents.iter().all(|s| s.session_id != COORD), "sesión muerta fuera del repo: no se escanea");
+        assert!(act.subagents.iter().all(|s| s.session_id != COORD), "dead session outside the repo: not scanned");
 
-        // Pasados 10 min sin escribir, un subagente sin `end_turn` deja de contar como activo.
+        // After 10 min without writing, a subagent without `end_turn` stops counting as active.
         let act = assemble(&[PathBuf::from("/Users/me/Code/repo")], &self::agents(now), &projects, &AppRuns::default(), now + STALE_MS + 1);
         assert!(act.subagents.iter().all(|s| !s.active), "{:?}", act.subagents);
         std::fs::remove_dir_all(&projects).unwrap();
@@ -717,14 +719,14 @@ mod tests {
         assert!(!roots.contains("repo"));
     }
 
-    /// Contra los datos reales de esta máquina (solo lectura):
-    /// `ACTIVITY_REPO=<ruta> cargo test -- --ignored`.
+    /// Against this machine's real data (read-only):
+    /// `ACTIVITY_REPO=<path> cargo test -- --ignored`.
     #[test]
     #[ignore]
     fn real_repo_activity() {
         let agents = tauri::async_runtime::block_on(list_agents()).expect("claude agents");
         let projects = claude_fs::claude_config_dir().unwrap().join("projects");
-        let repo = std::env::var("ACTIVITY_REPO").expect("ACTIVITY_REPO=<ruta de un repo>");
+        let repo = std::env::var("ACTIVITY_REPO").expect("ACTIVITY_REPO=<path to a repo>");
         let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis() as i64;
         let act = assemble(&[PathBuf::from(&repo)], &agents, &projects, &AppRuns::default(), now);
         for s in &act.sessions {

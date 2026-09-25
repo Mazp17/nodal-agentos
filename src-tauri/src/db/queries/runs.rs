@@ -17,10 +17,10 @@ pub fn get(conn: &Connection, id: &str) -> Result<Run, DbError> {
     get_run(conn, id)?.ok_or_else(|| not_found("run"))
 }
 
-/// Filtro por proyecto: el de la tarea, o el del repo si el run no tiene tarea.
+/// Project filter: the task's project, or the repo's if the run has no task.
 const IN_PROJECT: &str = "(?1 IS NULL OR t.project_id = ?1 OR (r.task_id IS NULL AND rp.project_id = ?1))";
 
-/// Runs del proyecto y/o de la tarea (`None`: sin filtrar), más recientes primero. Hasta
+/// Runs of the project and/or task (`None`: unfiltered), most recent first. Up to
 /// `HISTORY_LIMIT`.
 pub fn list_filtered(conn: &Connection, project_id: Option<&str>, task_id: Option<&str>) -> Result<Vec<Run>, DbError> {
     query(
@@ -36,8 +36,8 @@ pub fn list_filtered(conn: &Connection, project_id: Option<&str>, task_id: Optio
     )
 }
 
-/// El último run (por `queued_at`) de cada tarea del proyecto (`None`: todas), sin límite
-/// de historial.
+/// The latest run (by `queued_at`) of each of the project's tasks (`None`: all), with no
+/// history limit.
 pub fn latest_by_task(conn: &Connection, project_id: Option<&str>) -> Result<Vec<Run>, DbError> {
     query(
         conn,
@@ -50,7 +50,7 @@ pub fn latest_by_task(conn: &Connection, project_id: Option<&str>) -> Result<Vec
     )
 }
 
-/// Como `pending`, del proyecto (`None`: todos).
+/// Like `pending`, for the project (`None`: all).
 pub fn pending_of(conn: &Connection, project_id: Option<&str>) -> Result<Vec<Run>, DbError> {
     query(
         conn,
@@ -65,12 +65,12 @@ pub fn pending_of(conn: &Connection, project_id: Option<&str>) -> Result<Vec<Run
     )
 }
 
-/// Cola global en orden de salida.
+/// Global queue in dispatch order.
 pub fn queue(conn: &Connection) -> Result<Vec<Run>, DbError> {
     query(conn, "SELECT * FROM runs WHERE status = 'queued' ORDER BY queue_position, queued_at, id", [])
 }
 
-/// Todo lo que la cola sigue: en cola, lanzándose o lanzado (hasta que termine).
+/// Everything the queue tracks: queued, launching or launched (until it finishes).
 pub fn pending(conn: &Connection) -> Result<Vec<Run>, DbError> {
     query(
         conn,
@@ -87,7 +87,7 @@ pub fn pending_for_task(conn: &Connection, task_id: &str) -> Result<Vec<Run>, Db
     )
 }
 
-/// Runs pendientes de las tareas de un proyecto.
+/// Pending runs of a project's tasks.
 pub fn pending_in_project(conn: &Connection, project_id: &str) -> Result<i64, DbError> {
     Ok(conn.query_row(
         "SELECT COUNT(*) FROM runs r JOIN tasks t ON t.id = r.task_id
@@ -97,8 +97,8 @@ pub fn pending_in_project(conn: &Connection, project_id: &str) -> Result<i64, Db
     )?)
 }
 
-/// Último run terminado de la tarea (el paso previo de la cadena), incluidos los detenidos
-/// por el usuario (cancelados después de lanzarse).
+/// The task's last finished run (the previous step in the chain), including those stopped
+/// by the user (canceled after launching).
 pub fn last_finished(conn: &Connection, task_id: &str) -> Result<Option<Run>, DbError> {
     Ok(conn
         .query_row(
@@ -111,7 +111,7 @@ pub fn last_finished(conn: &Connection, task_id: &str) -> Result<Option<Run>, Db
         .optional()?)
 }
 
-/// Último run de trabajo de la tarea, en cualquier estado.
+/// The task's last work run, in any status.
 pub fn last_work(conn: &Connection, task_id: &str) -> Result<Option<Run>, DbError> {
     Ok(conn
         .query_row(
@@ -130,7 +130,7 @@ pub fn insert(conn: &Connection, r: &Run) -> Result<(), DbError> {
     insert_run(conn, r)
 }
 
-/// Guarda el estado mutable del run (todo menos identidad, tarea, prompt y opciones).
+/// Saves the run's mutable state (everything except identity, task, prompt and options).
 pub fn update(conn: &Connection, r: &Run) -> Result<(), DbError> {
     let n = conn.execute(
         "UPDATE runs SET cwd = :cwd, status = :status, queue_position = :qpos, verdict_json = :verdict,
@@ -153,18 +153,18 @@ pub fn update(conn: &Connection, r: &Run) -> Result<(), DbError> {
     Ok(())
 }
 
-/// Pasa de `from` a `to` solo si sigue en `from` (compare-and-set). Devuelve si cambió.
+/// Moves from `from` to `to` only if still in `from` (compare-and-set). Returns whether it changed.
 pub fn transition(conn: &Connection, id: &str, from: RunStatus, to: RunStatus) -> Result<bool, DbError> {
     Ok(conn.execute("UPDATE runs SET status = ?3 WHERE id = ?1 AND status = ?2", rusqlite::params![id, from, to])? > 0)
 }
 
-/// Runs `launching`. Solo la pasada de la cola (con su turno) los pone así y los saca en
-/// la misma pasada: fuera de ella, uno que quedó `launching` está huérfano.
+/// `launching` runs. Only the queue pass (holding its turn) sets them so and clears them in
+/// the same pass: outside of it, one left `launching` is orphaned.
 pub fn launching(conn: &Connection) -> Result<Vec<Run>, DbError> {
     query(conn, "SELECT * FROM runs WHERE status = 'launching' ORDER BY queued_at, id", [])
 }
 
-/// Nuevo orden de la cola: `ids` tiene que ser exactamente el conjunto de runs en cola.
+/// New queue order: `ids` must be exactly the set of queued runs.
 pub fn reorder_queue(conn: &mut Connection, ids: &[String]) -> Result<(), DbError> {
     let tx = conn.transaction()?;
     let current: Vec<String> = {
@@ -180,8 +180,8 @@ pub fn reorder_queue(conn: &mut Connection, ids: &[String]) -> Result<(), DbErro
     if want.len() != ids.len() || want != have {
         return Err(DbError::Invalid("The queue changed; reload it and try again.".into()));
     }
-    // Las posiciones nuevas arrancan después de todas las existentes: el orden relativo
-    // con los runs ya lanzados no importa, pero así nunca hay empates.
+    // New positions start after all existing ones: the relative order against already
+    // launched runs doesn't matter, but this way there are never ties.
     let base: f64 = tx.query_row("SELECT COALESCE(MAX(queue_position), 0) FROM runs", [], |r| r.get(0))?;
     for (i, id) in ids.iter().enumerate() {
         tx.execute("UPDATE runs SET queue_position = ?2 WHERE id = ?1", rusqlite::params![id, base + 1.0 + i as f64])?;
@@ -190,10 +190,10 @@ pub fn reorder_queue(conn: &mut Connection, ids: &[String]) -> Result<(), DbErro
     Ok(())
 }
 
-/// `(claude_run_id, session_id)` de un run lanzado.
+/// `(claude_run_id, session_id)` of a launched run.
 pub type LaunchedRef = (Option<String>, Option<String>);
 
-/// Refs de todos los runs lanzados (para marcar "lanzado por la app" en la actividad).
+/// Refs of every launched run (to mark "launched by the app" in the activity).
 pub fn launched_refs(conn: &Connection) -> Result<Vec<LaunchedRef>, DbError> {
     let mut stmt = conn.prepare(
         "SELECT claude_run_id, session_id FROM runs WHERE claude_run_id IS NOT NULL OR session_id IS NOT NULL",

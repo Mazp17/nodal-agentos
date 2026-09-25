@@ -1,8 +1,8 @@
-//! Resolución del binario `claude` y ejecución con timeout.
+//! Resolution of the `claude` binary and execution with a timeout.
 //!
-//! Una app abierta desde Finder no hereda el PATH del shell: por eso se busca en PATH y,
-//! si no está, en las rutas de instalación conocidas; y al hijo se le pasa un PATH ampliado
-//! para que `claude` encuentre a su vez git, node, etc.
+//! An app opened from Finder doesn't inherit the shell's PATH: so it looks in PATH and,
+//! failing that, in the known install locations; and the child gets an extended PATH so
+//! that `claude` can in turn find git, node, etc.
 
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
@@ -15,7 +15,7 @@ fn home() -> Option<PathBuf> {
     std::env::var_os("HOME").map(PathBuf::from)
 }
 
-/// Directorios donde suele vivir `claude` (y herramientas que usa) fuera del PATH de Finder.
+/// Directories where `claude` (and the tools it uses) usually live outside Finder's PATH.
 fn extra_dirs() -> Vec<PathBuf> {
     let mut dirs = Vec::new();
     if let Some(h) = home() {
@@ -40,7 +40,7 @@ fn is_executable(p: &Path) -> bool {
     }
 }
 
-/// Ruta de un ejecutable: primero el PATH, después los directorios conocidos.
+/// Path of an executable: PATH first, then the known directories.
 pub fn resolve_bin(name: &str) -> Option<PathBuf> {
     let from_path = std::env::var_os("PATH")
         .map(|p| std::env::split_paths(&p).collect::<Vec<_>>())
@@ -48,7 +48,7 @@ pub fn resolve_bin(name: &str) -> Option<PathBuf> {
     from_path.into_iter().chain(extra_dirs()).map(|d| d.join(name)).find(|c| is_executable(c))
 }
 
-/// Ruta del binario `claude`: primero el PATH, después `~/.local/bin/claude` y afines.
+/// Path of the `claude` binary: PATH first, then `~/.local/bin/claude` and the like.
 pub fn resolve_claude() -> Result<PathBuf, String> {
     resolve_bin("claude").ok_or_else(|| {
         "Couldn't find the `claude` executable in PATH or ~/.local/bin. Is Claude Code installed?".to_string()
@@ -67,26 +67,26 @@ pub fn augmented_path() -> OsString {
     std::env::join_paths(dirs).unwrap_or_default()
 }
 
-/// `claude` listo para configurar: sin stdin y con PATH ampliado.
+/// `claude` ready to configure: no stdin and an extended PATH.
 pub fn claude_command() -> Result<Command, String> {
     let mut cmd = Command::new(resolve_claude()?);
     cmd.env("PATH", augmented_path()).stdin(Stdio::null());
     Ok(cmd)
 }
 
-/// Ejecuta y espera la salida completa; si pasa `limit`, mata el proceso.
+/// Runs and waits for the full output; if `limit` passes, kills the process.
 pub async fn output_with_timeout(mut cmd: Command, limit: Duration, what: &str) -> Result<Output, String> {
     cmd.stdout(Stdio::piped()).stderr(Stdio::piped()).kill_on_drop(true);
     let child = cmd.spawn().map_err(|e| format!("Couldn't run {what}: {e}"))?;
     match tokio::time::timeout(limit, child.wait_with_output()).await {
         Ok(Ok(out)) => Ok(out),
         Ok(Err(e)) => Err(format!("{what} failed: {e}")),
-        // Al soltar el futuro se suelta el hijo y `kill_on_drop` lo mata.
+        // Dropping the future drops the child, and `kill_on_drop` kills it.
         Err(_) => Err(format!("{what} didn't respond within {} s and was cancelled.", limit.as_secs())),
     }
 }
 
-/// stderr (o stdout si stderr está vacío), recortado, para mensajes de error.
+/// stderr (or stdout if stderr is empty), trimmed, for error messages.
 pub fn error_text(out: &Output) -> String {
     let err = String::from_utf8_lossy(&out.stderr).trim().to_string();
     if err.is_empty() {

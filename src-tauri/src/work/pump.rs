@@ -1,6 +1,6 @@
-//! La pasada periódica de la cola: completa sessionIds, detecta los runs que terminaron
-//! (salen de working/blocked en `claude agents`), lee su resultado, aplica la transición
-//! (con el outbox y el revisor en la misma transacción) y lanza lo que entre.
+//! The periodic queue pass: fills in sessionIds, detects runs that finished (they leave
+//! working/blocked in `claude agents`), reads their result, applies the transition (with
+//! the outbox and the reviewer in the same transaction) and launches whatever fits.
 
 use std::path::Path;
 use std::sync::Arc;
@@ -18,7 +18,7 @@ use super::queue::{self, EndSignal};
 use super::transitions::{decide, executor_label, read_end, RunEnd};
 use super::{executors, launch, ops, Env, Inner};
 
-/// Mensaje de error de lanzamiento con la salida concreta para los casos conocidos.
+/// Launch error message with the concrete way out for known cases.
 pub fn friendly_launch_error(e: &str, cwd: &str, worktrees_root: &Path) -> String {
     if e.contains("Workspace not trusted") {
         let hint = if Path::new(cwd).starts_with(worktrees_root) {
@@ -34,13 +34,13 @@ pub fn friendly_launch_error(e: &str, cwd: &str, worktrees_root: &Path) -> Strin
     e.to_string()
 }
 
-/// Cierra un run que terminó (`final_status`: Finished, o Canceled si lo detuvo el usuario):
-/// guarda su resultado, mueve la tarea, deja el outbox y encola el revisor si corresponde,
-/// todo en una transacción. Si el run ya no está `launched` (otra pasada lo cerró), no hace
-/// nada. Devuelve el revisor encolado, si hubo.
+/// Closes a run that finished (`final_status`: Finished, or Canceled if the user stopped it):
+/// saves its result, moves the task, writes the outbox and enqueues the reviewer if needed,
+/// all in one transaction. If the run is no longer `launched` (another pass closed it), it
+/// does nothing. Returns the enqueued reviewer, if any.
 ///
-/// El revisor se arma (disco y git) sin la base tomada; la transacción vuelve a leer la
-/// tarea y, si la cerraron a mano mientras tanto, no lo encola.
+/// The reviewer is built (disk and git) without holding the database; the transaction
+/// re-reads the task and, if it was closed by hand in the meantime, doesn't enqueue it.
 pub fn apply_end(
     db: &Db,
     env: &Env,
@@ -52,7 +52,7 @@ pub fn apply_end(
 ) -> Result<Option<Run>, String> {
     let mut decision = decide(run, end);
     let is_closed = |t: &Task| matches!(t.status, TaskStatus::Done | TaskStatus::Canceled);
-    // 1. Lectura.
+    // 1. Read.
     let (task, inputs) = {
         let conn = launch::lock(db);
         let task = match &run.task_id {
@@ -65,9 +65,9 @@ pub fn apply_end(
         };
         (task, inputs)
     };
-    // 2. El revisor, sin la base.
+    // 2. The reviewer, without the database.
     let mut note = end.note.clone();
-    // El revisor ve el run ya con su resultado (resumen, rama).
+    // The reviewer sees the run already with its result (summary, branch).
     let mut view = run.clone();
     view.summary = end.summary.clone();
     view.pr_url = end.pr.clone();
@@ -82,7 +82,7 @@ pub fn apply_end(
     let mut reviewer = match built {
         Some(Ok(r)) => Some(r),
         Some(Err(e)) => {
-            // Sin revisor no hay gate: la tarea queda bloqueada con el motivo.
+            // Without a reviewer there's no gate: the task is left blocked with the reason.
             decision.enqueue_review = false;
             decision.task_status = Some(TaskStatus::Blocked);
             decision.closing = true;
@@ -92,7 +92,7 @@ pub fn apply_end(
         None => None,
     };
 
-    // 3. Transacción.
+    // 3. Transaction.
     let mut conn = launch::lock(db);
     let tx = conn.transaction().map_err(|e| e.to_string())?;
     let current = qruns::get(&tx, &run.id)?;
@@ -103,7 +103,7 @@ pub fn apply_end(
         Some(id) => rows::get_task(&tx, id)?,
         None => None,
     };
-    // Una tarea cerrada a mano (Done/Canceled) mientras corría: sin revisor ni comentario.
+    // A task closed by hand (Done/Canceled) while it ran: no reviewer and no comment.
     if task.as_ref().is_some_and(is_closed) {
         reviewer = None;
         decision.closing = false;
@@ -142,8 +142,8 @@ pub fn apply_end(
     Ok(reviewer)
 }
 
-/// Comentario de cierre de un paso. `work` es el run de trabajo del paso (PR/rama cuando
-/// cierra el revisor).
+/// Closing comment of a step. `work` is the step's work run (PR/branch when the reviewer
+/// closes it).
 fn step_comment(run: &Run, end: &RunEnd, note: Option<&str>, work: Option<&Run>, status: TaskStatus) -> String {
     let label = executor_label(&run.executor);
     closing_comment(&ClosingInfo {
@@ -160,13 +160,13 @@ fn step_comment(run: &Run, end: &RunEnd, note: Option<&str>, work: Option<&Run>,
 pub const NOTE_APP_CLOSED: &str = "The app closed while the run was launching; check the runs list before retrying.";
 pub const NOTE_STALE_LAUNCH: &str =
     "The launch result couldn't be saved; check the runs list (the session may be running) before retrying.";
-/// Reintentos al guardar el resultado de un launch.
+/// Retries when saving a launch's result.
 const RECORD_TRIES: u32 = 3;
 const RECORD_RETRY: std::time::Duration = std::time::Duration::from_millis(500);
 
-/// Un run que no llegó a lanzarse pasa a `failed` con el motivo y, si su tarea quedó en In
-/// Progress sin otros runs pendientes, la tarea pasa a Blocked con un comentario (como el
-/// cierre de un paso), todo en una transacción. `false` si el run ya no estaba `launching`.
+/// A run that never launched moves to `failed` with the reason and, if its task was left In
+/// Progress with no other pending runs, the task moves to Blocked with a comment (like a
+/// step's closing), all in one transaction. `false` if the run was no longer `launching`.
 pub fn fail_launch(conn: &mut Connection, run_id: &str, error: &str, now: i64) -> Result<bool, String> {
     let tx = conn.transaction().map_err(|e| e.to_string())?;
     let mut r = qruns::get(&tx, run_id)?;
@@ -197,8 +197,8 @@ pub fn fail_launch(conn: &mut Connection, run_id: &str, error: &str, now: i64) -
     Ok(true)
 }
 
-/// El launch salió (o se adoptó la sesión): `launched` con su id. `false` si el run ya no
-/// estaba `launching`.
+/// The launch went through (or the session was adopted): `launched` with its id. `false` if
+/// the run was no longer `launching`.
 pub fn mark_launched(conn: &Connection, run_id: &str, claude_id: &str, session: Option<String>, now: i64) -> Result<bool, String> {
     let mut r = qruns::get(conn, run_id)?;
     if r.status != RunStatus::Launching {
@@ -212,9 +212,9 @@ pub fn mark_launched(conn: &Connection, run_id: &str, claude_id: &str, session: 
     Ok(true)
 }
 
-/// Cierra con `fail_launch` los runs que quedaron `launching`: solo la pasada de la cola los
-/// pone así y los saca en la misma pasada, con su turno tomado, así que uno que se ve al
-/// empezar una pasada (o al arrancar la app) está huérfano. Devuelve cuántos cerró.
+/// Closes with `fail_launch` the runs left `launching`: only the queue pass sets that and
+/// clears it in the same pass, holding its turn, so one seen when a pass starts (or when the
+/// app starts) is orphaned. Returns how many it closed.
 pub fn fail_stale_launches(conn: &mut Connection, note: &str, now: i64) -> Result<usize, String> {
     let mut n = 0;
     for r in qruns::launching(conn)? {
@@ -225,8 +225,8 @@ pub fn fail_stale_launches(conn: &mut Connection, note: &str, now: i64) -> Resul
     Ok(n)
 }
 
-/// Guarda el resultado de un launch, con reintentos: si no se guarda, el run queda
-/// `launching` y la pasada siguiente lo cierra (`fail_stale_launches`).
+/// Saves a launch's result, with retries: if it isn't saved, the run stays `launching` and
+/// the next pass closes it (`fail_stale_launches`).
 async fn record_launch(inner: &Arc<Inner>, run: &Run, outcome: Result<(String, Option<String>), String>) -> Result<(), String> {
     let root = inner.env.worktrees_root.clone();
     let mut last = String::new();
@@ -252,8 +252,8 @@ async fn record_launch(inner: &Arc<Inner>, run: &Run, outcome: Result<(String, O
     Err(format!("Couldn't save the launch of run {}: {last}", run.id))
 }
 
-/// Tras un timeout de `claude --bg`: la sesión que arrancó igual, si se la reconoce sin
-/// ambigüedad en `claude agents` (`queue::adoptable`).
+/// After a `claude --bg` timeout: the session that started anyway, if it can be recognized
+/// unambiguously in `claude agents` (`queue::adoptable`).
 async fn adopt_after_timeout(inner: &Arc<Inner>, run: &Run, since: i64) -> Option<(String, Option<String>)> {
     let live = runs::list_runs().await.ok()?;
     let claimed: Vec<String> = with_db(&inner.db, |c| qruns::launched_refs(c))
@@ -265,7 +265,7 @@ async fn adopt_after_timeout(inner: &Arc<Inner>, run: &Run, since: i64) -> Optio
     queue::adoptable(&run.cwd, since, &live, &claimed).map(|s| (s.id.clone(), Some(s.session_id.clone())))
 }
 
-/// `(reviews, managesSource)` del workflow del run, del catálogo en disco.
+/// `(reviews, managesSource)` of the run's workflow, from the on-disk catalog.
 pub fn workflow_meta(env: &Env, repo_path: Option<&str>, executor: &Executor) -> (bool, Option<String>) {
     let Executor::Workflow { name } = executor else { return (false, None) };
     match executors::find_workflow(env.claude_dir.as_deref(), repo_path.map(Path::new), name) {
@@ -284,7 +284,7 @@ async fn finish_run(inner: &Arc<Inner>, run: Run, signal: EndSignal) -> Result<(
     let (session, cwd) = (run.session_id.clone(), run.cwd.clone());
     let (executor, env2) = (run.executor.clone(), env.clone());
     let (readout, (reviews, manages), tokens) = blocking(move || {
-        // Los workflows reparten el trabajo en subagentes con su propio transcript: sin tokens.
+        // Workflows split the work into subagents with their own transcripts: no tokens.
         let tokens = match (&executor, &session) {
             (Executor::Workflow { .. }, _) | (_, None) => None,
             (_, Some(sid)) => runs::session_tokens(sid, &cwd),
@@ -304,7 +304,7 @@ async fn finish_run(inner: &Arc<Inner>, run: Run, signal: EndSignal) -> Result<(
     Ok(())
 }
 
-/// Una pasada de la cola. Si no hay nada en cola ni lanzado, no consulta `claude agents`.
+/// One queue pass. If nothing is queued or launched, it doesn't query `claude agents`.
 pub async fn pump(inner: &Arc<Inner>) -> Result<(), String> {
     let mut touched = false;
     let r = pump_pass(inner, &mut touched).await;
@@ -316,7 +316,7 @@ pub async fn pump(inner: &Arc<Inner>) -> Result<(), String> {
     r
 }
 
-/// `touched`: la pasada cambió algún run (para avisar a la UI aunque después falle).
+/// `touched`: the pass changed some run (to notify the UI even if it fails afterwards).
 async fn pump_pass(inner: &Arc<Inner>, touched: &mut bool) -> Result<(), String> {
     let _turn = inner.pump.lock().await;
     let stale = with_db(&inner.db, |c| {
@@ -406,7 +406,7 @@ mod tests {
         task: Task,
     }
 
-    /// Proyecto, repo (carpeta con `.claude/agents/code-reviewer.md`) y una tarea con plan.
+    /// Project, repo (folder with `.claude/agents/code-reviewer.md`) and a task with a plan.
     fn fx(name: &str) -> Fx {
         let t = TempDir::new(name);
         let repo_dir = t.0.join("web");
@@ -453,21 +453,21 @@ mod tests {
         let agent = Executor::Agent { name: "frontend-developer".into(), source: AgentSource::User };
         let work = launched_run(&f, agent, RunKind::Work, true);
         tasks::set_status(&f.db.lock().unwrap(), &f.task.id, TaskStatus::InProgress, 3).unwrap();
-        let mut end = read_end(&work, EndSignal::Done, &done_readout("{\"status\":\"done\",\"summary\":\"listo\"}"), false);
+        let mut end = read_end(&work, EndSignal::Done, &done_readout("{\"status\":\"done\",\"summary\":\"all set\"}"), false);
         end.tokens = Some(1234);
         let reviewer = apply_end(&f.db, &f.env, &work, &end, RunStatus::Finished, None, 10).unwrap().unwrap();
         assert_eq!(reviewer.kind, RunKind::Review);
         assert_eq!(reviewer.parent_run_id.as_deref(), Some(work.id.as_str()));
         assert_eq!(reviewer.executor, Executor::Agent { name: "code-reviewer".into(), source: AgentSource::Repo });
-        assert!(reviewer.prompt.contains("frontend-developer did the work and reported: listo"));
-        assert_eq!(task_status(&f), TaskStatus::InProgress, "sigue en In Progress mientras revisa");
+        assert!(reviewer.prompt.contains("frontend-developer did the work and reported: all set"));
+        assert_eq!(task_status(&f), TaskStatus::InProgress, "stays In Progress while reviewing");
         let saved = qruns::get(&f.db.lock().unwrap(), &work.id).unwrap();
-        assert_eq!((saved.status, saved.outcome, saved.summary.as_deref()), (RunStatus::Finished, Some(RunOutcome::Green), Some("listo")));
-        assert_eq!(saved.tokens, Some(1234), "los tokens del transcript quedan en el run");
-        // Aplicar dos veces no duplica (el run ya no está launched).
+        assert_eq!((saved.status, saved.outcome, saved.summary.as_deref()), (RunStatus::Finished, Some(RunOutcome::Green), Some("all set")));
+        assert_eq!(saved.tokens, Some(1234), "the transcript tokens are stored on the run");
+        // Applying twice doesn't duplicate (the run is no longer launched).
         assert!(apply_end(&f.db, &f.env, &work, &end, RunStatus::Finished, None, 11).unwrap().is_none());
 
-        // El revisor falla → Blocked, sin reintento.
+        // The reviewer fails → Blocked, no retry.
         let mut rev = reviewer.clone();
         rev.status = RunStatus::Launched;
         qruns::update(&f.db.lock().unwrap(), &rev).unwrap();
@@ -511,7 +511,7 @@ mod tests {
         }
         let work = launched_run(&f, Executor::Claude, RunKind::Work, true);
         let end = read_end(&work, EndSignal::Done, &done_readout("{\"status\":\"done\"}"), false);
-        // El reviewer del repo no está configurado y el global no existe.
+        // The repo's reviewer isn't configured and the global one doesn't exist.
         assert!(apply_end(&f.db, &f.env, &work, &end, RunStatus::Finished, None, 10).unwrap().is_none());
         assert_eq!(task_status(&f), TaskStatus::Blocked);
         let saved = qruns::get(&f.db.lock().unwrap(), &work.id).unwrap();
@@ -562,7 +562,7 @@ mod tests {
         let end = read_end(&run, EndSignal::Done, &ro, true);
         apply_end(&f.db, &f.env, &run, &end, RunStatus::Finished, Some("linear"), 10).unwrap();
         assert_eq!(task_status(&f), TaskStatus::Blocked);
-        assert!(outbox_kinds(&f).is_empty(), "managesSource: la app no escribe en el proveedor");
+        assert!(outbox_kinds(&f).is_empty(), "managesSource: the app doesn't write to the provider");
 
         let run = launched_run(&f, Executor::Claude, RunKind::Work, false);
         let end = read_end(&run, EndSignal::Done, &done_readout("{\"status\":\"done\",\"summary\":\"ok\"}"), false);
@@ -578,7 +578,7 @@ mod tests {
         let c = f.db.lock().unwrap();
         tasks::set_status(&c, &f.task.id, TaskStatus::InProgress, 3).unwrap();
         let t = tasks::get(&c, &f.task.id).unwrap();
-        // Lo que hace cancelar el único run en cola de la tarea.
+        // What cancelling the task's only queued run does.
         ops::apply_task_transition(&c, &t, Some(TaskStatus::Todo), None, None, 4).unwrap();
         let state: String = c
             .query_row("SELECT payload_json FROM sync_outbox WHERE kind = 'set_state'", [], |r| r.get(0))
@@ -604,7 +604,7 @@ mod tests {
         let review = run_of(reviewer, RunKind::Review, false);
         let readout = SessionReadout {
             detail: None,
-            last_message: Some(r#"{"verdict":"fail","unmet":["c1"],"nits":["n1"],"summary":"falta c1"}"#.into()),
+            last_message: Some(r#"{"verdict":"fail","unmet":["c1"],"nits":["n1"],"summary":"c1 is missing"}"#.into()),
             blocker: None,
         };
         let end = read_end(&review, EndSignal::Done, &readout, false);
@@ -613,7 +613,7 @@ mod tests {
         let c = step_comment(&review, &end, None, Some(&work), TaskStatus::Blocked);
         assert_eq!(
             c,
-            "**Nodal** · Blocked · code-reviewer\n\nBranch: `nodal/pay-1-x`\n\nfalta c1\n\n**Unmet criteria**\n- c1\n\n**Nits**\n- n1"
+            "**Nodal** · Blocked · code-reviewer\n\nBranch: `nodal/pay-1-x`\n\nc1 is missing\n\n**Unmet criteria**\n- c1\n\n**Nits**\n- n1"
         );
     }
 
@@ -627,7 +627,7 @@ mod tests {
             r.task_id = Some(f.task.id.clone());
             r.repo_id = Some(f.task.repo_id.clone());
             r.status = RunStatus::Queued;
-            r.prompt = "/plan-task viejo".into();
+            r.prompt = "/plan-task old".into();
             r.legacy_label = Some("Logo".into());
             qruns::insert(&c, &r).unwrap();
             r
@@ -636,12 +636,12 @@ mod tests {
         let run = launch::confirm_legacy(&f.db, &f.env, &cleaning, &legacy.id, 10).unwrap();
         let c = f.db.lock().unwrap();
         assert_eq!((run.status, run.legacy_label.as_deref()), (RunStatus::Queued, None));
-        assert_ne!(run.prompt, legacy.prompt, "el prompt se arma de nuevo desde la tarea");
+        assert_ne!(run.prompt, legacy.prompt, "the prompt is rebuilt from the task");
         let old = qruns::get(&c, &legacy.id).unwrap();
         assert_eq!(old.status, RunStatus::Canceled);
         assert!(old.error.unwrap().contains(&run.id));
         assert_eq!(tasks::get(&c, &f.task.id).unwrap().status, TaskStatus::InProgress);
-        // Ya no espera confirmación: confirmar de nuevo falla.
+        // No longer awaiting confirmation: confirming again fails.
         drop(c);
         assert!(launch::confirm_legacy(&f.db, &f.env, &cleaning, &legacy.id, 11).is_err());
     }
@@ -668,8 +668,8 @@ mod tests {
         assert_eq!(err, crate::work::CLEANING_ERR);
         let c = f.db.lock().unwrap();
         let old = qruns::get(&c, &legacy.id).unwrap();
-        assert!(queue::awaiting_confirmation(&old), "sigue esperando confirmación");
-        assert_eq!(qruns::pending(&c).unwrap().len(), 1, "no se encoló nada");
+        assert!(queue::awaiting_confirmation(&old), "still awaiting confirmation");
+        assert_eq!(qruns::pending(&c).unwrap().len(), 1, "nothing was enqueued");
     }
 
     #[test]
@@ -679,13 +679,13 @@ mod tests {
         let input = crate::work::dto::LaunchInput::default();
         {
             let _guard = cleaning.mark(&f.task.id).unwrap();
-            assert!(cleaning.mark(&f.task.id).is_none(), "una limpieza a la vez");
+            assert!(cleaning.mark(&f.task.id).is_none(), "one cleanup at a time");
             let err = launch::enqueue_work(&f.db, &f.env, &cleaning, &f.task.id, &input, false, 10).unwrap_err();
             assert_eq!(err, crate::work::CLEANING_ERR);
             let err = launch::enqueue_review(&f.db, &f.env, &cleaning, &f.task.id, None, 10).unwrap_err();
             assert_eq!(err, crate::work::CLEANING_ERR);
         }
-        // Soltada la marca, se encola; y un segundo intento ve el pendiente.
+        // Once the mark is released, it enqueues; and a second attempt sees the pending one.
         let run = launch::enqueue_work(&f.db, &f.env, &cleaning, &f.task.id, &input, false, 11).unwrap();
         assert!(run.queue_position > 0.0);
         assert_eq!(task_status(&f), TaskStatus::InProgress);
@@ -702,7 +702,7 @@ mod tests {
         let run = launch::enqueue_work(&f.db, &f.env, &cleaning, &f.task.id, &input, false, 10).unwrap();
         assert_eq!(task_status(&f), TaskStatus::InProgress);
         let mut c = f.db.lock().unwrap();
-        // Sin `launching` no hace nada.
+        // Without `launching` it does nothing.
         assert!(!fail_launch(&mut c, &run.id, "boom", 11).unwrap());
         assert!(qruns::transition(&c, &run.id, RunStatus::Queued, RunStatus::Launching).unwrap());
         assert!(fail_launch(&mut c, &run.id, "Workspace not trusted.", 12).unwrap());
@@ -710,7 +710,7 @@ mod tests {
         assert_eq!((saved.status, saved.error.as_deref()), (RunStatus::Failed, Some("Workspace not trusted.")));
         drop(c);
         assert_eq!(task_status(&f), TaskStatus::Blocked);
-        // El set_state de In Progress lo reemplaza el de Blocked; más el comentario.
+        // The In Progress set_state is replaced by the Blocked one; plus the comment.
         assert_eq!(outbox_kinds(&f), ["set_state", "comment"]);
     }
 
@@ -737,8 +737,8 @@ mod tests {
     fn reviewer_isolation_follows_its_cwd() {
         assert_eq!(launch::review_isolation("/r/web", "/r/web/"), Isolation::InPlace);
         assert_eq!(launch::review_isolation("/wt/web/pay-1", "/r/web"), Isolation::Worktree);
-        // El trabajo corrió "en worktree" pero la tarea no tiene uno vivo: el revisor corre en
-        // la carpeta del repo y toma su lock.
+        // The work ran "in worktree" but the task has no live one: the reviewer runs in the
+        // repo folder and takes its lock.
         let f = fx("review-isolation");
         let mut work = launched_run(&f, Executor::Claude, RunKind::Work, true);
         work.isolation = Some(Isolation::Worktree);

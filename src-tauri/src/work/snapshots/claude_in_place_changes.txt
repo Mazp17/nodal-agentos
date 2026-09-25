@@ -1,4 +1,4 @@
-Task PAY-1: Logo nuevo en el header
+Task PAY-1: New logo in the header
 Imported from ENG-142: https://linear.app/acme/issue/ENG-142
 Repository: /Users/me/Code/web
 Working directory: /Users/me/Code/web
@@ -8,14 +8,14 @@ This is the repository folder itself. Don't switch branches.
 The plan is at /data/tasks/t1/plan.md.
 <plan>
 # Logo
-Cambiar el logo del header por el nuevo.
+Replace the header logo with the new one.
 </plan>
 
 ## Acceptance criteria
 None were given: infer them from the plan.
 
 ## Extra instructions for this run
-Usá solo CSS.
+Only use CSS.
 
 ## When you finish
 Leave your changes uncommitted in the working directory. Don't commit, push or open a pull request.

@@ -1,9 +1,9 @@
 use serde::{Serialize, Serializer};
 use std::fmt;
 
-/// Error de cara a la UI. Se serializa como `{ kind, message }` para que el frontend
-/// pueda elegir el estado vacío/de error correcto sin parsear textos.
-/// Ningún mensaje incluye la API key.
+/// UI-facing error. Serialized as `{ kind, message }` so the frontend can pick the
+/// right empty/error state without parsing text.
+/// No message includes the API key.
 #[derive(Debug, Clone, PartialEq)]
 pub enum LinearError {
     MissingKey,
@@ -11,11 +11,11 @@ pub enum LinearError {
     Network(String),
     RateLimited,
     Keychain(String),
-    /// Rechazo de la API (input inválido, sin permiso, entidad inexistente): reintentar no
-    /// sirve.
+    /// API rejection (invalid input, no permission, missing entity): retrying does not
+    /// help.
     Api(String),
-    /// Falla del lado de Linear (5xx, error interno de GraphQL, respuesta ilegible):
-    /// reintentable. Para la UI es un error de API más (`kind: "api"`).
+    /// Failure on Linear's side (5xx, internal GraphQL error, unreadable response):
+    /// retryable. For the UI it is just another API error (`kind: "api"`).
     Unavailable(String),
 }
 
@@ -76,7 +76,7 @@ impl From<reqwest::Error> for LinearError {
         } else if e.is_decode() {
             LinearError::Unavailable("unreadable response".into())
         } else {
-            // `without_url` por prolijidad; la key va en un header, nunca en la URL.
+            // `without_url` for tidiness; the key goes in a header, never in the URL.
             LinearError::Network(format!("Network error talking to Linear: {}", e.without_url()))
         }
     }

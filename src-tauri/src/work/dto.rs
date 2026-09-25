@@ -1,5 +1,5 @@
-//! Entradas de los comandos (espejo de los DTOs de `src/domain/api.ts`).
-//! En los patches, campo ausente = no tocar y `null` = borrar (`Option<Option<T>>`).
+//! Command inputs (mirror of the DTOs in `src/domain/api.ts`).
+//! In patches, a missing field = leave as is and `null` = clear (`Option<Option<T>>`).
 
 use serde::Deserialize;
 
@@ -72,12 +72,12 @@ pub struct RepoPatch {
     pub position: Option<i64>,
 }
 
-/// Lo que manda la UI para el plan; el backend lo guarda como `PlanRef`.
+/// What the UI sends for the plan; the backend stores it as `PlanRef`.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum PlanInput {
     Text { text: String },
-    /// Absoluta, o relativa al repo.
+    /// Absolute, or relative to the repo.
     File { path: String },
 }
 
@@ -106,7 +106,7 @@ pub struct NewTask {
     pub review: Option<bool>,
 }
 
-/// `repoId` mueve la tarea a otro repo del mismo proyecto.
+/// `repoId` moves the task to another repo of the same project.
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct TaskPatch {
@@ -127,7 +127,7 @@ pub struct TaskPatch {
     pub review: Option<Option<bool>>,
 }
 
-/// Overrides para este run; lo que falte sale de la tarea → repo → proyecto.
+/// Overrides for this run; anything missing comes from task → repo → project.
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LaunchInput {

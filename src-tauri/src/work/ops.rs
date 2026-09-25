@@ -1,5 +1,5 @@
-//! CRUD síncrono de proyectos, repos, tareas, relaciones y settings. Cada función recibe la
-//! conexión (los comandos la corren con `with_db`) y devuelve errores listos para mostrar.
+//! Synchronous CRUD for projects, repos, tasks, relations and settings. Each function takes
+//! the connection (commands run it with `with_db`) and returns errors ready to display.
 
 use std::path::{Path, PathBuf};
 
@@ -16,7 +16,7 @@ use super::dto::*;
 use super::transitions::{apply_status, outbox_ops, OutboxOp};
 use super::{validate, Env};
 
-// ---------- Proyectos ----------
+// ---------- Projects ----------
 
 pub fn create_project(conn: &Connection, input: &NewProject, now: i64) -> Result<Project, String> {
     let name = validate::name(&input.name, "project")?;
@@ -71,9 +71,9 @@ pub fn update_project(conn: &Connection, id: &str, patch: &ProjectPatch, now: i6
     Ok(p)
 }
 
-/// Borra en cascada repos, tareas y fuentes. Rechaza si hay runs en curso o tareas con
-/// worktree (quedarían la carpeta y la rama `nodal/*` huérfanas). Devuelve los ids de las
-/// tareas borradas (para limpiar sus planes en disco).
+/// Cascade-deletes repos, tasks and sources. Refuses if there are runs in progress or tasks
+/// with a worktree (the folder and the `nodal/*` branch would be orphaned). Returns the ids
+/// of the deleted tasks (to clean up their plans on disk).
 pub fn delete_project(conn: &mut Connection, id: &str) -> Result<Vec<String>, String> {
     projects::get(conn, id)?;
     if qruns::pending_in_project(conn, id)? > 0 {
@@ -89,8 +89,8 @@ pub fn delete_project(conn: &mut Connection, id: &str) -> Result<Vec<String>, St
         ));
     }
     let task_ids: Vec<String> = all.into_iter().map(|t| t.id).collect();
-    // Desvincular las tareas de sus fuentes antes del cascade (la FK de `src_link_id` no
-    // deja borrar un link con tareas apuntándole, y el orden del cascade no está garantizado).
+    // Unlink the tasks from their sources before the cascade (the `src_link_id` FK doesn't
+    // allow deleting a link with tasks pointing to it, and the cascade order isn't guaranteed).
     tx.execute(
         "UPDATE tasks SET src_link_id = NULL WHERE project_id = ?1 AND src_link_id IS NOT NULL",
         [id],
@@ -103,7 +103,7 @@ pub fn delete_project(conn: &mut Connection, id: &str) -> Result<Vec<String>, St
 
 // ---------- Repos ----------
 
-/// `root`: raíz git canónica ya resuelta (con `util::paths::require_git_root`).
+/// `root`: canonical git root, already resolved (with `util::paths::require_git_root`).
 pub fn add_repo(conn: &Connection, project_id: &str, input: &NewRepo, root: &Path, now: i64) -> Result<Repo, String> {
     projects::get(conn, project_id)?;
     let path = root.to_string_lossy().into_owned();
@@ -179,10 +179,10 @@ pub fn delete_repo(conn: &Connection, id: &str) -> Result<(), String> {
     Ok(repos::delete(conn, id)?)
 }
 
-// ---------- Tareas ----------
+// ---------- Tasks ----------
 
-/// Ruta del plan para leerlo o pasárselo al ejecutor. Un archivo se vuelve a validar
-/// (puede haberse movido o reemplazado por un symlink desde que se creó la tarea).
+/// Plan path, to read it or hand it to the executor. A file is validated again (it may have
+/// been moved or replaced by a symlink since the task was created).
 pub fn plan_path(env: &Env, task: &Task, repo: &Repo) -> Result<PathBuf, String> {
     match &task.plan {
         PlanRef::Text => {
@@ -208,8 +208,8 @@ pub fn read_plan(path: &Path) -> Result<String, String> {
     Ok(String::from_utf8_lossy(&bytes).into_owned())
 }
 
-/// Valida el plan. Un texto se escribe en `staging` (se renombra al definitivo recién
-/// cuando la base guardó la tarea).
+/// Validates the plan. A text is written to `staging` (it's renamed to the final path only
+/// once the database has saved the task).
 fn stage_plan(repo: &Repo, plan: &PlanInput, staging: &Path) -> Result<PlanRef, String> {
     match plan {
         PlanInput::Text { text } => {
@@ -224,8 +224,8 @@ fn stage_plan(repo: &Repo, plan: &PlanInput, staging: &Path) -> Result<PlanRef, 
     }
 }
 
-/// Filas del outbox por un cambio de estado hecho a mano en Nodal, en la transacción de
-/// quien llama (los de la cola pasan por `apply_task_transition`).
+/// Outbox rows for a status change made by hand in Nodal, in the caller's transaction
+/// (queue changes go through `apply_task_transition`).
 pub fn push_status(
     conn: &Connection,
     task: &Task,
@@ -299,8 +299,8 @@ pub fn create_task(conn: &mut Connection, env: &Env, input: &NewTask, now: i64) 
     result
 }
 
-/// Aplica un patch. En las importadas solo se acepta plan (queda `planOverridden`), estado,
-/// repo, criterios y opciones de ejecución.
+/// Applies a patch. Imported tasks only accept plan (sets `planOverridden`), status, repo,
+/// criteria and run options.
 pub fn update_task(conn: &mut Connection, env: &Env, id: &str, patch: &TaskPatch, now: i64) -> Result<Task, String> {
     let old = tasks::get(conn, id)?;
     let mut t = old.clone();
@@ -374,7 +374,7 @@ pub fn update_task(conn: &mut Connection, env: &Env, id: &str, patch: &TaskPatch
         push_status(&tx, &t, new_status, None, None, now)?;
         tx.commit().map_err(|e| e.to_string())
     })();
-    // Recién ahora se tocan los archivos del plan: si el guardado falló, quedan como estaban.
+    // Only now are the plan files touched: if saving failed, they stay as they were.
     if let Err(e) = saved {
         let _ = std::fs::remove_file(&staged);
         return Err(e);
@@ -387,7 +387,7 @@ pub fn update_task(conn: &mut Connection, env: &Env, id: &str, patch: &TaskPatch
     Ok(t)
 }
 
-/// Arrastre en el board: columna y/o posición.
+/// Drag on the board: column and/or position.
 pub fn move_task(conn: &mut Connection, id: &str, status: TaskStatus, position: f64, now: i64) -> Result<Task, String> {
     if !position.is_finite() {
         return Err("Invalid position.".into());
@@ -407,10 +407,9 @@ pub fn move_task(conn: &mut Connection, id: &str, status: TaskStatus, position: 
     Ok(t)
 }
 
-/// Orden nuevo de la columna `status`: renumera las posiciones (1, 2, ...) en una
-/// transacción. Todas las tareas tienen que estar en esa columna y en el mismo proyecto; las
-/// de la columna que no vienen en la lista quedan detrás, en su orden actual. Devuelve el
-/// proyecto.
+/// New order for the `status` column: renumbers the positions (1, 2, ...) in one
+/// transaction. All tasks must be in that column and in the same project; the column's tasks
+/// not in the list go after, in their current order. Returns the project.
 pub fn reorder_tasks(conn: &mut Connection, status: TaskStatus, ids: &[String], now: i64) -> Result<Option<String>, String> {
     let mut seen = std::collections::HashSet::new();
     if let Some(dup) = ids.iter().find(|id| !seen.insert(id.as_str())) {
@@ -440,7 +439,7 @@ pub fn reorder_tasks(conn: &mut Connection, status: TaskStatus, ids: &[String], 
     };
     let old: std::collections::HashMap<&str, f64> = column.iter().map(|(id, p)| (id.as_str(), *p)).collect();
     let order = ids.iter().map(String::as_str).chain(column.iter().map(|(id, _)| id.as_str()).filter(|id| !seen.contains(id)));
-    // Solo se tocan (y cambian `updated_at`) las que cambian de posición.
+    // Only the ones that change position are touched (and get a new `updated_at`).
     for (i, id) in order.enumerate() {
         let pos = (i + 1) as f64;
         if old.get(id) == Some(&pos) {
@@ -453,9 +452,9 @@ pub fn reorder_tasks(conn: &mut Connection, status: TaskStatus, ids: &[String], 
     Ok(Some(project_id))
 }
 
-/// Cambia el estado de la tarea por una transición de la cola (respeta Done/Canceled) y
-/// deja las filas del outbox en la misma transacción (incluido el regreso a Todo al sacar
-/// de la cola su único run). Devuelve el estado nuevo si cambió.
+/// Changes the task status for a queue transition (respects Done/Canceled) and writes the
+/// outbox rows in the same transaction (including the return to Todo when its only run is
+/// dequeued). Returns the new status if it changed.
 pub fn apply_task_transition(
     conn: &Connection,
     task: &Task,
@@ -474,9 +473,9 @@ pub fn apply_task_transition(
     Ok(status)
 }
 
-/// Borra la tarea y su plan en texto. Rechaza si tiene runs en cola o en curso, o si tiene
-/// worktree: se limpia antes con "Clean up" (que revisa lo sin publicar), para no dejar la
-/// carpeta y la rama `nodal/*` huérfanas.
+/// Deletes the task and its text plan. Refuses if it has queued or running runs, or if it
+/// has a worktree: that's cleaned up first with "Clean up" (which checks for unpushed work),
+/// so the folder and the `nodal/*` branch aren't orphaned.
 pub fn delete_task(conn: &Connection, env: &Env, id: &str) -> Result<(), String> {
     let t = tasks::get(conn, id)?;
     if !qruns::pending_for_task(conn, id)?.is_empty() {
@@ -501,7 +500,7 @@ pub fn read_task_plan(conn: &Connection, env: &Env, id: &str) -> Result<String, 
     read_plan(&plan_path(env, &t, &repo)?)
 }
 
-// ---------- Relaciones ----------
+// ---------- Relations ----------
 
 pub fn add_relation(conn: &Connection, task_id: &str, other_id: &str, kind: RelationKind) -> Result<(), String> {
     Ok(relations::add(conn, &TaskRelation { task_id: task_id.into(), other_id: other_id.into(), kind })?)
@@ -547,7 +546,7 @@ mod tests {
         let t = TempDir::new(name);
         let repo_dir = t.0.join("web");
         std::fs::create_dir_all(repo_dir.join("docs")).unwrap();
-        std::fs::write(repo_dir.join("docs/plan.md"), "# Plan del repo").unwrap();
+        std::fs::write(repo_dir.join("docs/plan.md"), "# Repo plan").unwrap();
         let env = Env { data_dir: t.0.join("data"), worktrees_root: t.0.join("wt"), claude_dir: None };
         Fx { _t: t, env, repo_dir }
     }
@@ -555,8 +554,8 @@ mod tests {
     fn new_task(project: &Project, repo: &Repo, title: &str) -> NewTask {
         serde_json::from_value(json!({
             "projectId": project.id, "repoId": repo.id, "title": title,
-            "plan": {"kind": "text", "text": "# Plan\nhacer algo"},
-            "acceptance": ["El logo aparece", "  "], "labels": ["ui"], "priority": "high"
+            "plan": {"kind": "text", "text": "# Plan\ndo something"},
+            "acceptance": ["The logo shows up", "  "], "labels": ["ui"], "priority": "high"
         }))
         .unwrap()
     }
@@ -568,7 +567,7 @@ mod tests {
         let p = create_project(&c, &NewProject { name: "Payments".into(), key: "pay".into(), color: None, description: None }, 10).unwrap();
         assert_eq!(p.key, "PAY");
         assert_eq!(p.color, validate::PALETTE[0]);
-        let err = create_project(&c, &NewProject { name: "Otro".into(), key: "PAY".into(), color: None, description: None }, 11).unwrap_err();
+        let err = create_project(&c, &NewProject { name: "Other".into(), key: "PAY".into(), color: None, description: None }, 11).unwrap_err();
         assert!(err.contains("already used"), "{err}");
         let q = create_project(&c, &NewProject { name: "Web".into(), key: "WEB".into(), color: Some("#123456".into()), description: None }, 12).unwrap();
         let err = update_project(&c, &q.id, &ProjectPatch { key: Some("pay".into()), ..Default::default() }, 13).unwrap_err();
@@ -579,8 +578,8 @@ mod tests {
         let patch: ProjectPatch = serde_json::from_value(json!({"reviewer": null, "archived": false})).unwrap();
         let q = update_project(&c, &q.id, &patch, 15).unwrap();
         assert_eq!((q.reviewer, q.archived_at), (None, None));
-        let patch: ProjectPatch = serde_json::from_value(json!({"description": "  Pagos y cobros  "})).unwrap();
-        assert_eq!(update_project(&c, &q.id, &patch, 15).unwrap().description.as_deref(), Some("Pagos y cobros"));
+        let patch: ProjectPatch = serde_json::from_value(json!({"description": "  Payments and billing  "})).unwrap();
+        assert_eq!(update_project(&c, &q.id, &patch, 15).unwrap().description.as_deref(), Some("Payments and billing"));
         let patch: ProjectPatch = serde_json::from_value(json!({"description": null})).unwrap();
         assert_eq!(update_project(&c, &q.id, &patch, 15).unwrap().description, None);
         let d = NewProject { name: "Api".into(), key: "API".into(), color: None, description: Some("Backend".into()) };
@@ -608,9 +607,9 @@ mod tests {
         let patch: RepoPatch = serde_json::from_value(json!({"model": null, "reviewer": "sec-reviewer", "defaultFinish": "commit"})).unwrap();
         let r = update_repo(&c, &r.id, &patch).unwrap();
         assert_eq!((r.launch.model.as_deref(), r.reviewer.as_deref(), r.default_finish), (None, Some("sec-reviewer"), Finish::Commit));
-        let t = create_task(&mut c, &f.env, &new_task(&p, &r, "Una"), 4).unwrap();
+        let t = create_task(&mut c, &f.env, &new_task(&p, &r, "One"), 4).unwrap();
         assert!(delete_repo(&c, &r.id).unwrap_err().contains("has 1 task"));
-        // Con worktree no se borra ni la tarea ni el proyecto (quedarían huérfanos).
+        // With a worktree neither the task nor the project is deleted (they'd be orphaned).
         let mut with_wt = tasks::get(&c, &t.id).unwrap();
         with_wt.worktree = Some(WorktreeRef { path: "/wt/pay-1".into(), branch: "nodal/pay-1".into(), base: "main".into() });
         tasks::update(&c, &with_wt).unwrap();
@@ -632,33 +631,33 @@ mod tests {
         let other_dir = f.repo_dir.parent().unwrap().join("api");
         std::fs::create_dir_all(&other_dir).unwrap();
         let r2 = add_repo(&c, &p.id, &NewRepo::default(), &other_dir, 2).unwrap();
-        let t1 = create_task(&mut c, &f.env, &new_task(&p, &r, "Primera"), 3).unwrap();
-        let t2 = create_task(&mut c, &f.env, &new_task(&p, &r, "Segunda"), 4).unwrap();
+        let t1 = create_task(&mut c, &f.env, &new_task(&p, &r, "First"), 3).unwrap();
+        let t2 = create_task(&mut c, &f.env, &new_task(&p, &r, "Second"), 4).unwrap();
         assert_eq!((t1.number, t2.number), (1, 2));
-        assert_eq!(t1.acceptance, ["El logo aparece"]);
+        assert_eq!(t1.acceptance, ["The logo shows up"]);
         assert_eq!((t1.status, t1.priority), (TaskStatus::Todo, Priority::High));
         assert!(t2.position > t1.position);
-        assert_eq!(read_task_plan(&c, &f.env, &t1.id).unwrap(), "# Plan\nhacer algo");
+        assert_eq!(read_task_plan(&c, &f.env, &t1.id).unwrap(), "# Plan\ndo something");
         assert_eq!(projects::get(&c, &p.id).unwrap().next_task_number, 3);
 
-        // Plan como archivo del repo (relativo), y de vuelta a texto.
+        // Plan as a repo file (relative), and back to text.
         let patch: TaskPatch = serde_json::from_value(json!({"plan": {"kind": "file", "path": "docs/plan.md"}})).unwrap();
         let t = update_task(&mut c, &f.env, &t1.id, &patch, 5).unwrap();
         assert!(matches!(&t.plan, PlanRef::File { path } if path.ends_with("docs/plan.md")));
         assert!(!f.env.text_plan_path(&t1.id).exists());
-        assert_eq!(read_task_plan(&c, &f.env, &t1.id).unwrap(), "# Plan del repo");
+        assert_eq!(read_task_plan(&c, &f.env, &t1.id).unwrap(), "# Repo plan");
         let bad: TaskPatch = serde_json::from_value(json!({"plan": {"kind": "file", "path": "../api/x.md"}})).unwrap();
         assert!(update_task(&mut c, &f.env, &t1.id, &bad, 6).is_err());
 
-        // Mover de repo: con plan del repo viejo, hay que dar otro plan.
+        // Moving repos: with a plan from the old repo, another plan must be given.
         let mv: TaskPatch = serde_json::from_value(json!({"repoId": r2.id})).unwrap();
         assert!(update_task(&mut c, &f.env, &t1.id, &mv, 7).unwrap_err().contains("old repo"));
-        let mv: TaskPatch = serde_json::from_value(json!({"repoId": r2.id, "plan": {"kind": "text", "text": "nuevo"}})).unwrap();
+        let mv: TaskPatch = serde_json::from_value(json!({"repoId": r2.id, "plan": {"kind": "text", "text": "new"}})).unwrap();
         let t = update_task(&mut c, &f.env, &t1.id, &mv, 8).unwrap();
         assert_eq!((t.repo_id.as_str(), &t.plan), (r2.id.as_str(), &PlanRef::Text));
-        assert_eq!(read_task_plan(&c, &f.env, &t1.id).unwrap(), "nuevo");
+        assert_eq!(read_task_plan(&c, &f.env, &t1.id).unwrap(), "new");
 
-        // Opciones con null = volver al default del repo.
+        // Options with null = back to the repo default.
         let opts: TaskPatch = serde_json::from_value(json!({"isolation": "in_place", "review": false, "assignee": {"kind": "workflow", "name": "plan-task"}})).unwrap();
         let t = update_task(&mut c, &f.env, &t1.id, &opts, 9).unwrap();
         assert_eq!((t.isolation, t.review), (Some(Isolation::InPlace), Some(false)));
@@ -666,32 +665,32 @@ mod tests {
         let t = update_task(&mut c, &f.env, &t1.id, &clear, 10).unwrap();
         assert_eq!((t.isolation, t.assignee, t.review), (None, None, Some(false)));
 
-        // Estado manual y cierre.
+        // Manual status and closing.
         let t = move_task(&mut c, &t1.id, TaskStatus::Done, 0.5, 11).unwrap();
         assert_eq!((t.status, t.position, t.closed_at), (TaskStatus::Done, 0.5, Some(11)));
         let t = move_task(&mut c, &t1.id, TaskStatus::Todo, 2.0, 12).unwrap();
         assert_eq!(t.closed_at, None);
         assert!(move_task(&mut c, &t1.id, TaskStatus::Todo, f64::NAN, 13).is_err());
 
-        // Reordenar la columna: renumera y deja detrás a las no listadas.
-        let t3 = create_task(&mut c, &f.env, &new_task(&p, &r, "Tercera"), 14).unwrap();
+        // Reordering the column: renumbers and puts the unlisted ones after.
+        let t3 = create_task(&mut c, &f.env, &new_task(&p, &r, "Third"), 14).unwrap();
         let pos = |c: &Connection, id: &str| tasks::get(c, id).unwrap().position;
         let got = reorder_tasks(&mut c, TaskStatus::Todo, &[t3.id.clone(), t1.id.clone()], 15).unwrap();
         assert_eq!(got.as_deref(), Some(p.id.as_str()));
         assert_eq!((pos(&c, &t3.id), pos(&c, &t1.id), pos(&c, &t2.id)), (1.0, 2.0, 3.0));
-        // Repetir el mismo orden no toca ninguna fila.
+        // Repeating the same order touches no row.
         reorder_tasks(&mut c, TaskStatus::Todo, &[t3.id.clone(), t1.id.clone()], 99).unwrap();
         assert_eq!(tasks::get(&c, &t2.id).unwrap().updated_at, 15);
         assert!(reorder_tasks(&mut c, TaskStatus::Todo, &[t1.id.clone(), t1.id.clone()], 16).unwrap_err().contains("twice"));
         assert!(reorder_tasks(&mut c, TaskStatus::Done, std::slice::from_ref(&t1.id), 16).unwrap_err().contains("column"));
         assert!(reorder_tasks(&mut c, TaskStatus::Todo, &["t-no".into()], 16).is_err());
-        // Un error no deja nada a medias.
+        // An error leaves nothing half-done.
         assert!(reorder_tasks(&mut c, TaskStatus::Todo, &[t2.id.clone(), "t-no".into()], 16).is_err());
         assert_eq!(pos(&c, &t2.id), 3.0);
         assert_eq!(reorder_tasks(&mut c, TaskStatus::Todo, &[], 16).unwrap(), None);
         delete_task(&c, &f.env, &t3.id).unwrap();
 
-        // Relaciones.
+        // Relations.
         add_relation(&c, &t1.id, &t2.id, RelationKind::Related).unwrap();
         add_relation(&c, &t2.id, &t1.id, RelationKind::Related).unwrap();
         add_relation(&c, &t1.id, &t2.id, RelationKind::Blocks).unwrap();
@@ -701,7 +700,7 @@ mod tests {
         remove_relation(&c, &t2.id, &t1.id, RelationKind::Related).unwrap();
         assert_eq!(relations::list(&c, &t1.id).unwrap().len(), 1);
 
-        // Borrar el proyecto borra en cascada.
+        // Deleting the project cascades.
         let gone = delete_project(&mut c, &p.id).unwrap();
         assert_eq!(gone.len(), 2);
         assert!(tasks::list(&c, None).unwrap().is_empty());
@@ -714,7 +713,7 @@ mod tests {
         let mut c = db.lock().unwrap();
         let p = create_project(&c, &NewProject { name: "Pay".into(), key: "PAY".into(), color: None, description: None }, 1).unwrap();
         let r = add_repo(&c, &p.id, &NewRepo::default(), &f.repo_dir, 2).unwrap();
-        let t = create_task(&mut c, &f.env, &new_task(&p, &r, "Importada"), 3).unwrap();
+        let t = create_task(&mut c, &f.env, &new_task(&p, &r, "Imported"), 3).unwrap();
         let mut map = StateMap { confirmed_at: Some(1), ..Default::default() };
         map.push.insert(TaskStatus::InProgress, Some("s-prog".into()));
         let link = SourceLink {
@@ -739,16 +738,16 @@ mod tests {
         .unwrap();
         let err = update_task(&mut c, &f.env, &t.id, &TaskPatch { title: Some("x".into()), ..Default::default() }, 4).unwrap_err();
         assert!(err.contains("read-only"));
-        let plan: TaskPatch = serde_json::from_value(json!({"plan": {"kind": "text", "text": "mío"}})).unwrap();
+        let plan: TaskPatch = serde_json::from_value(json!({"plan": {"kind": "text", "text": "mine"}})).unwrap();
         assert!(update_task(&mut c, &f.env, &t.id, &plan, 5).unwrap().plan_overridden);
         move_task(&mut c, &t.id, TaskStatus::InProgress, 1.0, 6).unwrap();
         let n: i64 = c.query_row("SELECT COUNT(*) FROM sync_outbox WHERE task_id = ?1 AND kind = 'set_state'", [&t.id], |r| r.get(0)).unwrap();
         assert_eq!(n, 1);
-        // Mover dentro de la misma columna no empuja nada.
+        // Moving within the same column pushes nothing.
         move_task(&mut c, &t.id, TaskStatus::InProgress, 3.0, 7).unwrap();
         let n: i64 = c.query_row("SELECT COUNT(*) FROM sync_outbox", [], |r| r.get(0)).unwrap();
         assert_eq!(n, 1);
-        // Se puede borrar el proyecto aunque tenga tareas vinculadas.
+        // The project can be deleted even with linked tasks.
         delete_project(&mut c, &p.id).unwrap();
     }
 

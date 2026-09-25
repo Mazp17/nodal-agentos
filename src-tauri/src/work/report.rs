@@ -1,9 +1,9 @@
-//! Parseo del bloque JSON final que el prompt pide a los ejecutores:
-//! - agente/Claude: `{"status":"done|blocked","summary":…,"pr":…,"branch":…}`;
-//! - revisor: `{"verdict":"pass|fail","unmet":[…],"nits":[…],"summary":…}`.
+//! Parsing of the final JSON block the prompt asks executors for:
+//! - agent/Claude: `{"status":"done|blocked","summary":…,"pr":…,"branch":…}`;
+//! - reviewer: `{"verdict":"pass|fail","unmet":[…],"nits":[…],"summary":…}`.
 //!
-//! Se busca el último objeto JSON del mensaje que tenga la clave esperada (dentro de un
-//! bloque ```json o suelto). Todo lo desconocido se ignora.
+//! It looks for the last JSON object in the message that has the expected key (inside a
+//! ```json block or loose). Anything unknown is ignored.
 
 use serde_json::Value;
 
@@ -29,7 +29,7 @@ pub struct AgentReport {
     pub branch: Option<String>,
 }
 
-/// Último objeto JSON de `text` con la clave `key`.
+/// Last JSON object in `text` with the key `key`.
 pub fn last_json_with_key(text: &str, key: &str) -> Option<serde_json::Map<String, Value>> {
     let starts: Vec<usize> = text.match_indices('{').map(|(i, _)| i).collect();
     for &i in starts.iter().rev().take(MAX_CANDIDATES) {
@@ -66,12 +66,12 @@ fn list_field(map: &serde_json::Map<String, Value>, key: &str) -> Vec<String> {
         .collect()
 }
 
-/// URL de PR solo si es http(s) (termina en un link de la UI).
+/// PR URL only if it's http(s) (it ends up as a link in the UI).
 pub fn clean_url(s: Option<String>) -> Option<String> {
     s.filter(|u| (u.starts_with("https://") || u.starts_with("http://")) && !u.chars().any(char::is_whitespace))
 }
 
-/// Nombre de rama razonable (sin espacios ni nada que parezca una opción).
+/// A reasonable branch name (no spaces or anything that looks like an option).
 pub fn clean_branch(s: Option<String>) -> Option<String> {
     s.filter(|b| {
         b.len() <= 200 && !b.starts_with('-') && !b.chars().any(|c| c.is_whitespace() || c.is_control())
@@ -114,59 +114,59 @@ mod tests {
 
     #[test]
     fn agent_report_from_fenced_block_at_the_end() {
-        let msg = "Listo. Cambié el header.\n\nEjemplo intermedio: {\"status\": \"blocked\"}\n\n```json\n{\"status\": \"done\", \"summary\": \"Logo nuevo en el header\", \"pr\": \"https://example.com/acme/web/pull/7\", \"branch\": \"nodal/pay-1-logo\"}\n```\n";
+        let msg = "Done. I changed the header.\n\nIntermediate example: {\"status\": \"blocked\"}\n\n```json\n{\"status\": \"done\", \"summary\": \"New logo in the header\", \"pr\": \"https://example.com/acme/web/pull/7\", \"branch\": \"nodal/pay-1-logo\"}\n```\n";
         let r = parse_agent_report(msg).unwrap();
         assert_eq!(r.status, ReportStatus::Done);
-        assert_eq!(r.summary.as_deref(), Some("Logo nuevo en el header"));
+        assert_eq!(r.summary.as_deref(), Some("New logo in the header"));
         assert_eq!(r.pr.as_deref(), Some("https://example.com/acme/web/pull/7"));
         assert_eq!(r.branch.as_deref(), Some("nodal/pay-1-logo"));
     }
 
     #[test]
     fn agent_report_blocked_loose_json_and_bad_fields() {
-        let msg = "No pude correr los tests. {\"status\":\"BLOCKED\",\"summary\":\"falta la DB\",\"pr\":\"javascript:alert(1)\",\"branch\":\"--force\"}";
+        let msg = "I couldn't run the tests. {\"status\":\"BLOCKED\",\"summary\":\"the DB is missing\",\"pr\":\"javascript:alert(1)\",\"branch\":\"--force\"}";
         let r = parse_agent_report(msg).unwrap();
         assert_eq!(r.status, ReportStatus::Blocked);
         assert_eq!(r.pr, None);
         assert_eq!(r.branch, None);
-        assert_eq!(parse_agent_report("sin reporte"), None);
+        assert_eq!(parse_agent_report("no report"), None);
         assert_eq!(parse_agent_report("{\"status\": \"maybe\"}"), None);
         assert_eq!(parse_agent_report("{\"status\": \"done\", \"pr\": null}").unwrap().pr, None);
-        // JSON roto al final: se usa el último válido.
-        let r = parse_agent_report("{\"status\":\"done\",\"summary\":\"ok\"} y después {\"status\": ").unwrap();
+        // Broken JSON at the end: the last valid one is used.
+        let r = parse_agent_report("{\"status\":\"done\",\"summary\":\"ok\"} and then {\"status\": ").unwrap();
         assert_eq!(r.summary.as_deref(), Some("ok"));
     }
 
     #[test]
     fn verdict_pass_and_fail() {
-        let v = parse_verdict("Revisé todo.\n```json\n{\"verdict\":\"pass\",\"unmet\":[],\"nits\":[\"renombrar x\"],\"summary\":\"Cumple\"}\n```").unwrap();
+        let v = parse_verdict("I reviewed everything.\n```json\n{\"verdict\":\"pass\",\"unmet\":[],\"nits\":[\"rename x\"],\"summary\":\"Meets the criteria\"}\n```").unwrap();
         assert!(v.pass);
         assert!(v.unmet.is_empty());
-        assert_eq!(v.nits, ["renombrar x"]);
-        assert_eq!(v.summary.as_deref(), Some("Cumple"));
-        let v = parse_verdict("{\"verdict\":\"fail\",\"unmet\":[\"El logo no aparece en mobile\", {\"id\": 2}],\"summary\":null}").unwrap();
+        assert_eq!(v.nits, ["rename x"]);
+        assert_eq!(v.summary.as_deref(), Some("Meets the criteria"));
+        let v = parse_verdict("{\"verdict\":\"fail\",\"unmet\":[\"The logo doesn't show on mobile\", {\"id\": 2}],\"summary\":null}").unwrap();
         assert!(!v.pass);
-        assert_eq!(v.unmet, ["El logo no aparece en mobile", "{\"id\":2}"]);
+        assert_eq!(v.unmet, ["The logo doesn't show on mobile", "{\"id\":2}"]);
         assert!(v.nits.is_empty());
         assert_eq!(v.summary, None);
         assert_eq!(parse_verdict("{\"verdict\":\"ok\"}"), None);
-        assert_eq!(parse_verdict("nada"), None);
+        assert_eq!(parse_verdict("nothing"), None);
     }
 
     #[test]
     fn reads_last_message_from_session_lines() {
-        // Formato real observado en el spike (2.1.281): líneas `assistant` con bloques `text`.
+        // Real format observed in the spike (2.1.281): `assistant` lines with `text` blocks.
         let lines = [
             r#"{"type":"agent-setting","agentSetting":"frontend-developer"}"#,
-            r#"{"type":"assistant","isSidechain":false,"message":{"content":[{"type":"text","text":"Empiezo."}]}}"#,
-            r#"{"type":"assistant","isSidechain":true,"message":{"content":[{"type":"text","text":"subagente"}]}}"#,
+            r#"{"type":"assistant","isSidechain":false,"message":{"content":[{"type":"text","text":"Starting."}]}}"#,
+            r#"{"type":"assistant","isSidechain":true,"message":{"content":[{"type":"text","text":"subagent"}]}}"#,
             r#"{"type":"assistant","isSidechain":false,"message":{"content":[{"type":"tool_use","name":"Bash","input":{}}]}}"#,
-            r#"{"type":"assistant","isSidechain":false,"message":{"content":[{"type":"text","text":"Hecho.\n```json\n{\"status\":\"done\",\"summary\":\"s\"}\n```"}]}}"#,
+            r#"{"type":"assistant","isSidechain":false,"message":{"content":[{"type":"text","text":"Done.\n```json\n{\"status\":\"done\",\"summary\":\"s\"}\n```"}]}}"#,
             r#"{"type":"system","subtype":"turn_duration"}"#,
         ]
         .join("\n");
         let last = crate::runs::claude_fs::last_assistant_text_in(&lines).unwrap();
-        assert!(last.starts_with("Hecho."));
+        assert!(last.starts_with("Done."));
         assert_eq!(parse_agent_report(&last).unwrap().status, ReportStatus::Done);
         assert_eq!(crate::runs::claude_fs::last_assistant_text_in("{\"type\":\"user\"}"), None);
     }

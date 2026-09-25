@@ -1,6 +1,6 @@
-//! SQL de proveedores: source links, tareas vinculadas, outbox y consulta de runs activos.
-//! Vive acá (y no en `db/queries`) para no pisar el CRUD de F1-B; usa `db::rows` para las
-//! conversiones fila ↔ struct.
+//! Provider SQL: source links, linked tasks, outbox and the active-runs query.
+//! Lives here (and not in `db/queries`) so it doesn't collide with F1-B's CRUD; uses `db::rows`
+//! for row ↔ struct conversions.
 
 use rusqlite::{params, Connection, OptionalExtension};
 
@@ -40,7 +40,7 @@ pub fn insert_link(conn: &Connection, link: &SourceLink) -> Result<(), DbError> 
     })
 }
 
-/// Guarda los campos editables (repo por defecto, reglas, mapeo, auto-import).
+/// Saves the editable fields (default repo, rules, mapping, auto-import).
 pub fn save_link(conn: &Connection, link: &SourceLink) -> Result<(), DbError> {
     conn.execute(
         "UPDATE source_links SET default_repo_id = ?2, repo_rules_json = ?3, state_map_json = ?4, auto_import = ?5
@@ -50,7 +50,7 @@ pub fn save_link(conn: &Connection, link: &SourceLink) -> Result<(), DbError> {
     Ok(())
 }
 
-/// Guarda el mapeo y limpia `pending_state_changes` (el usuario ya revisó los estados).
+/// Saves the mapping and clears `pending_state_changes` (the user already reviewed the states).
 pub fn save_state_map(conn: &Connection, link_id: &str, map: &crate::domain::StateMap) -> Result<(), DbError> {
     let n = conn.execute(
         "UPDATE source_links SET state_map_json = ?2, pending_state_changes = NULL WHERE id = ?1",
@@ -62,7 +62,7 @@ pub fn save_state_map(conn: &Connection, link_id: &str, map: &crate::domain::Sta
     Ok(())
 }
 
-/// Resultado de la pasada del sync sobre un link (`error: None` = fue bien).
+/// Result of the sync pass over a link (`error: None` = it went fine).
 pub fn set_link_sync(conn: &Connection, link_id: &str, now: i64, error: Option<&str>) -> Result<(), DbError> {
     conn.execute(
         "UPDATE source_links SET last_synced_at = ?2, last_sync_error = ?3 WHERE id = ?1",
@@ -71,14 +71,14 @@ pub fn set_link_sync(conn: &Connection, link_id: &str, now: i64, error: Option<&
     Ok(())
 }
 
-/// Altas/bajas de estados contra `known_states`; vacías → `NULL`.
+/// State additions/removals against `known_states`; empty → `NULL`.
 pub fn set_pending_changes(conn: &Connection, link_id: &str, changes: &StateChanges) -> Result<(), DbError> {
     let v = if changes.is_empty() { None } else { Some(json(changes)?) };
     conn.execute("UPDATE source_links SET pending_state_changes = ?2 WHERE id = ?1", params![link_id, v])?;
     Ok(())
 }
 
-/// Proyecto al que pertenece un repo.
+/// Project a repo belongs to.
 pub fn repo_project(conn: &Connection, repo_id: &str) -> Result<Option<String>, DbError> {
     Ok(conn.query_row("SELECT project_id FROM repos WHERE id = ?1", [repo_id], |r| r.get(0)).optional()?)
 }
@@ -87,7 +87,7 @@ pub fn project_exists(conn: &Connection, id: &str) -> Result<bool, DbError> {
     Ok(conn.query_row("SELECT 1 FROM projects WHERE id = ?1", [id], |_| Ok(())).optional()?.is_some())
 }
 
-/// Rechaza un repo que no sea del proyecto.
+/// Rejects a repo that isn't from the project.
 pub fn check_repo_in_project(conn: &Connection, repo_id: &str, project_id: &str) -> Result<(), DbError> {
     match repo_project(conn, repo_id)? {
         Some(p) if p == project_id => Ok(()),
@@ -96,7 +96,7 @@ pub fn check_repo_in_project(conn: &Connection, repo_id: &str, project_id: &str)
     }
 }
 
-// ---------- Tareas vinculadas ----------
+// ---------- Linked tasks ----------
 
 pub fn task_by_external(conn: &Connection, provider: &str, external_id: &str) -> Result<Option<Task>, DbError> {
     Ok(conn
@@ -108,11 +108,11 @@ pub fn task_by_external(conn: &Connection, provider: &str, external_id: &str) ->
         .optional()?)
 }
 
-/// Las tareas cerradas hace más que esto dejan de refrescarse en el pull (volumen de API).
+/// Tasks closed longer ago than this stop being refreshed on pull (API volume).
 pub const PULL_CLOSED_WINDOW_MS: i64 = 7 * 24 * 3_600_000;
 
-/// Tareas importadas por un link (o por cualquier link con `None`) que el pull refresca:
-/// abiertas, o cerradas hace menos de `PULL_CLOSED_WINDOW_MS`.
+/// Tasks imported by a link (or by any link with `None`) that the pull refreshes: open, or
+/// closed less than `PULL_CLOSED_WINDOW_MS` ago.
 pub fn linked_tasks(conn: &Connection, link_id: Option<&str>, now: i64) -> Result<Vec<Task>, DbError> {
     let mut stmt = conn.prepare(
         "SELECT * FROM tasks WHERE src_link_id IS NOT NULL AND (?1 IS NULL OR src_link_id = ?1)
@@ -125,9 +125,9 @@ pub fn linked_tasks(conn: &Connection, link_id: Option<&str>, now: i64) -> Resul
     Ok(out)
 }
 
-/// "Lápida" de un ítem desvinculado: el auto-import no lo vuelve a traer. Va en `settings`
-/// (clave con prefijo; `load_settings` ignora las claves que no conoce) para no tocar el
-/// esquema. TODO(F1 integración): tabla propia si `settings` pasa a listarse entero.
+/// "Tombstone" of an unlinked item: auto-import doesn't bring it back. Stored in `settings`
+/// (prefixed key; `load_settings` ignores keys it doesn't know) so the schema stays
+/// untouched. TODO(F1 integration): own table if `settings` ever gets listed in full.
 const UNLINKED_PREFIX: &str = "providers.unlinked:";
 
 fn unlinked_key(provider: &str, external_id: &str) -> String {
@@ -141,7 +141,7 @@ pub fn is_unlinked(conn: &Connection, provider: &str, external_id: &str) -> Resu
         .is_some())
 }
 
-/// Un run que todavía no terminó (en cola, lanzándose o corriendo).
+/// A run that hasn't finished yet (queued, launching or running).
 pub fn has_active_run(conn: &Connection, task_id: &str) -> Result<bool, DbError> {
     Ok(conn
         .query_row(
@@ -153,7 +153,7 @@ pub fn has_active_run(conn: &Connection, task_id: &str) -> Result<bool, DbError>
         .is_some())
 }
 
-/// Datos de una tarea nueva importada.
+/// Data for a new imported task.
 pub struct NewImported<'a> {
     pub id: String,
     pub project_id: &'a str,
@@ -162,13 +162,13 @@ pub struct NewImported<'a> {
     pub item: &'a ExternalItem,
     pub status: TaskStatus,
     pub acceptance: Vec<String>,
-    /// Regla de proyecto por la que llega (ver `TaskSource.rule_id`).
+    /// Project rule it arrives through (see `TaskSource.rule_id`).
     pub rule_id: Option<String>,
     pub now: i64,
 }
 
-/// Inserta la tarea asignando número (contador del proyecto) y posición al final de su
-/// columna. Llamar dentro de una transacción.
+/// Inserts the task assigning a number (project counter) and a position at the end of its
+/// column. Call inside a transaction.
 pub fn insert_imported(conn: &Connection, n: NewImported) -> Result<Task, DbError> {
     let number: i64 = conn
         .query_row(
@@ -225,17 +225,17 @@ pub fn insert_imported(conn: &Connection, n: NewImported) -> Result<Task, DbErro
     Ok(task)
 }
 
-/// Resultado del pull de una tarea (ver `sync::decide_pull`).
+/// Result of pulling a task (see `sync::decide_pull`).
 pub struct PullUpdate<'a> {
     pub task_id: &'a str,
     pub title: Option<&'a str>,
     pub status: Option<TaskStatus>,
-    /// `None`: no tocar el estado externo guardado.
+    /// `None`: don't touch the saved external state.
     pub external_state: Option<&'a ExternalState>,
     pub sync_error: Option<&'a str>,
-    /// Sin error propio del pull, conservar el que haya (lo dejó el push de esta pasada).
+    /// With no pull error of its own, keep whatever is there (left by this pass's push).
     pub keep_error: bool,
-    /// El estado externo no está en el mapeo pull.
+    /// The external state isn't in the pull mapping.
     pub unmapped: bool,
     pub now: i64,
 }
@@ -268,8 +268,8 @@ pub fn apply_pull(conn: &Connection, u: &PullUpdate) -> Result<(), DbError> {
     Ok(())
 }
 
-/// Proyecto del proveedor visto en el pull, regla de origen y cambio de proyecto pendiente
-/// (ver `sync::decide_project`). Escribe los tres tal cual.
+/// Provider project seen on pull, originating rule and pending project change (see
+/// `sync::decide_project`). Writes all three as given.
 pub fn set_src_project(
     conn: &Connection,
     task_id: &str,
@@ -291,8 +291,8 @@ pub fn set_src_project(
     Ok(())
 }
 
-/// El backfill de una regla encontró estas tareas ya en su repo: pasan a "llegadas por la
-/// regla" (avisan si la issue cambia de proyecto). Solo las de ese link y sin aviso pendiente.
+/// A rule's backfill found these tasks already in its repo: they become "arrived through the
+/// rule" (they warn if the issue changes project). Only those of that link with no pending warning.
 pub fn tag_rule(conn: &Connection, link_id: &str, rule_id: &str, repo_id: &str, task_ids: &[String]) -> Result<(), DbError> {
     for id in task_ids {
         conn.execute(
@@ -304,7 +304,7 @@ pub fn tag_rule(conn: &Connection, link_id: &str, rule_id: &str, repo_id: &str, 
     Ok(())
 }
 
-/// Tareas con un cambio de proyecto sin decidir (para el contador "need you").
+/// Tasks with an undecided project change (for the "need you" counter).
 pub fn moved_ids(conn: &Connection, project_id: Option<&str>) -> Result<Vec<String>, DbError> {
     let mut stmt =
         conn.prepare("SELECT id FROM tasks WHERE src_moved IS NOT NULL AND (?1 IS NULL OR project_id = ?1)")?;
@@ -312,20 +312,20 @@ pub fn moved_ids(conn: &Connection, project_id: Option<&str>) -> Result<Vec<Stri
     Ok(out)
 }
 
-/// Qué hacer con una tarea cuya issue cambió de proyecto.
+/// What to do with a task whose issue changed project.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum MovedAction {
-    /// Pasarla al repo sugerido.
+    /// Move it to the suggested repo.
     Move,
-    /// Dejarla en su repo.
+    /// Keep it in its repo.
     Keep,
 }
 
-/// Resuelve el aviso de cambio de proyecto. `Move` rechaza con un run activo, un worktree o
-/// un plan en archivo fuera del repo nuevo. En los dos casos la tarea queda asociada a la
-/// regla del proyecto actual si esa regla apunta a su repo (así el próximo pull no vuelve a
-/// avisar por el mismo cambio).
+/// Resolves the project-change warning. `Move` rejects with an active run, a worktree or a
+/// plan file outside the new repo. In both cases the task gets tied to the current project's
+/// rule if that rule points to its repo (so the next pull doesn't warn again about the same
+/// change).
 pub fn resolve_moved(conn: &Connection, task_id: &str, action: MovedAction, now: i64) -> Result<Task, DbError> {
     let task = rows::get_task(conn, task_id)?.ok_or_else(|| DbError::Invalid("Task not found.".into()))?;
     let Some(src) = task.source.as_ref() else {
@@ -381,7 +381,7 @@ pub fn resolve_moved(conn: &Connection, task_id: &str, action: MovedAction, now:
 }
 
 pub fn set_sync_error(conn: &Connection, task_id: &str, error: Option<&str>) -> Result<(), DbError> {
-    // Una tarea desvinculada mientras el sync iba a la red no recibe `src_*` de nuevo.
+    // A task unlinked while the sync was on the network doesn't get `src_*` again.
     conn.execute(
         "UPDATE tasks SET src_sync_error = ?2 WHERE id = ?1 AND src_provider IS NOT NULL",
         params![task_id, error],
@@ -389,8 +389,8 @@ pub fn set_sync_error(conn: &Connection, task_id: &str, error: Option<&str>) -> 
     Ok(())
 }
 
-/// Tras un push de estado exitoso: el estado externo guardado pasa a ser el empujado, así el
-/// próximo pull no lo ve como un cambio.
+/// After a successful state push: the saved external state becomes the pushed one, so the
+/// next pull doesn't see it as a change.
 pub fn set_external_state(conn: &Connection, task_id: &str, state: &ExternalState, now: i64) -> Result<(), DbError> {
     conn.execute(
         "UPDATE tasks SET src_state_json = ?2, src_last_synced_at = ?3, src_sync_error = NULL, src_unmapped = 0
@@ -400,7 +400,7 @@ pub fn set_external_state(conn: &Connection, task_id: &str, state: &ExternalStat
     Ok(())
 }
 
-/// Unlink: la tarea queda local (se limpian todos los `src_*` y su outbox).
+/// Unlink: the task stays local (all `src_*` and its outbox are cleared).
 pub fn unlink_task(conn: &Connection, task_id: &str, now: i64) -> Result<Task, DbError> {
     let src: Option<(Option<String>, Option<String>)> = conn
         .query_row("SELECT src_provider, src_external_id FROM tasks WHERE id = ?1", [task_id], |r| {
@@ -429,7 +429,7 @@ pub fn unlink_task(conn: &Connection, task_id: &str, now: i64) -> Result<Task, D
     rows::get_task(conn, task_id)?.ok_or_else(|| DbError::Invalid("Task not found.".into()))
 }
 
-/// Disconnect: desvincula las tareas del link (quedan locales) y lo borra, en una transacción.
+/// Disconnect: unlinks the link's tasks (they stay local) and deletes it, in one transaction.
 pub fn disconnect_link(conn: &mut Connection, link_id: &str, now: i64) -> Result<usize, DbError> {
     let tx = conn.transaction()?;
     let ids: Vec<String> = {
@@ -449,7 +449,7 @@ pub fn disconnect_link(conn: &mut Connection, link_id: &str, now: i64) -> Result
 }
 
 // ---------- Outbox ----------
-// `enqueue_*` los llama la cola (`work::ops::push_status`), en la transacción del cambio.
+// `enqueue_*` are called by the queue (`work::ops::push_status`), in the change's transaction.
 
 fn task_provider(conn: &Connection, task_id: &str) -> Result<Option<String>, DbError> {
     Ok(conn
@@ -458,13 +458,13 @@ fn task_provider(conn: &Connection, task_id: &str) -> Result<Option<String>, DbE
         .flatten())
 }
 
-/// Encola el push del estado Nodal `status` para una tarea importada. El destino externo se
-/// resuelve al drenar, con el mapeo vigente (así un cambio de mapeo o un mapeo pendiente se
-/// respetan). Reemplaza cualquier push de estado anterior todavía pendiente: solo importa el
-/// último. No hace nada con tareas locales. Devuelve si encoló.
+/// Enqueues the push of Nodal status `status` for an imported task. The external target is
+/// resolved when draining, with the current mapping (so a mapping change or a pending mapping
+/// are respected). Replaces any earlier state push still pending: only the last one matters.
+/// Does nothing for local tasks. Returns whether it enqueued.
 ///
-/// Contrato del payload: `SetState.state_id` lleva el `TaskStatus` (`"in_review"`); un valor
-/// que no sea un `TaskStatus` se toma como id de estado externo literal.
+/// Payload contract: `SetState.state_id` carries the `TaskStatus` (`"in_review"`); a value
+/// that isn't a `TaskStatus` is taken as a literal external state id.
 pub fn enqueue_status(conn: &Connection, task_id: &str, status: TaskStatus, now: i64) -> Result<bool, DbError> {
     let Some(provider) = task_provider(conn, task_id)? else { return Ok(false) };
     conn.execute("DELETE FROM sync_outbox WHERE task_id = ?1 AND kind = 'set_state'", [task_id])?;
@@ -473,7 +473,7 @@ pub fn enqueue_status(conn: &Connection, task_id: &str, status: TaskStatus, now:
     Ok(true)
 }
 
-/// Encola un comentario para una tarea importada (se manda aunque el mapeo esté pendiente).
+/// Enqueues a comment for an imported task (sent even if the mapping is pending).
 pub fn enqueue_comment(conn: &Connection, task_id: &str, body: &str, now: i64) -> Result<bool, DbError> {
     let Some(provider) = task_provider(conn, task_id)? else { return Ok(false) };
     insert(conn, task_id, &provider, OutboxPayload::Comment { body: body.to_string() }, now)?;
@@ -496,9 +496,9 @@ fn insert(conn: &Connection, task_id: &str, provider: &str, payload: OutboxPaylo
     )
 }
 
-/// Filas vencidas de un proveedor, en orden de creación (el comentario de cierre sale después
-/// del cambio de estado que lo acompaña). Una fila no sale mientras haya una anterior de su
-/// misma tarea todavía en backoff: el orden por tarea se respeta entre pasadas.
+/// Due rows of a provider, in creation order (the closing comment goes out after the state
+/// change that accompanies it). A row doesn't go out while an earlier row of the same task
+/// is still in backoff: per-task order is respected across passes.
 pub fn due_outbox(conn: &Connection, provider: &str, now: i64) -> Result<Vec<OutboxItem>, DbError> {
     let mut stmt = conn.prepare(
         "SELECT * FROM sync_outbox o WHERE provider = ?1 AND next_attempt_at <= ?2
@@ -510,7 +510,7 @@ pub fn due_outbox(conn: &Connection, provider: &str, now: i64) -> Result<Vec<Out
     Ok(out)
 }
 
-/// Un cambio de estado de Nodal todavía sin empujar: el pull no lo pisa.
+/// A Nodal state change not yet pushed: the pull doesn't overwrite it.
 pub fn has_pending_state_push(conn: &Connection, task_id: &str) -> Result<bool, DbError> {
     Ok(conn
         .query_row("SELECT 1 FROM sync_outbox WHERE task_id = ?1 AND kind = 'set_state' LIMIT 1", [task_id], |_| Ok(()))

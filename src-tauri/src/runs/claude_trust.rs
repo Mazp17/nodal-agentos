@@ -1,13 +1,13 @@
-//! ¿Claude Code confía en una carpeta? Se lee en SOLO LECTURA el config global
-//! (`$CLAUDE_CONFIG_DIR/.claude.json` o `~/.claude.json`), `projects[<ruta>].hasTrustDialogAccepted`.
+//! Does Claude Code trust a folder? Reads the global config READ-ONLY
+//! (`$CLAUDE_CONFIG_DIR/.claude.json` or `~/.claude.json`), `projects[<path>].hasTrustDialogAccepted`.
 //!
-//! Regla verificada contra el bundle de Claude Code 2.1.281:
-//! 1. la clave exacta de la raíz canónica del repo (para un worktree, el repo principal;
-//!    fuera de git, la carpeta misma) con `hasTrustDialogAccepted === true`;
-//! 2. si no, se sube desde la carpeta hasta la raíz git que la contiene (inclusive): la
-//!    primera con `hasTrustDialogAccepted` verdadero. Fuera de git se sube hasta `/`.
+//! Rule verified against the Claude Code 2.1.281 bundle:
+//! 1. the exact key of the repo's canonical root (for a worktree, the main repo;
+//!    outside git, the folder itself) with `hasTrustDialogAccepted === true`;
+//! 2. otherwise, walk up from the folder to the git root containing it (inclusive): the
+//!    first one with `hasTrustDialogAccepted` true. Outside git it walks up to `/`.
 //!
-//! La confianza del home es solo de sesión y no se persiste: no hay nada que leer.
+//! Trust for the home folder is session-only and not persisted: there's nothing to read.
 
 use std::path::{Path, PathBuf};
 
@@ -19,23 +19,23 @@ use crate::util::git;
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum TrustSource {
-    /// Entrada de la raíz canónica del repo.
+    /// Entry for the repo's canonical root.
     Repo,
-    /// Entrada de la carpeta o de una carpeta padre dentro del repo.
+    /// Entry for the folder or a parent folder inside the repo.
     Parent,
-    /// Ninguna entrada con confianza: Claude Code va a mostrar el diálogo.
+    /// No trusted entry: Claude Code will show the dialog.
     NotTrusted,
-    /// No hay config de Claude Code (nunca se abrió) o no se pudo leer.
+    /// There's no Claude Code config (never opened) or it couldn't be read.
     Unknown,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RepoTrust {
-    /// `null`: no se sabe (sin config legible).
+    /// `null`: unknown (no readable config).
     pub trusted: Option<bool>,
     pub source: TrustSource,
-    /// La clave de `projects` que dio la confianza.
+    /// The `projects` key that granted the trust.
     pub matched_path: Option<String>,
 }
 
@@ -50,8 +50,8 @@ fn accepted(config: &Value, key: &Path) -> Option<bool> {
     config.get("projects")?.get(key.to_str()?)?.get("hasTrustDialogAccepted")?.as_bool()
 }
 
-/// Regla pura. `canonical_root`: raíz del repo principal (o la carpeta fuera de git);
-/// `bound`: raíz git de la carpeta (`None` fuera de git).
+/// Pure rule. `canonical_root`: root of the main repo (or the folder, outside git);
+/// `bound`: the folder's git root (`None` outside git).
 pub fn trust_of(config: &Value, path: &Path, canonical_root: &Path, bound: Option<&Path>) -> RepoTrust {
     if accepted(config, canonical_root) == Some(true) {
         return RepoTrust {
@@ -80,14 +80,14 @@ pub fn trust_of(config: &Value, path: &Path, canonical_root: &Path, bound: Optio
     RepoTrust { trusted: Some(false), source: TrustSource::NotTrusted, matched_path: None }
 }
 
-/// Raíz del repo principal que contiene `dir` (la misma para sus worktrees).
+/// Root of the main repo containing `dir` (the same for its worktrees).
 fn main_root(dir: &Path) -> Option<PathBuf> {
     let out = git::run(dir, &["rev-parse", "--path-format=absolute", "--git-common-dir"]).ok()?;
     let common = PathBuf::from(out.stdout.trim());
     (out.ok && common.file_name().is_some_and(|n| n == ".git")).then(|| common.parent().map(Path::to_path_buf)).flatten()
 }
 
-/// Bloqueante: lee el config y consulta git.
+/// Blocking: reads the config and queries git.
 pub fn repo_trust_blocking(path: &Path, config_file: Option<&Path>) -> Result<RepoTrust, String> {
     if !path.is_absolute() {
         return Err(format!("The path must be absolute: {}", path.display()));
@@ -96,8 +96,8 @@ pub fn repo_trust_blocking(path: &Path, config_file: Option<&Path>) -> Result<Re
     let Some(file) = config_file else { return Ok(unknown) };
     let Ok(text) = std::fs::read_to_string(file) else { return Ok(unknown) };
     let Ok(config) = serde_json::from_str::<Value>(&text) else { return Ok(unknown) };
-    // git devuelve rutas resueltas (`/private/tmp`, no `/tmp`): se compara con la ruta
-    // canonicalizada, y si no alcanza, con la ruta tal cual (sin límite git).
+    // git returns resolved paths (`/private/tmp`, not `/tmp`): compare with the canonicalized
+    // path, and if that's not enough, with the path as is (no git bound).
     let real = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
     let bound = if real.is_dir() { git::toplevel(&real)?.map(|t| t.canonicalize().unwrap_or(t)) } else { None };
     let canonical = match &bound {
@@ -109,7 +109,7 @@ pub fn repo_trust_blocking(path: &Path, config_file: Option<&Path>) -> Result<Re
         return Ok(t);
     }
     let raw_bound = bound.as_ref().and_then(|b| {
-        // El mismo límite expresado con el prefijo sin resolver.
+        // The same bound expressed with the unresolved prefix.
         let rel = real.strip_prefix(b).ok()?;
         let n = rel.components().count();
         let mut p = path;
@@ -122,7 +122,7 @@ pub fn repo_trust_blocking(path: &Path, config_file: Option<&Path>) -> Result<Re
     Ok(if raw.trusted == Some(true) { raw } else { t })
 }
 
-/// Si Claude Code ya confía en la carpeta (sin diálogo de confianza al lanzar).
+/// Whether Claude Code already trusts the folder (no trust dialog on launch).
 #[tauri::command]
 pub async fn repo_trust(path: String) -> Result<RepoTrust, String> {
     let path = PathBuf::from(path.trim());
@@ -145,22 +145,22 @@ mod tests {
     fn rule_exact_parent_and_bound() {
         let repo = Path::new("/w/acme");
         let sub = Path::new("/w/acme/packages/web");
-        // Raíz canónica.
+        // Canonical root.
         let t = trust_of(&cfg(&[("/w/acme", true)]), sub, repo, Some(repo));
         assert_eq!((t.trusted, t.source, t.matched_path.as_deref()), (Some(true), TrustSource::Repo, Some("/w/acme")));
-        // Carpeta padre dentro del repo.
+        // Parent folder inside the repo.
         let t = trust_of(&cfg(&[("/w/acme/packages", true)]), sub, repo, Some(repo));
         assert_eq!((t.trusted, t.source), (Some(true), TrustSource::Parent));
-        // Un padre FUERA del repo no cuenta; fuera de git, sí.
+        // A parent OUTSIDE the repo doesn't count; outside git, it does.
         let t = trust_of(&cfg(&[("/w", true)]), sub, repo, Some(repo));
         assert_eq!((t.trusted, t.source), (Some(false), TrustSource::NotTrusted));
         let t = trust_of(&cfg(&[("/w", true)]), sub, sub, None);
         assert_eq!(t.matched_path.as_deref(), Some("/w"));
-        // `false` explícito o ausente: no confía.
+        // Explicit `false` or missing: not trusted.
         let t = trust_of(&cfg(&[("/w/acme", false)]), repo, repo, Some(repo));
         assert_eq!(t.trusted, Some(false));
         assert_eq!(trust_of(&json!({}), repo, repo, Some(repo)).trusted, Some(false));
-        // Worktree: la raíz canónica es el repo principal aunque esté fuera del bound.
+        // Worktree: the canonical root is the main repo even though it's outside the bound.
         let wt = Path::new("/wt/acme/pay-1");
         let t = trust_of(&cfg(&[("/w/acme", true)]), wt, repo, Some(wt));
         assert_eq!(t.source, TrustSource::Repo);
@@ -169,7 +169,7 @@ mod tests {
     #[test]
     fn reads_config_and_resolves_worktrees() {
         if !git_available() {
-            eprintln!("git no disponible: se saltea");
+            eprintln!("git not available: skipping");
             return;
         }
         let t = TempDir::new("trust");
@@ -188,18 +188,18 @@ mod tests {
 
         std::fs::write(&file, "{}").unwrap();
         assert_eq!(repo_trust_blocking(&repo, Some(&file)).unwrap().trusted, Some(false));
-        std::fs::write(&file, "no es json").unwrap();
+        std::fs::write(&file, "not json").unwrap();
         assert_eq!(repo_trust_blocking(&repo, Some(&file)).unwrap().source, TrustSource::Unknown);
         assert_eq!(repo_trust_blocking(&repo, Some(&t.0.join("missing.json"))).unwrap().trusted, None);
-        assert!(repo_trust_blocking(Path::new("relativa"), Some(&file)).is_err());
+        assert!(repo_trust_blocking(Path::new("relative"), Some(&file)).is_err());
 
-        // Symlink a la carpeta: se resuelve para comparar con lo que devuelve git.
+        // Symlink to the folder: resolved to compare with what git returns.
         let link = t.0.join("link");
         std::os::unix::fs::symlink(&repo, &link).unwrap();
         std::fs::write(&file, cfg(&[(repo.join("src").to_str().unwrap(), true)]).to_string()).unwrap();
         let r = repo_trust_blocking(&link.join("src"), Some(&file)).unwrap();
         assert_eq!((r.trusted, r.source), (Some(true), TrustSource::Parent));
-        // Y una entrada guardada con la ruta sin resolver también cuenta.
+        // And an entry saved with the unresolved path counts too.
         std::fs::write(&file, cfg(&[(link.to_str().unwrap(), true)]).to_string()).unwrap();
         assert_eq!(repo_trust_blocking(&link.join("src"), Some(&file)).unwrap().trusted, Some(true));
     }

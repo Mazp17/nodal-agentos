@@ -1,27 +1,27 @@
-//! Sync con los proveedores: worker cada 60 s y `sync_now`.
+//! Sync with the providers: a worker every 60 s and `sync_now`.
 //!
-//! Orden por proveedor: estados actuales de cada link → push (drena el outbox) → pull →
-//! auto-import. El push va primero para que el pull ya vea lo que Nodal empujó.
+//! Order per provider: current states of each link → push (drains the outbox) → pull →
+//! auto-import. Push goes first so that pull already sees what Nodal pushed.
 //!
-//! - Pull: título y plan (si no está overridden) siempre; el estado Nodal solo si cambió el
-//!   `external_state.id` y la tarea no tiene un run activo (gana Nodal). Un estado sin mapear
-//!   no cambia el estado Nodal y queda en `sync_error`.
-//! - Push: backoff exponencial por fila; los `set_state` con mapeo pendiente, "No
-//!   sincronizar", sin mapeo o hacia un estado desaparecido se descartan (los comentarios
-//!   se mandan igual). Errores permanentes o `MAX_ATTEMPTS` intentos descartan la fila; rate
-//!   limit o key inválida no gastan intentos y cortan el drenado del proveedor en esa pasada.
-//!   Una fila fallida frena las siguientes de su tarea (orden estado → comentario).
-//! - Pull solo de tareas abiertas o cerradas hace menos de 7 días; un ítem desvinculado
-//!   (unlink) no vuelve por auto-import.
-//! - Auto-import: ítems abiertos del scope creados después del link, con repo por regla o
-//!   default; sin repo resoluble no se importan y se reporta. El pull completo solo se pide
-//!   para candidatos nuevos con repo. Cada regla de proyecto suma (aunque el link no tenga
-//!   auto-import) los ítems abiertos de su proyecto creados después de la regla.
-//! - Proyecto: el pull guarda el proyecto del proveedor de cada tarea; una que llegó por
-//!   regla de proyecto y cambió de proyecto queda `moved` (no se mueve sola).
-//! - Rate limit o key rechazada en cualquier paso cortan la pasada del proveedor y lo pausan
-//!   en memoria (`SyncMemo`); los estados de cada scope se releen cada `STATES_TTL_MS`. Un
-//!   sync manual (`force`) ignora la pausa y relee los estados.
+//! - Pull: title and plan (unless overridden) always; the Nodal status only if the
+//!   `external_state.id` changed and the task has no active run (Nodal wins). An unmapped
+//!   state does not change the Nodal status and is left in `sync_error`.
+//! - Push: exponential backoff per row; `set_state` rows with a pending mapping, "Don't
+//!   sync", no mapping or targeting a vanished state are dropped (comments are sent
+//!   anyway). Permanent errors or `MAX_ATTEMPTS` attempts drop the row; a rate limit or an
+//!   invalid key spend no attempts and stop draining the provider for that pass.
+//!   A failed row holds back the following rows of its task (order: status → comment).
+//! - Pull only for open tasks or those closed less than 7 days ago; an unlinked item
+//!   does not come back through auto-import.
+//! - Auto-import: open items in the scope created after the link, with a repo from a rule or
+//!   the default; without a resolvable repo they are not imported and it is reported. The full
+//!   pull is only requested for new candidates with a repo. Each project rule adds (even if the
+//!   link has no auto-import) the open items of its project created after the rule.
+//! - Project: pull stores each task's provider project; one that came in through a project
+//!   rule and changed project is marked `moved` (it does not move on its own).
+//! - A rate limit or rejected key at any step cuts the provider's pass short and pauses it
+//!   in memory (`SyncMemo`); each scope's states are re-read every `STATES_TTL_MS`. A
+//!   manual sync (`force`) ignores the pause and re-reads the states.
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -46,27 +46,27 @@ use super::{
 };
 
 pub const TICK: Duration = Duration::from_secs(60);
-/// Primera pasada un rato después de arrancar, para no competir con el resto del arranque.
+/// First pass a while after startup, so as not to compete with the rest of startup.
 const FIRST_TICK: Duration = Duration::from_secs(15);
 pub const BACKOFF_BASE_MS: i64 = 30_000;
 pub const BACKOFF_MAX_MS: i64 = 60 * 60_000;
-/// Intentos de una fila del outbox con errores transitorios antes de descartarla.
+/// Attempts for an outbox row with transient errors before dropping it.
 pub const MAX_ATTEMPTS: i64 = 10;
 const AUTO_IMPORT_MAX_PAGES: usize = 4;
-/// Los estados de cada scope se releen cada tanto (o en un sync manual), no en cada pasada.
+/// Each scope's states are re-read every so often (or on a manual sync), not on every pass.
 pub const STATES_TTL_MS: i64 = 10 * 60_000;
-/// Pausa del proveedor entero tras un rate limit o una key rechazada (el worker no lo toca
-/// hasta entonces; un sync manual o una key nueva la levantan).
+/// Pause of the whole provider after a rate limit or a rejected key (the worker leaves it
+/// alone until then; a manual sync or a new key lifts it).
 pub const RATE_LIMIT_PAUSE_MS: i64 = 5 * 60_000;
 pub const AUTH_PAUSE_MS: i64 = 30 * 60_000;
 
-/// Espera antes del intento `attempts + 1` (30 s, 1 min, 2 min… hasta 1 h).
+/// Wait before attempt `attempts + 1` (30 s, 1 min, 2 min… up to 1 h).
 pub fn backoff_ms(attempts: i64) -> i64 {
     let exp = (attempts - 1).clamp(0, 20) as u32;
     BACKOFF_BASE_MS.saturating_mul(1 << exp).min(BACKOFF_MAX_MS)
 }
 
-/// Proveedor en pausa (ver `RATE_LIMIT_PAUSE_MS`).
+/// Paused provider (see `RATE_LIMIT_PAUSE_MS`).
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Pause {
@@ -74,55 +74,56 @@ pub struct Pause {
     pub reason: String,
 }
 
-/// Memoria del sync entre pasadas (en memoria; vive bajo `ProvidersState::sync_lock`).
+/// Sync memory between passes (in memory; lives under `ProvidersState::sync_lock`).
 #[derive(Debug, Default)]
 pub struct SyncMemo {
-    /// Proveedor → pausa.
+    /// Provider → pause.
     pub paused: HashMap<String, Pause>,
-    /// Link → (leídos en, mapeo con el que se leyeron, estados del scope). Un mapeo distinto
-    /// (el usuario lo guardó) invalida la entrada: un destino recién mapeado no se toma como
-    /// desaparecido.
+    /// Link → (read at, mapping they were read with, scope states). A different mapping
+    /// (the user saved it) invalidates the entry: a freshly mapped target is not taken as
+    /// vanished.
     states: HashMap<String, (i64, StateMap, Vec<ExternalState>)>,
 }
 
-/// Errores que no son de un ítem sino del proveedor entero: cortan la pasada y lo pausan.
+/// Errors that belong to the whole provider rather than one item: they cut the pass short and
+/// pause it.
 fn halts(e: &ProviderError) -> bool {
     matches!(e.kind, ErrorKind::RateLimited | ErrorKind::Auth)
 }
 
-/// Espejo de `SyncReport` en `api.ts`.
+/// Mirror of `SyncReport` in `api.ts`.
 #[derive(Debug, Clone, PartialEq, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SyncReport {
-    /// Tareas refrescadas desde el proveedor.
+    /// Tasks refreshed from the provider.
     pub pulled: usize,
-    /// Escrituras hechas en el proveedor (estados y comentarios).
+    /// Writes made to the provider (states and comments).
     pub pushed: usize,
-    /// Tareas nuevas por auto-import.
+    /// New tasks from auto-import.
     pub imported: usize,
     pub errors: Vec<String>,
-    /// Avisos que no son errores: estados nuevos o desaparecidos, ítems sin repo para el
-    /// auto-import, pushes descartados porque el destino ya no existe.
+    /// Notices that are not errors: new or vanished states, items with no repo for
+    /// auto-import, pushes dropped because the target no longer exists.
     pub notices: Vec<String>,
 }
 
-// ---------- Decisiones puras ----------
+// ---------- Pure decisions ----------
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct PullDecision {
     pub title: Option<String>,
     pub status: Option<TaskStatus>,
-    /// Guardar el estado externo como visto. No se guarda uno sin mapear: cuando el usuario
-    /// lo mapee, el pull siguiente lo verá como cambio y lo aplicará. Tampoco mientras hay un
-    /// push de estado pendiente: si ese push se descarta, el pull siguiente aplica el externo.
+    /// Record the external state as seen. An unmapped one is not recorded: once the user
+    /// maps it, the next pull will see it as a change and apply it. Nor while there is a
+    /// pending status push: if that push is dropped, the next pull applies the external one.
     pub record_state: bool,
-    /// El estado externo no está en el mapeo pull.
+    /// The external state is not in the pull mapping.
     pub unmapped: bool,
     pub sync_error: Option<String>,
 }
 
-/// `pending_push`: la tarea tiene un `set_state` en el outbox (cambio local sin empujar), que
-/// gana sobre el estado externo igual que un run activo.
+/// `pending_push`: the task has a `set_state` in the outbox (a local change not yet pushed),
+/// which wins over the external state just like an active run.
 pub fn decide_pull(task: &Task, item: &ExternalItem, map: &StateMap, active_run: bool, pending_push: bool) -> PullDecision {
     let prev = task.source.as_ref().and_then(|s| s.external_state.as_ref()).map(|s| s.id.as_str());
     let changed = prev != Some(item.state.id.as_str());
@@ -139,7 +140,7 @@ pub fn decide_pull(task: &Task, item: &ExternalItem, map: &StateMap, active_run:
     }
 }
 
-/// Proyecto, regla de origen y aviso de cambio de proyecto de una tarea tras el pull.
+/// A task's project, origin rule and project-change notice after the pull.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ProjectUpdate {
     pub project: Option<ExtProject>,
@@ -147,10 +148,10 @@ pub struct ProjectUpdate {
     pub moved: Option<MovedInfo>,
 }
 
-/// Una tarea que llegó por una regla de proyecto y cuya issue ahora está en otro proyecto no
-/// se mueve de repo: queda `moved` hasta que el usuario decida. Si el repo que le tocaría es
-/// el mismo, no hay nada que decidir (pasa a la regla del proyecto nuevo, si hay); si vuelve
-/// al proyecto original, el aviso se limpia. Las demás tareas solo registran el proyecto.
+/// A task that came in through a project rule and whose issue is now in another project does
+/// not change repo: it stays `moved` until the user decides. If the repo it would get is the
+/// same, there is nothing to decide (it switches to the new project's rule, if any); if it
+/// returns to the original project, the notice is cleared. Other tasks only record the project.
 pub fn decide_project(task: &Task, item: &ExternalItem, link: &SourceLink) -> ProjectUpdate {
     let src = task.source.as_ref();
     let current = item.project();
@@ -185,12 +186,12 @@ pub fn decide_project(task: &Task, item: &ExternalItem, link: &SourceLink) -> Pr
 pub enum PushAction {
     Comment(String),
     SetState(String),
-    /// Se descarta la fila; con mensaje si hay que avisar.
+    /// The row is dropped; with a message if the user must be notified.
     Drop(Option<String>),
 }
 
-/// Qué hacer con una fila del outbox. `map`: el del link de la tarea (`None` = tarea sin
-/// link, equivale a mapeo pendiente). `current`: estados actuales del scope si se conocen.
+/// What to do with an outbox row. `map`: the one of the task's link (`None` = task without a
+/// link, same as a pending mapping). `current`: the scope's current states, if known.
 pub fn decide_push(
     payload: &OutboxPayload,
     map: Option<&StateMap>,
@@ -219,19 +220,19 @@ pub fn decide_push(
     }
 }
 
-/// Marca invisible (comentario HTML) que identifica la fila del outbox en el cuerpo del
-/// comentario. Los ids del outbox son `AUTOINCREMENT`: nunca se reusan.
+/// Invisible marker (an HTML comment) that identifies the outbox row in the comment body.
+/// Outbox ids are `AUTOINCREMENT`: they are never reused.
 pub fn outbox_marker(id: i64) -> String {
     format!("<!-- nodal:outbox:{id} -->")
 }
 
-/// Cuerpo enviado: el texto más la marca.
+/// Body sent: the text plus the marker.
 pub fn marked_body(body: &str, id: i64) -> String {
     format!("{}\n\n{}", body.trim_end(), outbox_marker(id))
 }
 
-/// Manda el comentario de la fila `id` salvo que ya esté en el proveedor: si un intento
-/// anterior llegó a Linear pero no a `outbox_done` (timeout, cierre de la app), no se repite.
+/// Sends the comment of row `id` unless it is already in the provider: if an earlier attempt
+/// reached Linear but not `outbox_done` (timeout, app closed), it is not repeated.
 async fn send_comment(p: &Provider, external_id: &str, body: &str, id: i64) -> ProviderResult<()> {
     if p.has_comment_with(external_id, &outbox_marker(id)).await? {
         return Ok(());
@@ -239,14 +240,14 @@ async fn send_comment(p: &Provider, external_id: &str, body: &str, id: i64) -> P
     p.comment(external_id, &marked_body(body, id)).await
 }
 
-// ---------- Pasada de sync ----------
+// ---------- Sync pass ----------
 
 fn err(e: DbError) -> String {
     e.to_string()
 }
 
-/// Una pasada completa (o solo de `link_filter`). `providers`: los que tienen key.
-/// `force` (sync manual): ignora la pausa de los proveedores y relee los estados.
+/// A full pass (or only for `link_filter`). `providers`: those with a key.
+/// `force` (manual sync): ignores the providers' pause and re-reads the states.
 pub async fn sync_run(
     db: &Db,
     data_dir: &Path,
@@ -300,9 +301,9 @@ pub async fn sync_run(
             .collect();
 
         let mut current: HashMap<String, Vec<ExternalState>> = HashMap::new();
-        // Errores atribuibles a cada link en esta pasada (estados, pull, auto-import).
+        // Errors attributable to each link in this pass (states, pull, auto-import).
         let mut link_errors: HashMap<String, Vec<String>> = HashMap::new();
-        // Rate limit o key rechazada: el resto de la pasada fallaría igual.
+        // Rate limit or rejected key: the rest of the pass would fail anyway.
         let mut halt: Option<ProviderError> = None;
         for link in &targets {
             if halt.is_some() {
@@ -369,7 +370,7 @@ pub async fn sync_run(
         for link in &targets {
             let mut errors = link_errors.remove(&link.id).unwrap_or_default();
             if let Some(e) = &halt {
-                // Los links que no llegaron a sincronizarse también muestran por qué.
+                // Links that never got to sync also show why.
                 if errors.is_empty() {
                     errors.push(format!("{}: {e}", link.scope.name));
                 }
@@ -393,7 +394,7 @@ async fn drain_outbox(
     now: i64,
     report: &mut SyncReport,
 ) -> (HashSet<String>, Option<ProviderError>) {
-    // Tareas a las que el push les dejó un error o aviso: el pull de esta pasada no lo borra.
+    // Tasks the push left an error or notice on: this pass's pull does not clear it.
     let mut flagged = HashSet::new();
     let mut halt = None;
     let name = p.name();
@@ -404,8 +405,8 @@ async fn drain_outbox(
             return (flagged, None);
         }
     };
-    // Orden por tarea: si una fila falla, las siguientes de esa tarea esperan (el comentario
-    // de cierre no sale antes que el cambio de estado que lo acompaña).
+    // Per-task order: if a row fails, the following rows of that task wait (the closing
+    // comment does not go out before the status change that goes with it).
     let mut failed: HashSet<String> = HashSet::new();
     for item in items {
         if failed.contains(&item.task_id) {
@@ -420,7 +421,7 @@ async fn drain_outbox(
             }
         };
         let Some((task, src)) = task.and_then(|t| t.source.clone().map(|s| (t, s))) else {
-            // Tarea desvinculada entre medio: la fila ya no tiene destino.
+            // Task unlinked in the meantime: the row no longer has a target.
             let id = item.id;
             if let Err(e) = with_db(db, move |c| store::outbox_done(c, id)).await {
                 report.errors.push(err(e));
@@ -470,9 +471,10 @@ async fn drain_outbox(
             (Err(e), _) => {
                 flagged.insert(task.id.clone());
                 failed.insert(task.id.clone());
-                // Sin key o con rate limit, el resto de las filas fallaría igual. Esos errores
-                // no son de la fila: no gastan intentos (una key revocada no descarta cambios),
-                // solo corren el próximo intento (la espera larga es la pausa del proveedor).
+                // With no key or a rate limit, the rest of the rows would fail anyway. Those
+                // errors are not the row's: they spend no attempts (a revoked key drops no
+                // changes), they only push back the next attempt (the long wait is the
+                // provider's pause).
                 stop = halts(&e);
                 if stop {
                     halt = Some(e.clone());
@@ -507,7 +509,7 @@ async fn drain_outbox(
     (flagged, halt)
 }
 
-/// Lo común a todas las tareas de un link en el pull.
+/// What all tasks of a link share during the pull.
 struct PullCtx<'a> {
     data_dir: &'a Path,
     provider: &'a str,
@@ -515,7 +517,7 @@ struct PullCtx<'a> {
     now: i64,
 }
 
-/// Aplica el pull a una tarea. Devuelve si el ítem existía.
+/// Applies the pull to a task. Returns whether the item existed.
 fn apply_pull_task(
     conn: &Connection,
     ctx: &PullCtx,
@@ -525,8 +527,8 @@ fn apply_pull_task(
 ) -> Result<bool, DbError> {
     let PullCtx { data_dir, provider, link, now } = *ctx;
     let map = &link.state_map;
-    // La tarea se leyó antes de ir a la red: si entre medio la desvincularon, la movieron de
-    // link o le sobrescribieron el plan, manda lo que hay ahora.
+    // The task was read before going to the network: if in the meantime it was unlinked,
+    // moved to another link or had its plan overwritten, what is there now wins.
     let before = task.source.as_ref().map(|s| (s.link_id.clone(), s.external_id.clone()));
     let Some(task) = rows::get_task(conn, &task.id)?
         .filter(|t| t.source.as_ref().map(|s| (s.link_id.clone(), s.external_id.clone())) == before)
@@ -626,9 +628,9 @@ async fn auto_import_link(
     now: i64,
     report: &mut SyncReport,
 ) -> Option<ProviderError> {
-    // Consultas: el scope entero (ítems creados después del link) si el link tiene
-    // auto-import, y cada regla de proyecto (ítems creados después de la regla; los
-    // anteriores los trae su backfill). Una regla de proyecto auto-importa siempre.
+    // Queries: the whole scope (items created after the link) if the link has
+    // auto-import, and each project rule (items created after the rule; earlier ones
+    // are brought in by its backfill). A project rule always auto-imports.
     let mut queries = Vec::new();
     if link.auto_import {
         queries.push(ImportQuery { created_after: Some(link.created_at), ..ImportQuery::new(link.scope.clone()) });
@@ -662,8 +664,8 @@ async fn auto_import_link(
             if store::task_by_external(c, &l.provider, &i.external_id)?.is_none()
                 && !store::is_unlinked(c, &l.provider, &i.external_id)?
             {
-                // Un repo de regla o por defecto que ya no es del proyecto (borrado) no se
-                // reintenta: el ítem espera a que se corrija la fuente.
+                // A rule or default repo that no longer belongs to the project (deleted) is
+                // not retried: the item waits until the source is fixed.
                 let repo = suggest_repo_for(&l, &i);
                 let usable = match &repo {
                     Some(r) => store::repo_project(c, r)?.as_deref() == Some(l.project_id.as_str()),
@@ -695,7 +697,7 @@ async fn auto_import_link(
         }
     }
     if !stale.is_empty() {
-        // Error del link (queda en `last_sync_error` mientras dure): no se reintenta cada minuto.
+        // Link error (stays in `last_sync_error` while it lasts): not retried every minute.
         report.errors.push(format!(
             "{}: auto-import is waiting for {} ({}): the repo of its rule or the default repo no longer exists or belongs to another project. Review the source's repos.",
             link.scope.name,
@@ -718,8 +720,8 @@ async fn auto_import_link(
         routed.into_iter().filter_map(|(id, repo)| full.get(&id).cloned().map(|i| (i, repo))).collect();
     let (link_id, dir) = (link.id.clone(), data_dir.to_path_buf());
     let res = with_db(db, move |c| {
-        // `update_source_link` no toma el lock del sync: con el link releído, un ítem cuyo
-        // ruteo cambió mientras se iba a la red espera a la pasada siguiente.
+        // `update_source_link` does not take the sync lock: with the link re-read, an item
+        // whose routing changed while going to the network waits for the next pass.
         let l = store::get_link(c, &link_id)?;
         let pairs = pairs.into_iter().filter(|(i, repo)| suggest_repo_for(&l, i).as_deref() == Some(repo.as_str())).collect();
         import_items(c, &dir, &l, pairs, now)
@@ -734,15 +736,15 @@ async fn auto_import_link(
     None
 }
 
-// ---------- Worker y comando ----------
+// ---------- Worker and command ----------
 
-/// Proveedores con key, una pasada, bajo el lock de sync. `force`: sync manual (ver
+/// Providers with a key, one pass, under the sync lock. `force`: manual sync (see
 /// `sync_run`).
 pub async fn run_for_app(app: &AppHandle, link_filter: Option<&str>, force: bool) -> PResult<SyncReport> {
     let db: Db = app.try_state::<Db>().map(|s| s.inner().clone()).ok_or("The database is not available.")?;
     let state = app.state::<ProvidersState>();
     let mut memo = state.sync_lock.lock().await;
-    // Las pausas se leen de `ProvidersState::pauses`: una key nueva pudo levantarlas.
+    // Pauses are read from `ProvidersState::pauses`: a new key may have lifted them.
     memo.paused = state.paused();
     let before = memo.paused.clone();
     let mut providers = Vec::new();
@@ -756,12 +758,12 @@ pub async fn run_for_app(app: &AppHandle, link_filter: Option<&str>, force: bool
     }
     let data_dir: PathBuf = state.data_dir.clone();
     let report = sync_run(&db, &data_dir, &providers, link_filter, now_ms(), &mut memo, force).await;
-    // Solo lo que cambió esta pasada: una key nueva guardada mientras corría (que levantó una
-    // pausa previa) no la recupera por la copia que tomó la pasada.
+    // Only what changed in this pass: a new key saved while it ran (which lifted an earlier
+    // pause) does not get it back through the copy the pass took.
     state.merge_paused(&before, &memo.paused);
     if !providers.is_empty() {
         use crate::events::Kind;
-        // El estado de los links cambia en cada pasada; las tareas solo si hubo movimiento.
+        // Link state changes on every pass; tasks only if something moved.
         let kinds: &[Kind] =
             if report.pulled + report.pushed + report.imported > 0 { &[Kind::Sources, Kind::Tasks] } else { &[Kind::Sources] };
         crate::events::notify(app, kinds, None);
@@ -832,9 +834,9 @@ mod tests {
             }
         }
 
-        /// Importa el ítem `n` (en estado `state_id`) al repo web y lo deja en el fake.
+        /// Imports item `n` (in state `state_id`) into the web repo and leaves it in the fake.
         fn import(&self, n: u32, state_id: &str) -> Task {
-            let mut it = item(n, Some("Descripción original."));
+            let mut it = item(n, Some("Original description."));
             it.state = state(state_id);
             self.fake.data().items.insert(it.external_id.clone(), it.clone());
             let mut conn = self.db.lock().unwrap();
@@ -851,7 +853,7 @@ mod tests {
             self.run_with(now, false)
         }
 
-        /// Sync manual: sin pausa y releyendo estados.
+        /// Manual sync: no pause and re-reading states.
         fn run_forced(&self, now: i64) -> SyncReport {
             self.run_with(now, true)
         }
@@ -891,13 +893,13 @@ mod tests {
         let env = Env::new();
         let t = env.import(1, "s-todo");
         env.enqueue_status(&t.id, TaskStatus::InReview, 100);
-        env.enqueue_comment(&t.id, "cierre", 100);
+        env.enqueue_comment(&t.id, "closing", 100);
         env.fake.data().fail_writes =
             Some(ProviderError::new(ErrorKind::Transient, "Linear is unavailable (HTTP 502)"));
 
         let r = env.run(100);
         assert_eq!(r.pushed, 0);
-        // El comentario espera al cambio de estado que falló.
+        // The comment waits for the failed status change.
         assert_eq!(r.errors, vec!["ENG-1: Linear is unavailable (HTTP 502)"]);
         assert_eq!(env.outbox()[1].attempts, 0);
         let row = &env.outbox()[0];
@@ -905,7 +907,7 @@ mod tests {
         assert_eq!(row.last_error.as_deref(), Some("Linear is unavailable (HTTP 502)"));
         assert!(env.task(&t.id).source.unwrap().sync_error.unwrap().contains("502"));
 
-        // Antes de vencer el backoff no se reintenta.
+        // No retry before the backoff expires.
         env.run(100 + 29_999);
         assert_eq!(env.outbox()[0].attempts, 1);
         env.run(100 + 30_000);
@@ -930,8 +932,9 @@ mod tests {
         env.fake.data().fail_writes = Some(ProviderError::new(ErrorKind::Transient, "HTTP 502"));
         env.run(100);
         env.fake.data().fail_writes = None;
-        // El comentario llega mientras el cambio de estado espera su backoff: no se adelanta.
-        env.enqueue_comment(&t.id, "cierre", 200);
+        // The comment arrives while the status change waits for its backoff: it does not jump
+        // ahead.
+        env.enqueue_comment(&t.id, "closing", 200);
         let r = env.run(1_000);
         assert_eq!(r.pushed, 0, "{r:?}");
         assert!(env.fake.data().comments.is_empty());
@@ -945,10 +948,10 @@ mod tests {
     fn comment_already_posted_is_not_reposted() {
         let env = Env::new();
         let t = env.import(1, "s-todo");
-        env.enqueue_comment(&t.id, "cierre", 1);
+        env.enqueue_comment(&t.id, "closing", 1);
         let id = env.outbox()[0].id;
-        // Un intento anterior llegó a Linear pero la fila no se marcó (timeout, crash).
-        env.fake.data().comments.push(("uuid-1".into(), marked_body("cierre", id)));
+        // An earlier attempt reached Linear but the row was not marked (timeout, crash).
+        env.fake.data().comments.push(("uuid-1".into(), marked_body("closing", id)));
         let r = env.run(10);
         assert_eq!(r.pushed, 1, "{r:?}");
         assert!(env.outbox().is_empty());
@@ -959,7 +962,7 @@ mod tests {
     fn permanent_errors_and_attempt_cap_drop_the_row() {
         let env = Env::new();
         let t = env.import(1, "s-todo");
-        env.enqueue_comment(&t.id, "hola", 1);
+        env.enqueue_comment(&t.id, "hello", 1);
         env.fake.data().fail_writes = Some(ProviderError::new(ErrorKind::Permanent, "Entity not found"));
         let r = env.run(10);
         assert!(r.errors[0].contains("not retried"), "{r:?}");
@@ -967,7 +970,7 @@ mod tests {
         assert!(env.task(&t.id).source.unwrap().sync_error.unwrap().contains("Entity not found"));
 
         env.fake.data().fail_writes = Some(ProviderError::new(ErrorKind::Transient, "timeout"));
-        env.enqueue_comment(&t.id, "hola", 20);
+        env.enqueue_comment(&t.id, "hello", 20);
         env.db.lock().unwrap().execute("UPDATE sync_outbox SET attempts = ?1", [MAX_ATTEMPTS - 1]).unwrap();
         env.run(30);
         assert!(env.outbox().is_empty(), "gave up after MAX_ATTEMPTS");
@@ -978,13 +981,13 @@ mod tests {
         let env = Env::new();
         let a = env.import(1, "s-todo");
         let b = env.import(2, "s-todo");
-        env.enqueue_comment(&a.id, "uno", 1);
-        env.enqueue_comment(&b.id, "dos", 1);
+        env.enqueue_comment(&a.id, "one", 1);
+        env.enqueue_comment(&b.id, "two", 1);
         env.fake.data().fail_writes = Some(ProviderError::new(ErrorKind::RateLimited, "rate limited"));
         let r = env.run(10);
         assert_eq!(r.errors.len(), 1, "{r:?}");
         let rows = env.outbox();
-        // El rate limit no gasta intentos: solo corre el próximo.
+        // The rate limit spends no attempts: it only pushes back the next one.
         assert_eq!((rows[0].attempts, rows[1].attempts), (0, 0));
         assert_eq!(rows[0].next_attempt_at, 10 + BACKOFF_BASE_MS);
     }
@@ -997,18 +1000,18 @@ mod tests {
         let r = env.run(10);
         assert!(r.notices.iter().any(|n| n.contains("fake: sync paused until")), "{r:?}");
         env.fake.data().fail_states = None;
-        env.fake.data().items.get_mut("uuid-1").unwrap().title = "Nuevo".into();
+        env.fake.data().items.get_mut("uuid-1").unwrap().title = "New".into();
         let calls = env.fake.data().states_calls;
-        // En pausa: el worker no toca el proveedor.
+        // Paused: the worker leaves the provider alone.
         let r = env.run(20);
         assert_eq!((r.pulled, env.fake.data().states_calls), (0, calls), "{r:?}");
         assert_eq!(env.task(&t.id).title, t.title);
         let l = store::get_link(&env.db.lock().unwrap(), &env.link.id).unwrap();
         assert!(l.last_sync_error.unwrap().contains("rate limited"), "the link keeps the reason");
-        // Vencida la pausa, vuelve a sincronizar.
+        // Once the pause expires, it syncs again.
         let r = env.run(10 + RATE_LIMIT_PAUSE_MS);
         assert_eq!(r.pulled, 1, "{r:?}");
-        assert_eq!(env.task(&t.id).title, "Nuevo");
+        assert_eq!(env.task(&t.id).title, "New");
         assert!(env.memo.borrow().paused.is_empty());
     }
 
@@ -1029,7 +1032,7 @@ mod tests {
         let mut env = Env::new();
         let t = env.import(1, "s-todo");
         env.run(10);
-        // Estado nuevo en el proveedor, mapeado por el usuario dentro del TTL.
+        // New state in the provider, mapped by the user within the TTL.
         let qa = ExternalState { id: "s-qa".into(), name: "QA".into(), kind: ExtKind::Started, color: None };
         env.fake.data().states.push(qa);
         env.set_link(|l| {
@@ -1058,7 +1061,7 @@ mod tests {
     fn auth_errors_never_drop_changes() {
         let env = Env::new();
         let t = env.import(1, "s-todo");
-        env.enqueue_comment(&t.id, "hola", 1);
+        env.enqueue_comment(&t.id, "hello", 1);
         env.db.lock().unwrap().execute("UPDATE sync_outbox SET attempts = ?1", [MAX_ATTEMPTS - 1]).unwrap();
         env.fake.data().fail_writes = Some(ProviderError::new(ErrorKind::Auth, "key revoked"));
         let mut now = 10;
@@ -1084,7 +1087,7 @@ mod tests {
         store::unlink_task(&env.db.lock().unwrap(), &t.id, 5).unwrap();
         assert_eq!(env.run(10).imported, 0);
         assert!(store::task_by_external(&env.db.lock().unwrap(), "fake", "uuid-1").unwrap().is_none());
-        // Los settings conocidos no se ven afectados por la lápida.
+        // Known settings are not affected by the tombstone.
         assert_eq!(rows::load_settings(&env.db.lock().unwrap()).unwrap(), Settings::default());
     }
 
@@ -1117,7 +1120,7 @@ mod tests {
         assert_eq!((r.pushed, env.outbox().len()), (0, 0));
         assert!(env.fake.data().set_states.is_empty());
 
-        // "In Review" desaparece del proveedor: no se empuja y se avisa.
+        // "In Review" vanishes from the provider: it is not pushed and a notice is raised.
         env.fake.data().states.retain(|s| s.id != "s-review");
         env.enqueue_status(&t.id, TaskStatus::InReview, 20);
         let r = env.run_forced(30);
@@ -1135,7 +1138,7 @@ mod tests {
         assert_eq!((r.pushed, r.errors.len(), r.notices.len()), (1, 0, 0), "{r:?}");
         assert_eq!(env.fake.data().set_states, vec![("uuid-1".to_string(), "s-todo".to_string())]);
 
-        // Mapeo confirmado antes de que existiera la fila de Todo: no se sincroniza, sin aviso.
+        // Mapping confirmed before the Todo row existed: not synced, no notice.
         env.set_link(|l| {
             l.state_map.push.remove(&TaskStatus::Todo);
         });
@@ -1171,21 +1174,22 @@ mod tests {
         {
             let mut d = env.fake.data();
             let i = d.items.get_mut("uuid-1").unwrap();
-            i.title = "Título nuevo".into();
-            i.description_md = Some("Descripción nueva.".into());
+            i.title = "New title".into();
+            i.description_md = Some("New description.".into());
             i.state = state("s-done");
         }
         let r = env.run(50);
         assert_eq!(r.pulled, 1, "{r:?}");
         let t2 = env.task(&t.id);
-        assert_eq!(t2.title, "Título nuevo");
+        assert_eq!(t2.title, "New title");
         assert_eq!(t2.status, TaskStatus::Done);
         assert_eq!(t2.closed_at, Some(50));
         assert_eq!(t2.source.as_ref().unwrap().external_state.as_ref().unwrap().id, "s-done");
         let plan = std::fs::read_to_string(plan_path(&env.dir, &t.id)).unwrap();
-        assert!(plan.contains("Descripción nueva.") && plan.contains("# ENG-1 · Título nuevo"));
+        assert!(plan.contains("New description.") && plan.contains("# ENG-1 · New title"));
 
-        // Cambio local en Nodal con el estado externo quieto: el pull no lo pisa.
+        // Local change in Nodal while the external state stays put: the pull does not
+        // overwrite it.
         env.db.lock().unwrap().execute("UPDATE tasks SET status = 'blocked' WHERE id = ?1", [&t.id]).unwrap();
         env.run(60);
         assert_eq!(env.task(&t.id).status, TaskStatus::Blocked);
@@ -1198,12 +1202,12 @@ mod tests {
         env.enqueue_status(&t.id, TaskStatus::InReview, 1);
         env.db.lock().unwrap().execute("UPDATE tasks SET status = 'in_review' WHERE id = ?1", [&t.id]).unwrap();
         env.fake.data().fail_writes = Some(ProviderError::new(ErrorKind::Transient, "HTTP 502"));
-        // Mientras el push espera, alguien mueve el ítem en el proveedor.
+        // While the push waits, someone moves the item in the provider.
         env.fake.data().items.get_mut("uuid-1").unwrap().state = state("s-done");
         env.run(10);
         let t2 = env.task(&t.id);
         assert_eq!(t2.status, TaskStatus::InReview);
-        assert_eq!(t2.source.unwrap().external_state.unwrap().id, "s-todo", "no se da por visto");
+        assert_eq!(t2.source.unwrap().external_state.unwrap().id, "s-todo", "not marked as seen");
     }
 
     #[test]
@@ -1211,11 +1215,11 @@ mod tests {
         let env = Env::new();
         let t = env.import(1, "s-todo");
         let path = plan_path(&env.dir, &t.id);
-        std::fs::write(&path, "mi plan").unwrap();
+        std::fs::write(&path, "my plan").unwrap();
         env.db.lock().unwrap().execute("UPDATE tasks SET plan_overridden = 1 WHERE id = ?1", [&t.id]).unwrap();
-        env.fake.data().items.get_mut("uuid-1").unwrap().description_md = Some("otra".into());
+        env.fake.data().items.get_mut("uuid-1").unwrap().description_md = Some("other".into());
         env.run(10);
-        assert_eq!(std::fs::read_to_string(&path).unwrap(), "mi plan");
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "my plan");
     }
 
     #[test]
@@ -1235,7 +1239,7 @@ mod tests {
         env.run(10);
         let t2 = env.task(&t.id);
         assert_eq!(t2.status, TaskStatus::InProgress);
-        // El cambio queda consumido: al terminar el run no se aplica tarde.
+        // The change is consumed: it is not applied late when the run finishes.
         assert_eq!(t2.source.unwrap().external_state.unwrap().id, "s-canceled");
         env.db.lock().unwrap().execute("UPDATE runs SET status = 'finished'", []).unwrap();
         env.run(20);
@@ -1266,18 +1270,18 @@ mod tests {
         assert!(!bs.unmapped);
         assert_eq!(r.pulled, 1);
         let l = store::get_link(&env.db.lock().unwrap(), &env.link.id).unwrap();
-        assert_eq!((l.last_synced_at, l.last_sync_error), (Some(10), None), "un ítem faltante no es error del link");
-        let pending = l.pending_state_changes.expect("QA queda pendiente de revisar");
+        assert_eq!((l.last_synced_at, l.last_sync_error), (Some(10), None), "a missing item is not a link error");
+        let pending = l.pending_state_changes.expect("QA is left pending review");
         assert_eq!(pending.added.iter().map(|s| s.id.as_str()).collect::<Vec<_>>(), ["s-qa"]);
         assert!(pending.removed.is_empty());
-        // Sin mapear no se da por visto: cuando se mapea, el pull siguiente lo aplica.
+        // Unmapped is not marked as seen: once mapped, the next pull applies it.
         assert_eq!(a.source.as_ref().unwrap().external_state.as_ref().unwrap().id, "s-todo");
         let mut map = env.link.state_map.clone();
         map.pull.insert("s-qa".into(), TaskStatus::InReview);
         map.known_states = env.fake.data().states.clone();
         store::save_state_map(&env.db.lock().unwrap(), &env.link.id, &map).unwrap();
         let l = store::get_link(&env.db.lock().unwrap(), &env.link.id).unwrap();
-        assert_eq!(l.pending_state_changes, None, "guardar el mapeo limpia lo pendiente");
+        assert_eq!(l.pending_state_changes, None, "saving the mapping clears what was pending");
         env.run(20);
         let a = env.task(&t.id);
         assert_eq!(a.status, TaskStatus::InReview);
@@ -1310,7 +1314,7 @@ mod tests {
         env.set_link(|l| l.auto_import = true);
         {
             let mut d = env.fake.data();
-            let mut docs = item(10, Some("## Criterios\n- Doc publicada\n"));
+            let mut docs = item(10, Some("## Acceptance criteria\n- Docs published\n"));
             docs.labels = vec!["docs".into()];
             let plain = item(11, None);
             let mut closed = item(12, None);
@@ -1324,10 +1328,11 @@ mod tests {
         assert!(r.notices.iter().any(|n| n.starts_with("ENG-11: not auto-imported")), "{r:?}");
         let t = store::task_by_external(&env.db.lock().unwrap(), "fake", "uuid-10").unwrap().unwrap();
         assert_eq!(t.repo_id, "r-docs");
-        assert_eq!(t.acceptance, vec!["Doc publicada"]);
+        assert_eq!(t.acceptance, vec!["Docs published"]);
         assert!(store::task_by_external(&env.db.lock().unwrap(), "fake", "uuid-12").unwrap().is_none());
 
-        // Con repo por defecto, la que faltaba entra; la ya importada no se duplica.
+        // With a default repo, the missing one comes in; the one already imported is not
+        // duplicated.
         env.set_link(|l| l.default_repo_id = Some("r-web".into()));
         let r = env.run(20);
         assert_eq!(r.imported, 1, "{r:?}");
@@ -1339,7 +1344,7 @@ mod tests {
     #[test]
     fn auto_import_with_deleted_repo_is_reported_not_retried() {
         let mut env = Env::new();
-        // `default_repo_id` tiene FK (ON DELETE SET NULL); las reglas no: pueden quedar colgadas.
+        // `default_repo_id` has an FK (ON DELETE SET NULL); rules do not: they can dangle.
         env.set_link(|l| {
             l.auto_import = true;
             l.repo_rules = vec![RepoRule::label("api", "r-gone")];
@@ -1376,11 +1381,11 @@ mod tests {
                 it.state = state(st);
                 d.items.insert(it.external_id.clone(), it);
             };
-            add(30, "guides", "2026-09-15T08:00:00.000Z", "s-todo"); // nueva y abierta: entra
-            add(31, "guides", "2026-09-01T08:00:00.000Z", "s-todo"); // anterior a la regla: backfill
-            add(32, "guides", "2026-09-15T08:00:00.000Z", "s-done"); // cerrada
-            add(33, "site", "2026-09-15T08:00:00.000Z", "s-todo"); // otro proyecto, link sin auto-import
-            add(34, "guides", "2026-09-16T08:00:00.000Z", "s-todo"); // desvinculada a mano
+            add(30, "guides", "2026-09-15T08:00:00.000Z", "s-todo"); // new and open: comes in
+            add(31, "guides", "2026-09-01T08:00:00.000Z", "s-todo"); // older than the rule: backfill
+            add(32, "guides", "2026-09-15T08:00:00.000Z", "s-done"); // closed
+            add(33, "site", "2026-09-15T08:00:00.000Z", "s-todo"); // other project, link without auto-import
+            add(34, "guides", "2026-09-16T08:00:00.000Z", "s-todo"); // unlinked by hand
         }
         let t34 = {
             let it = env.fake.data().items["uuid-34"].clone();
@@ -1402,7 +1407,7 @@ mod tests {
         }
         drop(c);
         let q = env.fake.data().queries.clone();
-        assert_eq!(q.len(), 1, "solo la consulta de la regla: {q:?}");
+        assert_eq!(q.len(), 1, "only the rule's query: {q:?}");
         assert_eq!((q[0].project_id.as_deref(), q[0].created_after), (Some("proj-guides"), Some(RULE_AT)));
         assert_eq!(env.run(RULE_AT + 2000).imported, 0);
     }
@@ -1436,13 +1441,13 @@ mod tests {
         });
         let t = import_in(&env, 40, "site", "r-web");
         assert_eq!(t.source.as_ref().unwrap().rule_id.as_deref(), Some("rule-proj-site"));
-        let plain = import_in(&env, 42, "site", "r-docs"); // no llegó por la regla
+        let plain = import_in(&env, 42, "site", "r-docs"); // did not come in through the rule
 
         move_to(&env, 40, Some("guides"));
         move_to(&env, 42, Some("guides"));
         env.run(10);
         let t2 = env.task(&t.id);
-        assert_eq!(t2.repo_id, "r-web", "no se mueve sola");
+        assert_eq!(t2.repo_id, "r-web", "does not move on its own");
         let m = t2.source.as_ref().unwrap().moved.clone().unwrap();
         assert_eq!(m.from_project, ExtProject { id: "proj-site".into(), name: "site".into() });
         assert_eq!(m.to_project.unwrap().id, "proj-guides");
@@ -1451,12 +1456,12 @@ mod tests {
         assert_eq!((p.moved, p.project.unwrap().id), (None, "proj-guides".to_string()));
         assert_eq!(store::moved_ids(&env.db.lock().unwrap(), Some("p1")).unwrap(), vec![t.id.clone()]);
 
-        // Vuelve al proyecto original: el aviso se limpia.
+        // Back to the original project: the notice is cleared.
         move_to(&env, 40, Some("site"));
         env.run(20);
         assert_eq!(env.task(&t.id).source.unwrap().moved, None);
 
-        // Se va de nuevo; con run activo no se puede mover, sin run sí.
+        // It leaves again; with an active run it cannot be moved, without one it can.
         move_to(&env, 40, Some("guides"));
         env.run(30);
         env.db
@@ -1489,7 +1494,7 @@ mod tests {
         let src = moved.source.unwrap();
         assert_eq!((src.moved, src.rule_id.as_deref()), (None, Some("rule-proj-guides")));
         env.run(40);
-        assert_eq!(env.task(&t.id).source.unwrap().moved, None, "no vuelve a avisar");
+        assert_eq!(env.task(&t.id).source.unwrap().moved, None, "does not notify again");
         assert!(resolve(&env, &t.id, store::MovedAction::Keep).unwrap_err().to_string().contains("no pending"));
     }
 
@@ -1502,9 +1507,9 @@ mod tests {
         });
         let a = import_in(&env, 50, "site", "r-web");
         let b = import_in(&env, 51, "site", "r-web");
-        // Sin regla, label ni default para el proyecto nuevo: aviso sin repo sugerido.
+        // No rule, label or default for the new project: notice with no suggested repo.
         move_to(&env, 50, None);
-        // El proyecto nuevo va al mismo repo: nada que decidir.
+        // The new project goes to the same repo: nothing to decide.
         move_to(&env, 51, Some("alt"));
         env.run(10);
         let m = env.task(&a.id).source.unwrap().moved.unwrap();
@@ -1519,14 +1524,14 @@ mod tests {
         let src = kept.source.unwrap();
         assert_eq!((src.moved, src.rule_id), (None, None));
         env.run(20);
-        assert_eq!(env.task(&a.id).source.unwrap().moved, None, "keep: no vuelve a avisar");
+        assert_eq!(env.task(&a.id).source.unwrap().moved, None, "keep: does not notify again");
     }
 
     #[test]
     fn disconnect_leaves_tasks_local() {
         let env = Env::new();
         let t = env.import(1, "s-todo");
-        env.enqueue_comment(&t.id, "hola", 1);
+        env.enqueue_comment(&t.id, "hello", 1);
         let n = store::disconnect_link(&mut env.db.lock().unwrap(), "l1", 5).unwrap();
         assert_eq!(n, 1);
         let t2 = env.task(&t.id);

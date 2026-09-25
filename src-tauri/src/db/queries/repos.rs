@@ -5,7 +5,7 @@ use crate::db::rows::{get_repo, insert_repo, repo_from_row};
 use crate::db::DbError;
 use crate::domain::Repo;
 
-/// `None`: todos. Orden: proyecto, posición.
+/// `None`: all of them. Order: project, position.
 pub fn list(conn: &Connection, project_id: Option<&str>) -> Result<Vec<Repo>, DbError> {
     let mut stmt = conn.prepare(
         "SELECT * FROM repos WHERE ?1 IS NULL OR project_id = ?1 ORDER BY project_id, position, created_at, id",
@@ -22,7 +22,7 @@ pub fn find_by_path(conn: &Connection, path: &str) -> Result<Option<Repo>, DbErr
     Ok(conn.query_row("SELECT * FROM repos WHERE path = ?1", [path], repo_from_row).optional()?)
 }
 
-/// Rechaza una ruta que ya está en algún proyecto (con el nombre del proyecto).
+/// Rejects a path that already belongs to some project (naming that project).
 pub fn insert(conn: &Connection, r: &Repo) -> Result<(), DbError> {
     if let Some(existing) = find_by_path(conn, &r.path)? {
         let project: String = conn
@@ -34,7 +34,7 @@ pub fn insert(conn: &Connection, r: &Repo) -> Result<(), DbError> {
     insert_repo(conn, r)
 }
 
-/// Guarda todo menos `project_id`, `path` y `created_at`.
+/// Saves everything except `project_id`, `path` and `created_at`.
 pub fn update(conn: &Connection, r: &Repo) -> Result<(), DbError> {
     let n = conn.execute(
         "UPDATE repos SET name = :name, model = :model, effort = :effort, permission_mode = :perm,

@@ -1,17 +1,17 @@
-//! Validación de los flags de lanzamiento por repo (`--model`, `--effort`,
-//! `--permission-mode`) y su traducción a argumentos de `claude`.
-//! Valores verificados contra `claude --help` (v2.1.281).
+//! Validation of the per-repo launch flags (`--model`, `--effort`,
+//! `--permission-mode`) and their translation into `claude` arguments.
+//! Values verified against `claude --help` (v2.1.281).
 
 use super::types::LaunchOptions;
 
 pub const EFFORTS: [&str; 5] = ["low", "medium", "high", "xhigh", "max"];
-/// `claude --help` lista todos menos `default`, que también se acepta (verificado: alias de `manual`).
+/// `claude --help` lists all but `default`, which is also accepted (verified: alias of `manual`).
 pub const PERMISSION_MODES: [&str; 7] =
     ["default", "manual", "acceptEdits", "auto", "dontAsk", "plan", "bypassPermissions"];
-/// Alias de "último modelo" que acepta `--model`.
+/// "Latest model" aliases that `--model` accepts.
 pub const MODEL_ALIASES: [&str; 4] = ["fable", "opus", "sonnet", "haiku"];
 
-/// Alias conocido, o nombre completo `claude-...` (con sufijo `[1m]` opcional).
+/// A known alias, or a full `claude-...` name (with an optional `[1m]` suffix).
 pub fn is_valid_model(m: &str) -> bool {
     let base = m.strip_suffix("[1m]").unwrap_or(m);
     if MODEL_ALIASES.contains(&base) {
@@ -27,7 +27,7 @@ fn clean(v: &Option<String>) -> Option<String> {
     v.as_deref().map(str::trim).filter(|s| !s.is_empty()).map(String::from)
 }
 
-/// Normaliza (trim, vacío → `None`) y valida contra las listas permitidas.
+/// Normalizes (trim, empty → `None`) and validates against the allowed lists.
 pub fn normalize(opts: &LaunchOptions) -> Result<LaunchOptions, Vec<String>> {
     let out = LaunchOptions {
         model: clean(&opts.model),
@@ -60,7 +60,7 @@ pub fn normalize(opts: &LaunchOptions) -> Result<LaunchOptions, Vec<String>> {
     }
 }
 
-/// Argumentos (cada uno por separado, sin shell) para `claude --bg`.
+/// Arguments (each one separate, no shell) for `claude --bg`.
 pub fn to_args(opts: &LaunchOptions) -> Result<Vec<String>, String> {
     let opts = normalize(opts).map_err(|e| e.join("\n"))?;
     let mut args = Vec::new();

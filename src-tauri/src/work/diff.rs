@@ -1,5 +1,5 @@
-//! Diff de un run: `git diff <base>...HEAD` en su carpeta, más lo que haya sin commitear
-//! (incluidos archivos nuevos sin trackear), parseado en archivos y hunks.
+//! A run's diff: `git diff <base>...HEAD` in its folder, plus anything uncommitted
+//! (including new untracked files), parsed into files and hunks.
 
 use std::path::Path;
 
@@ -7,7 +7,7 @@ use serde::Serialize;
 
 use crate::util::git;
 
-/// Tope del patch que se devuelve a la UI (el resto se descarta).
+/// Cap on the patch returned to the UI (the rest is discarded).
 pub const PATCH_MAX: usize = 8 * 1024 * 1024;
 const UNTRACKED_MAX: usize = 200;
 const UNTRACKED_FILE_MAX: u64 = 1024 * 1024;
@@ -65,13 +65,13 @@ pub struct FileDiff {
 #[serde(rename_all = "camelCase")]
 pub struct RunDiff {
     pub base: String,
-    /// Rama del run (la del worktree, la del workflow o la del checkout). `None` si HEAD
-    /// está desacoplado o no se pudo leer.
+    /// The run's branch (the worktree's, the workflow's or the checkout's). `None` if HEAD
+    /// is detached or couldn't be read.
     pub branch: Option<String>,
-    /// Commits de la rama que no están en `base`, del más nuevo al más viejo (hasta
-    /// `COMMITS_MAX`). Vacío sin base (in place).
+    /// Branch commits that aren't in `base`, newest to oldest (up to `COMMITS_MAX`). Empty
+    /// without a base (in place).
     pub commits: Vec<CommitInfo>,
-    /// El run sigue activo: el diff puede cambiar.
+    /// The run is still active: the diff may change.
     pub live: bool,
     pub cwd: String,
     pub includes_working_tree: bool,
@@ -86,14 +86,14 @@ pub struct CommitInfo {
     pub short_sha: String,
     pub subject: String,
     pub author: String,
-    /// Fecha del autor, epoch ms.
+    /// Author date, epoch ms.
     pub at: i64,
 }
 
 pub const COMMITS_MAX: usize = 200;
 const SEP: char = '\u{1f}';
 
-/// Parsea `git log --format=%H%x1f%h%x1f%an%x1f%at%x1f%s`.
+/// Parses `git log --format=%H%x1f%h%x1f%an%x1f%at%x1f%s`.
 pub fn parse_log(text: &str) -> Vec<CommitInfo> {
     text.lines()
         .filter_map(|l| {
@@ -110,7 +110,7 @@ pub fn parse_log(text: &str) -> Vec<CommitInfo> {
         .collect()
 }
 
-/// Commits de `head` que no están en `base` (`git log base..head`).
+/// Commits in `head` that aren't in `base` (`git log base..head`).
 pub fn commits(dir: &Path, base: &str, head: &str) -> Result<Vec<CommitInfo>, String> {
     if base.starts_with('-') || head.starts_with('-') {
         return Err("Invalid branch name.".into());
@@ -121,19 +121,19 @@ pub fn commits(dir: &Path, base: &str, head: &str) -> Result<Vec<CommitInfo>, St
     Ok(parse_log(&out))
 }
 
-/// Rama del checkout de `dir`; `None` con HEAD desacoplado.
+/// Branch checked out in `dir`; `None` with a detached HEAD.
 pub fn current_branch(dir: &Path) -> Option<String> {
     let b = git::ok(dir, &["rev-parse", "--abbrev-ref", "HEAD"]).ok()?;
     let b = b.trim();
     (!b.is_empty() && b != "HEAD").then(|| b.to_string())
 }
 
-/// Patch crudo de `cwd` contra `base` (con `None`, contra HEAD: solo lo sin commitear).
-/// Devuelve `(patch, hay cambios sin commitear)`.
+/// Raw patch of `cwd` against `base` (with `None`, against HEAD: only uncommitted work).
+/// Returns `(patch, has uncommitted changes)`.
 pub fn collect(cwd: &Path, base: Option<&str>) -> Result<(String, bool), String> {
     let from = match base {
         Some(b) => {
-            // `base...HEAD` = desde el merge-base; si no hay (historias sin relación), la base.
+            // `base...HEAD` = from the merge-base; if there's none (unrelated histories), the base.
             let mb = git::run(cwd, &["merge-base", b, "HEAD"])?;
             if mb.ok && !mb.stdout.trim().is_empty() {
                 mb.stdout.trim().to_string()
@@ -145,8 +145,8 @@ pub fn collect(cwd: &Path, base: Option<&str>) -> Result<(String, bool), String>
     };
     let status = git::ok(cwd, &["status", "--porcelain"])?;
     let dirty = !status.trim().is_empty();
-    // Sin `..HEAD`: compara el árbol de trabajo contra `from`, que incluye los commits de
-    // la rama y lo que no se commiteó.
+    // Without `..HEAD`: compares the working tree against `from`, which includes the branch's
+    // commits and whatever wasn't committed.
     let mut patch = git::ok(
         cwd,
         &["-c", "core.quotePath=false", "diff", "-M", "--no-color", "--no-ext-diff", &from, "--"],
@@ -158,7 +158,7 @@ pub fn collect(cwd: &Path, base: Option<&str>) -> Result<(String, bool), String>
                 patch.push_str(&format!("diff --git a/{file} b/{file}\nnew file mode 100644\nBinary files /dev/null and b/{file} differ\n"));
                 continue;
             }
-            // `--no-index` sale con 1 cuando hay diferencias: se usa `run`, no `ok`.
+            // `--no-index` exits with 1 when there are differences: use `run`, not `ok`.
             let out = git::run(
                 cwd,
                 &["-c", "core.quotePath=false", "diff", "--no-index", "--no-color", "--no-ext-diff", "--", "/dev/null", file],
@@ -179,8 +179,8 @@ pub fn collect(cwd: &Path, base: Option<&str>) -> Result<(String, bool), String>
     Ok((patch, dirty))
 }
 
-/// Patch de una rama que no está en un checkout propio (la de un workflow):
-/// `git diff <base>...<branch>`, sin árbol de trabajo.
+/// Patch of a branch that isn't in its own checkout (a workflow's):
+/// `git diff <base>...<branch>`, without a working tree.
 pub fn collect_branch(repo: &Path, base: &str, branch: &str) -> Result<String, String> {
     if branch.starts_with('-') || base.starts_with('-') {
         return Err("Invalid branch name.".into());
@@ -216,7 +216,7 @@ fn strip_side(p: &str) -> Option<String> {
     Some(p.strip_prefix("a/").or_else(|| p.strip_prefix("b/")).unwrap_or(&p).to_string())
 }
 
-/// `diff --git a/x b/x` → `x` cuando las dos mitades coinciden (caso sin rename).
+/// `diff --git a/x b/x` → `x` when both halves match (the no-rename case).
 fn header_path(rest: &str) -> Option<String> {
     let rest = rest.trim();
     let n = rest.len();
@@ -245,7 +245,7 @@ fn parse_hunk_header(line: &str) -> Option<DiffHunk> {
     Some(DiffHunk { header: line.to_string(), old_start, old_lines, new_start, new_lines, lines: Vec::new() })
 }
 
-/// Parsea un patch unificado de git en archivos (A/M/D/R, +/−) y hunks.
+/// Parses a git unified patch into files (A/M/D/R, +/−) and hunks.
 pub fn parse(patch: &str) -> Vec<FileDiff> {
     let mut files: Vec<FileDiff> = Vec::new();
     let mut old_no = 0u32;
@@ -265,7 +265,7 @@ pub fn parse(patch: &str) -> Vec<FileDiff> {
         }
         let Some(f) = files.last_mut() else { continue };
         if f.hunks.is_empty() {
-            // Cabecera del archivo.
+            // File header.
             if line.starts_with("new file mode") {
                 f.status = DiffFileStatus::Added;
             } else if line.starts_with("deleted file mode") {
@@ -302,7 +302,7 @@ pub fn parse(patch: &str) -> Vec<FileDiff> {
             Some('+') => (DiffLineKind::Add, &line[1..]),
             Some('-') => (DiffLineKind::Del, &line[1..]),
             Some(' ') => (DiffLineKind::Context, &line[1..]),
-            // `\ No newline at end of file` y líneas vacías de contexto recortadas.
+            // `\ No newline at end of file` and trimmed empty context lines.
             Some('\\') => continue,
             None => (DiffLineKind::Context, ""),
             _ => continue,
@@ -406,14 +406,14 @@ Binary files /dev/null and b/logo.png differ
                 (DiffLineKind::Context, Some(3), Some(4)),
             ]
         );
-        assert_eq!(files[1].hunks[0].lines.len(), 2, "sin la línea `\\ No newline`");
+        assert_eq!(files[1].hunks[0].lines.len(), 2, "without the `\\ No newline` line");
         assert!(parse("").is_empty());
     }
 
     #[test]
     fn diff_of_a_worktree_branch_includes_uncommitted_and_untracked() {
         if !git_available() {
-            eprintln!("git no disponible: se saltea");
+            eprintln!("git not available: skipping");
             return;
         }
         let t = TempDir::new("diff");
@@ -439,18 +439,18 @@ Binary files /dev/null and b/logo.png differ
         let files = parse(&patch);
         assert_eq!(files.len(), 1);
         assert_eq!((files[0].additions, files[0].deletions), (1, 0));
-        // La misma rama vista desde afuera (como la de un workflow).
+        // The same branch seen from outside (like a workflow's).
         assert_eq!(parse(&collect_branch(&repo, "main", "feature").unwrap()).len(), 1);
         assert!(collect_branch(&repo, "main", "--output=x").is_err());
 
         std::fs::write(repo.join("README.md"), "# demo\ncommitted\nwip\n").unwrap();
-        std::fs::write(repo.join("new file.txt"), "hola\n").unwrap();
+        std::fs::write(repo.join("new file.txt"), "hello\n").unwrap();
         let (patch, dirty) = collect(&repo, Some("main")).unwrap();
         assert!(dirty);
         let files = parse(&patch);
         let paths: Vec<(&str, DiffFileStatus, u32)> = files.iter().map(|f| (f.path.as_str(), f.status, f.additions)).collect();
         assert_eq!(paths, [("README.md", DiffFileStatus::Modified, 2), ("new file.txt", DiffFileStatus::Added, 1)]);
-        // Sin base (in_place): solo lo sin commitear.
+        // No base (in_place): only uncommitted work.
         let (patch, _) = collect(&repo, None).unwrap();
         let files = parse(&patch);
         assert_eq!(files[0].additions, 1);
@@ -459,10 +459,10 @@ Binary files /dev/null and b/logo.png differ
 
     #[test]
     fn parse_log_tolerates_bad_lines() {
-        let text = "aaaa\u{1f}aa\u{1f}Ana\u{1f}1700000000\u{1f}fix: a\u{1f}b\nroto\nbbbb\u{1f}bb\u{1f}Ana\u{1f}x\u{1f}s\n";
+        let text = "aaaa\u{1f}aa\u{1f}Ana\u{1f}1700000000\u{1f}fix: a\u{1f}b\nbroken\nbbbb\u{1f}bb\u{1f}Ana\u{1f}x\u{1f}s\n";
         let log = parse_log(text);
         assert_eq!(log.len(), 1);
-        assert_eq!(log[0].subject, "fix: a\u{1f}b", "el asunto puede contener el separador");
+        assert_eq!(log[0].subject, "fix: a\u{1f}b", "the subject may contain the separator");
         assert_eq!(log[0].at, 1_700_000_000_000);
     }
 }

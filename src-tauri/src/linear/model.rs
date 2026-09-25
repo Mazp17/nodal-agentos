@@ -1,16 +1,16 @@
-//! Tipos, queries y parseo de respuestas GraphQL de Linear. Sin red: todo acá es puro
-//! para poder testearlo con fixtures.
+//! Types, queries and parsing of Linear GraphQL responses. No network: everything here is
+//! pure so it can be tested with fixtures.
 
 use super::error::LinearError;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
-/// Issues completed/canceled más viejas que esto no se traen al board.
+/// Completed/canceled issues older than this are not brought to the board.
 pub const RECENT_DONE_DAYS: u32 = 14;
 pub const PAGE_SIZE: u32 = 100;
-/// Tope de páginas por board (100 × 20 = 2000 issues) para no colgar la UI si un
-/// workspace es enorme; si se alcanza, el board sale con `truncated: true`.
+/// Page cap per board (100 × 20 = 2000 issues) so the UI does not hang on a huge
+/// workspace; if reached, the board comes back with `truncated: true`.
 pub const MAX_PAGES: usize = 20;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -68,7 +68,7 @@ pub struct Issue {
     pub identifier: String,
     pub title: String,
     pub url: String,
-    /// 0 = sin prioridad, 1 = urgente … 4 = baja.
+    /// 0 = no priority, 1 = urgent … 4 = low.
     pub priority: f64,
     pub priority_label: String,
     pub team: Team,
@@ -91,11 +91,11 @@ pub struct TeamStates {
 pub struct Board {
     pub teams: Vec<TeamStates>,
     pub issues: Vec<Issue>,
-    /// true si se cortó la paginación en MAX_PAGES.
+    /// true if pagination was cut off at MAX_PAGES.
     pub truncated: bool,
 }
 
-// ---- Formas crudas de la respuesta GraphQL ----
+// ---- Raw GraphQL response shapes ----
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 pub struct Connection<T> {
@@ -170,8 +170,8 @@ pub const VIEWER_QUERY: &str = "query Viewer { viewer { name email } }";
 
 pub const TEAMS_QUERY: &str = "query Teams { teams(first: 250) { nodes { id key name } } }";
 
-/// Tamaños acotados a propósito: Linear puntúa la complejidad multiplicando por `first`
-/// en conexiones anidadas (límite 10k por query); 50×50 ≈ 3.8k.
+/// Sizes bounded on purpose: Linear scores complexity by multiplying by `first` in
+/// nested connections (limit 10k per query); 50×50 ≈ 3.8k.
 pub const TEAM_STATES_QUERY: &str = "query TeamStates($filter: TeamFilter) {
   teams(first: 50, filter: $filter) {
     nodes { id key name states(first: 50) { nodes { id name type position color } } }
@@ -192,15 +192,15 @@ pub const ISSUES_QUERY: &str = "query BoardIssues($filter: IssueFilter, $first: 
   }
 }";
 
-/// Lista de team ids efectiva: `None` o vacía = todos los teams.
+/// Effective team id list: `None` or empty = all teams.
 fn non_empty(team_ids: Option<&[String]>) -> Option<&[String]> {
     team_ids.filter(|ids| !ids.is_empty())
 }
 
-/// Filtro de issues: abiertas (cualquier estado que no sea completed/canceled) o
-/// cerradas (completedAt/canceledAt, no updatedAt: un comentario en una issue vieja no
-/// la trae de vuelta) hace menos de `recent_days`. Linear acepta duraciones ISO 8601
-/// relativas ("-P14D") en comparadores de fecha, así no dependemos del reloj local.
+/// Issue filter: open (any state other than completed/canceled) or closed
+/// (completedAt/canceledAt, not updatedAt: a comment on an old issue does not bring it
+/// back) less than `recent_days` ago. Linear accepts relative ISO 8601 durations
+/// ("-P14D") in date comparators, so we do not depend on the local clock.
 pub fn issue_filter(team_ids: Option<&[String]>, recent_days: u32) -> Value {
     let since = format!("-P{recent_days}D");
     let open_or_recent = json!({ "or": [
@@ -221,9 +221,9 @@ pub fn team_filter(team_ids: Option<&[String]>) -> Value {
     }
 }
 
-// ---- Sync con Nodal (providers::linear) ----
+// ---- Sync with Nodal (providers::linear) ----
 //
-// Campos y argumentos verificados contra el schema oficial del SDK
+// Fields and arguments verified against the official SDK schema
 // (github.com/linear/linear, packages/sdk/src/schema.graphql, 2026-09):
 // - `Query.issues(filter: IssueFilter, first, after, includeArchived, orderBy)`,
 //   `Query.workflowStates(filter: WorkflowStateFilter, first)`, `Query.project(id: String!)`,
@@ -235,20 +235,20 @@ pub fn team_filter(team_ids: Option<&[String]>) -> Value {
 //   started, paused, completed, canceled);
 // - `Issue.{id, identifier, title, url, description (markdown), priority: Float!, updatedAt,
 //   state, team, project, assignee, parent, labels(first), children(first)}`;
-// - `Mutation.issueUpdate(id: String!, input: IssueUpdateInput{stateId})` y
-//   `Mutation.commentCreate(input: CommentCreateInput{issueId, body})`, ambos con `success`
-//   (`IssuePayload.issue` trae el estado resultante);
-// - `Query.workflowState(id: String!)` y `Team.states(first)` para resolver el push.
-// Reglas de proyecto (mismo schema, 2026-09-24):
+// - `Mutation.issueUpdate(id: String!, input: IssueUpdateInput{stateId})` and
+//   `Mutation.commentCreate(input: CommentCreateInput{issueId, body})`, both with `success`
+//   (`IssuePayload.issue` carries the resulting state);
+// - `Query.workflowState(id: String!)` and `Team.states(first)` to resolve the push.
+// Project rules (same schema, 2026-09-24):
 // - `Issue.{project: Project {id, name}, createdAt: DateTime!, completedAt: DateTime,
 //   canceledAt: DateTime}`;
 // - `IssueFilter.{completedAt, canceledAt}: NullableDateComparator{gt: DateTimeOrDuration}`;
 // - `ProjectFilter.accessibleTeams: TeamCollectionFilter{some: TeamFilter{id}}`.
 
-/// Página del listado de importables. Chico a propósito: cada issue trae `labels(first: 20)`.
+/// Page of the importables listing. Small on purpose: each issue carries `labels(first: 20)`.
 pub const SYNC_PAGE_SIZE: u32 = 25;
-/// Ids por query de `issues_by_ids`. Con `children(50)` + `labels(20)` por issue la query
-/// queda en unos miles de puntos de complejidad (estimado, sin medir), bajo el límite de 10k.
+/// Ids per `issues_by_ids` query. With `children(50)` + `labels(20)` per issue the query
+/// lands at a few thousand complexity points (estimated, not measured), under the 10k limit.
 pub const PULL_BATCH: usize = 25;
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -275,8 +275,8 @@ pub struct SyncChild {
     pub state: WorkflowState,
 }
 
-/// Issue tal como la usa el sync. El listado no pide `description`, `parent`, `children` ni
-/// `assignee`: llegan vacíos.
+/// Issue as used by the sync. The listing does not request `description`, `parent`,
+/// `children` or `assignee`: they arrive empty.
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SyncIssue {
@@ -372,7 +372,7 @@ pub struct IssueTeam {
     pub team: TeamWithStates,
 }
 
-/// Estados del team de la issue y el estado destino, para resolver el push (ver
+/// States of the issue's team and the target state, to resolve the push (see
 /// `pick_team_state`).
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -381,9 +381,9 @@ pub struct IssueTeamStatesData {
     pub workflow_state: WorkflowState,
 }
 
-/// Estado del team de la issue equivalente a `target`: el mismo id; si no (el mapeo es de
-/// otro team, en un proyecto multi-team), el del mismo nombre y tipo; si no, el del mismo
-/// nombre.
+/// State of the issue's team equivalent to `target`: the same id; otherwise (the mapping is
+/// from another team, in a multi-team project), the one with the same name and type;
+/// otherwise, the one with the same name.
 pub fn pick_team_state<'a>(team: &'a [WorkflowState], target: &WorkflowState) -> Option<&'a WorkflowState> {
     let same_name = |s: &&WorkflowState| s.name.trim().eq_ignore_ascii_case(target.name.trim());
     team.iter()
@@ -400,7 +400,7 @@ pub struct CommentCreateData {
 
 #[derive(Debug, Deserialize)]
 pub struct IdNode {
-    #[allow(dead_code)] // Solo importa si hay nodos.
+    #[allow(dead_code)] // Only matters whether there are nodes.
     pub id: String,
 }
 
@@ -411,7 +411,7 @@ pub struct IssueComments {
 
 #[derive(Debug, Deserialize)]
 pub struct CommentMarkerData {
-    /// `null` si la issue ya no existe o la key no la ve.
+    /// `null` if the issue no longer exists or the key cannot see it.
     pub issue: Option<IssueComments>,
 }
 
@@ -421,7 +421,7 @@ pub const PROJECTS_QUERY: &str = r#"query NodalProjects {
   }
 }"#;
 
-/// Proyectos activos a los que tiene acceso un team (para elegir la regla de proyecto).
+/// Active projects a team has access to (to pick the project rule).
 pub const TEAM_PROJECTS_QUERY: &str = r#"query NodalTeamProjects($teamId: ID!) {
   projects(first: 100, filter: {
     accessibleTeams: { some: { id: { eq: $teamId } } },
@@ -483,13 +483,13 @@ pub const COMMENT_MUTATION: &str = "mutation NodalComment($issueId: String!, $bo
   commentCreate(input: { issueId: $issueId, body: $body }) { success }
 }";
 
-/// Comentarios de la issue cuyo cuerpo contiene `marker` (idempotencia del outbox).
+/// Issue comments whose body contains `marker` (outbox idempotency).
 pub const COMMENT_MARKER_QUERY: &str = "query NodalCommentMarker($id: String!, $marker: String!) {
   issue(id: $id) { comments(first: 1, filter: { body: { contains: $marker } }) { nodes { id } } }
 }";
 
-/// Filtro del listado de importables: scope (`team` o `project`), tipos de estado, texto
-/// (título, o número si parece un identifier `ENG-12` / `12`) y creadas después de una fecha.
+/// Importables listing filter: scope (`team` or `project`), state types, text (title, or
+/// number if it looks like an identifier `ENG-12` / `12`) and created after a date.
 pub fn importable_filter(
     scope_kind: &str,
     scope_id: &str,
@@ -518,10 +518,10 @@ pub fn importable_filter(
     json!({ "and": and })
 }
 
-/// Filtro de una regla de proyecto: scope del link (`team` o `project`) + proyecto de la
-/// regla, abiertas (`state_types`) y, con `closed_within_days`, también las completadas o
-/// canceladas hace menos de esos días (`completedAt`/`canceledAt` con duración ISO 8601
-/// relativa, como `issue_filter`); con `created_after_iso`, solo las creadas después.
+/// Project rule filter: link scope (`team` or `project`) + the rule's project, open
+/// (`state_types`) and, with `closed_within_days`, also those completed or canceled less
+/// than that many days ago (`completedAt`/`canceledAt` with a relative ISO 8601 duration,
+/// like `issue_filter`); with `created_after_iso`, only those created after it.
 pub fn project_rule_filter(
     scope_kind: &str,
     scope_id: &str,
@@ -553,7 +553,7 @@ pub fn project_rule_filter(
     json!({ "and": and })
 }
 
-// ---- Interpretación de respuestas ----
+// ---- Response interpretation ----
 
 #[derive(Debug, Deserialize)]
 struct GqlResponse<T> {
@@ -576,11 +576,11 @@ struct GqlErrorExt {
     user_presentable_message: Option<String>,
 }
 
-/// `extensions.code` de errores internos de Linear (reintentables). Linear no documenta la
-/// lista completa: estos son los códigos genéricos de GraphQL/Apollo para fallas del servidor.
+/// `extensions.code` of Linear's internal errors (retryable). Linear does not document the
+/// full list: these are the generic GraphQL/Apollo codes for server failures.
 const SERVER_CODES: &[&str] = &["INTERNAL_SERVER_ERROR", "INTERNAL_ERROR", "SERVICE_UNAVAILABLE", "TIMEOUT"];
 
-/// Clasifica por `extensions.code`, nunca por el texto del mensaje.
+/// Classifies by `extensions.code`, never by the message text.
 fn classify(errors: &[GqlError]) -> LinearError {
     let mut server = false;
     for e in errors {
@@ -607,9 +607,9 @@ fn classify(errors: &[GqlError]) -> LinearError {
     LinearError::Api(msg)
 }
 
-/// Convierte status HTTP + cuerpo en datos tipados o en un error legible.
-/// Linear responde errores de auth como HTTP 400 con `extensions.code`, por eso se
-/// intenta parsear el cuerpo antes de mirar el status.
+/// Turns HTTP status + body into typed data or a readable error.
+/// Linear returns auth errors as HTTP 400 with `extensions.code`, so the body is parsed
+/// before looking at the status.
 pub fn interpret_response<T: DeserializeOwned>(status: u16, body: &str) -> Result<T, LinearError> {
     let parsed: Result<GqlResponse<T>, _> = serde_json::from_str(body);
     match parsed {
@@ -633,8 +633,8 @@ mod tests {
       "data": { "issues": {
         "nodes": [
           {
-            "id": "i1", "identifier": "ACME-8", "title": "Arreglar login",
-            "url": "https://linear.app/acme/issue/ACME-8/arreglar-login",
+            "id": "i1", "identifier": "ACME-8", "title": "Fix login",
+            "url": "https://linear.app/acme/issue/ACME-8/fix-login",
             "priority": 2, "priorityLabel": "High", "updatedAt": "2026-09-20T10:00:00.000Z",
             "team": { "id": "t1", "key": "ACME", "name": "Acme" },
             "state": { "id": "s3", "name": "In Review", "type": "started", "position": 3, "color": "#0f783c" },
@@ -643,8 +643,8 @@ mod tests {
             "parent": { "identifier": "ACME-2" }
           },
           {
-            "id": "i2", "identifier": "OPS-1", "title": "Sin asignar",
-            "url": "https://linear.app/acme/issue/OPS-1/sin-asignar",
+            "id": "i2", "identifier": "OPS-1", "title": "Unassigned",
+            "url": "https://linear.app/acme/issue/OPS-1/unassigned",
             "priority": 0, "priorityLabel": "No priority", "updatedAt": "2026-09-21T10:00:00.000Z",
             "team": { "id": "t2", "key": "OPS", "name": "Ops" },
             "state": { "id": "s9", "name": "Backlog", "type": "backlog", "position": 0.5, "color": "#bec2c8" },

@@ -1,4 +1,4 @@
-Task PAY-1: Logo nuevo en el header
+Task PAY-1: New logo in the header
 Repository: /Users/me/Code/web
 Working directory: /Users/me/.nodal/worktrees/web/pay-1-logo
 This is a git worktree dedicated to this task, on branch `nodal/pay-1-logo` (based on `main`). Work only here and stay on this branch.
@@ -7,12 +7,12 @@ This is a git worktree dedicated to this task, on branch `nodal/pay-1-logo` (bas
 The plan is at /data/tasks/t1/plan.md.
 <plan>
 # Logo
-Cambiar el logo del header por el nuevo.
+Replace the header logo with the new one.
 </plan>
 
 ## Acceptance criteria
-- El logo nuevo aparece en el header
-- Los tests pasan
+- The new logo shows up in the header
+- The tests pass
 
 ## When you finish
 Commit your changes, push the branch and open a pull request with `gh pr create`. Never merge it.

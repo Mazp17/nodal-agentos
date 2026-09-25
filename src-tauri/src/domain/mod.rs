@@ -1,25 +1,25 @@
-//! Modelo de Nodal: proyectos, repos, tareas, runs y fuentes externas.
-//! Espejo exacto en `src/domain/types.ts`: cualquier cambio acá va también allá.
+//! Nodal's model: projects, repos, tasks, runs and external sources.
+//! Exact mirror in `src/domain/types.ts`: any change here goes there too.
 //!
-//! Convenciones de serialización:
-//! - structs en camelCase;
-//! - enums "de valor" en snake_case (`in_place`, `in_progress`);
-//! - enums con datos llevan el discriminante en `kind`;
-//! - fechas en epoch ms (`i64`).
+//! Serialization conventions:
+//! - structs in camelCase;
+//! - "value" enums in snake_case (`in_place`, `in_progress`);
+//! - enums with data carry the discriminant in `kind`;
+//! - dates in epoch ms (`i64`).
 
 use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
-/// Genera `as_str`/`parse` para enums de valor, con los mismos nombres que usa serde.
-/// Se usan como representación en SQLite (columnas TEXT).
+/// Generates `as_str`/`parse` for value enums, with the same names serde uses.
+/// They're used as the SQLite representation (TEXT columns).
 macro_rules! str_enum {
     ($ty:ident { $($variant:ident => $s:literal),+ $(,)? }) => {
         impl $ty {
             #[cfg(test)]
             #[allow(dead_code)]
             pub const ALL: &'static [$ty] = &[$($ty::$variant),+];
-            // Generadas para todos los enums; no todos las usan fuera de los tests.
+            // Generated for every enum; not all of them use these outside tests.
             #[allow(dead_code)]
             pub fn as_str(self) -> &'static str {
                 match self { $($ty::$variant => $s),+ }
@@ -32,32 +32,32 @@ macro_rules! str_enum {
     };
 }
 
-// ---------- Proyectos y repos ----------
+// ---------- Projects and repos ----------
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Project {
     pub id: String,
     pub name: String,
-    /// Prefijo de los ids de tarea (`PAY` → `PAY-1`). Mayúsculas y dígitos, único.
+    /// Prefix for task ids (`PAY` → `PAY-1`). Uppercase letters and digits, unique.
     pub key: String,
-    /// Próximo `Task.number` a asignar (empieza en 1).
+    /// Next `Task.number` to assign (starts at 1).
     pub next_task_number: i64,
-    /// Color del proyecto en la UI (hex o `oklch(...)`).
+    /// Project color in the UI (hex or `oklch(...)`).
     pub color: String,
-    /// Descripción libre (v2).
+    /// Free-form description (v2).
     #[serde(default)]
     pub description: Option<String>,
-    /// Ejecutor por defecto si el repo no define uno. `None` → el global de Settings → Claude.
+    /// Default executor if the repo doesn't define one. `None` → the global one in Settings → Claude.
     pub default_executor: Option<Executor>,
-    /// Revisor por defecto si el repo no define uno. `None` → `code-reviewer`.
+    /// Default reviewer if the repo doesn't define one. `None` → `code-reviewer`.
     pub reviewer: Option<String>,
     pub created_at: i64,
     pub archived_at: Option<i64>,
 }
 
-/// Flags opcionales de `claude --bg` que se configuran por repo.
-/// Valores permitidos: ver `runs::options` (verificados contra `claude --help` 2.1.281).
+/// Optional `claude --bg` flags configured per repo.
+/// Allowed values: see `runs::options` (checked against `claude --help` 2.1.281).
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LaunchOptions {
@@ -74,26 +74,26 @@ pub struct LaunchOptions {
 pub struct Repo {
     pub id: String,
     pub project_id: String,
-    /// Raíz git canónica. Única en toda la app.
+    /// Canonical git root. Unique across the whole app.
     pub path: String,
     pub name: String,
-    /// `model`, `effort` y `permissionMode` van planos en el JSON.
+    /// `model`, `effort` and `permissionMode` are flattened in the JSON.
     #[serde(flatten)]
     pub launch: LaunchOptions,
     pub default_executor: Option<Executor>,
     pub default_isolation: Isolation,
     pub default_finish: Finish,
     pub default_review: bool,
-    /// Agente revisor. `None` → el del proyecto → `code-reviewer`.
+    /// Reviewer agent. `None` → the project's → `code-reviewer`.
     pub reviewer: Option<String>,
-    /// Orden dentro del proyecto.
+    /// Order within the project.
     pub position: i64,
     pub created_at: i64,
 }
 
-// ---------- Ejecutores y opciones ----------
+// ---------- Executors and options ----------
 
-/// De dónde sale la definición de un agente.
+/// Where an agent's definition comes from.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AgentSource {
@@ -101,12 +101,12 @@ pub enum AgentSource {
     User,
     /// `<repo>/.claude/agents/*.md`
     Repo,
-    /// Un plugin habilitado.
+    /// An enabled plugin.
     Plugin,
 }
 str_enum!(AgentSource { User => "user", Repo => "repo", Plugin => "plugin" });
 
-/// A quién se delega una tarea (su `assignee`) o quién corre un run.
+/// Who a task is delegated to (its `assignee`) or who runs a run.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Executor {
@@ -114,16 +114,16 @@ pub enum Executor {
     Agent { name: String, source: AgentSource },
     /// `claude --bg "/<name> <args>"`.
     Workflow { name: String },
-    /// Sesión común con la tarea como prompt.
+    /// Plain session with the task as the prompt.
     Claude,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Isolation {
-    /// `~/.nodal/worktrees/<repo>/<task-slug>`, rama `nodal/<task-slug>`.
+    /// `~/.nodal/worktrees/<repo>/<task-slug>`, branch `nodal/<task-slug>`.
     Worktree,
-    /// En la carpeta del repo; la cola no lanza dos a la vez por repo.
+    /// In the repo folder; the queue never launches two at once per repo.
     InPlace,
 }
 str_enum!(Isolation { Worktree => "worktree", InPlace => "in_place" });
@@ -131,16 +131,16 @@ str_enum!(Isolation { Worktree => "worktree", InPlace => "in_place" });
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Finish {
-    /// Cambios sin commitear.
+    /// Uncommitted changes.
     Changes,
-    /// Commit en la rama, sin push.
+    /// Commit on the branch, no push.
     Commit,
-    /// Commit, push y PR con `gh`.
+    /// Commit, push and PR with `gh`.
     Pr,
 }
 str_enum!(Finish { Changes => "changes", Commit => "commit", Pr => "pr" });
 
-// ---------- Tareas ----------
+// ---------- Tasks ----------
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -175,26 +175,26 @@ pub enum Priority {
 }
 str_enum!(Priority { Urgent => "urgent", High => "high", Medium => "medium", Low => "low", None => "none" });
 
-/// Dónde está el plan. El texto vive en `tasks/<id>/plan.md` (no en la base).
+/// Where the plan is. The text lives in `tasks/<id>/plan.md` (not in the database).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum PlanRef {
     Text,
-    /// Ruta absoluta de un `.md` dentro del repo.
+    /// Absolute path of a `.md` inside the repo.
     File { path: String },
 }
 
-/// Worktree propio de la tarea (solo con `Isolation::Worktree`).
+/// The task's own worktree (only with `Isolation::Worktree`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WorktreeRef {
     pub path: String,
     pub branch: String,
-    /// Ref base contra la que se calcula el diff.
+    /// Base ref the diff is computed against.
     pub base: String,
 }
 
-/// Tipo normalizado de un estado externo, para la heurística de mapeo.
+/// Normalized type of an external state, for the mapping heuristic.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ExtKind {
@@ -204,7 +204,7 @@ pub enum ExtKind {
     Started,
     Completed,
     Canceled,
-    /// El proveedor no tipa sus estados (p. ej. secciones de Asana).
+    /// The provider doesn't type its states (e.g. Asana sections).
     Unknown,
 }
 
@@ -217,34 +217,34 @@ pub struct ExternalState {
     pub color: Option<String>,
 }
 
-/// Vínculo de una tarea importada con su ítem en el proveedor.
+/// Link between an imported task and its item in the provider.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TaskSource {
-    /// `"linear"`, más adelante `"asana"`, `"azure_devops"`...
+    /// `"linear"`, later `"asana"`, `"azure_devops"`...
     pub provider: String,
-    /// SourceLink por el que se importó. Para borrar el link, antes se desvinculan sus
-    /// tareas (`source = None`): la base no deja borrarlo con tareas apuntándole.
+    /// SourceLink it was imported through. To delete the link, its tasks are unlinked first
+    /// (`source = None`): the database won't delete it while tasks point to it.
     pub link_id: Option<String>,
     pub external_id: String,
-    /// Id legible del proveedor (`ENG-142`).
+    /// Provider's human-readable id (`ENG-142`).
     pub identifier: String,
     pub url: String,
     pub external_state: Option<ExternalState>,
     pub last_synced_at: Option<i64>,
     pub sync_error: Option<String>,
-    /// El estado externo actual no está en el mapeo pull (v2): la tarea conserva su estado
-    /// Nodal y la UI muestra "estado externo sin mapear".
+    /// The current external state is not in the pull mapping (v2): the task keeps its Nodal
+    /// status and the UI shows "unmapped external state".
     #[serde(default)]
     pub unmapped: bool,
-    /// Proyecto del proveedor visto en el último import/pull (v3).
+    /// Provider project seen on the last import/pull (v3).
     #[serde(default)]
     pub project: Option<ExtProject>,
-    /// Regla de proyecto por la que llegó al repo (v3): solo esas tareas avisan si la issue
-    /// cambia de proyecto.
+    /// Project rule through which it reached the repo (v3): only those tasks warn if the
+    /// issue changes project.
     #[serde(default)]
     pub rule_id: Option<String>,
-    /// Cambio de proyecto pendiente de decidir (v3).
+    /// Project change awaiting a decision (v3).
     #[serde(default)]
     pub moved: Option<MovedInfo>,
 }
@@ -255,22 +255,22 @@ pub struct Task {
     pub id: String,
     pub project_id: String,
     pub repo_id: String,
-    /// Número dentro del proyecto: el id visible es `{project.key}-{number}`.
+    /// Number within the project: the visible id is `{project.key}-{number}`.
     pub number: i64,
     pub title: String,
     pub status: TaskStatus,
     pub priority: Priority,
     pub labels: Vec<String>,
-    /// Orden dentro de la columna (REAL para insertar entre dos sin renumerar).
+    /// Order within the column (REAL to insert between two without renumbering).
     pub position: f64,
     pub plan: PlanRef,
-    /// En una importada: el plan ya no se regenera desde la descripción externa.
+    /// On an imported task: the plan is no longer regenerated from the external description.
     pub plan_overridden: bool,
-    /// Criterios de aceptación contra los que revisa el gate.
+    /// Acceptance criteria the gate reviews against.
     pub acceptance: Vec<String>,
-    /// `None` → default del repo → del proyecto → Claude.
+    /// `None` → repo default → project default → Claude.
     pub assignee: Option<Executor>,
-    /// `None` → default del repo.
+    /// `None` → repo default.
     pub isolation: Option<Isolation>,
     pub finish: Option<Finish>,
     pub review: Option<bool>,
@@ -278,11 +278,11 @@ pub struct Task {
     pub source: Option<TaskSource>,
     pub created_at: i64,
     pub updated_at: i64,
-    /// Cuándo pasó a Done o Canceled.
+    /// When it moved to Done or Canceled.
     pub closed_at: Option<i64>,
 }
 
-/// `{KEY}-{number}`, p. ej. `PAY-1`.
+/// `{KEY}-{number}`, e.g. `PAY-1`.
 pub fn task_key(project_key: &str, number: i64) -> String {
     format!("{project_key}-{number}")
 }
@@ -291,7 +291,7 @@ pub fn task_key(project_key: &str, number: i64) -> String {
 #[serde(rename_all = "snake_case")]
 pub enum RelationKind {
     Related,
-    /// `task_id` bloquea a `other_id`.
+    /// `task_id` blocks `other_id`.
     Blocks,
 }
 str_enum!(RelationKind { Related => "related", Blocks => "blocks" });
@@ -344,7 +344,7 @@ pub enum RunOutcome {
 }
 str_enum!(RunOutcome { Green => "green", Yellow => "yellow", Red => "red", Stopped => "stopped", Unknown => "unknown" });
 
-/// Veredicto del revisor (o el resultado estructurado de un workflow que revisa).
+/// The reviewer's verdict (or the structured result of a reviewing workflow).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Verdict {
@@ -358,48 +358,48 @@ pub struct Verdict {
 #[serde(rename_all = "camelCase")]
 pub struct Run {
     pub id: String,
-    /// `None` en runs sin tarea (lanzados a mano o migrados).
+    /// `None` for runs without a task (launched by hand or migrated).
     pub task_id: Option<String>,
     pub repo_id: Option<String>,
     pub cwd: String,
     pub executor: Executor,
     pub kind: RunKind,
-    /// Paso anterior de la cadena (el run revisado, o el previo a un traspaso).
+    /// Previous step in the chain (the reviewed run, or the one before a handoff).
     pub parent_run_id: Option<String>,
     pub prompt: String,
-    /// "Extra instructions for this run", ya incluidas en `prompt`.
+    /// "Extra instructions for this run", already included in `prompt`.
     pub extra_instructions: Option<String>,
     pub options: LaunchOptions,
     pub finish: Finish,
-    /// Resuelta al encolar (tarea → repo). `None` en workflows, que manejan su worktree.
+    /// Resolved on enqueue (task → repo). `None` for workflows, which manage their own worktree.
     pub isolation: Option<Isolation>,
-    /// Resuelto al encolar: al terminar este run de trabajo, se encola el revisor.
+    /// Resolved on enqueue: when this work run finishes, the reviewer is enqueued.
     pub review: bool,
     pub verdict: Option<Verdict>,
     pub status: RunStatus,
-    /// Orden en la cola global (menor sale antes). REAL para reordenar sin renumerar.
+    /// Order in the global queue (lower goes first). REAL to reorder without renumbering.
     pub queue_position: f64,
-    /// Id corto de `claude --bg`.
+    /// Short id from `claude --bg`.
     pub claude_run_id: Option<String>,
     pub session_id: Option<String>,
     pub queued_at: i64,
     pub launched_at: Option<i64>,
     pub finished_at: Option<i64>,
     pub outcome: Option<RunOutcome>,
-    /// `summary` del bloque JSON final del ejecutor (se pasa al siguiente paso).
+    /// `summary` from the executor's final JSON block (passed on to the next step).
     pub summary: Option<String>,
     pub pr_url: Option<String>,
     pub branch: Option<String>,
     pub error: Option<String>,
-    /// Etiqueta del run importado de una versión anterior (issue o tarea vieja).
+    /// Label of a run imported from a previous version (old issue or task).
     pub legacy_label: Option<String>,
-    /// Tokens del transcript (input + output + cache), sumados al cerrar (v2). `None` en
-    /// workflows o si no se pudo leer.
+    /// Transcript tokens (input + output + cache), summed on close (v2). `None` for
+    /// workflows or if it couldn't be read.
     #[serde(default)]
     pub tokens: Option<i64>,
 }
 
-/// `Run` sin `prompt` ni `extraInstructions`, para listas (historial, board).
+/// `Run` without `prompt` or `extraInstructions`, for lists (history, board).
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RunLight {
@@ -464,38 +464,38 @@ impl From<Run> for RunLight {
     }
 }
 
-// ---------- Fuentes externas ----------
+// ---------- External sources ----------
 
-/// Scope del proveedor que se vincula (team o proyecto de Linear, proyecto de Asana...).
+/// Provider scope being linked (Linear team or project, Asana project...).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ScopeRef {
-    /// Depende del proveedor: `"team"`, `"project"`...
+    /// Depends on the provider: `"team"`, `"project"`...
     pub kind: String,
     pub id: String,
     pub name: String,
 }
 
-/// Qué mira una regla de ruteo.
+/// What a routing rule looks at.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RuleKind {
-    /// Un label del ítem (sin distinguir mayúsculas).
+    /// One of the item's labels (case-insensitive).
     #[default]
     Label,
-    /// El proyecto del proveedor (proyecto de Linear) al que pertenece el ítem.
+    /// The provider project (Linear project) the item belongs to.
     Project,
-    /// Tipo que esta versión no conoce: la regla no rutea nada, pero leerla no rompe el link
-    /// (ni el sync entero).
+    /// Type this version doesn't know: the rule routes nothing, but reading it doesn't break
+    /// the link (or the whole sync).
     #[serde(other)]
     Unknown,
 }
 
-/// Al importar, un ítem con este label (o de este proyecto del proveedor) va a este repo.
-/// Precedencia: regla de proyecto > regla de label > repo por defecto del link.
+/// On import, an item with this label (or from this provider project) goes to this repo.
+/// Precedence: project rule > label rule > the link's default repo.
 ///
-/// Compatible con el JSON v1/v2 `{label, repoId}`: `kind` default `label`, `value` acepta
-/// `label`, y `id`/`created_at`/`name` vacíos se completan al leer
+/// Compatible with the v1/v2 JSON `{label, repoId}`: `kind` defaults to `label`, `value`
+/// accepts `label`, and empty `id`/`created_at`/`name` are filled in on read
 /// (`normalize_legacy_rules`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -504,15 +504,15 @@ pub struct RepoRule {
     pub id: String,
     #[serde(default)]
     pub kind: RuleKind,
-    /// Label, o id del proyecto del proveedor.
+    /// Label, or the provider project's id.
     #[serde(alias = "label")]
     pub value: String,
-    /// Nombre visible (el del proyecto; en las de label, el label).
+    /// Display name (the project's; for label rules, the label).
     #[serde(default)]
     pub name: String,
     pub repo_id: String,
-    /// Las reglas de proyecto auto-importan ítems creados después de esto (los anteriores
-    /// los trae el backfill al crear la regla).
+    /// Project rules auto-import items created after this (earlier ones are brought in by
+    /// the backfill when the rule is created).
     #[serde(default)]
     pub created_at: i64,
 }
@@ -547,8 +547,8 @@ impl RepoRule {
     }
 }
 
-/// Completa lo que el JSON viejo no trae: id estable por posición (`rule-{i}`, así dos
-/// lecturas dan el mismo id), `created_at` del link y `name` = `value`.
+/// Fills in what the old JSON lacks: a stable id by position (`rule-{i}`, so two reads
+/// yield the same id), the link's `created_at` and `name` = `value`.
 pub fn normalize_legacy_rules(rules: &mut [RepoRule], link_created_at: i64) {
     for (i, r) in rules.iter_mut().enumerate() {
         if r.id.is_empty() {
@@ -563,7 +563,7 @@ pub fn normalize_legacy_rules(rules: &mut [RepoRule], link_created_at: i64) {
     }
 }
 
-/// Proyecto del proveedor al que pertenece un ítem (id y nombre).
+/// Provider project an item belongs to (id and name).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ExtProject {
@@ -571,29 +571,29 @@ pub struct ExtProject {
     pub name: String,
 }
 
-/// La issue cambió de proyecto en el proveedor después de llegar por una regla de proyecto
-/// (v3). Nodal no la mueve de repo: espera a `resolve_moved_task`.
+/// The issue changed project in the provider after arriving through a project rule
+/// (v3). Nodal doesn't move it to another repo: it waits for `resolve_moved_task`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MovedInfo {
     pub from_project: ExtProject,
-    /// `None`: la issue quedó sin proyecto.
+    /// `None`: the issue was left without a project.
     pub to_project: Option<ExtProject>,
-    /// Repo que le tocaría ahora por las reglas; `None` si ninguna aplica.
+    /// Repo it would now get by the rules; `None` if none applies.
     pub suggested_repo_id: Option<String>,
 }
 
-/// Mapeo de estados en las dos direcciones. Lo propone Nodal; lo confirma el usuario.
+/// State mapping in both directions. Nodal proposes it; the user confirms it.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct StateMap {
-    /// `external_state.id` → estado Nodal. Un id ausente está "sin mapear".
+    /// `external_state.id` → Nodal status. A missing id is "unmapped".
     pub pull: BTreeMap<String, TaskStatus>,
-    /// Estado Nodal → `external_state.id`; `null` = "No sincronizar" (solo comentario).
+    /// Nodal status → `external_state.id`; `null` = "Don't sync" (comment only).
     pub push: BTreeMap<TaskStatus, Option<String>>,
-    /// `None` = mapeo pendiente: se puede importar pero no se hace push.
+    /// `None` = mapping pending: importing works but nothing is pushed.
     pub confirmed_at: Option<i64>,
-    /// Foto de los estados del proveedor al confirmar, para detectar altas y bajas.
+    /// Snapshot of the provider states at confirmation, to detect additions and removals.
     pub known_states: Vec<ExternalState>,
 }
 
@@ -609,19 +609,19 @@ pub struct SourceLink {
     pub state_map: StateMap,
     pub auto_import: bool,
     pub created_at: i64,
-    /// Última pasada del sync sobre este link (v2).
+    /// Last sync pass over this link (v2).
     #[serde(default)]
     pub last_synced_at: Option<i64>,
-    /// Error de la última pasada (`None` si fue bien).
+    /// Error from the last pass (`None` if it went fine).
     #[serde(default)]
     pub last_sync_error: Option<String>,
-    /// Altas/bajas de estados sin revisar. `None` = nada pendiente.
+    /// Unreviewed state additions/removals. `None` = nothing pending.
     #[serde(default)]
     pub pending_state_changes: Option<StateChanges>,
 }
 
-/// Estados del proveedor que cambiaron contra `StateMap.known_states` (v2). Lo deja el
-/// sync; se limpia al guardar el mapeo.
+/// Provider states that changed against `StateMap.known_states` (v2). Set by the
+/// sync; cleared when the mapping is saved.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct StateChanges {
@@ -635,7 +635,7 @@ impl StateChanges {
     }
 }
 
-/// Qué hay que escribir en el proveedor.
+/// What must be written to the provider.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum OutboxPayload {
@@ -653,11 +653,11 @@ impl OutboxPayload {
     }
 }
 
-/// Escritura pendiente en el proveedor (push de estado o comentario), con backoff.
+/// Pending write to the provider (state push or comment), with backoff.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct OutboxItem {
-    /// Autoincremental; 0 antes de insertar.
+    /// Autoincrement; 0 before insertion.
     pub id: i64,
     pub task_id: String,
     pub provider: String,
@@ -674,17 +674,17 @@ pub const DEFAULT_CONCURRENCY: u32 = 3;
 pub const MAX_CONCURRENCY: u32 = 16;
 pub const DEFAULT_REVIEWER: &str = "code-reviewer";
 
-/// Ajustes globales. En la base es una fila por campo (`settings.key` = nombre camelCase).
+/// Global settings. In the database it's one row per field (`settings.key` = camelCase name).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct Settings {
-    /// Runs simultáneos en la cola global.
+    /// Concurrent runs in the global queue.
     pub concurrency: u32,
-    /// Comando del editor para "Open in editor" (`code`, `cursor`...). `None` → el del sistema.
+    /// Editor command for "Open in editor" (`code`, `cursor`...). `None` → the system one.
     pub editor: Option<String>,
-    /// Revisor global si ni el repo ni el proyecto definen uno.
+    /// Global reviewer if neither the repo nor the project define one.
     pub reviewer: String,
-    /// Último fallback del ejecutor: repo → proyecto → este → Claude.
+    /// Last executor fallback: repo → project → this → Claude.
     pub default_executor: Option<Executor>,
 }
 
@@ -739,8 +739,8 @@ mod tests {
         let p = OutboxPayload::SetState { state_id: "s3".into() };
         assert_eq!(serde_json::to_value(&p).unwrap(), json!({"kind": "set_state", "stateId": "s3"}));
         assert_eq!(p.kind(), "set_state");
-        let c = OutboxPayload::Comment { body: "hola".into() };
-        assert_eq!(serde_json::to_value(&c).unwrap(), json!({"kind": "comment", "body": "hola"}));
+        let c = OutboxPayload::Comment { body: "hello".into() };
+        assert_eq!(serde_json::to_value(&c).unwrap(), json!({"kind": "comment", "body": "hello"}));
         assert_eq!(c.kind(), "comment");
     }
 

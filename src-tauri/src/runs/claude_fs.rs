@@ -1,14 +1,14 @@
-//! ATENCIÓN: formato interno y SIN DOCUMENTAR de Claude Code (observado en v2.1.281).
+//! WARNING: Claude Code's internal, UNDOCUMENTED format (observed in v2.1.281).
 //!
-//! Todo lo que depende de cómo Claude Code imprime su salida o escribe sus archivos vive
-//! acá y solo acá, para que cuando cambie haya un único lugar que tocar:
-//! - salida de `claude --bg` (línea `backgrounded · <id>`),
-//! - salida de `claude agents --json --all`,
-//! - layout de `~/.claude/projects/<slug>/<sessionId>/` (journal, meta, transcripts,
-//!   resumen final `workflows/wf_*.json`, script `workflows/scripts/*-wf_*.js`).
+//! Everything that depends on how Claude Code prints its output or writes its files lives
+//! here and only here, so that when it changes there's a single place to touch:
+//! - `claude --bg` output (the `backgrounded · <id>` line),
+//! - `claude agents --json --all` output,
+//! - layout of `~/.claude/projects/<slug>/<sessionId>/` (journal, meta, transcripts,
+//!   final summary `workflows/wf_*.json`, script `workflows/scripts/*-wf_*.js`).
 //!
-//! Criterio: tolerar todo lo desconocido (campos nuevos, tipos inesperados, líneas
-//! cortadas a mitad de escritura) y degradar a `None` en vez de fallar.
+//! Policy: tolerate anything unknown (new fields, unexpected types, lines cut off
+//! mid-write) and degrade to `None` instead of failing.
 
 use std::fs;
 use std::io::{Read, Seek, SeekFrom};
@@ -24,7 +24,7 @@ use super::types::{
     TranscriptItem,
 };
 
-/// Deserializa un campo opcional sin fallar si el tipo no es el esperado.
+/// Deserializes an optional field without failing if the type isn't the expected one.
 fn lenient<'de, D, T>(d: D) -> Result<Option<T>, D::Error>
 where
     D: Deserializer<'de>,
@@ -38,20 +38,20 @@ where
 // `claude --bg`
 // ---------------------------------------------------------------------------
 
-/// Extrae el id corto de una línea como `backgrounded · ddb91222` (con o sin colores ANSI).
+/// Extracts the short id from a line like `backgrounded · ddb91222` (with or without ANSI colors).
 pub fn parse_bg_line(line: &str) -> Option<String> {
     let clean = strip_ansi(line);
     let pos = clean.find("backgrounded")?;
     let rest = &clean[pos + "backgrounded".len()..];
-    // Primer token después de `backgrounded` (puede venir texto detrás del id).
+    // First token after `backgrounded` (there may be text after the id).
     let id = rest
         .split(|c: char| !(c.is_ascii_alphanumeric() || c == '-'))
         .find(|t| !t.is_empty())?;
     is_plausible_id(id).then(|| id.to_string())
 }
 
-/// Plan B si la salida no trae la palabra `backgrounded` (p.ej. otro formato sin TTY):
-/// aceptar una salida que sea solo un id hexadecimal. No observado, solo defensivo.
+/// Fallback if the output lacks the word `backgrounded` (e.g. another format without a TTY):
+/// accept output that is just a hex id. Not observed, purely defensive.
 pub fn parse_bare_id(output: &str) -> Option<String> {
     let clean = strip_ansi(output);
     let t = clean.trim();
@@ -69,7 +69,7 @@ fn strip_ansi(s: &str) -> String {
         if c == '\u{1b}' {
             if chars.peek() == Some(&'[') {
                 chars.next();
-                // CSI: parámetros hasta una letra final.
+                // CSI: parameters up to a final letter.
                 for n in chars.by_ref() {
                     if n.is_ascii_alphabetic() || n == '~' {
                         break;
@@ -112,8 +112,8 @@ struct RawAgent {
     waiting_for: Option<String>,
 }
 
-/// Sesiones `kind == "background"`, más recientes primero. Entradas sin `id` o
-/// `sessionId` se descartan (las interactivas, por ejemplo, no traen `id`).
+/// Sessions with `kind == "background"`, most recent first. Entries without `id` or
+/// `sessionId` are dropped (interactive ones, for example, have no `id`).
 pub fn parse_agents_json(text: &str) -> Result<Vec<RunSummary>, String> {
     let values: Vec<Value> = serde_json::from_str(text.trim())
         .map_err(|e| format!("`claude agents --json` didn't return the expected JSON list: {e}"))?;
@@ -140,10 +140,10 @@ pub fn parse_agents_json(text: &str) -> Result<Vec<RunSummary>, String> {
 }
 
 // ---------------------------------------------------------------------------
-// Ubicación de la sesión en disco
+// Session location on disk
 // ---------------------------------------------------------------------------
 
-/// `$CLAUDE_CONFIG_DIR` o `~/.claude`.
+/// `$CLAUDE_CONFIG_DIR` or `~/.claude`.
 pub fn claude_config_dir() -> Option<PathBuf> {
     if let Some(dir) = std::env::var_os("CLAUDE_CONFIG_DIR").filter(|d| !d.is_empty()) {
         return Some(PathBuf::from(dir));
@@ -151,20 +151,20 @@ pub fn claude_config_dir() -> Option<PathBuf> {
     std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".claude"))
 }
 
-/// Slug del directorio de proyecto: todo carácter no alfanumérico pasa a `-`.
-/// Verificado contra `~/.claude/projects`: `/Users/x/Code/nodal-sandbox` →
-/// `-Users-x-Code-nodal-sandbox`, y `/.claude/worktrees` → `--claude-worktrees`.
+/// Project directory slug: every non-alphanumeric character becomes `-`.
+/// Verified against `~/.claude/projects`: `/Users/x/Code/nodal-sandbox` →
+/// `-Users-x-Code-nodal-sandbox`, and `/.claude/worktrees` → `--claude-worktrees`.
 pub fn project_slug(cwd: &str) -> String {
     cwd.chars().map(|c| if c.is_ascii_alphanumeric() { c } else { '-' }).collect()
 }
 
-/// Un sessionId viene del frontend y termina en una ruta: solo `[A-Za-z0-9-]`.
+/// A sessionId comes from the frontend and ends up in a path: only `[A-Za-z0-9-]`.
 pub fn is_valid_session_id(id: &str) -> bool {
     !id.is_empty() && id.len() <= 128 && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
 }
 
-/// `<projects>/<slug>/<sessionId>`. Si el slug no coincide (rutas largas o reglas que
-/// cambien), busca la sesión en cualquier proyecto.
+/// `<projects>/<slug>/<sessionId>`. If the slug doesn't match (long paths or changed
+/// rules), looks for the session in any project.
 pub fn find_session_dir(projects: &Path, cwd: &str, session_id: &str) -> Option<PathBuf> {
     let direct = projects.join(project_slug(cwd)).join(session_id);
     if direct.is_dir() {
@@ -178,10 +178,10 @@ pub fn find_session_dir(projects: &Path, cwd: &str, session_id: &str) -> Option<
 }
 
 // ---------------------------------------------------------------------------
-// Detalle de un workflow
+// Workflow detail
 // ---------------------------------------------------------------------------
 
-/// Detalle del workflow más reciente de la sesión, o `None` si la sesión no lanzó ninguno.
+/// Detail of the session's most recent workflow, or `None` if the session launched none.
 pub fn read_run_detail(session_dir: &Path) -> Option<RunDetail> {
     let ids = workflow_ids(session_dir);
     let workflow_count = ids.len() as u32;
@@ -195,7 +195,7 @@ pub fn read_run_detail(session_dir: &Path) -> Option<RunDetail> {
         .and_then(|text| parse_final(&text, &wf_id));
     let mut detail = match from_final {
         Some(d) => d,
-        // Sin resumen (o a medio escribir): se reconstruye desde el journal.
+        // No summary (or half-written): rebuilt from the journal.
         None => read_live(session_dir, &wf_id),
     };
     detail.workflow_count = workflow_count;
@@ -206,7 +206,7 @@ fn wf_live_dir(session_dir: &Path, wf_id: &str) -> PathBuf {
     session_dir.join("subagents").join("workflows").join(wf_id)
 }
 
-/// Ids `wf_*` presentes en `subagents/workflows/` (dirs) y `workflows/` (resúmenes).
+/// `wf_*` ids present in `subagents/workflows/` (dirs) and `workflows/` (summaries).
 fn workflow_ids(session_dir: &Path) -> Vec<String> {
     let mut ids: Vec<String> = Vec::new();
     if let Ok(entries) = fs::read_dir(session_dir.join("subagents").join("workflows")) {
@@ -263,7 +263,7 @@ fn phase_index(phases: &[PhaseInfo], title: Option<&str>) -> Option<u32> {
     phases.iter().position(|p| p.title == title).map(|i| i as u32 + 1)
 }
 
-// --- Resumen final: workflows/wf_<id>.json --------------------------------
+// --- Final summary: workflows/wf_<id>.json --------------------------------
 
 #[derive(Deserialize)]
 struct RawPhase {
@@ -329,7 +329,7 @@ struct RawProgressItem {
     result_preview: Option<String>,
 }
 
-/// `None` si el archivo no es JSON válido (p.ej. a medio escribir).
+/// `None` if the file isn't valid JSON (e.g. half-written).
 pub fn parse_final(text: &str, wf_id: &str) -> Option<RunDetail> {
     let raw: RawFinal = serde_json::from_str(text).ok()?;
     let progress: Vec<RawProgressItem> = raw
@@ -391,7 +391,7 @@ pub fn parse_final(text: &str, wf_id: &str) -> Option<RunDetail> {
     })
 }
 
-// --- En vivo: journal.jsonl + meta + transcripts ------------------------------
+// --- Live: journal.jsonl + meta + transcripts ---------------------------------
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -414,11 +414,11 @@ struct RawMeta {
     model: Option<String>,
 }
 
-/// Agentes del journal en orden de arranque: `started` sin `result` = corriendo.
-/// Ignora tipos desconocidos y líneas ilegibles (la última puede estar a medio escribir).
+/// Journal agents in start order: `started` without `result` = running.
+/// Ignores unknown types and unreadable lines (the last one may be half-written).
 pub fn parse_journal(text: &str) -> Vec<AgentInfo> {
     let mut agents: Vec<AgentInfo> = Vec::new();
-    // Identidad de cada agente: agentId, o la `key` si faltara.
+    // Identity of each agent: agentId, or the `key` if missing.
     let mut ids: Vec<String> = Vec::new();
     for line in text.lines().filter(|l| !l.trim().is_empty()) {
         let Ok(entry) = serde_json::from_str::<RawJournalLine>(line) else { continue };
@@ -438,7 +438,7 @@ pub fn parse_journal(text: &str) -> Vec<AgentInfo> {
                     last_tool_summary: None,
                     result_preview: None,
                 };
-                // Un reintento puede reusar la identidad: queda el último arranque.
+                // A retry may reuse the identity: the latest start wins.
                 if let Some(i) = ids.iter().position(|x| *x == ident) {
                     agents[i] = info;
                 } else {
@@ -459,7 +459,7 @@ pub fn parse_journal(text: &str) -> Vec<AgentInfo> {
 
 fn read_live(session_dir: &Path, wf_id: &str) -> RunDetail {
     let dir = wf_live_dir(session_dir, wf_id);
-    // Lossy: la última línea puede estar cortada a mitad de un carácter multibyte.
+    // Lossy: the last line may be cut off in the middle of a multibyte character.
     let journal = fs::read(dir.join("journal.jsonl"))
         .map(|b| String::from_utf8_lossy(&b).into_owned())
         .unwrap_or_default();
@@ -485,7 +485,7 @@ fn read_live(session_dir: &Path, wf_id: &str) -> RunDetail {
         .and_then(|p| fs::read_to_string(p).ok())
         .map(|src| parse_script_phases(&src))
         .unwrap_or_default();
-    // Sin script legible: las fases que se vieron en el journal, en orden.
+    // No readable script: the phases seen in the journal, in order.
     for a in &agents {
         if let Some(ph) = &a.phase {
             if !phases.iter().any(|p| &p.title == ph) {
@@ -518,7 +518,7 @@ fn read_live(session_dir: &Path, wf_id: &str) -> RunDetail {
     }
 }
 
-/// `workflows/scripts/<nombre>-<wf_id>.js`.
+/// `workflows/scripts/<name>-<wf_id>.js`.
 fn find_script(session_dir: &Path, wf_id: &str) -> Option<PathBuf> {
     let suffix = format!("-{wf_id}.js");
     fs::read_dir(session_dir.join("workflows").join("scripts"))
@@ -528,8 +528,8 @@ fn find_script(session_dir: &Path, wf_id: &str) -> Option<PathBuf> {
         .find(|p| p.file_name().is_some_and(|n| n.to_string_lossy().ends_with(&suffix)))
 }
 
-/// Fases declaradas en `meta.phases` del script JS del workflow. Best effort: es JS, no
-/// JSON; se buscan `title:` / `detail:` con literales de string dentro del array.
+/// Phases declared in `meta.phases` of the workflow's JS script. Best effort: it's JS, not
+/// JSON; looks for `title:` / `detail:` with string literals inside the array.
 pub fn parse_script_phases(src: &str) -> Vec<PhaseInfo> {
     let Some(start) = src.find("phases:") else { return Vec::new() };
     let after = &src[start + "phases:".len()..];
@@ -550,7 +550,7 @@ pub fn parse_script_phases(src: &str) -> Vec<PhaseInfo> {
         .collect()
 }
 
-/// Índice del cierre que balancea, saltando literales de string.
+/// Index of the balancing closer, skipping string literals.
 pub(crate) fn find_closing(s: &str, open: char, close: char) -> Option<usize> {
     let mut depth = 0usize;
     let mut quote: Option<char> = None;
@@ -581,7 +581,7 @@ pub(crate) fn find_closing(s: &str, open: char, close: char) -> Option<usize> {
     None
 }
 
-/// Trozos `{ ... }` de primer nivel, sin las llaves.
+/// Top-level `{ ... }` chunks, without the braces.
 fn split_top_level_objects(s: &str) -> Vec<&str> {
     let mut out = Vec::new();
     let mut rest = s;
@@ -594,7 +594,7 @@ fn split_top_level_objects(s: &str) -> Vec<&str> {
     out
 }
 
-/// Valor de `key: '...'` (comillas simples, dobles o backticks).
+/// Value of `key: '...'` (single quotes, double quotes or backticks).
 pub(crate) fn js_string_prop(obj: &str, key: &str) -> Option<String> {
     let mut search = obj;
     loop {
@@ -636,10 +636,10 @@ pub(crate) fn js_string_prop(obj: &str, key: &str) -> Option<String> {
     }
 }
 
-// --- Transcript de un agente: última tool ----------------------------------
+// --- Agent transcript: last tool --------------------------------------------
 
-/// Última `tool_use` de un transcript `agent-<id>.jsonl`. Lee solo la cola del archivo
-/// (pueden pesar MB): primero 64 KB, y si ahí no hay ninguna, 1 MB.
+/// Last `tool_use` of an `agent-<id>.jsonl` transcript. Reads only the file's tail
+/// (they can weigh MBs): first 64 KB, and if there's none there, 1 MB.
 pub fn last_tool_from_transcript(path: &Path) -> Option<(String, Option<String>)> {
     let mut file = fs::File::open(path).ok()?;
     let len = file.metadata().ok()?.len();
@@ -649,7 +649,7 @@ pub fn last_tool_from_transcript(path: &Path) -> Option<(String, Option<String>)
         let mut buf = Vec::new();
         file.by_ref().take(window).read_to_end(&mut buf).ok()?;
         let text = String::from_utf8_lossy(&buf);
-        // Si no arrancamos al principio, la primera línea está cortada.
+        // If we didn't start at the beginning, the first line is cut off.
         let text = if start > 0 { text.split_once('\n').map_or("", |(_, r)| r) } else { &text };
         if let Some(found) = last_tool_in_lines(text) {
             return Some(found);
@@ -663,7 +663,7 @@ pub fn last_tool_from_transcript(path: &Path) -> Option<(String, Option<String>)
 
 pub fn last_tool_in_lines(text: &str) -> Option<(String, Option<String>)> {
     text.lines().rev().find_map(|line| {
-        // Filtro barato antes de parsear líneas que pueden ser enormes.
+        // Cheap filter before parsing lines that can be huge.
         if !line.contains("\"tool_use\"") {
             return None;
         }
@@ -698,7 +698,7 @@ fn truncate(s: &str, max: usize) -> String {
     clip(s, max).0
 }
 
-/// Recorta a `max` caracteres (con `…`) e indica si recortó.
+/// Clips to `max` characters (with `…`) and reports whether it clipped.
 fn clip(s: &str, max: usize) -> (String, bool) {
     match s.char_indices().nth(max) {
         None => (s.to_string(), false),
@@ -710,7 +710,7 @@ fn clip(s: &str, max: usize) -> (String, bool) {
     }
 }
 
-// --- Resultado del workflow ---------------------------------------------------
+// --- Workflow result ----------------------------------------------------------
 
 const RESULT_RAW_MAX: usize = 8000;
 const RESULT_LIST_MAX: usize = 100;
@@ -720,7 +720,7 @@ fn str_field(obj: &serde_json::Map<String, Value>, key: &str) -> Option<String> 
     obj.get(key)?.as_str().map(str::trim).filter(|s| !s.is_empty()).map(|s| truncate(s, RESULT_ITEM_MAX))
 }
 
-/// Lista de strings; ignora elementos que no lo sean. `None` si el campo no es un array.
+/// List of strings; ignores elements that aren't. `None` if the field isn't an array.
 fn str_list(obj: &serde_json::Map<String, Value>, key: &str) -> Option<Vec<String>> {
     let arr = obj.get(key)?.as_array()?;
     Some(
@@ -734,8 +734,8 @@ fn str_list(obj: &serde_json::Map<String, Value>, key: &str) -> Option<Vec<Strin
     )
 }
 
-/// Campos conocidos del `result` (forma de `linear-issue`) más el JSON crudo recortado.
-/// `result` es libre: lo que no tenga la forma esperada queda en `None`.
+/// Known fields of the `result` (shape of `linear-issue`) plus the clipped raw JSON.
+/// `result` is free-form: anything without the expected shape stays `None`.
 pub fn parse_result(result: Option<&Value>) -> Option<RunResult> {
     let v = result.filter(|v| !v.is_null())?;
     let raw = match v {
@@ -745,8 +745,8 @@ pub fn parse_result(result: Option<&Value>) -> Option<RunResult> {
     let mut out = RunResult { raw: Some(truncate(&raw, RESULT_RAW_MAX)), ..RunResult::default() };
     if let Some(obj) = v.as_object() {
         out.issue = str_field(obj, "issue");
-        // Solo URLs web: el frontend la abre con el opener del sistema.
-        // Sin recortar: una URL cortada abriría un link roto.
+        // Web URLs only: the frontend opens it with the system opener.
+        // Not clipped: a cut URL would open a broken link.
         out.pr = obj
             .get("pr")
             .and_then(Value::as_str)
@@ -762,9 +762,9 @@ pub fn parse_result(result: Option<&Value>) -> Option<RunResult> {
     Some(out)
 }
 
-// --- Transcript completo de un subagente ---------------------------------------
+// --- Full subagent transcript -------------------------------------------------
 
-/// Por encima de esto se lee el principio (prompt) y la cola (conversación reciente).
+/// Above this, the head (prompt) and the tail (recent conversation) are read.
 const TRANSCRIPT_MAX_READ: u64 = 16 * 1024 * 1024;
 const TRANSCRIPT_HEAD: u64 = 1024 * 1024;
 const PROMPT_MAX: usize = 8000;
@@ -775,7 +775,7 @@ const SUMMARY_MAX: usize = 160;
 pub const TRANSCRIPT_DEFAULT_LIMIT: u32 = 200;
 pub const TRANSCRIPT_MAX_LIMIT: u32 = 2000;
 
-/// Ids que terminan en una ruta (`wf_...`, id de agente): solo `[A-Za-z0-9_-]`.
+/// Ids that end up in a path (`wf_...`, agent id): only `[A-Za-z0-9_-]`.
 pub fn is_valid_path_id(id: &str) -> bool {
     !id.is_empty()
         && id.len() <= 128
@@ -802,7 +802,7 @@ struct RawAgentMeta {
     workflow_phase: Option<String>,
 }
 
-/// Lo que sale de parsear el texto del transcript.
+/// The result of parsing the transcript text.
 #[derive(Debug, Default)]
 pub struct ParsedTranscript {
     pub prompt: Option<String>,
@@ -811,8 +811,8 @@ pub struct ParsedTranscript {
     pub final_output: Option<String>,
 }
 
-/// El workflow envuelve la tarea: `[Workflow harness — computed task] ... follows:` y el
-/// texto indentado con dos espacios. Devuelve el texto sin el marco.
+/// The workflow wraps the task: `[Workflow harness — computed task] ... follows:` and the
+/// text indented by two spaces. Returns the text without the wrapper.
 fn unwrap_harness(text: &str) -> Option<String> {
     if !text.starts_with("[Workflow harness") || !text.contains("computed task]") {
         return None;
@@ -844,9 +844,9 @@ fn tool_result_text(block: &Value) -> String {
     }
 }
 
-/// Parsea las líneas de un `agent-<id>.jsonl`: prompt inicial, conversación con cada
-/// `tool_result` pegado a su `tool_use`, y salida final. Devuelve como mucho los últimos
-/// `limit` items. Tolera líneas rotas y tipos desconocidos.
+/// Parses the lines of an `agent-<id>.jsonl`: initial prompt, conversation with each
+/// `tool_result` attached to its `tool_use`, and final output. Returns at most the last
+/// `limit` items. Tolerates broken lines and unknown types.
 pub fn parse_transcript(text: &str, limit: usize) -> ParsedTranscript {
     let mut prompts: Vec<String> = Vec::new();
     let mut items: Vec<TranscriptItem> = Vec::new();
@@ -855,7 +855,7 @@ pub fn parse_transcript(text: &str, limit: usize) -> ParsedTranscript {
     let mut structured: Option<String> = None;
 
     for line in text.lines() {
-        // Filtro barato: los adjuntos (listas de skills, snapshots) son la mayor parte del archivo.
+        // Cheap filter: attachments (skill lists, snapshots) make up most of the file.
         if line.trim().is_empty() || !(line.contains("\"assistant\"") || line.contains("\"user\"")) {
             continue;
         }
@@ -882,7 +882,7 @@ pub fn parse_transcript(text: &str, limit: usize) -> ParsedTranscript {
                                     is_error: b.get("is_error").and_then(Value::as_bool).unwrap_or(false),
                                     truncated,
                                 };
-                                // El tool_use suele estar muy cerca: se busca desde el final.
+                                // The tool_use is usually very close: search from the end.
                                 let slot = items.iter_mut().rev().find_map(|it| match it {
                                     TranscriptItem::ToolUse { id: Some(tid), result, .. } if Some(tid.as_str()) == id => {
                                         Some(result)
@@ -975,8 +975,8 @@ pub fn parse_transcript(text: &str, limit: usize) -> ParsedTranscript {
     }
 }
 
-/// Lee el archivo entero, o si es muy grande su principio (donde está el prompt) y su
-/// cola. Devuelve `(texto, parcial, bytes)`.
+/// Reads the whole file, or if it's too large, its head (where the prompt is) and its
+/// tail. Returns `(text, partial, bytes)`.
 fn read_transcript_text(path: &Path) -> std::io::Result<(String, bool, u64)> {
     let mut file = fs::File::open(path)?;
     let len = file.metadata()?.len();
@@ -988,7 +988,7 @@ fn read_transcript_text(path: &Path) -> std::io::Result<(String, bool, u64)> {
     let mut head = Vec::new();
     file.by_ref().take(TRANSCRIPT_HEAD).read_to_end(&mut head)?;
     let head = String::from_utf8_lossy(&head);
-    // Solo líneas completas del principio.
+    // Only complete lines from the head.
     let head = head.rsplit_once('\n').map_or("", |(h, _)| h);
     let tail_len = TRANSCRIPT_MAX_READ - TRANSCRIPT_HEAD;
     file.seek(SeekFrom::Start(len - tail_len))?;
@@ -999,8 +999,8 @@ fn read_transcript_text(path: &Path) -> std::io::Result<(String, bool, u64)> {
     Ok((format!("{head}\n{tail}"), true, len))
 }
 
-/// Transcript del agente `agent_id` del workflow `wf_id`. `Ok(None)` si no hay archivo.
-/// Los ids tienen que venir validados con `is_valid_path_id`.
+/// Transcript of agent `agent_id` of workflow `wf_id`. `Ok(None)` if there's no file.
+/// The ids must already be validated with `is_valid_path_id`.
 pub fn read_agent_transcript(
     session_dir: &Path,
     wf_id: &str,
@@ -1036,14 +1036,14 @@ pub fn read_agent_transcript(
     }))
 }
 
-/// Sin las líneas de sidechain (subagentes lanzados con `Task` dentro de la sesión). Claude
-/// Code escribe JSON compacto, así que alcanza con buscar el literal.
+/// Without the sidechain lines (subagents launched with `Task` inside the session). Claude
+/// Code writes compact JSON, so searching for the literal is enough.
 fn main_thread_lines(text: &str) -> String {
     text.lines().filter(|l| !l.contains("\"isSidechain\":true")).collect::<Vec<_>>().join("\n")
 }
 
-/// Transcript principal de una sesión (`<sid>.jsonl`): runs de agente, Claude o revisor.
-/// `id`/`label`/`model` van tal cual al `Transcript`. `Ok(None)` si no hay archivo.
+/// Main transcript of a session (`<sid>.jsonl`): agent, Claude or reviewer runs.
+/// `id`/`label`/`model` go as is into the `Transcript`. `Ok(None)` if there's no file.
 pub fn read_session_transcript(
     path: &Path,
     id: &str,
@@ -1072,10 +1072,10 @@ pub fn read_session_transcript(
     }))
 }
 
-/// Tokens de un transcript de sesión: `input + output + cache_creation + cache_read` de
-/// cada respuesta del asistente. Claude Code repite el `usage` en cada línea de un mismo
-/// mensaje (una por bloque), así que se cuenta una vez por `message.id`. Incluye los
-/// sidechains (subagentes de la sesión): también son gasto del run. `None` si no hay usage.
+/// Tokens of a session transcript: `input + output + cache_creation + cache_read` of
+/// each assistant response. Claude Code repeats the `usage` on every line of the same
+/// message (one per block), so it's counted once per `message.id`. Includes the
+/// sidechains (the session's subagents): they're also the run's spend. `None` if no usage.
 pub fn usage_tokens_in<'a>(lines: impl IntoIterator<Item = &'a str>) -> Option<i64> {
     let mut seen = std::collections::HashSet::new();
     let mut total: Option<i64> = None;
@@ -1103,7 +1103,7 @@ pub fn usage_tokens_in<'a>(lines: impl IntoIterator<Item = &'a str>) -> Option<i
     total
 }
 
-/// `usage_tokens_in` sobre el archivo entero, línea por línea (sin cargarlo en memoria).
+/// `usage_tokens_in` over the whole file, line by line (without loading it into memory).
 pub fn read_usage_tokens(path: &Path) -> Option<i64> {
     use std::io::BufRead;
     let file = fs::File::open(path).ok()?;
@@ -1112,17 +1112,17 @@ pub fn read_usage_tokens(path: &Path) -> Option<i64> {
 }
 
 // ---------------------------------------------------------------------------
-// Motivo por el que una sesión en background no llegó a arrancar su workflow
+// Why a background session never got to start its workflow
 // ---------------------------------------------------------------------------
 
-/// Texto con que Claude Code (2.1.281) rechaza la tool `Workflow` cuando el workflow es
-/// nuevo o cambió y nadie lo aprobó en `/workflows`. En una sesión `--bg` no hay a quién
-/// preguntarle: queda como `tool_result` con `is_error` y la sesión termina sin workflow.
+/// Text Claude Code (2.1.281) uses to reject the `Workflow` tool when the workflow is new
+/// or changed and nobody approved it in `/workflows`. In a `--bg` session there's nobody to
+/// ask: it stays as a `tool_result` with `is_error` and the session ends without a workflow.
 pub const WORKFLOW_REVIEW_TEXT: &str = "Review dynamic workflow before running";
-/// Lo que se lee del principio del transcript: la llamada a `Workflow` es de lo primero.
+/// How much of the transcript's head is read: the `Workflow` call comes early on.
 const BLOCKER_SCAN_BYTES: u64 = 4 * 1024 * 1024;
 
-/// `<projects>/<slug(cwd)>/<sid>.jsonl`, o el primero que aparezca en otro proyecto.
+/// `<projects>/<slug(cwd)>/<sid>.jsonl`, or the first one found in another project.
 pub fn find_session_jsonl(projects: &Path, cwd: &str, session_id: &str) -> Option<PathBuf> {
     let file = format!("{session_id}.jsonl");
     let direct = projects.join(project_slug(cwd)).join(&file);
@@ -1132,11 +1132,11 @@ pub fn find_session_jsonl(projects: &Path, cwd: &str, session_id: &str) -> Optio
     fs::read_dir(projects).ok()?.flatten().map(|e| e.path().join(&file)).find(|p| p.is_file())
 }
 
-/// Tope del último mensaje que se devuelve (el bloque JSON final va al final).
+/// Cap on the returned last message (the final JSON block goes at the end).
 const LAST_TEXT_MAX: usize = 64 * 1024;
 
-/// Texto del último mensaje del asistente en las líneas de un transcript de sesión: los
-/// bloques `text` del último turno con texto, unidos. Ignora sidechains (subagentes).
+/// Text of the last assistant message in the lines of a session transcript: the `text`
+/// blocks of the last turn with text, joined. Ignores sidechains (subagents).
 pub fn last_assistant_text_in(text: &str) -> Option<String> {
     let mut last: Option<String> = None;
     for line in text.lines() {
@@ -1165,7 +1165,7 @@ pub fn last_assistant_text_in(text: &str) -> Option<String> {
         if s.len() <= LAST_TEXT_MAX {
             return s;
         }
-        // Se conserva el final, que es donde va el bloque JSON.
+        // Keep the end, which is where the JSON block goes.
         let mut start = s.len() - LAST_TEXT_MAX;
         while !s.is_char_boundary(start) {
             start += 1;
@@ -1174,17 +1174,17 @@ pub fn last_assistant_text_in(text: &str) -> Option<String> {
     })
 }
 
-/// Último mensaje del asistente del transcript principal (`<sid>.jsonl`). Lee como mucho
-/// la cola del archivo (ver `read_transcript_text`).
+/// Last assistant message of the main transcript (`<sid>.jsonl`). Reads at most the
+/// file's tail (see `read_transcript_text`).
 pub fn read_last_assistant_text(path: &Path) -> Option<String> {
     let (text, _, _) = read_transcript_text(path).ok()?;
     last_assistant_text_in(&text)
 }
 
-/// Busca en las líneas de un transcript de sesión la llamada a `Workflow` rechazada por
-/// falta de aprobación. `Some(nombre)` si la encuentra (el nombre puede faltar).
+/// Searches the lines of a session transcript for the `Workflow` call rejected for lack
+/// of approval. `Some(name)` if found (the name may be missing).
 pub fn find_workflow_review_denial(text: &str) -> Option<Option<String>> {
-    // id del tool_use → nombre del workflow pedido.
+    // tool_use id → name of the requested workflow.
     let mut calls: Vec<(String, Option<String>)> = Vec::new();
     for line in text.lines() {
         let has_call = line.contains("\"Workflow\"");
@@ -1214,8 +1214,8 @@ pub fn find_workflow_review_denial(text: &str) -> Option<Option<String>> {
     None
 }
 
-/// Lee el principio del transcript y busca el rechazo (una última línea cortada no
-/// parsea como JSON y se ignora).
+/// Reads the head of the transcript and looks for the rejection (a cut-off last line
+/// doesn't parse as JSON and is ignored).
 pub fn read_workflow_review_denial(path: &Path) -> Option<Option<String>> {
     let file = fs::File::open(path).ok()?;
     let mut buf = Vec::new();
@@ -1225,7 +1225,7 @@ pub fn read_workflow_review_denial(path: &Path) -> Option<Option<String>> {
 }
 
 // ---------------------------------------------------------------------------
-// Tests: fixtures recortados de runs reales en `src/runs/fixtures/`.
+// Tests: fixtures trimmed from real runs in `src/runs/fixtures/`.
 // ---------------------------------------------------------------------------
 
 #[cfg(test)]
@@ -1242,7 +1242,7 @@ mod tests {
 
     #[test]
     fn workflow_review_denial_from_real_session() {
-        // Líneas reales (recortadas) de una sesión --bg de claude 2.1.281 con plan-task sin aprobar.
+        // Real (trimmed) lines from a claude 2.1.281 --bg session with an unapproved plan-task.
         let text = concat!(
             r#"{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_01D3","name":"Workflow","input":{"name":"plan-task","args":{"finish":"branch"}}}]}}"#,
             "\n",
@@ -1250,13 +1250,13 @@ mod tests {
             "\n",
         );
         assert_eq!(find_workflow_review_denial(text), Some(Some("plan-task".into())));
-        // Sin la llamada (o con otro formato): se detecta igual, sin nombre.
+        // Without the call (or with another format): still detected, without a name.
         let only = text.lines().nth(1).unwrap();
         assert_eq!(find_workflow_review_denial(only), Some(None));
-        // Un texto del asistente que cita el mensaje no cuenta.
+        // An assistant text quoting the message doesn't count.
         let quoted = r#"{"type":"assistant","message":{"content":[{"type":"text","text":"Review dynamic workflow before running"}]}}"#;
         assert_eq!(find_workflow_review_denial(quoted), None);
-        assert_eq!(find_workflow_review_denial("{roto\n"), None);
+        assert_eq!(find_workflow_review_denial("{broken\n"), None);
     }
 
     #[test]
@@ -1268,25 +1268,25 @@ mod tests {
         assert_eq!(parse_bg_line("backgrounded"), None);
         assert_eq!(parse_bg_line("Error: not logged in"), None);
         assert_eq!(parse_bare_id("ddb91222\n").as_deref(), Some("ddb91222"));
-        assert_eq!(parse_bare_id("hola mundo"), None);
+        assert_eq!(parse_bare_id("hello world"), None);
     }
 
     #[test]
     fn agents_json_filters_background_and_tolerates_missing_fields() {
         let text = r#"[
           {"id":"0eef7f11","cwd":"/a","kind":"background","startedAt":1787690543980,
-           "sessionId":"0eef7f11-d932-4001-97f8-df01555801d7","name":"viejo","state":"done"},
+           "sessionId":"0eef7f11-d932-4001-97f8-df01555801d7","name":"old","state":"done"},
           {"pid":59575,"cwd":"/b","kind":"interactive","startedAt":1790087661575,
-           "sessionId":"a5ff54f0-6f8e-49b4-9213-0c859d3432de","name":"interactiva","status":"idle"},
+           "sessionId":"a5ff54f0-6f8e-49b4-9213-0c859d3432de","name":"interactive","status":"idle"},
           {"pid":123,"id":"ddb91222","cwd":"/c","kind":"background","startedAt":1790192548000,
-           "sessionId":"ddb91222-57b2-4ae4-a0bb-d1c5993dc1c8","name":"nuevo","status":"busy",
-           "state":"working","campoNuevo":{"x":1}},
-          {"id":"sinsesion","kind":"background"},
-          {"id":"raro","sessionId":"s","kind":"background","pid":"no-es-numero","startedAt":"ayer"}
+           "sessionId":"ddb91222-57b2-4ae4-a0bb-d1c5993dc1c8","name":"new","status":"busy",
+           "state":"working","newField":{"x":1}},
+          {"id":"nosession","kind":"background"},
+          {"id":"odd","sessionId":"s","kind":"background","pid":"not-a-number","startedAt":"yesterday"}
         ]"#;
         let runs = parse_agents_json(text).unwrap();
         let ids: Vec<&str> = runs.iter().map(|r| r.id.as_str()).collect();
-        assert_eq!(ids, ["ddb91222", "0eef7f11", "raro"]);
+        assert_eq!(ids, ["ddb91222", "0eef7f11", "odd"]);
         assert_eq!(runs[0].pid, Some(123));
         assert_eq!(runs[0].status.as_deref(), Some("busy"));
         assert_eq!(runs[0].state.as_deref(), Some("working"));
@@ -1314,9 +1314,9 @@ mod tests {
         let projects = fixtures_projects();
         let dir = find_session_dir(&projects, SANDBOX, DONE_SESSION).unwrap();
         assert!(dir.ends_with(DONE_SESSION));
-        // cwd que no coincide con el slug: cae al escaneo.
-        assert_eq!(find_session_dir(&projects, "/otro/lado", DONE_SESSION), Some(dir));
-        assert_eq!(find_session_dir(&projects, SANDBOX, "no-existe"), None);
+        // cwd that doesn't match the slug: falls back to the scan.
+        assert_eq!(find_session_dir(&projects, "/somewhere/else", DONE_SESSION), Some(dir));
+        assert_eq!(find_session_dir(&projects, SANDBOX, "no-such-session"), None);
     }
 
     #[test]
@@ -1361,7 +1361,7 @@ mod tests {
         assert_eq!(d.workflow_name.as_deref(), Some("demo-board"));
         assert_eq!(d.status, None);
         assert_eq!(d.result_status, None);
-        // Fases del meta del script: el total se conoce aunque no se hayan alcanzado.
+        // Phases from the script's meta: the total is known even if they weren't reached.
         let titles: Vec<&str> = d.phases.iter().map(|p| p.title.as_str()).collect();
         assert_eq!(titles, ["Idear", "Escribir", "Revisar", "Cerrar"]);
         assert_eq!(d.current_phase.as_deref(), Some("Escribir"));
@@ -1379,7 +1379,7 @@ mod tests {
             ]
         );
         assert!(d.agents.iter().all(|a| a.model.as_deref() == Some("claude-haiku-4-5-20251001")));
-        // Última tool sacada de la cola del transcript (solo agentes en curso).
+        // Last tool taken from the transcript's tail (only agents in progress).
         let planeta = d.agents.iter().find(|a| a.label == "escribir:volcanes-y-el-planeta").unwrap();
         assert_eq!(planeta.last_tool_name.as_deref(), Some("Bash"));
         assert_eq!(planeta.last_tool_summary.as_deref(), Some("sleep 34"));
@@ -1391,27 +1391,27 @@ mod tests {
     fn journal_ignores_unknown_types_and_broken_lines() {
         let text = concat!(
             "{\"type\":\"launched\"}\n",
-            "{\"type\":\"started\",\"key\":\"k1\",\"agentId\":\"a1\",\"label\":\"uno\",\"phase\":\"A\"}\n",
-            "{\"type\":\"algo-nuevo\",\"agentId\":\"a1\"}\n",
-            "{\"type\":\"started\",\"key\":\"k2\",\"label\":\"dos\",\"phase\":\"B\"}\n",
+            "{\"type\":\"started\",\"key\":\"k1\",\"agentId\":\"a1\",\"label\":\"one\",\"phase\":\"A\"}\n",
+            "{\"type\":\"something-new\",\"agentId\":\"a1\"}\n",
+            "{\"type\":\"started\",\"key\":\"k2\",\"label\":\"two\",\"phase\":\"B\"}\n",
             "{\"type\":\"result\",\"key\":\"k2\",\"result\":null}\n",
             "{\"type\":\"started\",\"key\":\"k3\",\"agentId\":\"a3\",\"lab",
         );
         let agents = parse_journal(text);
         assert_eq!(agents.len(), 2);
         assert_eq!(agents[0].state, AgentState::Running);
-        assert_eq!(agents[1].label, "dos");
+        assert_eq!(agents[1].label, "two");
         assert_eq!(agents[1].state, AgentState::Done);
     }
 
     #[test]
     fn final_summary_tolerates_garbage() {
         assert!(parse_final("{\"runId\": \"wf_x\", \"workflowProg", "wf_x").is_none());
-        let d = parse_final(r#"{"workflowProgress":[{"type":"workflow_phase","index":1,"title":"Solo"},
-            {"type":"workflow_agent","label":"x","phaseTitle":"Solo","state":"exploded","tokens":"muchos"}],
+        let d = parse_final(r#"{"workflowProgress":[{"type":"workflow_phase","index":1,"title":"Only"},
+            {"type":"workflow_agent","label":"x","phaseTitle":"Only","state":"exploded","tokens":"lots"}],
             "result":{"status":"purple"}}"#, "wf_y").unwrap();
         assert_eq!(d.workflow_id, "wf_y");
-        assert_eq!(d.phases[0].title, "Solo");
+        assert_eq!(d.phases[0].title, "Only");
         assert_eq!(d.agents[0].state, AgentState::Unknown);
         assert_eq!(d.agents[0].tokens, None);
         assert_eq!(d.result_status, None);
@@ -1419,17 +1419,17 @@ mod tests {
 
     #[test]
     fn script_phases_best_effort() {
-        let src = "export const meta = { name: 'x', phases: [ { title: 'Uno', detail: \"con } llave\" },\n { title: `Dos` } ], }";
+        let src = "export const meta = { name: 'x', phases: [ { title: 'One', detail: \"with } brace\" },\n { title: `Two` } ], }";
         let phases = parse_script_phases(src);
         assert_eq!(phases.len(), 2);
-        assert_eq!(phases[0].detail.as_deref(), Some("con } llave"));
-        assert_eq!(phases[1].title, "Dos");
-        assert!(parse_script_phases("sin fases").is_empty());
+        assert_eq!(phases[0].detail.as_deref(), Some("with } brace"));
+        assert_eq!(phases[1].title, "Two");
+        assert!(parse_script_phases("no phases").is_empty());
     }
 
     #[test]
     fn agents_json_exposes_blocked_on_permission() {
-        // Entrada real de una sesión --bg esperando aprobación de un Write (claude 2.1.281).
+        // Real entry from a --bg session waiting for approval of a Write (claude 2.1.281).
         let text = r#"[{"pid":21111,"id":"af5deb85","cwd":"/Users/me/Code/nodal-sandbox",
           "kind":"background","startedAt":1790198688952,"sessionId":"af5deb85-3fe1-4ea9-b172-00b68389e167",
           "name":"create perm-test.txt","status":"waiting","waitingFor":"permission prompt","state":"blocked"}]"#;
@@ -1457,19 +1457,19 @@ mod tests {
         assert_eq!(r.nits, Some(vec!["Extract hook".to_string()]));
         assert!(r.raw.unwrap().contains("\"children\""));
 
-        // Otro workflow: sin campos conocidos, pero con el JSON crudo.
+        // Another workflow: no known fields, but with the raw JSON.
         let demo = read_run_detail(&fixtures_projects().join(project_slug(SANDBOX)).join(DONE_SESSION)).unwrap();
         let res = demo.result.unwrap();
         assert_eq!((res.pr, res.unmet_acceptance, res.nits), (None, None, None));
         assert!(res.raw.unwrap().contains("\"tema\": \"volcanes\""));
 
-        // PR que no es URL web: se descarta. `null` o ausente: sin resultado.
-        let v: Value = serde_json::from_str(r#"{"pr":"javascript:alert(1)","nits":"no-lista"}"#).unwrap();
+        // PR that isn't a web URL: dropped. `null` or missing: no result.
+        let v: Value = serde_json::from_str(r#"{"pr":"javascript:alert(1)","nits":"not-a-list"}"#).unwrap();
         let r = parse_result(Some(&v)).unwrap();
         assert_eq!((r.pr, r.nits), (None, None));
         assert_eq!(parse_result(Some(&Value::Null)), None);
         assert_eq!(parse_result(None), None);
-        assert_eq!(parse_result(Some(&Value::String("hecho".into()))).unwrap().raw.as_deref(), Some("hecho"));
+        assert_eq!(parse_result(Some(&Value::String("done".into()))).unwrap().raw.as_deref(), Some("done"));
     }
 
     #[test]
@@ -1479,11 +1479,11 @@ mod tests {
         assert_eq!(t.label.as_deref(), Some("revisar:volcanes-famosos"));
         assert_eq!(t.model.as_deref(), Some("claude-sonnet-5"));
         assert_eq!(t.phase.as_deref(), Some("Revisar"));
-        // Sin el marco del harness y sin la indentación.
+        // Without the harness wrapper and without the indentation.
         let prompt = t.prompt.unwrap();
         assert!(prompt.starts_with("Leé /Users/me/Code/nodal-sandbox/demo-out/04-volcanes-famosos.md"), "{prompt}");
         assert!(!prompt.contains("Workflow harness"));
-        // thinking vacío (firmado) se omite: Bash, texto, StructuredOutput.
+        // Empty (signed) thinking is skipped: Bash, text, StructuredOutput.
         assert_eq!(t.total_items, 3);
         assert_eq!(t.omitted, 0);
         match &t.items[0] {
@@ -1500,12 +1500,12 @@ mod tests {
         assert!(t.final_output.unwrap().contains("\"ok\": true"));
         assert!(!t.partial);
 
-        // Límite: solo los últimos N.
+        // Limit: only the last N.
         let t = read_agent_transcript(&dir, "wf_2450b7a8-254", "a1007a0f03db17270", 1).unwrap().unwrap();
         assert_eq!((t.items.len(), t.omitted, t.total_items), (1, 2, 3));
         assert!(matches!(&t.items[0], TranscriptItem::ToolUse { name, .. } if name == "StructuredOutput"));
 
-        // Sin archivo → None; ids con rutas → error.
+        // No file → None; ids with paths → error.
         assert_eq!(read_agent_transcript(&dir, "wf_2450b7a8-254", "nope", 10).unwrap(), None);
         assert!(read_agent_transcript(&dir, "wf_2450b7a8-254", "../x", 10).is_err());
         assert!(read_agent_transcript(&dir, "..", "a1", 10).is_err());
@@ -1515,19 +1515,19 @@ mod tests {
     fn transcript_tolerates_errors_arrays_and_long_text() {
         let long = "x".repeat(TEXT_MAX + 50);
         let lines = [
-            r#"{"type":"user","message":{"role":"user","content":"Tarea sin marco"}}"#.to_string(),
+            r#"{"type":"user","message":{"role":"user","content":"Task without wrapper"}}"#.to_string(),
             r#"{"type":"attachment","attachment":{"type":"skill_listing","content":"user assistant"}}"#.to_string(),
-            format!(r#"{{"type":"assistant","message":{{"content":[{{"type":"thinking","thinking":"pienso"}},{{"type":"text","text":"{long}"}}]}}}}"#),
+            format!(r#"{{"type":"assistant","message":{{"content":[{{"type":"thinking","thinking":"hmm"}},{{"type":"text","text":"{long}"}}]}}}}"#),
             r#"{"type":"assistant","message":{"content":[{"type":"tool_use","id":"t1","name":"Read","input":{"file_path":"/a/b.rs"}}]}}"#.to_string(),
             r#"{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"t1","is_error":true,"content":[{"type":"text","text":"File not found"},{"type":"image"}]}]}}"#.to_string(),
-            r#"{"type":"user","message":{"content":"¿seguís?"}}"#.to_string(),
+            r#"{"type":"user","message":{"content":"still there?"}}"#.to_string(),
             r#"{"type":"assistant","message":{"content":[{"type":"tool_use","id":"t2","name":"Bash","input":{}}]}}"#.to_string(),
             r#"{"type":"assistant","message":{"content":[{"type":"text","te"#.to_string(),
         ];
         let p = parse_transcript(&lines.join("\n"), 100);
-        assert_eq!(p.prompt.as_deref(), Some("Tarea sin marco"));
+        assert_eq!(p.prompt.as_deref(), Some("Task without wrapper"));
         assert_eq!(p.total, 5);
-        assert!(matches!(&p.items[0], TranscriptItem::Thinking { text, .. } if text == "pienso"));
+        assert!(matches!(&p.items[0], TranscriptItem::Thinking { text, .. } if text == "hmm"));
         assert!(matches!(&p.items[1], TranscriptItem::Text { truncated: true, text } if text.chars().count() == TEXT_MAX + 1));
         match &p.items[2] {
             TranscriptItem::ToolUse { summary, result: Some(r), .. } => {
@@ -1537,10 +1537,10 @@ mod tests {
             }
             other => panic!("{other:?}"),
         }
-        assert!(matches!(&p.items[3], TranscriptItem::User { text, .. } if text == "¿seguís?"));
-        // Tool sin resultado todavía (agente corriendo) e input vacío.
+        assert!(matches!(&p.items[3], TranscriptItem::User { text, .. } if text == "still there?"));
+        // Tool with no result yet (agent running) and empty input.
         assert!(matches!(&p.items[4], TranscriptItem::ToolUse { result: None, input: None, summary: None, .. }));
-        // Sin StructuredOutput: la salida final es el último texto.
+        // No StructuredOutput: the final output is the last text.
         assert!(p.final_output.unwrap().starts_with("xxx"));
     }
 
@@ -1561,7 +1561,7 @@ mod tests {
         let _ = fs::remove_dir_all(&tmp);
     }
 
-    /// Todos los transcripts de workflows de esta máquina: ninguno falla y se miden tiempos.
+    /// Every workflow transcript on this machine: none fails, and timings are measured.
     #[test]
     #[ignore]
     fn real_transcripts_on_disk() {
@@ -1590,16 +1590,16 @@ mod tests {
         eprintln!("{n} transcripts; slowest {:?} {}", slowest.0, slowest.1.display());
     }
 
-    /// Contra los datos reales de esta máquina:
-    /// `NODAL_SANDBOX=<ruta del repo sandbox> cargo test -- --ignored`.
+    /// Against this machine's real data:
+    /// `NODAL_SANDBOX=<sandbox repo path> cargo test -- --ignored`.
     #[test]
     #[ignore]
     fn real_sessions_on_disk() {
-        let sandbox = std::env::var("NODAL_SANDBOX").expect("NODAL_SANDBOX=<ruta del repo sandbox>");
+        let sandbox = std::env::var("NODAL_SANDBOX").expect("NODAL_SANDBOX=<sandbox repo path>");
         let projects = claude_config_dir().unwrap().join("projects");
         for session in [DONE_SESSION, CUT_SESSION] {
-            let dir = find_session_dir(&projects, &sandbox, session).expect("sesión real no encontrada");
-            let d = read_run_detail(&dir).expect("sin workflow");
+            let dir = find_session_dir(&projects, &sandbox, session).expect("real session not found");
+            let d = read_run_detail(&dir).expect("no workflow");
             eprintln!("{session}: {d:#?}");
         }
     }
@@ -1607,12 +1607,12 @@ mod tests {
     #[test]
     fn session_transcript_skips_sidechains() {
         let lines = [
-            r#"{"type":"user","message":{"role":"user","content":"Arreglá el bug del login"}}"#,
-            r#"{"type":"assistant","message":{"content":[{"type":"text","text":"Miro el código."}]}}"#,
-            r#"{"type":"assistant","isSidechain":true,"message":{"content":[{"type":"text","text":"subagente"}]}}"#,
+            r#"{"type":"user","message":{"role":"user","content":"Fix the login bug"}}"#,
+            r#"{"type":"assistant","message":{"content":[{"type":"text","text":"Looking at the code."}]}}"#,
+            r#"{"type":"assistant","isSidechain":true,"message":{"content":[{"type":"text","text":"subagent"}]}}"#,
             r#"{"type":"assistant","message":{"content":[{"type":"tool_use","id":"t1","name":"Bash","input":{"command":"ls"}}]}}"#,
             r#"{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"t1","content":"a.rs"}]}}"#,
-            r#"{"type":"assistant","message":{"content":[{"type":"text","text":"Listo."}]}}"#,
+            r#"{"type":"assistant","message":{"content":[{"type":"text","text":"Done."}]}}"#,
         ];
         let dir = std::env::temp_dir().join(format!("nodal-session-tx-{}", std::process::id()));
         fs::create_dir_all(&dir).unwrap();
@@ -1620,10 +1620,10 @@ mod tests {
         fs::write(&path, lines.join("\n")).unwrap();
         let t = read_session_transcript(&path, "run-1", Some("Claude".into()), None, 2).unwrap().unwrap();
         assert_eq!(t.agent_id, "run-1");
-        assert_eq!(t.prompt.as_deref(), Some("Arreglá el bug del login"));
+        assert_eq!(t.prompt.as_deref(), Some("Fix the login bug"));
         assert_eq!((t.total_items, t.omitted), (3, 1));
-        assert_eq!(t.final_output.as_deref(), Some("Listo."));
-        assert!(!t.items.iter().any(|i| matches!(i, TranscriptItem::Text { text, .. } if text == "subagente")));
+        assert_eq!(t.final_output.as_deref(), Some("Done."));
+        assert!(!t.items.iter().any(|i| matches!(i, TranscriptItem::Text { text, .. } if text == "subagent")));
         assert!(read_session_transcript(&dir.join("nope.jsonl"), "x", None, None, 10).unwrap().is_none());
         fs::remove_dir_all(&dir).ok();
     }
@@ -1635,7 +1635,7 @@ mod tests {
             r#"{"type":"assistant","message":{"id":"m1","content":[{"type":"tool_use","id":"t","name":"Bash","input":{}}],"usage":{"input_tokens":10,"output_tokens":5,"cache_creation_input_tokens":100,"cache_read_input_tokens":1000}}}"#,
             r#"{"type":"user","message":{"content":"usage"}}"#,
             r#"{"type":"assistant","isSidechain":true,"message":{"id":"m2","content":[],"usage":{"input_tokens":1,"output_tokens":2}}}"#,
-            "no es json \"usage\" \"assistant\"",
+            "not json \"usage\" \"assistant\"",
         ];
         assert_eq!(usage_tokens_in(lines), Some(1115 + 3));
         assert_eq!(usage_tokens_in([r#"{"type":"assistant","message":{"content":[]}}"#]), None);

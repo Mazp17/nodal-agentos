@@ -1,19 +1,19 @@
-//! Detalle de una issue (panel lateral): descripción, sub-issues, relaciones, labels y
-//! comentarios. Puro (sin red) para testearlo con fixtures.
+//! Issue detail (side panel): description, sub-issues, relations, labels and
+//! comments. Pure (no network) so it can be tested with fixtures.
 //!
-//! Campos verificados contra el schema oficial del SDK
+//! Fields verified against the official SDK schema
 //! (github.com/linear/linear, packages/sdk/src/schema.graphql):
 //! `Issue.{description, estimate, dueDate, createdAt, creator, parent, labels,
 //! children, relations, inverseRelations, comments}`, `IssueRelation.{type, issue,
-//! relatedIssue}` e `IssueRelationType = blocks | duplicate | related | similar`.
-//! No existe un tipo "blocked_by": es un `blocks` visto desde `inverseRelations`.
+//! relatedIssue}` and `IssueRelationType = blocks | duplicate | related | similar`.
+//! There is no "blocked_by" type: it is a `blocks` seen from `inverseRelations`.
 
 use super::model::{PageInfo, UserRef};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 
-/// Topes de cada conexión anidada. Linear puntúa la complejidad multiplicando por
-/// `first`; con estos valores la query queda en unos cientos de puntos (límite 10k).
+/// Caps for each nested connection. Linear scores complexity by multiplying by
+/// `first`; with these values the query stays at a few hundred points (limit 10k).
 pub const CHILDREN_FIRST: u32 = 50;
 pub const RELATIONS_FIRST: u32 = 25;
 pub const LABELS_FIRST: u32 = 20;
@@ -68,7 +68,7 @@ pub enum RelationKind {
 #[serde(rename_all = "camelCase")]
 pub struct Relation {
     pub kind: RelationKind,
-    /// Sólo `duplicate` puede tenerlo en true: la otra issue es duplicado de ésta.
+    /// Only `duplicate` can have it true: the other issue is a duplicate of this one.
     pub inverse: bool,
     pub issue: IssueRef,
 }
@@ -78,7 +78,7 @@ pub struct Relation {
 pub struct Comment {
     pub id: String,
     pub body: String,
-    /// Usuario o bot autor; `None` si Linear no expone ninguno (p. ej. integraciones).
+    /// Author user or bot; `None` if Linear exposes neither (e.g. integrations).
     pub author: Option<String>,
     pub created_at: String,
 }
@@ -88,7 +88,7 @@ pub struct Comment {
 pub struct IssueDetail {
     pub id: String,
     pub identifier: String,
-    /// Markdown tal cual lo guarda Linear.
+    /// Markdown as stored by Linear.
     pub description: Option<String>,
     pub parent: Option<IssueRef>,
     pub children: Vec<SubIssue>,
@@ -100,13 +100,13 @@ pub struct IssueDetail {
     pub due_date: Option<String>,
     pub created_at: String,
     pub creator: Option<UserRef>,
-    /// Primera página (`COMMENTS_FIRST`) en el orden por defecto de Linear, reordenada
-    /// cronológicamente ascendente. Que sea la página más reciente no está verificado.
+    /// First page (`COMMENTS_FIRST`) in Linear's default order, re-sorted in ascending
+    /// chronological order. Whether it is the most recent page is not verified.
     pub comments: Vec<Comment>,
     pub comments_truncated: bool,
 }
 
-// ---- Forma cruda de la respuesta ----
+// ---- Raw response shape ----
 
 #[derive(Debug, Deserialize)]
 pub struct IssueDetailData {
@@ -173,8 +173,8 @@ struct RawComment {
     bot_actor: Option<BotRef>,
 }
 
-/// `inverse` = la relación viene de `inverseRelations` (la otra issue es el sujeto).
-/// `similar` (sugerencias automáticas de Linear) y tipos desconocidos se descartan.
+/// `inverse` = the relation comes from `inverseRelations` (the other issue is the subject).
+/// `similar` (Linear's automatic suggestions) and unknown types are dropped.
 fn relation_kind(rel_type: &str, inverse: bool) -> Option<RelationKind> {
     match (rel_type, inverse) {
         ("blocks", false) => Some(RelationKind::Blocks),
@@ -204,7 +204,7 @@ impl IssueDetailData {
             .chain(inverse)
             .filter_map(|(t, inv, issue)| {
                 let kind = relation_kind(&t, inv)?;
-                // "related" puede venir de ambos lados; una sola fila por (tipo, issue).
+                // "related" can come from both sides; a single row per (type, issue).
                 let inverse = inv && kind == RelationKind::Duplicate;
                 seen.insert((kind, inverse, issue.id.clone()))
                     .then_some(Relation { kind, inverse, issue })
@@ -225,7 +225,7 @@ impl IssueDetailData {
                 created_at: c.created_at,
             })
             .collect();
-        // ISO 8601 en UTC: el orden lexicográfico es el cronológico.
+        // ISO 8601 in UTC: lexicographic order is chronological order.
         comments.sort_by(|a, b| a.created_at.cmp(&b.created_at));
 
         IssueDetail {
@@ -247,7 +247,7 @@ impl IssueDetailData {
     }
 }
 
-/// `issue(id:)` acepta tanto el UUID como el identifier ("ACME-8").
+/// `issue(id:)` accepts both the UUID and the identifier ("ACME-8").
 pub fn issue_detail_query() -> String {
     format!(
         "query IssueDetail($id: String!) {{

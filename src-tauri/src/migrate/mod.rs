@@ -1,31 +1,32 @@
-//! "Import data from a previous version…": importa la carpeta de datos de la versión
-//! anterior, que elige el usuario (la app no conoce ninguna ruta vieja).
+//! "Import data from a previous version…": imports the previous version's data folder,
+//! chosen by the user (the app doesn't know any old path).
 //!
-//! 1. Copia los archivos de datos de la versión vieja (los JSON de abajo y
-//!    `tasks/<id>/plan.md`, nada más y con tope de tamaño) a
-//!    `<app_data_dir>/legacy-backup-<ts>/`, o reusa el último backup si es idéntico. Sin
-//!    ninguno de esos JSON es un error y no se copia nada. El origen solo se lee.
-//! 2. Importa desde la copia, en una sola transacción, `config.json`, `tasks.json`,
-//!    `task-runs.json`, `issue-runs.json` y `tasks/<id>/plan.md`.
-//! 3. Después del commit escribe los planes que falten en `<app_data_dir>/tasks/<id>/plan.md`.
+//! 1. Copies the old version's data files (the JSON files below and
+//!    `tasks/<id>/plan.md`, nothing else and with a size cap) to
+//!    `<app_data_dir>/legacy-backup-<ts>/`, or reuses the latest backup if identical. Having
+//!    none of those JSON files is an error and nothing is copied. The source is only read.
+//! 2. Imports from the copy, in a single transaction, `config.json`, `tasks.json`,
+//!    `task-runs.json`, `issue-runs.json` and `tasks/<id>/plan.md`.
+//! 3. After the commit, writes any missing plans to `<app_data_dir>/tasks/<id>/plan.md`.
 //!
-//! Idempotencia: cada objeto importado deja una fila en `legacy_imports` (clave estable
-//! derivada del registro viejo) y los ids nuevos son deterministas. Reimportar la misma
-//! carpeta no crea nada nuevo y cuenta cada registro en `already_imported`.
+//! Idempotency: each imported object leaves a row in `legacy_imports` (a stable key
+//! derived from the old record) and new ids are deterministic. Re-importing the same
+//! folder creates nothing new and counts each record in `already_imported`.
 //!
-//! Reglas:
-//! - cada repo de `config.json` → un Repo; si su path ya es de un proyecto, se usa ese
-//!   proyecto, y si no se crea uno (nombre = scope si se conoce, si no la carpeta). Cada
-//!   scope del mapeo → un SourceLink de ese proyecto (mapeo de estados pendiente);
-//! - tareas locales → el proyecto del repo con ese path; si no hay, el proyecto "Local"
-//!   (con un repo nuevo para ese path). Quedan asignadas a `plan-task`, que era como corrían;
-//! - runs → tabla `runs` con `legacy_label` (identifier de la issue o título de la tarea) y
-//!   `task_id` NULL si no hay tarea. `launching` → Failed("migrated"); `launched` → Finished
-//!   sin outcome (no se reevalúa: no dispara transiciones); `queued` → sigue **Queued**: con
-//!   `legacy_label` la cola no lo lanza solo (`work::queue::awaiting_confirmation`) hasta
-//!   que se confirma (`confirm_run`) o se cancela;
-//! - `concurrency` → settings (solo la primera vez, y nunca pisa uno ya configurado);
-//! - un JSON corrupto (archivo o registro) se saltea con aviso en `skipped`.
+//! Rules:
+//! - each repo in `config.json` → a Repo; if its path already belongs to a project, that
+//!   project is used, otherwise one is created (name = scope if known, else the folder). Each
+//!   scope in the mapping → a SourceLink of that project (state mapping pending);
+//! - local tasks → the project of the repo with that path; if there's none, the "Local"
+//!   project (with a new repo for that path). They're assigned to `plan-task`, which is how
+//!   they used to run;
+//! - runs → `runs` table with `legacy_label` (issue identifier or task title) and a NULL
+//!   `task_id` if there's no task. `launching` → Failed("migrated"); `launched` → Finished
+//!   with no outcome (not re-evaluated: triggers no transitions); `queued` → stays **Queued**:
+//!   with `legacy_label` the queue doesn't launch it on its own
+//!   (`work::queue::awaiting_confirmation`) until it's confirmed (`confirm_run`) or canceled;
+//! - `concurrency` → settings (only the first time, and never overwrites one already set);
+//! - a corrupt JSON (file or record) is skipped with a warning in `skipped`.
 
 pub mod legacy;
 #[cfg(test)]
@@ -46,7 +47,7 @@ use crate::domain::*;
 pub const BACKUP_PREFIX: &str = "legacy-backup-";
 pub const LOCAL_PROJECT: &str = "Local";
 pub const LAUNCHING_ERROR: &str = "migrated";
-/// Nombre con el que los runs viejos lanzaban las tareas locales.
+/// Name old runs used to launch local tasks.
 const LEGACY_TASK_WORKFLOW: &str = "plan-task";
 
 const COLORS: &[&str] = &[
@@ -62,15 +63,15 @@ const COLORS: &[&str] = &[
 #[derive(Debug, Default, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LegacyImportReport {
-    /// Copia intacta de la carpeta elegida.
+    /// Untouched copy of the chosen folder.
     pub backup_dir: String,
     pub projects: u32,
     pub repos: u32,
     pub tasks: u32,
     pub runs: u32,
-    /// Ya importados antes (idempotencia).
+    /// Already imported before (idempotency).
     pub already_imported: u32,
-    /// Archivos o registros salteados, con el motivo.
+    /// Skipped files or records, with the reason.
     pub skipped: Vec<String>,
 }
 
@@ -84,7 +85,7 @@ pub async fn import_legacy_data(
     let now = crate::util::now_ms();
     let src = PathBuf::from(folder.trim());
     let dd = data_dir.clone();
-    // La copia no toma el lock de la base.
+    // The copy doesn't take the database lock.
     let (backup_dir, skipped) = tauri::async_runtime::spawn_blocking(move || backup(&src, &dd, now))
         .await
         .map_err(|e| format!("Backup task failed: {e}"))??;
@@ -97,7 +98,7 @@ pub async fn import_legacy_data(
     Ok(report)
 }
 
-/// Copia + importación (lo que hace el comando, en un solo hilo). Para tests.
+/// Copy + import (what the command does, on a single thread). For tests.
 #[cfg(test)]
 pub fn import_folder(conn: &mut Connection, src: &Path, data_dir: &Path, now: i64) -> Result<LegacyImportReport, String> {
     let (backup_dir, skipped) = backup(src, data_dir, now)?;
@@ -108,11 +109,11 @@ pub fn import_folder(conn: &mut Connection, src: &Path, data_dir: &Path, now: i6
 
 // ---------- Backup ----------
 
-/// Tope de lo que se copia al backup: los JSON y planes de la versión vieja pesan KB, así
-/// que algo más grande es casi seguro una carpeta equivocada.
+/// Cap on what's copied to the backup: the old version's JSON files and plans weigh KBs, so
+/// anything larger is almost certainly the wrong folder.
 pub const MAX_BACKUP_BYTES: u64 = 64 * 1024 * 1024;
 
-/// Archivos de datos de la versión vieja; la carpeta tiene que tener al menos uno.
+/// The old version's data files; the folder must have at least one.
 pub const LEGACY_JSON: [&str; 4] =
     [legacy::CONFIG_FILE, legacy::TASKS_FILE, legacy::TASK_RUNS_FILE, legacy::ISSUE_RUNS_FILE];
 
@@ -120,12 +121,12 @@ fn is_regular_file(p: &Path) -> Option<bool> {
     fs::symlink_metadata(p).ok().map(|m| m.is_file())
 }
 
-/// (ruta relativa en el backup, ruta en el origen).
+/// (relative path in the backup, path in the source).
 type LegacyFile = (PathBuf, PathBuf);
 
-/// Lo que se copia: los `LEGACY_JSON` presentes y `tasks/<id>/plan.md`. Nada más de la
-/// carpeta (así elegir `~` no copia el disco). Sin ningún JSON conocido es un error. No
-/// sigue symlinks.
+/// What gets copied: the `LEGACY_JSON` files present and `tasks/<id>/plan.md`. Nothing else
+/// from the folder (so choosing `~` doesn't copy the disk). No known JSON is an error. Doesn't
+/// follow symlinks.
 fn legacy_files(src: &Path) -> Result<(Vec<LegacyFile>, Vec<String>), String> {
     let mut files = Vec::new();
     let mut skipped = Vec::new();
@@ -167,14 +168,14 @@ fn legacy_files(src: &Path) -> Result<(Vec<LegacyFile>, Vec<String>), String> {
     Ok((files, skipped))
 }
 
-/// `legacy-backup-<ts>[-n]` → `(ts, n)` para ordenar.
+/// `legacy-backup-<ts>[-n]` → `(ts, n)` for sorting.
 fn backup_order(name: &str) -> Option<(i64, u32)> {
     let rest = name.strip_prefix(BACKUP_PREFIX)?;
     let (ts, n) = rest.split_once('-').unwrap_or((rest, "1"));
     Some((ts.parse().ok()?, n.parse().ok()?))
 }
 
-/// El backup más reciente de la carpeta de datos.
+/// The most recent backup in the data folder.
 fn latest_backup(data_dir: &Path) -> Option<PathBuf> {
     fs::read_dir(data_dir)
         .ok()?
@@ -185,7 +186,7 @@ fn latest_backup(data_dir: &Path) -> Option<PathBuf> {
         .map(|(_, p)| p)
 }
 
-/// Archivos de un árbol (sin seguir symlinks), relativos a `root`.
+/// Files in a tree (without following symlinks), relative to `root`.
 fn tree_files(root: &Path, dir: &Path, out: &mut Vec<PathBuf>) -> std::io::Result<()> {
     for e in fs::read_dir(dir)? {
         let p = e?.path();
@@ -198,7 +199,7 @@ fn tree_files(root: &Path, dir: &Path, out: &mut Vec<PathBuf>) -> std::io::Resul
     Ok(())
 }
 
-/// `backup` tiene exactamente estos archivos, con el mismo contenido.
+/// `backup` has exactly these files, with the same content.
 fn same_content(backup: &Path, files: &[LegacyFile]) -> bool {
     let mut have = Vec::new();
     if tree_files(backup, backup, &mut have).is_err() {
@@ -214,9 +215,9 @@ fn same_content(backup: &Path, files: &[LegacyFile]) -> bool {
         })
 }
 
-/// Copia los archivos de la versión vieja de `src` (ver `legacy_files`) a
-/// `<data_dir>/legacy-backup-<now>[-n]/` y devuelve esa ruta más los avisos. Si el backup
-/// más reciente ya tiene exactamente ese contenido, lo reusa en vez de copiar de nuevo.
+/// Copies the old version's files from `src` (see `legacy_files`) to
+/// `<data_dir>/legacy-backup-<now>[-n]/` and returns that path plus the warnings. If the most
+/// recent backup already has exactly that content, it's reused instead of copying again.
 pub fn backup(src: &Path, data_dir: &Path, now: i64) -> Result<(PathBuf, Vec<String>), String> {
     let src = src
         .canonicalize()
@@ -259,10 +260,10 @@ pub fn backup(src: &Path, data_dir: &Path, now: i64) -> Result<(PathBuf, Vec<Str
     Ok((dest, skipped))
 }
 
-// ---------- Importación ----------
+// ---------- Import ----------
 
-/// Importa desde una carpeta ya copiada. Todo en una transacción; los planes se escriben
-/// después del commit (solo los que falten, así un reintento completa los que fallaron).
+/// Imports from an already copied folder. All in one transaction; plans are written after
+/// the commit (only missing ones, so a retry completes those that failed).
 pub fn import_backup(conn: &mut Connection, dir: &Path, data_dir: &Path, now: i64) -> Result<LegacyImportReport, String> {
     let tx = conn.transaction().map_err(sql)?;
     let mut ctx = Ctx {
@@ -305,16 +306,16 @@ struct Ctx<'c> {
     now: i64,
     data_dir: &'c Path,
     report: LegacyImportReport,
-    /// Finish del repo por path (para los runs de issues, que no lo guardaban).
+    /// Repo finish by path (for issue runs, which didn't store it).
     finish_by_path: HashMap<String, Finish>,
-    /// Planes a copiar después del commit: (origen en el backup, destino).
+    /// Plans to copy after the commit: (source in the backup, destination).
     plans: Vec<(PathBuf, PathBuf)>,
-    /// Claves marcadas en esta misma importación (un duplicado dentro del archivo no cuenta
-    /// como "ya importado").
+    /// Keys marked in this same import (a duplicate within the file doesn't count as
+    /// "already imported").
     fresh: HashSet<String>,
 }
 
-/// Hash FNV-1a de 64 bits: estable entre versiones de Rust (a diferencia de `DefaultHasher`).
+/// 64-bit FNV-1a hash: stable across Rust versions (unlike `DefaultHasher`).
 fn fnv(s: &str) -> String {
     let mut h: u64 = 0xcbf2_9ce4_8422_2325;
     for b in s.bytes() {
@@ -342,12 +343,12 @@ fn trim_slash(p: &Path) -> String {
     if t.is_empty() { "/".into() } else { t.into() }
 }
 
-/// `~`, espacios y `/` final; no toca el disco (para claves de idempotencia).
+/// `~`, whitespace and trailing `/`; doesn't touch the disk (for idempotency keys).
 pub fn norm_path(raw: &str) -> String {
     trim_slash(&expand(raw))
 }
 
-/// Como `norm_path`, más symlinks resueltos si la ruta existe (para comparar con `repos.path`).
+/// Like `norm_path`, plus symlinks resolved if the path exists (to compare with `repos.path`).
 pub fn canon_path(raw: &str) -> String {
     let p = expand(raw);
     trim_slash(&p.canonicalize().unwrap_or(p))
@@ -357,7 +358,7 @@ fn folder_name(path: &str) -> String {
     Path::new(path).file_name().map(|s| s.to_string_lossy().into_owned()).unwrap_or_else(|| path.to_string())
 }
 
-/// `my-app` → `MA`, `payments` → `PAYM`. Siempre `[A-Z][A-Z0-9]*`.
+/// `my-app` → `MA`, `payments` → `PAYM`. Always `[A-Z][A-Z0-9]*`.
 pub fn key_base(name: &str) -> String {
     let words: Vec<&str> = name.split(|c: char| !c.is_ascii_alphanumeric()).filter(|w| !w.is_empty()).collect();
     let mut k: String = if words.len() >= 2 {
@@ -379,7 +380,7 @@ fn parse_finish(s: Option<&str>) -> Finish {
     }
 }
 
-/// `/plan-task {...}` → workflow `plan-task`; cualquier otra cosa, una sesión común.
+/// `/plan-task {...}` → workflow `plan-task`; anything else, a plain session.
 fn executor_from_prompt(prompt: &str) -> Executor {
     match prompt.trim().strip_prefix('/').and_then(|r| r.split_whitespace().next()) {
         Some(name) if !name.is_empty() => Executor::Workflow { name: name.into() },
@@ -387,7 +388,7 @@ fn executor_from_prompt(prompt: &str) -> Executor {
     }
 }
 
-/// Estado viejo → (estado, error, outcome). Ver las reglas en el doc del módulo.
+/// Old status → (status, error, outcome). See the rules in the module doc.
 fn map_run_status(status: &str, error: Option<String>) -> Result<(RunStatus, Option<String>), String> {
     Ok(match status {
         "queued" => (RunStatus::Queued, None),
@@ -398,7 +399,7 @@ fn map_run_status(status: &str, error: Option<String>) -> Result<(RunStatus, Opt
     })
 }
 
-/// Una lista de registros: `{<field>: [...]}` o directamente `[...]`.
+/// A list of records: `{<field>: [...]}` or just `[...]`.
 fn records(v: Value, field: &str) -> Option<Vec<Value>> {
     match v {
         Value::Array(a) => Some(a),
@@ -416,7 +417,7 @@ impl Ctx<'_> {
         self.report.skipped.push(msg);
     }
 
-    /// Lee un JSON del backup. Ausente → `None` sin aviso; corrupto → `None` con aviso.
+    /// Reads a JSON file from the backup. Missing → `None` without warning; corrupt → `None` with a warning.
     fn read_json(&mut self, dir: &Path, file: &str) -> Option<Value> {
         let path = dir.join(file);
         let text = match fs::read_to_string(&path) {
@@ -488,7 +489,7 @@ impl Ctx<'_> {
             .map_err(sql)
     }
 
-    // --- proyectos y repos ---
+    // --- projects and repos ---
 
     fn repo_by_id(&self, id: &str) -> Result<Option<(String, String)>, String> {
         self.conn
@@ -540,14 +541,14 @@ impl Ctx<'_> {
         Ok(())
     }
 
-    /// Id determinista del repo que la importación crea para `path`.
+    /// Deterministic id of the repo the import creates for `path`.
     fn repo_id_for(path: &str) -> String {
         det_id("lr_", path)
     }
 
-    /// Crea el repo de `path` en el proyecto, o devuelve el que ya creó una importación
-    /// anterior (aunque después le cambiaran el path). Un choque con otro repo no aborta la
-    /// importación: se saltea con aviso (`None`).
+    /// Creates the repo for `path` in the project, or returns the one a previous import
+    /// already created (even if its path was changed later). A clash with another repo doesn't
+    /// abort the import: it's skipped with a warning (`None`).
     fn ensure_repo(
         &mut self,
         project_id: &str,
@@ -579,7 +580,7 @@ impl Ctx<'_> {
         };
         match rows::insert_repo(self.conn, &r) {
             Ok(()) => {}
-            // Solo choques de unicidad (path o id tomados); cualquier otra restricción es un bug.
+            // Only uniqueness clashes (path or id taken); any other constraint is a bug.
             Err(DbError::Sqlite(rusqlite::Error::SqliteFailure(f, m)))
                 if matches!(
                     f.extended_code,
@@ -596,7 +597,7 @@ impl Ctx<'_> {
         Ok(Some((id, project_id.to_string())))
     }
 
-    /// Proyecto "Local" de la importación (se crea la primera vez que hace falta).
+    /// The import's "Local" project (created the first time it's needed).
     fn local_project(&mut self) -> Result<String, String> {
         const KEY: &str = "project:local";
         if let Some(Some(id)) = self.seen(KEY)? {
@@ -653,8 +654,8 @@ impl Ctx<'_> {
             self.finish_by_path.entry(path.clone()).or_insert(finish);
             let scopes = entry.scopes();
 
-            // La clave usa el path sin resolver symlinks: no cambia si la carpeta aparece,
-            // desaparece o cambia un symlink entre dos importaciones.
+            // The key uses the path without resolving symlinks: it doesn't change if the folder
+            // appears, disappears or a symlink changes between two imports.
             let stable = norm_path(&entry.path);
             let repo_key = format!("config:repo:{stable}");
             let previous = match self.seen(&repo_key)? {
@@ -667,8 +668,8 @@ impl Ctx<'_> {
                     found
                 }
                 None => {
-                    // Ya lo tenía el usuario, lo creó otra entrada o una importación anterior
-                    // (aunque después le cambiaran el path): se reusa sin tocarlo.
+                    // The user already had it, or another entry or a previous import created it
+                    // (even if its path was changed later): it's reused untouched.
                     let existing = match self.repo_by_path(&path)? {
                         Some(found) => Some(found),
                         None => self.repo_by_id(&Self::repo_id_for(&path))?,
@@ -690,7 +691,7 @@ impl Ctx<'_> {
                                 self.create_project(&project_id, name.trim())?;
                             }
                             let Some(found) = self.ensure_repo(&project_id, &path, entry.launch(), finish)? else {
-                                // No dejar un proyecto vacío por un repo salteado.
+                                // Don't leave an empty project behind because of a skipped repo.
                                 if new_project {
                                     self.conn.execute("DELETE FROM projects WHERE id = ?1", [&project_id]).map_err(sql)?;
                                     self.report.projects -= 1;
@@ -754,7 +755,7 @@ impl Ctx<'_> {
         let raws = self.read_records(dir, file, "tasks");
         let mut tasks: Vec<legacy::Task> =
             raws.into_iter().enumerate().filter_map(|(i, v)| self.parse(file, i, v)).collect();
-        // Los números se asignan por orden de creación: el mismo archivo da los mismos números.
+        // Numbers are assigned by creation order: the same file yields the same numbers.
         tasks.sort_by(|a, b| (a.created_at, &a.id).cmp(&(b.created_at, &b.id)));
 
         for t in tasks {
@@ -763,7 +764,7 @@ impl Ctx<'_> {
             let is_text = matches!(t.plan, legacy::PlanRef::Text);
             if let Some(target) = self.seen(&key)? {
                 self.already(&key);
-                // Si el usuario la borró después, no se deja un plan huérfano.
+                // If the user deleted it later, don't leave an orphaned plan.
                 let alive = match target {
                     Some(id) => self.exists("tasks", &id)?,
                     None => false,
@@ -792,7 +793,7 @@ impl Ctx<'_> {
             let path = canon_path(&t.repo_path);
             let existing = match self.repo_by_path(&path)? {
                 Some(found) => Some(found),
-                // El repo que creó una importación anterior, aunque le hayan cambiado el path.
+                // The repo a previous import created, even if its path was changed.
                 None => self.repo_by_id(&Self::repo_id_for(&path))?,
             };
             let (repo_id, project_id) = match existing {
@@ -942,7 +943,7 @@ impl Ctx<'_> {
         let raws = self.read_records(dir, file, "runs");
         for (i, v) in raws.into_iter().enumerate() {
             let Some(r) = self.parse::<legacy::TaskRun>(file, i, v) else { continue };
-            // Sin `run_id`: un run que estaba en cola y después se lanzó sigue siendo el mismo.
+            // Without `run_id`: a run that was queued and later launched is still the same one.
             let key = format!("task-run:{}:{}", r.task_id, r.queued_at);
             if self.seen(&key)?.is_some() {
                 self.already(&key);
@@ -1024,7 +1025,7 @@ impl Ctx<'_> {
     }
 }
 
-/// Ids que terminan en rutas (`tasks/<id>/`): `[0-9a-z]`, como los generaba la versión vieja.
+/// Ids that end up in paths (`tasks/<id>/`): `[0-9a-z]`, as the old version generated them.
 fn is_safe_id(id: &str) -> bool {
     (2..=40).contains(&id.len()) && id.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit())
 }

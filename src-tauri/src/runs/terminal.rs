@@ -1,5 +1,5 @@
-//! Acciones sobre sesiones en background que no pasan por la cola: detener (`claude stop`),
-//! abrir en Terminal (`claude attach`) y abrir Terminal en una carpeta.
+//! Actions on background sessions that don't go through the queue: stop (`claude stop`),
+//! open in Terminal (`claude attach`) and open Terminal in a folder.
 
 use std::path::Path;
 use std::time::Duration;
@@ -9,7 +9,7 @@ use super::claude_bin;
 const STOP_TIMEOUT: Duration = Duration::from_secs(20);
 const OSASCRIPT_TIMEOUT: Duration = Duration::from_secs(15);
 
-/// Id corto de un run (`claude --bg` imprime hex). Va a un comando y a AppleScript.
+/// Short id of a run (`claude --bg` prints hex). It goes into a command and into AppleScript.
 pub fn is_valid_run_id(id: &str) -> bool {
     (4..=64).contains(&id.len()) && !id.starts_with('-') && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
 }
@@ -28,25 +28,25 @@ pub async fn stop(run_id: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// Detiene una sesión por su id corto. Para los runs de la cola, `cancel_run` (que además
-/// guarda el patch a medias y aplica la transición).
+/// Stops a session by its short id. For queue runs, use `cancel_run` (which also saves the
+/// partial patch and applies the transition).
 #[tauri::command]
 pub async fn stop_run(run_id: String) -> Result<(), String> {
     stop(&run_id).await
 }
 
-/// Comillas simples de shell: `'...'` con `'` → `'\''`.
+/// Shell single quotes: `'...'` with `'` → `'\''`.
 fn shell_quote(s: &str) -> String {
     format!("'{}'", s.replace('\'', r"'\''"))
 }
 
-/// Literal de string AppleScript.
+/// AppleScript string literal.
 fn applescript_string(s: &str) -> String {
     format!("\"{}\"", s.replace('\\', r"\\").replace('"', "\\\""))
 }
 
-/// Líneas `-e` para osascript: abre una ventana de Terminal con `claude attach <id>`.
-/// `run_id` ya viene validado; el path del binario se cita igual por si tiene espacios.
+/// `-e` lines for osascript: opens a Terminal window with `claude attach <id>`.
+/// `run_id` is already validated; the binary path is quoted anyway in case it has spaces.
 fn attach_script(claude: &Path, run_id: &str) -> Vec<String> {
     let cmd = format!("{} attach {}", shell_quote(&claude.to_string_lossy()), run_id);
     vec![
@@ -82,8 +82,8 @@ pub async fn attach_run(run_id: String) -> Result<(), String> {
     osascript(attach_script(&claude, &run_id)).await
 }
 
-/// Líneas `-e` para osascript: abre una ventana de Terminal en `dir` y, si viene
-/// `claude`, lo arranca ahí (para aceptar el diálogo de confianza del workspace).
+/// `-e` lines for osascript: opens a Terminal window in `dir` and, if `claude` is given,
+/// starts it there (to accept the workspace trust dialog).
 fn terminal_at_script(dir: &Path, claude: Option<&Path>) -> Vec<String> {
     let mut cmd = format!("cd {}", shell_quote(&dir.to_string_lossy()));
     if let Some(c) = claude {
@@ -98,9 +98,9 @@ fn terminal_at_script(dir: &Path, claude: Option<&Path>) -> Vec<String> {
     ]
 }
 
-/// Abre Terminal.app en `path` (un directorio existente). Con `run_claude`, arranca
-/// `claude` ahí: sirve para aceptar el diálogo de confianza de un repo nuevo (o de
-/// `~/.nodal/worktrees`, donde viven los worktrees de las tareas).
+/// Opens Terminal.app in `path` (an existing directory). With `run_claude`, starts
+/// `claude` there: useful for accepting the trust dialog of a new repo (or of
+/// `~/.nodal/worktrees`, where the tasks' worktrees live).
 #[tauri::command]
 pub async fn open_terminal_at(path: String, run_claude: Option<bool>) -> Result<(), String> {
     if !cfg!(target_os = "macos") {
@@ -110,7 +110,7 @@ pub async fn open_terminal_at(path: String, run_claude: Option<bool>) -> Result<
     if !raw.is_absolute() {
         return Err(format!("The folder must be an absolute path: {path}"));
     }
-    // Un salto de línea (u otro control) partiría la línea de AppleScript.
+    // A newline (or another control char) would split the AppleScript line.
     if path.chars().any(char::is_control) {
         return Err("The folder path contains control characters.".into());
     }
@@ -120,7 +120,7 @@ pub async fn open_terminal_at(path: String, run_claude: Option<bool>) -> Result<
         .filter(|d| d.is_dir())
         .ok_or_else(|| format!("The folder doesn't exist or isn't a directory: {path}"))?;
     let claude = if run_claude.unwrap_or(false) { Some(claude_bin::resolve_claude()?) } else { None };
-    // `canonicalize` resuelve symlinks: se revisa también la ruta final (y la de claude).
+    // `canonicalize` resolves symlinks: the final path (and claude's) is checked too.
     let has_control = |p: &Path| p.to_string_lossy().chars().any(char::is_control);
     if has_control(&dir) || claude.as_deref().is_some_and(has_control) {
         return Err("The folder path contains control characters.".into());
@@ -147,7 +147,7 @@ mod tests {
     fn attach_script_quotes_path() {
         let lines = attach_script(Path::new("/Users/a b/it's \"x\"/claude"), "ddb91222");
         assert_eq!(lines[0], "tell application \"Terminal\"");
-        // Shell: '/Users/a b/it'\''s "x"/claude' attach ddb91222, luego escapado para AppleScript.
+        // Shell: '/Users/a b/it'\''s "x"/claude' attach ddb91222, then escaped for AppleScript.
         assert_eq!(lines[2], r#"do script "'/Users/a b/it'\\''s \"x\"/claude' attach ddb91222""#);
     }
 

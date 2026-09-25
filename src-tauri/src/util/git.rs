@@ -1,5 +1,5 @@
-//! `git` síncrono con timeout (se llama desde hilos bloqueantes). Sin shell: cada
-//! argumento va por separado.
+//! Synchronous `git` with a timeout (called from blocking threads). No shell: each
+//! argument is passed separately.
 
 use std::io::Read;
 use std::path::{Path, PathBuf};
@@ -20,8 +20,8 @@ fn git_bin() -> Result<PathBuf, String> {
     claude_bin::resolve_bin("git").ok_or_else(|| "Couldn't find `git` in PATH.".to_string())
 }
 
-/// Corre `git -C <dir> <args>` y devuelve la salida aunque falle. Error solo si no se pudo
-/// ejecutar o pasó el timeout.
+/// Runs `git -C <dir> <args>` and returns the output even if it fails. Errors only if it
+/// couldn't run or the timeout passed.
 pub fn run(dir: &Path, args: &[&str]) -> Result<GitOutput, String> {
     let mut cmd = Command::new(git_bin()?);
     cmd.arg("-C")
@@ -35,7 +35,7 @@ pub fn run(dir: &Path, args: &[&str]) -> Result<GitOutput, String> {
         .stderr(Stdio::piped());
     let what = format!("git {}", args.first().copied().unwrap_or(""));
     let mut child = cmd.spawn().map_err(|e| format!("Couldn't run {what}: {e}"))?;
-    // Se leen los dos streams en paralelo: un diff grande llenaría el pipe y colgaría a git.
+    // Both streams are read in parallel: a large diff would fill the pipe and hang git.
     let mut out = child.stdout.take();
     let mut err = child.stderr.take();
     let out_t = std::thread::spawn(move || {
@@ -70,7 +70,7 @@ pub fn run(dir: &Path, args: &[&str]) -> Result<GitOutput, String> {
     Ok(GitOutput { ok: status.success(), stdout, stderr })
 }
 
-/// Como `run`, pero un código de salida distinto de 0 es error (con el stderr).
+/// Like `run`, but a non-zero exit code is an error (with the stderr).
 pub fn ok(dir: &Path, args: &[&str]) -> Result<String, String> {
     let out = run(dir, args)?;
     if out.ok {
@@ -82,14 +82,14 @@ pub fn ok(dir: &Path, args: &[&str]) -> Result<String, String> {
     }
 }
 
-/// Raíz del repo que contiene `dir`, o `None` si no está en un repo git.
+/// Root of the repo containing `dir`, or `None` if it's not in a git repo.
 pub fn toplevel(dir: &Path) -> Result<Option<PathBuf>, String> {
     let out = run(dir, &["rev-parse", "--show-toplevel"])?;
     let root = out.stdout.trim();
     Ok((out.ok && !root.is_empty()).then(|| PathBuf::from(root)))
 }
 
-/// Versión de `git` (`git version 2.x`), con el mismo resolutor que el resto de la app.
+/// `git` version (`git version 2.x`), using the same resolver as the rest of the app.
 #[tauri::command]
 pub async fn git_version() -> Result<String, String> {
     crate::util::blocking(|| {

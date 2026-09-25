@@ -1,20 +1,20 @@
-//! Cola única de runs: lógica pura sobre las filas de `runs` y la salida de
-//! `claude agents`. Portada de las dos colas viejas (issues y tareas), ahora con una
-//! sola concurrencia global, orden por `queue_position`, lock por repo para `in_place` y
-//! runs migrados que esperan confirmación.
+//! The single run queue: pure logic over the `runs` rows and the `claude agents` output.
+//! Ported from the two old queues (issues and tasks), now with a single global
+//! concurrency, ordering by `queue_position`, a per-repo lock for `in_place` and migrated
+//! runs that await confirmation.
 
 use std::collections::HashSet;
 
 use crate::domain::{Isolation, Run, RunStatus};
 use crate::runs::types::RunSummary;
 
-/// Un run recién lanzado tarda en aparecer en `claude agents`: mientras tanto ocupa un slot.
+/// A just-launched run takes a while to show up in `claude agents`: meanwhile it takes a slot.
 pub const LAUNCH_GRACE_MS: i64 = 90_000;
-/// Un run lanzado que no aparece en `claude agents` pasado este tiempo se da por perdido.
+/// A launched run that doesn't show up in `claude agents` after this long is deemed lost.
 pub const VANISH_MS: i64 = 10 * 60_000;
 
-/// Run migrado de una versión anterior que quedó en cola: no se lanza solo, hay que
-/// confirmarlo (`confirm_run`) o cancelarlo.
+/// Run migrated from a previous version that was left queued: it doesn't launch on its
+/// own, it has to be confirmed (`confirm_run`) or cancelled.
 pub fn awaiting_confirmation(r: &Run) -> bool {
     r.status == RunStatus::Queued && r.legacy_label.is_some()
 }
@@ -24,8 +24,8 @@ fn live_of<'a>(r: &Run, live: &'a [RunSummary]) -> Option<&'a RunSummary> {
     live.iter().find(|s| s.id == id)
 }
 
-/// ¿El run sigue activo? En cola/lanzándose, o lanzado y `working`/`blocked` (o recién
-/// lanzado y todavía sin aparecer en `claude agents`).
+/// Is the run still active? Queued/launching, or launched and `working`/`blocked` (or just
+/// launched and not yet showing up in `claude agents`).
 pub fn is_active(r: &Run, live: Option<&[RunSummary]>, now: i64) -> bool {
     match r.status {
         RunStatus::Queued | RunStatus::Launching => true,
@@ -40,9 +40,10 @@ pub fn is_active(r: &Run, live: Option<&[RunSummary]>, now: i64) -> bool {
     }
 }
 
-/// Slots ocupados: toda sesión en background `working` (sea nuestra o no), más las
-/// nuestras que se están lanzando o que se lanzaron hace poco y aún no figuran.
-/// `blocked` (esperando permiso/input) no ocupa slot: si nadie responde frenaría la cola.
+/// Occupied slots: every `working` background session (ours or not), plus ours that are
+/// launching or were launched recently and aren't listed yet.
+/// `blocked` (waiting for permission/input) doesn't take a slot: if nobody answers it would
+/// stall the queue.
 pub fn occupied_slots(runs: &[Run], live: &[RunSummary], now: i64) -> usize {
     let working = live.iter().filter(|s| s.state.as_deref() == Some("working")).count();
     let pending = runs
@@ -58,33 +59,33 @@ pub fn occupied_slots(runs: &[Run], live: &[RunSummary], now: i64) -> usize {
     working + pending
 }
 
-/// Resumen de la cola para la UI.
+/// Queue summary for the UI.
 #[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WorkSummary {
-    /// Slots ocupados (regla de `occupied_slots`).
+    /// Occupied slots (`occupied_slots` rule).
     pub running: u32,
-    /// Concurrencia global de Settings.
+    /// Global concurrency from Settings.
     pub capacity: u32,
-    /// Cosas distintas esperando al usuario: tareas Blocked o movidas de proyecto en el
-    /// proveedor, runs migrados sin confirmar y sesiones esperando permiso/input. Una tarea
-    /// cuenta una sola vez.
+    /// Distinct things waiting on the user: tasks Blocked or moved to another project in the
+    /// provider, unconfirmed migrated runs and sessions waiting for permission/input. A task
+    /// counts only once.
     pub need_you: u32,
-    /// En cola y listos para salir (sin los que esperan confirmación).
+    /// Queued and ready to go (excluding those awaiting confirmation).
     pub queued: u32,
-    /// Error de la última pasada de la cola (p. ej. `claude agents` falla), o `null`.
+    /// Error of the last queue pass (e.g. `claude agents` fails), or `null`.
     pub pump_error: Option<String>,
 }
 
-/// La sesión espera al usuario (permiso, input, diálogo).
+/// The session is waiting on the user (permission, input, dialog).
 fn waiting(s: &RunSummary) -> bool {
     s.state.as_deref() == Some("blocked") || s.status.as_deref() == Some("waiting")
 }
 
-/// `runs`: los pendientes del alcance (`pending`/`pending_of`); `blocked_tasks`: ids de las
-/// tareas Blocked del alcance. `global`: sin filtro de proyecto, así que también cuentan las
-/// sesiones ajenas (trabajando ocupan slot; esperando, necesitan al usuario). Con proyecto,
-/// `running` son solo los runs propios que ocupan slot.
+/// `runs`: the pending ones in scope (`pending`/`pending_of`); `blocked_tasks`: ids of the
+/// Blocked tasks in scope. `global`: no project filter, so foreign sessions count too
+/// (working ones take a slot; waiting ones need the user). With a project, `running` is
+/// only our own runs that take a slot.
 pub fn work_summary(
     runs: &[Run],
     blocked_tasks: &[String],
@@ -140,7 +141,7 @@ pub fn work_summary(
     }
 }
 
-/// Repos con un run `in_place` activo: la cola no lanza otro ahí.
+/// Repos with an active `in_place` run: the queue doesn't launch another one there.
 fn locked_repos(runs: &[Run], live: &[RunSummary], now: i64) -> HashSet<String> {
     runs.iter()
         .filter(|r| r.isolation == Some(Isolation::InPlace))
@@ -150,9 +151,9 @@ fn locked_repos(runs: &[Run], live: &[RunSummary], now: i64) -> HashSet<String> 
         .collect()
 }
 
-/// Ids de los runs en cola a lanzar ahora, en orden (`queue_position`, `queued_at`),
-/// según los slots libres. Salta los que esperan confirmación y los `in_place` cuyo repo
-/// está ocupado (sin frenar a los de atrás).
+/// Ids of the queued runs to launch now, in order (`queue_position`, `queued_at`), based on
+/// the free slots. Skips those awaiting confirmation and the `in_place` ones whose repo is
+/// busy (without holding back the ones behind).
 pub fn next_to_launch(runs: &[Run], live: &[RunSummary], concurrency: u32, now: i64) -> Vec<String> {
     let mut free = (concurrency as usize).saturating_sub(occupied_slots(runs, live, now));
     let mut locked = locked_repos(runs, live, now);
@@ -179,8 +180,8 @@ pub fn next_to_launch(runs: &[Run], live: &[RunSummary], concurrency: u32, now: 
     out
 }
 
-/// Completa `session_id` cruzando `claude_run_id` con `claude agents`. Devuelve los índices
-/// que cambiaron.
+/// Fills in `session_id` by matching `claude_run_id` against `claude agents`. Returns the
+/// indices that changed.
 pub fn fill_session_ids(runs: &mut [Run], live: &[RunSummary]) -> Vec<usize> {
     let mut changed = Vec::new();
     for (i, r) in runs.iter_mut().enumerate().filter(|(_, r)| r.session_id.is_none()) {
@@ -192,12 +193,12 @@ pub fn fill_session_ids(runs: &mut [Run], live: &[RunSummary]) -> Vec<usize> {
     changed
 }
 
-/// Margen de reloj entre `started_at` de `claude agents` y el momento del launch.
+/// Clock slack between `claude agents`' `started_at` and the moment of the launch.
 pub const ADOPT_SLACK_MS: i64 = 5_000;
 
-/// La sesión que probablemente arrancó un `claude --bg` que no devolvió su id a tiempo: la
-/// única en `cwd`, arrancada desde `since` y que ningún run tiene (`claimed`: sus
-/// `claude_run_id`). Con más de una candidata no se adivina.
+/// The session probably started by a `claude --bg` that didn't return its id in time: the
+/// only one in `cwd`, started since `since` and not held by any run (`claimed`: their
+/// `claude_run_id`s). With more than one candidate, no guessing.
 pub fn adoptable<'a>(cwd: &str, since: i64, live: &'a [RunSummary], claimed: &[String]) -> Option<&'a RunSummary> {
     let norm = |p: &str| p.trim_end_matches('/').to_string();
     let want = norm(cwd);
@@ -210,27 +211,27 @@ pub fn adoptable<'a>(cwd: &str, since: i64, live: &'a [RunSummary], claimed: &[S
     found.next().is_none().then_some(first)
 }
 
-/// ¿Hay algo que requiera consultar `claude agents`? Runs en cola que se puedan lanzar, o
-/// lanzados (para detectar cuándo terminan).
+/// Is there anything that requires querying `claude agents`? Queued runs that can launch,
+/// or launched ones (to detect when they finish).
 pub fn needs_tick(runs: &[Run]) -> bool {
     runs.iter()
         .any(|r| (r.status == RunStatus::Queued && !awaiting_confirmation(r)) || r.status == RunStatus::Launched)
 }
 
-/// Cómo terminó una sesión, según `claude agents`.
+/// How a session ended, according to `claude agents`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EndSignal {
-    /// `state: "done"`: terminó su turno.
+    /// `state: "done"`: it finished its turn.
     Done,
     /// `state: "failed"`.
     Failed,
-    /// `state: "stopped"` (`claude stop` o se cerró).
+    /// `state: "stopped"` (`claude stop` or it was closed).
     Stopped,
-    /// No figura en `claude agents` desde hace más de `VANISH_MS`.
+    /// Not listed in `claude agents` for more than `VANISH_MS`.
     Vanished,
 }
 
-/// Runs lanzados que dejaron de estar en curso (salieron de working/blocked).
+/// Launched runs that are no longer in progress (left working/blocked).
 pub fn ended(runs: &[Run], live: &[RunSummary], now: i64) -> Vec<(String, EndSignal)> {
     runs.iter()
         .filter(|r| r.status == RunStatus::Launched)
@@ -241,7 +242,7 @@ pub fn ended(runs: &[Run], live: &[RunSummary], now: i64) -> Vec<(String, EndSig
                     Some("done") => EndSignal::Done,
                     Some("failed") => EndSignal::Failed,
                     Some("stopped") => EndSignal::Stopped,
-                    // Estado desconocido: se espera (puede ser uno nuevo "en curso").
+                    // Unknown state: wait (it may be a new "in progress" one).
                     _ => return None,
                 },
                 None if r.launched_at.is_some_and(|t| now - t >= VANISH_MS) => EndSignal::Vanished,
@@ -274,13 +275,13 @@ mod adopt_tests {
     fn adopts_only_an_unambiguous_new_session_in_the_cwd() {
         let live = vec![session("old", "/r/web", 100), session("other", "/r/api", 10_000), session("new", "/r/web/", 10_000)];
         assert_eq!(adoptable("/r/web", 9_000, &live, &[]).map(|s| s.id.as_str()), Some("new"));
-        // Ya la tiene otro run.
+        // Another run already has it.
         assert!(adoptable("/r/web", 9_000, &live, &["new".into()]).is_none());
-        // Dos candidatas: no se adivina.
+        // Two candidates: no guessing.
         let mut two = live.clone();
         two.push(session("new2", "/r/web", 11_000));
         assert!(adoptable("/r/web", 9_000, &two, &[]).is_none());
-        // Anterior al launch (fuera del margen).
+        // Before the launch (outside the slack).
         assert!(adoptable("/r/web", 20_000, &live, &[]).is_none());
     }
 }
@@ -365,14 +366,14 @@ mod tests {
         let blocked = vec!["t-blocked".to_string(), "t-other".to_string()];
 
         let g = work_summary(&runs, &blocked, &lv, 3, true, NOW);
-        // working: bbbb, xxxx, ffff (ajenas incluidas) + c (en gracia) + n (launching).
+        // working: bbbb, xxxx, ffff (foreign included) + c (in grace) + n (launching).
         assert_eq!((g.running, g.capacity, g.queued), (5, 3, 1));
-        // t-blocked (tarea Blocked y su sesión esperando permiso: una vez), t-other, el
-        // migrado y la sesión ajena esperando.
+        // t-blocked (Blocked task and its session waiting for permission: once), t-other, the
+        // migrated one and the waiting foreign session.
         assert_eq!(g.need_you, 4, "{g:?}");
 
         let p = work_summary(&runs, &blocked, &lv, 3, false, NOW);
-        // Solo propios: b (working), c (gracia), n (launching). `a` está blocked: no ocupa slot.
+        // Own only: b (working), c (grace), n (launching). `a` is blocked: takes no slot.
         assert_eq!((p.running, p.queued, p.need_you), (3, 1, 3), "{p:?}");
         assert_eq!(work_summary(&[], &[], &[], 2, false, NOW), WorkSummary { capacity: 2, ..Default::default() });
         let v = serde_json::to_value(WorkSummary { pump_error: Some("`claude agents` failed".into()), ..Default::default() }).unwrap();
@@ -389,11 +390,11 @@ mod tests {
             run("x", RunStatus::Failed, 1.0),
         ];
         let lv = vec![live("aa11", "working"), live("bb22", "done"), live("cc33", "stopped")];
-        // 3 slots, 1 working ajeno → 2 libres: los dos primeros de la cola.
+        // 3 slots, 1 foreign working → 2 free: the first two in the queue.
         assert_eq!(next_to_launch(&runs, &lv, 3, NOW), ["a", "b"]);
         assert_eq!(next_to_launch(&runs, &lv, 1, NOW), Vec::<String>::new());
         assert_eq!(next_to_launch(&runs, &[], 10, NOW), ["a", "b", "c"]);
-        // Reordenar cambia quién sale.
+        // Reordering changes who goes next.
         let mut reordered = runs.clone();
         reordered[0].queue_position = 1.0;
         assert_eq!(next_to_launch(&reordered, &lv, 3, NOW), ["c", "a"]);
@@ -404,25 +405,25 @@ mod tests {
         let runs = vec![
             run("q", RunStatus::Queued, 5.0),
             run("l", RunStatus::Launching, 1.0),
-            // Recién lanzado, todavía no figura en claude agents: ocupa.
+            // Just launched, not yet listed in claude agents: takes a slot.
             launched("f", "ffff0001", NOW - 1_000),
-            // Lanzado hace mucho y no figura: no ocupa.
+            // Launched long ago and not listed: takes no slot.
             launched("o", "ffff0002", NOW - LAUNCH_GRACE_MS - 1),
-            // Figura y terminó: no ocupa (ni doble cuenta).
+            // Listed and finished: takes no slot (nor double counts).
             launched("d", "dddd0001", NOW - 1_000),
         ];
         let lv = vec![live("dddd0001", "done")];
         assert_eq!(occupied_slots(&runs, &lv, NOW), 2);
         assert!(next_to_launch(&runs, &lv, 2, NOW).is_empty());
         assert_eq!(next_to_launch(&runs, &lv, 3, NOW), ["q"]);
-        // Si figura y está working, cuenta una sola vez (por claude agents).
+        // If listed and working, it counts only once (via claude agents).
         let lv = vec![live("ffff0001", "working"), live("dddd0001", "done")];
         assert_eq!(occupied_slots(&runs, &lv, NOW), 2);
     }
 
     #[test]
     fn global_concurrency_never_exceeded() {
-        // Cuatro en cola con concurrencia 2: salen 2, y con esos 2 working no sale ninguno más.
+        // Four queued with concurrency 2: 2 go, and with those 2 working no more go.
         let mut runs: Vec<Run> = (0..4).map(|i| run(&format!("r{i}"), RunStatus::Queued, i as f64)).collect();
         let first = next_to_launch(&runs, &[], 2, NOW);
         assert_eq!(first, ["r0", "r1"]);
@@ -448,14 +449,14 @@ mod tests {
         c.isolation = Some(Isolation::InPlace);
         c.repo_id = Some("other".into());
         let d = run("d", RunStatus::Queued, 4.0);
-        // Dos in_place del mismo repo: sale uno; el de otro repo y el worktree siguen.
+        // Two in_place on the same repo: one goes; the other repo's and the worktree one proceed.
         assert_eq!(next_to_launch(&[a.clone(), b.clone(), c.clone(), d.clone()], &[], 10, NOW), ["a", "c", "d"]);
-        // Con uno in_place activo en el repo, el siguiente espera.
+        // With an active in_place run in the repo, the next one waits.
         let mut active = launched("x", "xxxx0001", NOW - 1_000);
         active.isolation = Some(Isolation::InPlace);
         let lv = vec![live("xxxx0001", "working")];
         assert_eq!(next_to_launch(&[active.clone(), b.clone(), d.clone()], &lv, 10, NOW), ["d"]);
-        // Cuando termina, se libera.
+        // When it finishes, it's released.
         let lv = vec![live("xxxx0001", "done")];
         assert_eq!(next_to_launch(&[active, b, d], &lv, 10, NOW), ["b", "d"]);
     }
@@ -488,12 +489,12 @@ mod tests {
         assert!(!is_active(&run("f", RunStatus::Failed, 1.0), Some(&lv), NOW));
         assert!(is_active(&launched("a", "aaaa", 1), Some(&lv), NOW));
         assert!(!is_active(&launched("b", "bbbb", NOW), Some(&lv), NOW));
-        // `blocked` sigue activo (no se relanza) pero no ocupa slot.
+        // `blocked` is still active (not relaunched) but takes no slot.
         assert!(is_active(&launched("c", "cccc", 1), Some(&lv), NOW));
         assert_eq!(occupied_slots(&[], &[live("cccc", "blocked")], NOW), 0);
         assert!(is_active(&launched("d", "dddd", NOW - 10), Some(&lv), NOW));
         assert!(!is_active(&launched("d", "dddd", NOW - LAUNCH_GRACE_MS), Some(&lv), NOW));
-        // Sin `claude agents` se asume activo (no se relanza a ciegas).
+        // Without `claude agents` it's assumed active (no blind relaunch).
         assert!(is_active(&launched("e", "eeee", 1), None, NOW));
     }
 

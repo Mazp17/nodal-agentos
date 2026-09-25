@@ -1,5 +1,5 @@
-//! Proveedor falso para tests: ítems y estados en memoria, registro de escrituras y fallos
-//! programables.
+//! Fake provider for tests: in-memory items and states, a log of writes and programmable
+//! failures.
 
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex, MutexGuard};
@@ -12,19 +12,19 @@ use super::{iso_from_ms, ErrorKind, ExternalItem, ImportQuery, Page, ProviderErr
 pub struct FakeData {
     pub states: Vec<ExternalState>,
     pub items: BTreeMap<String, ExternalItem>,
-    /// Si está, `set_state` y `comment` fallan con este error.
+    /// If set, `set_state` and `comment` fail with this error.
     pub fail_writes: Option<ProviderError>,
-    /// Si está, `states` falla con este error.
+    /// If set, `states` fails with this error.
     pub fail_states: Option<ProviderError>,
     pub set_states: Vec<(String, String)>,
     pub comments: Vec<(String, String)>,
-    /// Llamadas a `states`.
+    /// Calls to `states`.
     pub states_calls: usize,
-    /// Proyectos que devuelve `rule_projects`.
+    /// Projects returned by `rule_projects`.
     pub projects: Vec<ScopeRef>,
-    /// "Ahora" del proveedor (epoch ms) para `closed_within_days`.
+    /// Provider's "now" (epoch ms) for `closed_within_days`.
     pub now: i64,
-    /// Consultas recibidas por `list_importable`.
+    /// Queries received by `list_importable`.
     pub queries: Vec<ImportQuery>,
 }
 
@@ -63,8 +63,8 @@ impl TaskProvider for FakeProvider {
         Ok(self.data().projects.clone())
     }
 
-    /// Emula el filtro de Linear: tipos de estado (o cerrados hace menos de
-    /// `closed_within_days`), texto, proyecto y `created_after` (fechas ISO comparables).
+    /// Emulates Linear's filter: state types (or closed less than `closed_within_days`
+    /// ago), text, project and `created_after` (comparable ISO dates).
     async fn list_importable(&self, q: &ImportQuery) -> ProviderResult<Page> {
         let mut d = self.data();
         d.queries.push(q.clone());

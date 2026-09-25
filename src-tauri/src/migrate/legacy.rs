@@ -1,7 +1,7 @@
-//! Formatos de la versión anterior, copiados acá para que la migración no dependa de los
-//! módulos viejos (`config`, `tasks`, `issue_runs`), que se borran en F1-B.
-//! Todos los campos que se pueden faltar son opcionales: se parsea registro por registro y
-//! uno inválido se saltea sin tirar el archivo entero.
+//! Formats from the previous version, copied here so the migration doesn't depend on the
+//! old modules (`config`, `tasks`, `issue_runs`), which are deleted in F1-B.
+//! Every field that may be missing is optional: parsing goes record by record and an
+//! invalid one is skipped without discarding the whole file.
 
 use serde::Deserialize;
 
@@ -25,8 +25,8 @@ pub struct Config {
     pub concurrency: Option<u32>,
 }
 
-/// Una entrada de `repos`. Acepta el formato legacy (un mapeo `teamId`/`projectId` → path)
-/// y el "actual" (un repo con `links` a varios scopes, con nombres).
+/// A `repos` entry. Accepts the legacy format (a `teamId`/`projectId` → path mapping)
+/// and the "current" one (a repo with `links` to several scopes, with names).
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RepoEntry {
@@ -74,8 +74,8 @@ fn clean(s: &Option<String>) -> Option<String> {
 }
 
 impl RepoEntry {
-    /// Scopes vinculados. En el formato legacy, el mapeo team+proyecto es el proyecto (el
-    /// más específico); solo team es el team.
+    /// Linked scopes. In the legacy format, a team+project mapping is the project (the
+    /// more specific one); team alone is the team.
     pub fn scopes(&self) -> Vec<LinkEntry> {
         if !self.links.is_empty() {
             return self

@@ -5,7 +5,7 @@ use crate::db::rows::{get_task, insert_task, task_from_row};
 use crate::db::DbError;
 use crate::domain::{PlanRef, Task, TaskStatus};
 
-/// `None`: todas. Orden: proyecto, estado, posición.
+/// `None`: all of them. Order: project, status, position.
 pub fn list(conn: &Connection, project_id: Option<&str>) -> Result<Vec<Task>, DbError> {
     let mut stmt = conn.prepare(
         "SELECT * FROM tasks WHERE ?1 IS NULL OR project_id = ?1 ORDER BY project_id, status, position, number",
@@ -18,7 +18,7 @@ pub fn get(conn: &Connection, id: &str) -> Result<Task, DbError> {
     get_task(conn, id)?.ok_or_else(|| not_found("task"))
 }
 
-/// La tarea `{KEY}-{number}` de un proyecto.
+/// A project's `{KEY}-{number}` task.
 pub fn find_by_number(conn: &Connection, project_id: &str, number: i64) -> Result<Option<Task>, DbError> {
     use rusqlite::OptionalExtension;
     Ok(conn
@@ -30,8 +30,8 @@ pub fn insert(conn: &Connection, t: &Task) -> Result<(), DbError> {
     insert_task(conn, t)
 }
 
-/// Guarda todos los campos de Nodal (no toca `project_id`, `number`, `created_at` ni los
-/// `src_*`, que son del proveedor, salvo `link`/estado que maneja F1-C).
+/// Saves every Nodal field (doesn't touch `project_id`, `number`, `created_at` or the
+/// `src_*` fields, which belong to the provider, except `link`/state, handled by F1-C).
 pub fn update(conn: &Connection, t: &Task) -> Result<(), DbError> {
     let (plan_kind, plan_path) = match &t.plan {
         PlanRef::Text => ("text", None),
@@ -62,7 +62,7 @@ pub fn update(conn: &Connection, t: &Task) -> Result<(), DbError> {
     Ok(())
 }
 
-/// Cambia el estado (y `closed_at` si pasa a Done/Canceled o sale de ahí).
+/// Changes the status (and `closed_at` when it moves into or out of Done/Canceled).
 pub fn set_status(conn: &Connection, id: &str, status: TaskStatus, now: i64) -> Result<(), DbError> {
     let closed = matches!(status, TaskStatus::Done | TaskStatus::Canceled);
     let n = conn.execute(
@@ -84,7 +84,7 @@ pub fn delete(conn: &Connection, id: &str) -> Result<(), DbError> {
     Ok(())
 }
 
-/// Posición al final de la columna `status` del proyecto.
+/// Position at the end of the project's `status` column.
 pub fn next_position(conn: &Connection, project_id: &str, status: TaskStatus) -> Result<f64, DbError> {
     Ok(conn.query_row(
         "SELECT COALESCE(MAX(position), 0) + 1 FROM tasks WHERE project_id = ?1 AND status = ?2",
@@ -93,7 +93,7 @@ pub fn next_position(conn: &Connection, project_id: &str, status: TaskStatus) ->
     )?)
 }
 
-/// Ids de las tareas bloqueadas del proyecto (`None`: todas).
+/// Ids of the project's blocked tasks (`None`: all projects).
 pub fn blocked_ids(conn: &Connection, project_id: Option<&str>) -> Result<Vec<String>, DbError> {
     let mut stmt = conn.prepare("SELECT id FROM tasks WHERE status = 'blocked' AND (?1 IS NULL OR project_id = ?1)")?;
     let rows = stmt.query_map([project_id], |r| r.get::<_, String>(0))?;

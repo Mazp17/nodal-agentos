@@ -40,7 +40,7 @@ pub fn insert(conn: &Connection, p: &Project) -> Result<(), DbError> {
     insert_project(conn, p)
 }
 
-/// Guarda todos los campos editables (no toca `next_task_number`).
+/// Saves every editable field (doesn't touch `next_task_number`).
 pub fn update(conn: &Connection, p: &Project) -> Result<(), DbError> {
     if key_taken(conn, &p.key, Some(&p.id))? {
         return Err(key_error(&p.key));
@@ -71,7 +71,7 @@ pub fn delete(conn: &Connection, id: &str) -> Result<(), DbError> {
     Ok(())
 }
 
-/// Toma el próximo número de tarea del proyecto y avanza el contador.
+/// Takes the project's next task number and advances the counter.
 pub fn take_task_number(conn: &Connection, project_id: &str) -> Result<i64, DbError> {
     let n: Option<i64> = conn
         .query_row(
