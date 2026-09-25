@@ -68,6 +68,20 @@ jobs:
           toolchain: stable
           targets: aarch64-apple-darwin, x86_64-apple-darwin
 
+      # tauri-cli only lipos the main binary of a universal build, but bundles every binary of
+      # the crate: make the universal nodal-mcp it copies into Contents/MacOS. Same features as
+      # tauri build, so its per-arch builds below reuse these. dist/ is needed to compile.
+      - name: Build universal nodal-mcp
+        run: |
+          pnpm build
+          cd src-tauri
+          for triple in aarch64-apple-darwin x86_64-apple-darwin; do
+            cargo build --release --locked --bin nodal-mcp --features tauri/custom-protocol --target "$triple"
+          done
+          mkdir -p target/universal-apple-darwin/release
+          lipo -create -output target/universal-apple-darwin/release/nodal-mcp \
+            target/aarch64-apple-darwin/release/nodal-mcp target/x86_64-apple-darwin/release/nodal-mcp
+
       # No cache on purpose: release builds start clean.
       - name: Build universal .dmg and update bundle
         env:
