@@ -44,7 +44,7 @@ Everything stays on your Mac: an SQLite database, worktrees under `~/.nodal`, AP
 
 ### Agents (MCP)
 
-While Nodal is open, agents can list projects and tasks, create and update tasks and read run results through MCP. The app listens on a Unix socket in its data folder (readable only by you, no network port) and `nodal-mcp` bridges it to stdio. Build it from source (`pnpm build`, then `cargo build --release --features mcp-cli --bin nodal-mcp` in `src-tauri`), put `src-tauri/target/release/nodal-mcp` on your `PATH` and register it:
+While Nodal is open, agents can list projects and tasks, create and update tasks and read run results through MCP. The app listens on a Unix socket in its data folder (readable only by you, no network port) and `nodal-mcp` bridges it to stdio. Build it from source (`pnpm build`, then `cargo build --release --bin nodal-mcp` in `src-tauri`), put `src-tauri/target/release/nodal-mcp` on your `PATH` and register it:
 
 ```bash
 claude mcp add nodal -- nodal-mcp

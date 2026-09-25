@@ -64,7 +64,7 @@ pnpm tsc --noEmit
 pnpm build                                    # includes lint:no-native-dialogs
 cd src-tauri
 cargo test --lib
-cargo clippy --all-targets --features mcp-cli -- -D warnings
+cargo clippy --all-targets -- -D warnings
 ```
 
 **Coverage.** Rust line coverage must stay at or above **75%**; CI fails below that and posts a coverage report on the pull request. New logic comes with tests. To check locally (needs `cargo install cargo-llvm-cov` and `rustup component add llvm-tools-preview`):

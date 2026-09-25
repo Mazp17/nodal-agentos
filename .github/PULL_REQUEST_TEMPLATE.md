@@ -9,7 +9,7 @@
 ## Checklist
 
 - [ ] `pnpm tsc --noEmit` and `pnpm build` pass
-- [ ] `cargo test --lib` and `cargo clippy --all-targets --features mcp-cli -- -D warnings` pass (in `src-tauri/`)
+- [ ] `cargo test --lib` and `cargo clippy --all-targets -- -D warnings` pass (in `src-tauri/`)
 - [ ] Rust commands/types and `src/domain/api.ts` / `types.ts` are in sync
 - [ ] Database changes are an additive migration with a test
 - [ ] No real data in fixtures, tests or screenshots; no API keys
