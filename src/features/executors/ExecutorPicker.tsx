@@ -1,24 +1,46 @@
-import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent } from "react";
+import { createPortal } from "react-dom";
 import type { ExecutorInfo } from "../../domain/api";
 import { useExecutors } from "../../domain/hooks/store";
 import type { Executor } from "../../domain/types";
+import { FOCUSABLE } from "../../ui/useFocusTrap";
 import { ExecutorAvatar } from "./ExecutorAvatar";
 import { CLAUDE, executorKey, executorLabel, sameExecutor } from "./executors";
 import "./executors.css";
 
 export interface ExecutorPickerProps {
-  /** Suma los agentes y workflows del repo al catálogo global. */
+  /** Adds the repo's agents and workflows to the global catalog. */
   repoId: string | null;
-  /** `null` = hereda (`inherited`). */
+  /** `null` = inherits (`inherited`). */
   value: Executor | null;
   onChange: (value: Executor | null) => void;
-  /** Si viene, ofrece "Default · x" (valor `null`). */
+  /** When set, offers "Default · x" (value `null`). */
   inherited?: Executor;
-  /** Nombre accesible del botón. */
+  /** Accessible name of the button. */
   label?: string;
   disabled?: boolean;
-  /** Abre el menú hacia arriba (p. ej. al pie de un panel). */
+  /** Prefers opening the menu upwards (e.g. at the foot of a panel). */
   dropUp?: boolean;
+}
+
+const MENU_W = 340;
+const MENU_MAX_H = 360;
+const GAP = 4;
+const EDGE = 8;
+
+/**
+ * Fixed position of the menu next to the trigger. It lives in a portal on the body because
+ * panels and dialogs clip it (overflow) and their `translate` breaks `position: fixed` inside.
+ * Opens towards the side with more room when the preferred one doesn't fit, and stays in the window.
+ */
+function menuPosition(trigger: DOMRect, dropUp: boolean): CSSProperties {
+  const below = window.innerHeight - trigger.bottom - GAP - EDGE;
+  const above = trigger.top - GAP - EDGE;
+  const up = dropUp ? above >= MENU_MAX_H || above >= below : below < MENU_MAX_H && above > below;
+  const left = Math.max(EDGE, Math.min(trigger.left, window.innerWidth - MENU_W - EDGE));
+  return up
+    ? { left, bottom: window.innerHeight - trigger.top + GAP, maxHeight: Math.max(0, Math.min(MENU_MAX_H, above)) }
+    : { left, top: trigger.bottom + GAP, maxHeight: Math.max(0, Math.min(MENU_MAX_H, below)) };
 }
 
 interface Group {
@@ -34,7 +56,7 @@ function matches(info: ExecutorInfo, q: string) {
   return hay.includes(q);
 }
 
-/** Selector de ejecutor: agentes, workflows y Claude, cada uno con su fuente y descripción. */
+/** Executor picker: agents, workflows and Claude, each with its source and description. */
 export function ExecutorPicker({ repoId, value, onChange, inherited, label = "Executor", disabled, dropUp }: ExecutorPickerProps) {
   const { data: catalog, error } = useExecutors(repoId);
   const [open, setOpen] = useState(false);
@@ -42,6 +64,8 @@ export function ExecutorPicker({ repoId, value, onChange, inherited, label = "Ex
   const wrap = useRef<HTMLDivElement>(null);
   const trigger = useRef<HTMLButtonElement>(null);
   const search = useRef<HTMLInputElement>(null);
+  const menu = useRef<HTMLDivElement>(null);
+  const [pos, setPos] = useState<CSSProperties | null>(null);
   const menuId = useId();
 
   const shown = value ?? inherited ?? CLAUDE;
@@ -59,35 +83,84 @@ export function ExecutorPicker({ repoId, value, onChange, inherited, label = "Ex
     }
     if (agents.length) out.push({ title: "Agents", items: agents.map((info) => ({ executor: info.executor, info })) });
     if (workflows.length) out.push({ title: "Workflows", items: workflows.map((info) => ({ executor: info.executor, info })) });
-    // Claude siempre está, aunque el catálogo no lo liste.
+    // Claude is always there, even if the catalog doesn't list it.
     if (claudeInfo || !ql || "claude".includes(ql)) {
       out.push({ title: "Claude", items: [{ executor: claudeInfo?.executor ?? CLAUDE, info: claudeInfo }] });
     }
     return out;
   }, [catalog, q, inherited]);
 
+  useLayoutEffect(() => {
+    if (!open) {
+      setPos(null);
+      return;
+    }
+    const place = () => {
+      const r = trigger.current?.getBoundingClientRect();
+      if (!r) return;
+      // If the trigger scrolls out of view, the menu has nothing to anchor to.
+      if (r.bottom < 0 || r.top > window.innerHeight) setOpen(false);
+      else setPos(menuPosition(r, !!dropUp));
+    };
+    const onScroll = (e: Event) => {
+      if (!menu.current?.contains(e.target as Node)) place();
+    };
+    place();
+    // Capture: follows the trigger when its containing panel scrolls.
+    window.addEventListener("resize", place);
+    window.addEventListener("scroll", onScroll, true);
+    return () => {
+      window.removeEventListener("resize", place);
+      window.removeEventListener("scroll", onScroll, true);
+    };
+  }, [open, dropUp]);
+
   useEffect(() => {
     if (!open) return;
     const onDown = (e: MouseEvent) => {
-      if (!wrap.current?.contains(e.target as Node)) setOpen(false);
+      const t = e.target as Node;
+      if (!wrap.current?.contains(t) && !menu.current?.contains(t)) setOpen(false);
     };
     document.addEventListener("mousedown", onDown);
-    search.current?.focus();
     return () => document.removeEventListener("mousedown", onDown);
   }, [open]);
+
+  const placed = pos !== null;
+  useEffect(() => {
+    if (placed) search.current?.focus();
+  }, [placed]);
 
   const close = () => {
     setOpen(false);
     setQ("");
     trigger.current?.focus();
   };
+  /**
+   * Tab from the menu follows the trigger's order: the menu lives in a portal, so native
+   * Tab would go to the end of the body. Wraps within the enclosing modal dialog.
+   */
+  const tabFrom = (back: boolean) => {
+    const t = trigger.current;
+    setOpen(false);
+    setQ("");
+    if (!t) return;
+    const scope = t.closest<HTMLElement>('[aria-modal="true"]') ?? document.body;
+    const list = [...scope.querySelectorAll<HTMLElement>(FOCUSABLE)].filter(
+      (el) => el.getClientRects().length > 0 && !menu.current?.contains(el),
+    );
+    const i = list.indexOf(t);
+    if (i < 0) return t.focus();
+    const next = back ? list[i - 1] : list[i + 1];
+    (next ?? (scope === document.body ? t : list[back ? list.length - 1 : 0]) ?? t).focus();
+  };
+
   const pick = (e: Executor | null) => {
     onChange(e);
     close();
   };
 
   const onKey = (e: KeyboardEvent<HTMLDivElement>) => {
-    const items = [...(wrap.current?.querySelectorAll<HTMLElement>(".ex-item") ?? [])];
+    const items = [...(menu.current?.querySelectorAll<HTMLElement>(".ex-item") ?? [])];
     const i = items.indexOf(document.activeElement as HTMLElement);
     if (e.key === "Escape") {
       e.preventDefault();
@@ -101,8 +174,10 @@ export function ExecutorPicker({ repoId, value, onChange, inherited, label = "Ex
       if (i <= 0) search.current?.focus();
       else items[i - 1]?.focus();
     } else if (e.key === "Tab") {
-      setOpen(false);
-      setQ("");
+      // Don't propagate: the dialog's focus trap would move focus again.
+      e.preventDefault();
+      e.stopPropagation();
+      tabFrom(e.shiftKey);
     }
   };
 
@@ -128,11 +203,15 @@ export function ExecutorPicker({ repoId, value, onChange, inherited, label = "Ex
         {!known && <span className="ex-missing" title="Not found in this repo's catalog">not found</span>}
         <span className="ex-caret" aria-hidden>▼</span>
       </button>
-      {open && (
+      {open && pos && createPortal(
         <div
+          ref={menu}
           id={menuId}
-          className={`menu ex-menu ${dropUp ? "ex-menu-up" : ""}`}
+          className="menu ex-menu"
+          style={pos}
           role="dialog"
+          // Outside the parent dialog (aria-modal): without this VoiceOver hides it.
+          aria-modal="true"
           aria-label={label}
           onKeyDown={onKey}
           onClick={(e) => e.stopPropagation()}
@@ -147,7 +226,7 @@ export function ExecutorPicker({ repoId, value, onChange, inherited, label = "Ex
             onKeyDown={(e) => {
               if (e.key === "ArrowDown") {
                 e.preventDefault();
-                wrap.current?.querySelector<HTMLElement>(".ex-item")?.focus();
+                menu.current?.querySelector<HTMLElement>(".ex-item")?.focus();
               }
             }}
           />
@@ -194,7 +273,8 @@ export function ExecutorPicker({ repoId, value, onChange, inherited, label = "Ex
           ))}
           {catalog && groups.length === 0 && <div className="ex-note">No executors match.</div>}
           </div>
-        </div>
+        </div>,
+        document.body,
       )}
     </div>
   );

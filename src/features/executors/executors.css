@@ -1,4 +1,4 @@
-/* Ejecutores: ícono, nombre y selector. */
+/* Executors: icon, name and picker. */
 
 .ex-icon {
   flex: none;
@@ -45,8 +45,8 @@
 }
 .ex-missing { color: var(--red); border-color: var(--red-tint-35); }
 
-.ex-menu { top: calc(var(--h-xl) + 4px); left: 0; width: 340px; max-height: 360px; }
-.ex-menu-up { top: auto; bottom: calc(var(--h-xl) + 4px); }
+/* In a portal on the body, positioned by ExecutorPicker; above dialogs (56). */
+.ex-menu { position: fixed; z-index: 60; width: 340px; }
 .ex-search { width: 100%; height: var(--h-lg); margin-bottom: var(--sp-1); }
 .ex-note { padding: var(--sp-2) var(--sp-3); font-size: var(--fs-sm); color: var(--text-dim); }
 .ex-error { color: var(--red-text); }

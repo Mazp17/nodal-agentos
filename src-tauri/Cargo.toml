@@ -5,6 +5,8 @@ description = "Nodal — Agent OS for Claude"
 authors = ["Nodal contributors"]
 license = "MIT"
 edition = "2021"
+# `pnpm tauri dev` runs the app, not `nodal-mcp`.
+default-run = "nodal"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
