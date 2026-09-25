@@ -1,4 +1,4 @@
-/* Issue detail: drawer lateral de 470px. */
+/* Issue detail: 470px side drawer. */
 
 .issue-panel { width: var(--w-issue-panel); max-width: 100%; background: var(--surface-drawer); }
 
@@ -105,7 +105,7 @@
   justify-content: flex-end;
 }
 
-/* ---- Detalle de Linear ---- */
+/* ---- Linear detail ---- */
 .ip-labels { display: flex; flex-wrap: wrap; gap: var(--sp-1); list-style: none; margin: 0; padding: 0; }
 .ip-label {
   display: inline-flex;

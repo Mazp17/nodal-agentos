@@ -1,15 +1,15 @@
-//! Transiciones de estado de tareas y runs (puras). La cola junta los datos (salida de
-//! `claude agents`, archivos de la sesión, catálogo de ejecutores) y aplica lo que se
-//! decide acá en una sola transacción.
+//! Task and run state transitions (pure). The queue gathers the data (`claude agents`
+//! output, session files, executor catalog) and applies what's decided here in a single
+//! transaction.
 //!
-//! Reglas (plan, sección Transiciones):
-//! - al encolar un run de trabajo, la tarea pasa a In Progress;
-//! - al terminar un run de trabajo: si `review` está activa (y el ejecutor no revisa solo)
-//!   se encola el revisor y la tarea sigue en In Progress; si no, green/yellow o `done`
-//!   → In Review, red o `blocked` → Blocked;
-//! - al terminar el revisor: pass → In Review; fail → Blocked. Sin reintento automático;
-//! - detenido o muerto sin resultado → Blocked. Un launch fallido no cambia la tarea;
-//! - Done y Canceled solo a mano (o por pull): una tarea ahí no se toca.
+//! Rules (plan, Transitions section):
+//! - when a work run is enqueued, the task moves to In Progress;
+//! - when a work run finishes: if `review` is on (and the executor doesn't review itself)
+//!   the reviewer is enqueued and the task stays In Progress; otherwise, green/yellow or
+//!   `done` → In Review, red or `blocked` → Blocked;
+//! - when the reviewer finishes: pass → In Review; fail → Blocked. No automatic retry;
+//! - stopped or dead without a result → Blocked. A failed launch doesn't change the task;
+//! - Done and Canceled only by hand (or by pull): a task there isn't touched.
 
 use crate::domain::{Executor, Run, RunKind, RunOutcome, Task, TaskStatus, Verdict};
 use crate::runs::SessionReadout;
@@ -18,7 +18,7 @@ use crate::util::clip_chars;
 use super::queue::EndSignal;
 use super::report::{clean_branch, clean_url, parse_agent_report, parse_verdict, ReportStatus};
 
-/// Lo que se sabe de un run que terminó.
+/// What's known about a run that finished.
 #[derive(Debug, Clone, PartialEq)]
 pub struct RunEnd {
     pub signal: EndSignal,
@@ -26,13 +26,13 @@ pub struct RunEnd {
     pub summary: Option<String>,
     pub pr: Option<String>,
     pub branch: Option<String>,
-    /// Del revisor, o del resultado de un workflow que revisa.
+    /// From the reviewer, or from the result of a workflow that reviews.
     pub verdict: Option<Verdict>,
-    /// Aviso para mostrar en el run (queda en `error`).
+    /// Notice to show on the run (stored in `error`).
     pub note: Option<String>,
-    /// Terminó normalmente pero sin el bloque JSON final.
+    /// Finished normally but without the final JSON block.
     pub missing_report: bool,
-    /// Tokens del transcript (agente/Claude/revisor); `None` = no tocar `runs.tokens`.
+    /// Transcript tokens (agent/Claude/reviewer); `None` = leave `runs.tokens` as is.
     pub tokens: Option<i64>,
 }
 
@@ -43,8 +43,8 @@ pub const NOTE_FAILED: &str = "The session failed.";
 pub const NOTE_VANISHED: &str = "The session is no longer listed by `claude agents`.";
 pub const NOTE_NO_RESULT: &str = "The workflow finished without a result.";
 
-/// Interpreta la salida de la sesión según el tipo de run y de ejecutor.
-/// `executor_reviews`: el workflow declara `reviews: true` (su resultado es el veredicto).
+/// Interprets the session output according to the run and executor type.
+/// `executor_reviews`: the workflow declares `reviews: true` (its result is the verdict).
 pub fn read_end(run: &Run, signal: EndSignal, readout: &SessionReadout, executor_reviews: bool) -> RunEnd {
     let mut end = RunEnd {
         signal,
@@ -131,7 +131,7 @@ pub fn read_end(run: &Run, signal: EndSignal, readout: &SessionReadout, executor
             None => {
                 end.missing_report = true;
                 end.note = Some(NOTE_NO_REPORT.into());
-                // Sin JSON, el último mensaje sirve de resumen para el siguiente paso.
+                // Without JSON, the last message serves as the summary for the next step.
                 end.summary = readout.last_message.as_deref().map(|m| clip_chars(m.trim(), 4000));
             }
         },
@@ -139,14 +139,14 @@ pub fn read_end(run: &Run, signal: EndSignal, readout: &SessionReadout, executor
     end
 }
 
-/// Qué hacer cuando termina un run.
+/// What to do when a run finishes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Decision {
-    /// Estado nuevo de la tarea (`None`: no cambia).
+    /// New task status (`None`: unchanged).
     pub task_status: Option<TaskStatus>,
-    /// Encolar el revisor sobre el mismo cwd.
+    /// Enqueue the reviewer on the same cwd.
     pub enqueue_review: bool,
-    /// Es el cierre del paso: se deja el comentario en el proveedor.
+    /// It closes the step: the comment is left on the provider.
     pub closing: bool,
 }
 
@@ -169,7 +169,7 @@ pub fn decide(run: &Run, end: &RunEnd) -> Decision {
     if dead {
         return blocked;
     }
-    // Un workflow que revisa trae su veredicto: si falló, Blocked.
+    // A workflow that reviews brings its own verdict: if it failed, Blocked.
     if let Some(v) = &end.verdict {
         if !v.pass {
             return blocked;
@@ -181,7 +181,7 @@ pub fn decide(run: &Run, end: &RunEnd) -> Decision {
     in_review
 }
 
-/// Estado final de la tarea: Done/Canceled (puestos a mano) no se pisan.
+/// Final task status: Done/Canceled (set by hand) aren't overwritten.
 pub fn apply_status(current: TaskStatus, next: Option<TaskStatus>) -> Option<TaskStatus> {
     match (current, next) {
         (TaskStatus::Done | TaskStatus::Canceled, _) => None,
@@ -190,28 +190,27 @@ pub fn apply_status(current: TaskStatus, next: Option<TaskStatus>) -> Option<Tas
     }
 }
 
-/// Estado de la tarea al encolar un run de trabajo.
+/// Task status when a work run is enqueued.
 pub fn on_enqueue_work(current: TaskStatus) -> Option<TaskStatus> {
     apply_status(current, Some(TaskStatus::InProgress))
 }
 
-/// Estados que Nodal empuja al proveedor. Todo cubre sacar de la cola el único run de una
-/// tarea (vuelve de In Progress a Todo; si no, el proveedor quedaría en In Progress). El
-/// proveedor lo resuelve con su `state_map` (sin mapeo, se descarta).
+/// Statuses Nodal pushes to the provider. Todo covers dequeuing a task's only run (it goes
+/// back from In Progress to Todo; otherwise the provider would stay In Progress). The
+/// provider resolves it with its `state_map` (without a mapping, it's dropped).
 pub const PUSHED_STATUSES: [TaskStatus; 4] =
     [TaskStatus::InProgress, TaskStatus::InReview, TaskStatus::Blocked, TaskStatus::Todo];
 
-/// Qué escribir en el proveedor por un cambio hecho en Nodal.
+/// What to write to the provider for a change made in Nodal.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum OutboxOp {
     Status(TaskStatus),
     Comment(String),
 }
 
-/// Escrituras al proveedor por un cambio de la tarea. Nada si la tarea es local o si el
-/// ejecutor sincroniza el proveedor por su cuenta (`managesSource` del mismo proveedor).
-/// El mapeo (pendiente, "No sincronizar", estados desaparecidos) lo resuelve el proveedor
-/// al drenar.
+/// Provider writes for a task change. Nothing if the task is local or if the executor syncs
+/// the provider on its own (`managesSource` of the same provider). The mapping (pending,
+/// "Don't sync", vanished states) is resolved by the provider when draining.
 pub fn outbox_ops(
     task: &Task,
     new_status: Option<TaskStatus>,
@@ -279,8 +278,8 @@ mod tests {
         Executor::Agent { name: "frontend-developer".into(), source: AgentSource::User }
     }
 
-    const DONE: &str = "ok ```json\n{\"status\":\"done\",\"summary\":\"hecho\",\"branch\":\"nodal/pay-1-x\"}\n```";
-    const BLOCKED: &str = "{\"status\":\"blocked\",\"summary\":\"falta acceso\"}";
+    const DONE: &str = "ok ```json\n{\"status\":\"done\",\"summary\":\"done\",\"branch\":\"nodal/pay-1-x\"}\n```";
+    const BLOCKED: &str = "{\"status\":\"blocked\",\"summary\":\"no access\"}";
 
     #[test]
     fn agent_done_without_review_goes_to_in_review() {
@@ -298,10 +297,10 @@ mod tests {
         let end = read_end(&run, EndSignal::Done, &readout(DONE), false);
         let d = decide(&run, &end);
         assert_eq!(d, Decision { task_status: None, enqueue_review: true, closing: false });
-        // Sin reporte también lo decide el revisor.
-        let end = read_end(&run, EndSignal::Done, &readout("terminé"), false);
+        // Without a report the reviewer decides too.
+        let end = read_end(&run, EndSignal::Done, &readout("finished"), false);
         assert!(end.missing_report);
-        assert_eq!(end.summary.as_deref(), Some("terminé"));
+        assert_eq!(end.summary.as_deref(), Some("finished"));
         assert!(decide(&run, &end).enqueue_review);
     }
 
@@ -323,7 +322,7 @@ mod tests {
     #[test]
     fn no_report_without_reviewer_goes_to_in_review_with_warning() {
         let run = run_of(Executor::Claude, RunKind::Work, false);
-        let end = read_end(&run, EndSignal::Done, &readout("listo, sin json"), false);
+        let end = read_end(&run, EndSignal::Done, &readout("done, no json"), false);
         assert_eq!(end.outcome, RunOutcome::Unknown);
         assert_eq!(end.note.as_deref(), Some(NOTE_NO_REPORT));
         assert_eq!(decide(&run, &end).task_status, Some(TaskStatus::InReview));
@@ -332,22 +331,22 @@ mod tests {
     #[test]
     fn reviewer_pass_and_fail() {
         let review = run_of(Executor::Agent { name: "code-reviewer".into(), source: AgentSource::User }, RunKind::Review, false);
-        let pass = read_end(&review, EndSignal::Done, &readout("{\"verdict\":\"pass\",\"unmet\":[],\"nits\":[\"n1\"],\"summary\":\"bien\"}"), false);
+        let pass = read_end(&review, EndSignal::Done, &readout("{\"verdict\":\"pass\",\"unmet\":[],\"nits\":[\"n1\"],\"summary\":\"good\"}"), false);
         assert_eq!(pass.outcome, RunOutcome::Green);
         assert_eq!(decide(&review, &pass).task_status, Some(TaskStatus::InReview));
         let fail = read_end(&review, EndSignal::Done, &readout("{\"verdict\":\"fail\",\"unmet\":[\"c1\"],\"nits\":[],\"summary\":\"no\"}"), false);
         assert_eq!(fail.outcome, RunOutcome::Red);
         let d = decide(&review, &fail);
         assert_eq!(d.task_status, Some(TaskStatus::Blocked));
-        assert!(!d.enqueue_review, "sin reintento automático");
-        let none = read_end(&review, EndSignal::Done, &readout("no sé"), false);
+        assert!(!d.enqueue_review, "no automatic retry");
+        let none = read_end(&review, EndSignal::Done, &readout("not sure"), false);
         assert_eq!(none.note.as_deref(), Some(NOTE_NO_VERDICT));
         assert_eq!(decide(&review, &none).task_status, Some(TaskStatus::Blocked));
     }
 
     #[test]
     fn workflow_with_reviews_skips_gate_and_uses_its_result() {
-        // `review` ya viene resuelto en false al encolar un workflow que revisa.
+        // `review` is already resolved to false when enqueueing a workflow that reviews.
         let run = run_of(Executor::Workflow { name: "plan-task".into() }, RunKind::Work, false);
         let res = RunResult {
             pr: Some("https://example.com/acme/web/pull/3".into()),
@@ -423,14 +422,14 @@ mod tests {
         let t = linked_task();
         let ops = outbox_ops(&t, Some(TaskStatus::InReview), Some("c".into()), None);
         assert_eq!(ops, vec![OutboxOp::Status(TaskStatus::InReview), OutboxOp::Comment("c".into())]);
-        // Solo In Progress, In Review y Blocked se empujan.
+        // Only In Progress, In Review and Blocked are pushed.
         assert_eq!(outbox_ops(&t, Some(TaskStatus::Done), None, None), vec![]);
         assert_eq!(outbox_ops(&t, Some(TaskStatus::Blocked), None, None), vec![OutboxOp::Status(TaskStatus::Blocked)]);
-        // managesSource del mismo proveedor: nada.
+        // managesSource of the same provider: nothing.
         assert!(outbox_ops(&t, Some(TaskStatus::InReview), Some("c".into()), Some("linear")).is_empty());
-        // Otro proveedor en managesSource: sí.
+        // Another provider in managesSource: yes.
         assert_eq!(outbox_ops(&t, Some(TaskStatus::InProgress), None, Some("asana")).len(), 1);
-        // Tarea local: nada.
+        // Local task: nothing.
         assert!(outbox_ops(&task_of("t2"), Some(TaskStatus::InReview), Some("c".into()), None).is_empty());
         assert_eq!(outbox_ops(&t, Some(TaskStatus::Todo), None, None), vec![OutboxOp::Status(TaskStatus::Todo)]);
     }

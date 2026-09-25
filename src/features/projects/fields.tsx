@@ -1,4 +1,4 @@
-// Controles compartidos por el onboarding, New project y Project settings.
+// Controls shared by onboarding, New project and Project settings.
 
 import { useId, type KeyboardEvent } from "react";
 import { useProviderScopes, useProviderStatus } from "../../domain/hooks/providers";
@@ -8,7 +8,7 @@ import "../providers/providers.css";
 import { PROJECT_COLORS } from "./create";
 import "./projects.css";
 
-/** Nombres accesibles de `PROJECT_COLORS`, en el mismo orden. */
+/** Accessible names for `PROJECT_COLORS`, in the same order. */
 const COLOR_NAMES = ["Amber", "Blue", "Green", "Magenta", "Yellow", "Red", "Teal", "Violet"];
 
 export function ColorSwatches({
@@ -23,7 +23,7 @@ export function ColorSwatches({
   const colors: readonly string[] = PROJECT_COLORS.includes(value as (typeof PROJECT_COLORS)[number])
     ? PROJECT_COLORS
     : [...PROJECT_COLORS, value];
-  // Radio group con flechas (WAI-ARIA): un solo tab stop.
+  // Radio group with arrow keys (WAI-ARIA): a single tab stop.
   const onKey = (e: KeyboardEvent<HTMLDivElement>) => {
     const dir = e.key === "ArrowRight" || e.key === "ArrowDown" ? 1 : e.key === "ArrowLeft" || e.key === "ArrowUp" ? -1 : 0;
     if (!dir) return;
@@ -59,7 +59,7 @@ export interface SegOption<T> {
   label: string;
 }
 
-/** Segmentado de una sola elección (radio group). */
+/** Single-choice segmented control (radio group). */
 export function Segmented<T>({
   value,
   options,
@@ -106,9 +106,9 @@ export function Segmented<T>({
 }
 
 /**
- * Team o proyecto de Linear para la fuente de un proyecto nuevo (diálogo "New project").
- * Sin key conectada remite a Settings → Integrations; la key se carga en el onboarding
- * (ConnectProviderStep) o en Settings.
+ * Linear team or project for a new project's source ("New project" dialog).
+ * Without a connected key it points to Settings → Integrations; the key is entered in onboarding
+ * (ConnectProviderStep) or in Settings.
  */
 export function LinearScopeField({ value, onChange }: { value: ScopeRef | null; onChange: (s: ScopeRef | null) => void }) {
   const st = useProviderStatus("linear");

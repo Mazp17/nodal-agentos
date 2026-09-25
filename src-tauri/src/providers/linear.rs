@@ -1,5 +1,5 @@
-//! Adapter de Linear. Las queries y el parseo viven en `crate::linear::{client,model}`;
-//! acá solo se traduce al modelo genérico. Scopes: `team` y `project`.
+//! Linear adapter. Queries and parsing live in `crate::linear::{client,model}`; here we only
+//! translate to the generic model. Scopes: `team` and `project`.
 
 use crate::domain::{ExtKind, ExternalState, Priority, ScopeRef};
 use crate::linear::client::LinearClient;
@@ -22,7 +22,7 @@ impl LinearProvider {
     }
 }
 
-/// `WorkflowState.type` → tipo normalizado.
+/// `WorkflowState.type` → normalized kind.
 pub fn ext_kind(state_type: &str) -> ExtKind {
     match state_type {
         "triage" => ExtKind::Triage,
@@ -30,7 +30,7 @@ pub fn ext_kind(state_type: &str) -> ExtKind {
         "unstarted" => ExtKind::Unstarted,
         "started" => ExtKind::Started,
         "completed" => ExtKind::Completed,
-        // Por si Linear expone "duplicate" como tipo propio (hoy es `canceled`).
+        // In case Linear exposes "duplicate" as its own type (today it is `canceled`).
         "canceled" | "duplicate" => ExtKind::Canceled,
         _ => ExtKind::Unknown,
     }
@@ -52,7 +52,7 @@ pub fn ext_state(s: &WorkflowState) -> ExternalState {
     ExternalState { id: s.id.clone(), name: s.name.clone(), kind: ext_kind(&s.state_type), color: Some(s.color.clone()) }
 }
 
-/// 0 = sin prioridad, 1 = urgente … 4 = baja.
+/// 0 = no priority, 1 = urgent … 4 = low.
 pub fn priority(p: f64) -> Priority {
     match p.round() as i64 {
         1 => Priority::Urgent,
@@ -63,8 +63,8 @@ pub fn priority(p: f64) -> Priority {
     }
 }
 
-/// Estados de uno o varios teams. Con varios (proyecto multi-team) el nombre lleva el key del
-/// team para distinguir "ENG · In Progress" de "OPS · In Progress".
+/// States of one or more teams. With several (multi-team project) the name carries the team
+/// key to tell "ENG · In Progress" apart from "OPS · In Progress".
 pub fn scoped_states(states: &[ScopedState]) -> Vec<ExternalState> {
     let multi = states.iter().any(|s| s.team.id != states[0].team.id);
     states
@@ -192,8 +192,8 @@ impl TaskProvider for LinearProvider {
 
     async fn set_state(&self, external_id: &str, state_id: &str) -> ProviderResult<ExternalState> {
         let c = self.client();
-        // Un query más por push (son pocos): en un proyecto multi-team el mapeo apunta al
-        // estado de un team, y la issue puede ser de otro.
+        // One extra query per push (there are few): in a multi-team project the mapping points
+        // to one team's state, and the issue may belong to another.
         let (team, target) = c.issue_team_states(external_id, state_id).await?;
         let Some(pick) = pick_team_state(&team, &target) else {
             return Err(ProviderError::new(
@@ -215,21 +215,21 @@ impl TaskProvider for LinearProvider {
 
 #[cfg(test)]
 mod tests {
-    //! Fixtures GraphQL ficticios (workspace "acme"), con la forma de las respuestas reales.
+    //! Fictitious GraphQL fixtures (workspace "acme"), shaped like the real responses.
     use super::*;
     use crate::linear::model::{interpret_response, IssueUpdateData, SyncIssuesData, WorkflowStatesData};
     use serde_json::json;
 
     const ISSUES_BY_IDS: &str = r##"{"data":{"issues":{"nodes":[{
-      "id":"uuid-142","identifier":"ENG-142","title":"Rebrand de la web",
-      "url":"https://linear.app/acme/issue/ENG-142/rebrand-de-la-web",
+      "id":"uuid-142","identifier":"ENG-142","title":"Website rebrand",
+      "url":"https://linear.app/acme/issue/ENG-142/website-rebrand",
       "priority":2,"updatedAt":"2026-09-20T10:00:00.000Z",
-      "description":"Cambiar el logo.\n\n## Acceptance criteria\n- Logo nuevo en el header\n- [ ] Favicon actualizado\n",
+      "description":"Change the logo.\n\n## Acceptance criteria\n- New logo in the header\n- [ ] Favicon updated\n",
       "state":{"id":"st-prog","name":"In Progress","type":"started","position":3,"color":"#f2c94c"},
       "team":{"id":"team-eng","key":"ENG","name":"Engineering"},
       "project":{"id":"proj-web","name":"Website"},
       "assignee":{"id":"u1","name":"Ana Pérez","displayName":"ana"},
-      "parent":{"id":"uuid-100","identifier":"ENG-100","title":"Marca nueva","url":"https://linear.app/acme/issue/ENG-100/marca-nueva"},
+      "parent":{"id":"uuid-100","identifier":"ENG-100","title":"New brand","url":"https://linear.app/acme/issue/ENG-100/new-brand"},
       "labels":{"nodes":[{"name":"frontend"},{"name":"brand"}]},
       "children":{"nodes":[
         {"id":"uuid-143","identifier":"ENG-143","title":"Header","url":"https://linear.app/acme/issue/ENG-143/header",
@@ -258,7 +258,7 @@ mod tests {
     #[test]
     fn list_page_without_optional_fields() {
         let body = r##"{"data":{"issues":{"nodes":[{
-          "id":"uuid-7","identifier":"ENG-7","title":"Algo","url":"https://linear.app/acme/issue/ENG-7/algo",
+          "id":"uuid-7","identifier":"ENG-7","title":"Something","url":"https://linear.app/acme/issue/ENG-7/something",
           "priority":0,"updatedAt":"2026-09-20T10:00:00.000Z",
           "state":{"id":"st-todo","name":"Todo","type":"unstarted","position":2,"color":"#e2e2e2"},
           "team":{"id":"team-eng","key":"ENG","name":"Engineering"},"project":null,
@@ -348,7 +348,7 @@ mod tests {
 
     #[test]
     fn project_rule_filter_shape() {
-        // Backfill: team + proyecto + (abiertas | cerradas en 14 días).
+        // Backfill: team + project + (open | closed within 14 days).
         let f = project_rule_filter("team", "team-eng", "proj-web", &["triage", "backlog", "unstarted", "started"], Some(14), None);
         assert_eq!(f["and"][0], json!({"team": {"id": {"eq": "team-eng"}}}));
         assert_eq!(f["and"][1], json!({"project": {"id": {"eq": "proj-web"}}}));
@@ -361,30 +361,30 @@ mod tests {
             ]})
         );
         assert_eq!(f["and"].as_array().unwrap().len(), 3);
-        // Auto-import: abiertas creadas después de la regla.
+        // Auto-import: open ones created after the rule.
         let a = project_rule_filter("team", "team-eng", "proj-web", &["started"], None, Some("2026-09-10T00:00:00.000Z"));
         assert_eq!(a["and"][2], json!({"state": {"type": {"in": ["started"]}}}));
         assert_eq!(a["and"][3], json!({"createdAt": {"gt": "2026-09-10T00:00:00.000Z"}}));
     }
 
-    /// Página del backfill (fixture ficticio): abierta, completada hace 2 días y cancelada
-    /// hace 30 (Linear no debería devolverla; el control local la descarta igual).
+    /// Backfill page (fictitious fixture): open, completed 2 days ago and canceled 30 days ago
+    /// (Linear should not return it; the local check drops it anyway).
     #[test]
     fn backfill_page_parses_dates_and_project() {
         let body = r##"{"data":{"issues":{"nodes":[
-          {"id":"u1","identifier":"ENG-1","title":"Abierta","url":"https://linear.app/acme/issue/ENG-1/a",
+          {"id":"u1","identifier":"ENG-1","title":"Open","url":"https://linear.app/acme/issue/ENG-1/a",
            "priority":0,"updatedAt":"2026-09-20T10:00:00.000Z","createdAt":"2026-08-01T10:00:00.000Z",
            "completedAt":null,"canceledAt":null,
            "state":{"id":"st-todo","name":"Todo","type":"unstarted","position":2,"color":"#e2e2e2"},
            "team":{"id":"team-eng","key":"ENG","name":"Engineering"},"project":{"id":"proj-web","name":"Website"},
            "labels":{"nodes":[]}},
-          {"id":"u2","identifier":"ENG-2","title":"Hecha","url":"https://linear.app/acme/issue/ENG-2/b",
+          {"id":"u2","identifier":"ENG-2","title":"Done","url":"https://linear.app/acme/issue/ENG-2/b",
            "priority":3,"updatedAt":"2026-09-19T10:00:00.000Z","createdAt":"2026-08-02T10:00:00.000Z",
            "completedAt":"2026-09-19T10:00:00.000Z","canceledAt":null,
            "state":{"id":"st-done","name":"Done","type":"completed","position":6,"color":"#5e6ad2"},
            "team":{"id":"team-eng","key":"ENG","name":"Engineering"},"project":{"id":"proj-web","name":"Website"},
            "labels":{"nodes":[{"name":"frontend"}]}},
-          {"id":"u3","identifier":"ENG-3","title":"Vieja","url":"https://linear.app/acme/issue/ENG-3/c",
+          {"id":"u3","identifier":"ENG-3","title":"Old","url":"https://linear.app/acme/issue/ENG-3/c",
            "priority":0,"updatedAt":"2026-08-22T10:00:00.000Z","createdAt":"2026-08-03T10:00:00.000Z",
            "completedAt":null,"canceledAt":"2026-08-22T10:00:00.000Z",
            "state":{"id":"st-canc","name":"Canceled","type":"canceled","position":7,"color":"#95a2b3"},
@@ -415,8 +415,8 @@ mod tests {
         assert_eq!(ext_kind("weird"), ExtKind::Unknown);
     }
 
-    /// Contra la API real: `cargo test -- --ignored live_provider` con LINEAR_API_KEY.
-    /// Solo lectura: no cambia estados ni comenta.
+    /// Against the real API: `cargo test -- --ignored live_provider` with LINEAR_API_KEY.
+    /// Read-only: does not change states or comment.
     #[test]
     #[ignore]
     fn live_provider_read_only() {

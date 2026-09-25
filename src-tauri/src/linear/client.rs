@@ -1,4 +1,4 @@
-//! Cliente HTTP mínimo para la API GraphQL de Linear.
+//! Minimal HTTP client for Linear's GraphQL API.
 
 use super::detail::{issue_detail_query, IssueDetail, IssueDetailData};
 use super::error::LinearError;
@@ -30,7 +30,7 @@ impl<'a> LinearClient<'a> {
     }
 
     async fn query<T: DeserializeOwned>(&self, query: &str, variables: Value) -> Result<T, LinearError> {
-        // Personal API keys van sin "Bearer" (sólo OAuth lo usa):
+        // Personal API keys go without "Bearer" (only OAuth uses it):
         // https://linear.app/developers/graphql#personal-api-keys
         let mut auth = HeaderValue::from_str(self.key).map_err(|_| LinearError::InvalidKey)?;
         auth.set_sensitive(true);
@@ -88,7 +88,7 @@ impl<'a> LinearClient<'a> {
         Ok(Board { teams: states.into_team_states(), issues, truncated })
     }
 
-    /// Proyectos activos (ni completed ni canceled), por nombre.
+    /// Active projects (neither completed nor canceled), by name.
     pub async fn projects(&self) -> Result<Vec<ProjectRef>, LinearError> {
         let d: ProjectsData = self.query(PROJECTS_QUERY, json!({})).await?;
         let mut out = d.projects.nodes;
@@ -96,7 +96,7 @@ impl<'a> LinearClient<'a> {
         Ok(out)
     }
 
-    /// Proyectos activos a los que tiene acceso el team, por nombre.
+    /// Active projects the team has access to, by name.
     pub async fn team_projects(&self, team_id: &str) -> Result<Vec<ProjectRef>, LinearError> {
         let d: ProjectsData = self.query(TEAM_PROJECTS_QUERY, json!({ "teamId": team_id })).await?;
         let mut out = d.projects.nodes;
@@ -109,7 +109,7 @@ impl<'a> LinearClient<'a> {
         Ok(d.project.teams.nodes)
     }
 
-    /// Estados (no archivados) de esos teams, ordenados por team y posición.
+    /// (Non-archived) states of those teams, sorted by team and position.
     pub async fn workflow_states(&self, team_ids: &[String]) -> Result<Vec<ScopedState>, LinearError> {
         let d: WorkflowStatesData = self.query(WORKFLOW_STATES_QUERY, json!({ "teamIds": team_ids })).await?;
         let mut out = d.workflow_states.nodes;
@@ -117,7 +117,7 @@ impl<'a> LinearClient<'a> {
         Ok(out)
     }
 
-    /// Una página del listado de importables (`filter` de `model::importable_filter`).
+    /// One page of the importables listing (`filter` from `model::importable_filter`).
     pub async fn importable_page(
         &self,
         filter: &Value,
@@ -133,8 +133,8 @@ impl<'a> LinearClient<'a> {
         Ok((d.issues.nodes, next))
     }
 
-    /// Issues completas por UUID, en lotes de `PULL_BATCH`. Las que no existen (o la key no
-    /// ve) simplemente no vuelven.
+    /// Full issues by UUID, in batches of `PULL_BATCH`. Those that do not exist (or the key
+    /// cannot see) are simply not returned.
     pub async fn issues_by_ids(&self, ids: &[String]) -> Result<Vec<SyncIssue>, LinearError> {
         let mut out = Vec::with_capacity(ids.len());
         for chunk in ids.chunks(PULL_BATCH) {
@@ -146,7 +146,7 @@ impl<'a> LinearClient<'a> {
         Ok(out)
     }
 
-    /// Estados del team de la issue y el estado `state_id` (de cualquier team).
+    /// States of the issue's team and the `state_id` state (from any team).
     pub async fn issue_team_states(
         &self,
         issue_id: &str,
@@ -158,7 +158,7 @@ impl<'a> LinearClient<'a> {
         Ok((d.issue.team.states.nodes, d.workflow_state))
     }
 
-    /// Cambia el estado y devuelve el estado resultante.
+    /// Changes the state and returns the resulting state.
     pub async fn set_issue_state(&self, issue_id: &str, state_id: &str) -> Result<WorkflowState, LinearError> {
         let d: IssueUpdateData = self
             .query(SET_STATE_MUTATION, json!({ "id": issue_id, "stateId": state_id }))
@@ -180,7 +180,7 @@ impl<'a> LinearClient<'a> {
         }
     }
 
-    /// Si la issue ya tiene un comentario que contiene `marker`.
+    /// Whether the issue already has a comment containing `marker`.
     pub async fn has_comment_with(&self, issue_id: &str, marker: &str) -> Result<bool, LinearError> {
         let d: CommentMarkerData = self
             .query(COMMENT_MARKER_QUERY, json!({ "id": issue_id, "marker": marker }))

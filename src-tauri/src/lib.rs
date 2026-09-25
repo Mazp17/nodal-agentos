@@ -14,8 +14,8 @@ mod work;
 
 use std::time::Duration;
 
-/// Versión del CLI de `claude`: prueba mínima de que el core puede invocarlo.
-/// Usa el mismo resolutor que los runs, así funciona también abierta desde Finder.
+/// Version of the `claude` CLI: minimal proof that the core can invoke it.
+/// Uses the same resolver as runs, so it also works when opened from Finder.
 #[tauri::command]
 async fn claude_version() -> Result<String, String> {
     let mut cmd = runs::claude_bin::claude_command()?;
@@ -46,9 +46,10 @@ pub fn run() {
                     let _ = w.set_title("Nodal Dev");
                 }
             }
-            // Único lugar que arranca los workers de fondo: el pump de la cola (`work::init`)
-            // con el socket MCP (`mcp::server`) y el sync de proveedores (`providers::init`). Sin base la app abre igual (para
-            // mostrar el error): no hay pump, el sync no hace nada y los comandos fallan.
+            // The only place that starts the background workers: the queue pump (`work::init`)
+            // with the MCP socket (`mcp::server`) and the provider sync (`providers::init`).
+            // Without a database the app still opens (to show the error): there is no pump, the
+            // sync does nothing and the commands fail.
             match db::open(&util::paths::data_dir(app.handle())?.join(db::DB_FILE)) {
                 Ok(db) => {
                     app.manage(db.clone());

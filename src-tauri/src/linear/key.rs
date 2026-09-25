@@ -1,13 +1,13 @@
-//! API key de Linear: fachada sobre `crate::secrets` (proveedor `linear`, cuenta
-//! `linear-api-key` en el servicio `io.github.mazp17.nodal`), con los errores tipados de Linear.
-//! La key nunca se serializa hacia el frontend ni se loguea.
+//! Linear API key: facade over `crate::secrets` (provider `linear`, account
+//! `linear-api-key` in the `io.github.mazp17.nodal` service), with Linear's typed errors.
+//! The key is never serialized to the frontend nor logged.
 
 use super::error::LinearError;
 use crate::secrets::Secrets;
 
 const PROVIDER: &str = "linear";
 
-/// Clon del `Secrets` que se registra como estado de Tauri (misma caché).
+/// Clone of the `Secrets` registered as Tauri state (same cache).
 pub struct KeyCache(Secrets);
 
 impl KeyCache {
@@ -15,7 +15,7 @@ impl KeyCache {
         Self(secrets)
     }
 
-    /// Key actual, leyendo el llavero sólo la primera vez.
+    /// Current key, reading the keychain only the first time.
     pub async fn load(&self) -> Result<Option<String>, LinearError> {
         self.0.get(PROVIDER).await.map_err(LinearError::Keychain)
     }

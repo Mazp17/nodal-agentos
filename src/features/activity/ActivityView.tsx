@@ -42,7 +42,7 @@ function sessionState(s: SessionActivity): { label: string; tone: Tone; live: bo
 }
 
 function useRepoActivity(repoPath: string | null): { data: RepoActivity | null; error: string | null } {
-  // Mismo motor que el resto de la capa de datos: un timer por repo, pausa con la ventana oculta.
+  // Same engine as the rest of the data layer: one timer per repo, paused while the window is hidden.
   const { data, error } = usePolled<RepoActivity>(
     repoPath ? `activity:${repoPath}` : null,
     () => repoActivity(repoPath as string),
@@ -52,7 +52,7 @@ function useRepoActivity(repoPath: string | null): { data: RepoActivity | null; 
   return { data: data ?? null, error };
 }
 
-/** Conteos por repo del proyecto (un solo `claude agents`), para las pestañas. */
+/** Per-repo counts for the project (a single `claude agents`), for the tabs. */
 function useProjectActivity(projectId: string | null) {
   return usePolled<ProjectActivity>(
     projectId ? `project-activity:${projectId}` : null,
@@ -67,7 +67,7 @@ interface SessionGroup {
   subs: SubagentActivity[];
 }
 
-/** Subagentes debajo de su sesión; los de sesiones que no figuran arman una propia. */
+/** Subagents under their session; those from unlisted sessions get one of their own. */
 function groupSessions(data: RepoActivity): SessionGroup[] {
   const groups = new Map<string, SessionGroup>(data.sessions.map((s) => [s.sessionId, { session: s, subs: [] }]));
   for (const a of data.subagents) {
@@ -104,19 +104,19 @@ function groupSessions(data: RepoActivity): SessionGroup[] {
 const isActiveGroup = (g: SessionGroup) => g.session.alive || g.subs.some((a) => a.active);
 
 export interface ActivityViewProps {
-  /** `null`: repos de todos los proyectos. */
+  /** `null`: repos from every project. */
   projectId: string | null;
-  /** Abrir el run de Nodal de una sesión lanzada por la app. */
+  /** Open the Nodal run of a session launched by the app. */
   onOpenRun?: (runId: string) => void;
 }
 
 /**
- * Pantalla "Activity": todo lo que Claude Code está haciendo en cada repo del proyecto
- * (sesiones interactivas, en background y headless, y sus subagentes), lo haya lanzado
- * Nodal o no.
+ * "Activity" screen: everything Claude Code is doing in each of the project's repos
+ * (interactive, background and headless sessions, and their subagents), whether Nodal
+ * launched it or not.
  */
 export function ActivityView({ projectId, onOpenRun }: ActivityViewProps) {
-  // Ya vienen ordenados por posición.
+  // Already sorted by position.
   const reposQ = useRepos(projectId);
   const repos = reposQ.data ?? [];
   const runs = useAllRuns();
@@ -158,7 +158,7 @@ export function ActivityView({ projectId, onOpenRun }: ActivityViewProps) {
         <div className="segmented act-repos" role="tablist" aria-label="Repos">
           {repos.map((r) => {
             const on = r.id === repo?.id;
-            // Sesiones trabajando/esperando y subagentes activos (criterio de `project_activity`).
+            // Working/waiting sessions and active subagents (same criteria as `project_activity`).
             const c = countByRepo.get(r.id);
             const n = c?.sessions ?? 0;
             const agents = c?.agents ?? 0;

@@ -1,24 +1,24 @@
-//! Migraciones versionadas con `PRAGMA user_version`.
-//! `MIGRATIONS[i]` lleva la base de la versión `i` a la `i + 1`. Nunca se edita una
-//! migración publicada: los cambios van en una nueva al final.
+//! Versioned migrations with `PRAGMA user_version`.
+//! `MIGRATIONS[i]` takes the database from version `i` to `i + 1`. A published migration is
+//! never edited: changes go in a new one at the end.
 //!
-//! Convenciones: ids TEXT, fechas INTEGER (epoch ms), booleanos INTEGER 0/1, enums TEXT
-//! (el `as_str` de `domain`), estructuras anidadas en columnas `*_json`.
+//! Conventions: TEXT ids, INTEGER dates (epoch ms), INTEGER 0/1 booleans, TEXT enums
+//! (the `as_str` from `domain`), nested structures in `*_json` columns.
 
 use rusqlite::Connection;
 
 use super::DbError;
 
-/// v1: esquema completo del plan.
+/// v1: the plan's full schema.
 ///
 /// FKs:
-/// - borrar un proyecto borra en cascada sus repos, tareas y source links;
-/// - borrar un repo con tareas falla (`tasks.repo_id` es NO ACTION: se comprueba al final de
-///   la sentencia, así el cascade desde el proyecto no choca con el orden de borrado);
-/// - la tarea apunta a `(repo_id, project_id)`: no puede quedar en un repo de otro proyecto;
-/// - borrar un source link con tareas vinculadas falla: primero hay que desvincularlas
-///   (limpiar todos los `src_*` en la misma transacción) para que queden locales;
-/// - borrar una tarea borra sus relaciones y su outbox; sus runs quedan con `task_id` NULL.
+/// - deleting a project cascades to its repos, tasks and source links;
+/// - deleting a repo with tasks fails (`tasks.repo_id` is NO ACTION: it is checked at the end
+///   of the statement, so the cascade from the project doesn't clash with the deletion order);
+/// - the task points to `(repo_id, project_id)`: it can't end up in another project's repo;
+/// - deleting a source link with linked tasks fails: they must be unlinked first
+///   (clear every `src_*` in the same transaction) so they become local;
+/// - deleting a task deletes its relations and its outbox; its runs keep a NULL `task_id`.
 const V1: &str = r#"
 CREATE TABLE projects (
     id                    TEXT PRIMARY KEY,
@@ -101,7 +101,7 @@ CREATE TABLE tasks (
     closed_at          INTEGER,
     FOREIGN KEY (repo_id, project_id) REFERENCES repos(id, project_id),
     UNIQUE (project_id, number),
-    -- `external_id` tiene que ser único por proveedor (con la org como prefijo si hace falta).
+    -- `external_id` must be unique per provider (prefixed with the org if needed).
     UNIQUE (src_provider, src_external_id),
     CHECK (plan_kind IN ('text', 'file') AND (plan_kind = 'file') = (plan_path IS NOT NULL)),
     CHECK ((wt_path IS NULL) = (wt_branch IS NULL) AND (wt_path IS NULL) = (wt_base IS NULL)),
@@ -120,7 +120,7 @@ CREATE TABLE task_relations (
     kind     TEXT NOT NULL,
     PRIMARY KEY (task_id, other_id, kind),
     CHECK (task_id <> other_id),
-    -- `related` es simétrica: se guarda una sola vez, con los ids ordenados.
+    -- `related` is symmetric: stored only once, with the ids ordered.
     CHECK (kind <> 'related' OR task_id < other_id)
 );
 CREATE INDEX task_relations_other ON task_relations(other_id);
@@ -178,7 +178,7 @@ CREATE TABLE settings (
     value_json TEXT NOT NULL
 );
 
--- Idempotencia de "Import data from a previous version": una fila por objeto importado.
+-- Idempotency for "Import data from a previous version": one row per imported object.
 CREATE TABLE legacy_imports (
     source_key  TEXT PRIMARY KEY,
     kind        TEXT NOT NULL,
@@ -187,15 +187,15 @@ CREATE TABLE legacy_imports (
 );
 "#;
 
-/// v2: aditiva (solo `ADD COLUMN`, sin reconstruir tablas).
+/// v2: additive (only `ADD COLUMN`, no table rebuilds).
 /// - `projects.description`;
-/// - `source_links.last_synced_at`/`last_sync_error`: resultado de la última pasada del sync
-///   por link; `pending_state_changes`: JSON `{added, removed}` con los estados del proveedor
-///   que cambiaron contra `known_states` (se limpia al guardar el mapeo);
-/// - `tasks.src_unmapped`: el estado externo actual no está en el mapeo pull;
-/// - `runs.tokens`: tokens del transcript (agente/Claude/revisor) sumados al cerrar.
+/// - `source_links.last_synced_at`/`last_sync_error`: result of the last sync pass per
+///   link; `pending_state_changes`: JSON `{added, removed}` with the provider states that
+///   changed against `known_states` (cleared when the mapping is saved);
+/// - `tasks.src_unmapped`: the current external state is not in the pull mapping;
+/// - `runs.tokens`: transcript tokens (agent/Claude/reviewer) summed on close.
 ///
-/// `Settings.defaultExecutor` es una fila más de `settings`: no necesita DDL.
+/// `Settings.defaultExecutor` is just another `settings` row: it needs no DDL.
 const V2: &str = r#"
 ALTER TABLE projects ADD COLUMN description TEXT;
 ALTER TABLE source_links ADD COLUMN last_synced_at INTEGER;
@@ -205,12 +205,12 @@ ALTER TABLE tasks ADD COLUMN src_unmapped INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE runs ADD COLUMN tokens INTEGER;
 "#;
 
-/// v3: aditiva. Reglas de ruteo por proyecto del proveedor (van en `repo_rules_json`, sin
-/// DDL) y, en la tarea:
-/// - `src_project_id`/`src_project_name`: proyecto del proveedor visto en el último pull;
-/// - `src_rule_id`: regla de proyecto por la que llegó a su repo;
-/// - `src_moved`: JSON `{fromProject, toProject, suggestedRepoId}` si la issue cambió de
-///   proyecto y falta que el usuario decida (`resolve_moved_task`).
+/// v3: additive. Routing rules by provider project (they go in `repo_rules_json`, no
+/// DDL) and, on the task:
+/// - `src_project_id`/`src_project_name`: provider project seen on the last pull;
+/// - `src_rule_id`: project rule through which it reached its repo;
+/// - `src_moved`: JSON `{fromProject, toProject, suggestedRepoId}` if the issue changed
+///   project and the user still has to decide (`resolve_moved_task`).
 const V3: &str = r#"
 ALTER TABLE tasks ADD COLUMN src_project_id TEXT;
 ALTER TABLE tasks ADD COLUMN src_project_name TEXT;
@@ -224,12 +224,12 @@ pub fn user_version(conn: &Connection) -> Result<i64, DbError> {
     Ok(conn.query_row("PRAGMA user_version", [], |r| r.get(0))?)
 }
 
-/// Aplica las migraciones pendientes, cada una en su transacción. Idempotente.
-/// Falla si la base es de una versión más nueva que esta app.
+/// Applies the pending migrations, each in its own transaction. Idempotent.
+/// Fails if the database is from a newer version than this app.
 ///
-/// Una migración futura que reconstruya tablas necesita las FKs apagadas, y
-/// `PRAGMA foreign_keys` no hace nada dentro de una transacción: habrá que apagarlas antes de
-/// `transaction()` y correr `PRAGMA foreign_key_check` antes del commit.
+/// A future migration that rebuilds tables needs FKs turned off, and
+/// `PRAGMA foreign_keys` does nothing inside a transaction: they'll have to be turned off
+/// before `transaction()` and `PRAGMA foreign_key_check` run before the commit.
 pub fn migrate(conn: &mut Connection) -> Result<(), DbError> {
     let current = user_version(conn)?;
     let target = MIGRATIONS.len() as i64;

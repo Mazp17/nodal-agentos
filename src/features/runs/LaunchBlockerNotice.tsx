@@ -5,15 +5,15 @@ import type { RunView } from "./status";
 import "./launch-blocker.css";
 
 /**
- * Motivos conocidos por los que Claude Code no deja arrancar un run, con una acción clara.
+ * Known reasons Claude Code won't let a run start, each with a clear action.
  *
- * - `trust`: `claude --bg` se niega en un repo que nunca se abrió con `claude`
+ * - `trust`: `claude --bg` refuses in a repo that was never opened with `claude`
  *   ("Workspace not trusted. Run `claude` in <dir> once and accept the trust prompt…").
- *   Sale sincrónico por stderr, así que llega en el error del lanzamiento (`launchError`).
- * - `workflowReview`: el workflow es nuevo o cambió y nadie lo aprobó en `/workflows`. La
- *   sesión `--bg` sí arranca: el rechazo queda como `tool_result` en su transcript y la
- *   sesión termina sin workflow ("Interrupted"). Solo se ve leyendo el transcript
- *   (`get_launch_blocker`); `claude agents` no lo reporta.
+ *   It comes out synchronously on stderr, so it arrives in the launch error (`launchError`).
+ * - `workflowReview`: the workflow is new or changed and nobody approved it in `/workflows`.
+ *   The `--bg` session does start: the rejection lands as a `tool_result` in its transcript
+ *   and the session ends without a workflow ("Interrupted"). Only visible by reading the
+ *   transcript (`get_launch_blocker`); `claude agents` doesn't report it.
  */
 export type Blocker =
   | { kind: "trust"; dir: string | null; home: boolean }
@@ -22,7 +22,7 @@ export type Blocker =
 const TRUST_RE = /Workspace not trusted/i;
 const REVIEW_TEXT = "Review dynamic workflow before running";
 
-/** Detecta un motivo conocido en el texto de error de un lanzamiento. */
+/** Detects a known reason in a launch's error text. */
 export function classifyLaunchError(text: string | null | undefined, fallbackDir: string | null): Blocker | null {
   if (!text) return null;
   if (TRUST_RE.test(text)) {
@@ -34,7 +34,7 @@ export function classifyLaunchError(text: string | null | undefined, fallbackDir
   return null;
 }
 
-/** Texto para un toast de lanzamiento fallido: el motivo accionable si se reconoce. */
+/** Text for a failed-launch toast: the actionable reason if recognized. */
 export function launchErrorHint(text: string | null | undefined, dir: string | null): string | undefined {
   const b = classifyLaunchError(text, dir);
   if (b?.kind === "trust" && !b.home) {
@@ -43,10 +43,10 @@ export function launchErrorHint(text: string | null | undefined, dir: string | n
   return text ?? undefined;
 }
 
-// Una sesión terminada no cambia: el resultado de `get_launch_blocker` se cachea.
+// A finished session doesn't change: the `get_launch_blocker` result is cached.
 const blockerCache = new Map<string, Blocker | null>();
 
-/** Run de workflow que terminó sin resultado: candidato a haber sido frenado por la aprobación. */
+/** Workflow run that ended without a result: likely stopped by the approval check. */
 function endedWithoutResult(v: RunView): boolean {
   if (v.run.executor.kind !== "workflow" || !v.run.sessionId) return false;
   if (v.phase === "failed") return true;
@@ -88,7 +88,7 @@ export function useLaunchBlocker(view: RunView | undefined): Blocker | null {
 
 const basename = (p: string) => p.replace(/\/+$/, "").split("/").pop() || p;
 
-/** Aviso accionable para un run frenado por confianza del workspace o aprobación del workflow. */
+/** Actionable notice for a run blocked by workspace trust or workflow approval. */
 export function LaunchBlockerNotice({
   view,
   compact,
@@ -96,7 +96,7 @@ export function LaunchBlockerNotice({
 }: {
   view: RunView | undefined;
   compact?: boolean;
-  /** Si ya se calculó con `useLaunchBlocker`, para no repetir la consulta. */
+  /** If already computed with `useLaunchBlocker`, to avoid repeating the query. */
   blocker?: Blocker | null;
 }) {
   const own = useLaunchBlocker(given === undefined ? view : undefined);

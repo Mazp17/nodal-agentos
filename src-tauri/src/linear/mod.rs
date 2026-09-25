@@ -1,5 +1,5 @@
-//! Linear en modo sólo lectura. Todas las llamadas salen desde Rust, así la API key
-//! no pasa por el webview y la CSP no necesita abrir `connect-src` a linear.app.
+//! Linear in read-only mode. All calls go out from Rust, so the API key never goes
+//! through the webview and the CSP does not need to open `connect-src` to linear.app.
 
 pub(crate) mod client;
 mod detail;
@@ -21,13 +21,13 @@ pub struct LinearState {
 }
 
 impl LinearState {
-    /// `secrets` es la instancia compartida (`State<Secrets>`): una key guardada desde
-    /// `linear_*` o desde `provider_*` se ve en los dos lados.
+    /// `secrets` is the shared instance (`State<Secrets>`): a key saved from `linear_*`
+    /// or from `provider_*` is visible on both sides.
     pub fn new(secrets: crate::secrets::Secrets) -> Self {
         Self { http: http_client(), key: KeyCache::new(secrets) }
     }
 
-    /// Para `providers::linear`: mismo cliente HTTP.
+    /// For `providers::linear`: same HTTP client.
     pub(crate) fn http(&self) -> &reqwest::Client {
         &self.http
     }
@@ -43,7 +43,7 @@ pub async fn linear_key_status(state: State<'_, LinearState>) -> Result<KeyStatu
     Ok(KeyStatus { configured: state.key.load().await?.is_some() })
 }
 
-/// Valida la key contra Linear y sólo si es válida la guarda en el llavero.
+/// Validates the key against Linear and stores it in the keychain only if it is valid.
 #[tauri::command]
 pub async fn linear_set_api_key(
     state: State<'_, LinearState>,
@@ -75,7 +75,7 @@ pub async fn linear_teams(state: State<'_, LinearState>) -> Result<Vec<Team>, Li
     LinearClient::new(&state.http, &key).teams().await
 }
 
-/// Issues abiertas + cerradas en los últimos 14 días. `team_ids` vacío o ausente = todos.
+/// Open issues + issues closed in the last 14 days. Empty or missing `team_ids` = all.
 #[tauri::command]
 pub async fn linear_board(
     state: State<'_, LinearState>,
@@ -85,7 +85,7 @@ pub async fn linear_board(
     LinearClient::new(&state.http, &key).board(team_ids.as_deref()).await
 }
 
-/// Detalle completo de una issue para el panel lateral. `issue_id` acepta UUID o
+/// Full detail of an issue for the side panel. `issue_id` accepts a UUID or an
 /// identifier ("ACME-8").
 #[tauri::command]
 pub async fn linear_issue_detail(
@@ -98,8 +98,8 @@ pub async fn linear_issue_detail(
 
 #[cfg(test)]
 mod live_tests {
-    //! Contra la API real. `cargo test -- --ignored live_` con LINEAR_API_KEY en el
-    //! entorno. Nunca imprime la key.
+    //! Against the real API. `cargo test -- --ignored live_` with LINEAR_API_KEY in the
+    //! environment. Never prints the key.
     use super::*;
 
     fn env_key() -> Option<String> {
@@ -141,14 +141,14 @@ mod live_tests {
         });
     }
 
-    /// No necesita key real: confirma que Linear rechaza una key falsa y que eso se
-    /// traduce a `InvalidKey` (formato real del error de auth).
+    /// Needs no real key: confirms Linear rejects a fake key and that this maps to
+    /// `InvalidKey` (real format of the auth error).
     #[test]
     #[ignore]
     fn live_bogus_key_is_invalid() {
         tauri::async_runtime::block_on(async {
             let http = http_client();
-            let err = LinearClient::new(&http, "lin_api_clave_falsa_para_test").viewer().await;
+            let err = LinearClient::new(&http, "lin_api_fake_key_for_test").viewer().await;
             assert_eq!(err.unwrap_err(), LinearError::InvalidKey);
         });
     }

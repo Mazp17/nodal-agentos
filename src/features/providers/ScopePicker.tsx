@@ -2,7 +2,7 @@ import type { ScopeRef } from "../../domain/types";
 
 const KIND_LABEL: Record<string, string> = { team: "Teams", project: "Projects" };
 
-/** Selector de team/proyecto del proveedor, agrupado por tipo. */
+/** Provider team/project picker, grouped by type. */
 export function ScopePicker({
   scopes,
   loading,
@@ -17,7 +17,7 @@ export function ScopePicker({
   error: string | null;
   value: string | null;
   onChange: (id: string | null) => void;
-  /** Texto de la opción vacía; sin él, la vacía es "Pick a team or project". */
+  /** Label of the empty option; without it, the empty one is "Pick a team or project". */
   allowNone?: string;
   id?: string;
 }) {

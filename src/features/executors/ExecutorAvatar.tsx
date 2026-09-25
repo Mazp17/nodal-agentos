@@ -3,7 +3,7 @@ import { Avatar } from "../../ui/Avatar";
 import { executorKindLabel, executorLabel } from "./executors";
 import "./executors.css";
 
-/** Ícono del ejecutor, como el assignee de Linear: iniciales (agente) o glifo (workflow, Claude). */
+/** Executor icon, like Linear's assignee: initials (agent) or a glyph (workflow, Claude). */
 export function ExecutorAvatar({ executor, size = "sm" }: { executor: Executor; size?: "sm" | "md" }) {
   if (executor.kind === "agent") return <Avatar name={executor.name} size={size} />;
   const title = `${executorKindLabel(executor)} · ${executorLabel(executor)}`;
@@ -30,7 +30,7 @@ export function ExecutorAvatar({ executor, size = "sm" }: { executor: Executor; 
   );
 }
 
-/** Avatar + nombre, para listas y cadenas de pasos. */
+/** Avatar + name, for lists and step chains. */
 export function ExecutorName({ executor, size = "sm" }: { executor: Executor; size?: "sm" | "md" }) {
   return (
     <span className="ex-name">

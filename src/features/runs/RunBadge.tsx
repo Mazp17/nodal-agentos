@@ -7,14 +7,14 @@ const EMPTY_CTX = { live: [], details: {}, queuePos: new Map(), reviews: new Map
 
 const isView = (x: RunLight | RunView): x is RunView => "run" in x && "phase" in x;
 
-/** Vista derivada de un run: la del store compartido si ya lo tiene, o una sin datos en vivo. */
+/** Derived view of a run: the shared store's if it has one, or one without live data. */
 export function useRunView(run: RunLight | RunView): RunView {
   const { byId } = useRuns();
   if (isView(run)) return run;
   return byId.get(run.id) ?? deriveRunView(run, { ...EMPTY_CTX, now: Date.now() });
 }
 
-/** Píldora de estado de un run ("Phase 3/9 · Implement", "Needs permission", "PR #12 · Green"). */
+/** Status pill for a run ("Phase 3/9 · Implement", "Needs permission", "PR #12 · Green"). */
 export function RunBadge({ run, className }: { run: RunLight | RunView; className?: string }) {
   const v = useRunView(run);
   return (
@@ -26,8 +26,8 @@ export function RunBadge({ run, className }: { run: RunLight | RunView; classNam
 }
 
 /**
- * Barra de fases segmentada (cards del board). Solo para workflows con fases conocidas;
- * para agentes y Claude no dibuja nada.
+ * Segmented phase bar (board cards). Only for workflows with known phases;
+ * draws nothing for agents and Claude.
  */
 export function PhaseSegments({ run }: { run: RunLight | RunView }) {
   const v = useRunView(run);

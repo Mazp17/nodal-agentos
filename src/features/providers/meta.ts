@@ -4,10 +4,10 @@ import type { MapOrigin } from "../../domain/api";
 export interface ProviderInfo {
   id: string;
   name: string;
-  /** Con backend; el resto se muestra como "Coming soon". */
+  /** Has a backend; the rest show as "Coming soon". */
   available: boolean;
   keyPlaceholder?: string;
-  /** Dónde se crea la key, para el texto de ayuda. */
+  /** Where the key is created, for the help text. */
   keyHelp?: string;
 }
 
@@ -38,7 +38,7 @@ export const STATUS_LABEL: Record<TaskStatus, string> = {
   canceled: "Canceled",
 };
 
-/** Color de cada estado Nodal (variables de tokens). */
+/** Color of each Nodal state (token variables). */
 export const STATUS_COLOR: Record<TaskStatus, string> = {
   backlog: "var(--text-disabled)",
   todo: "var(--text-dim)",
@@ -79,8 +79,8 @@ export function plural(n: number, one: string, many = `${one}s`): string {
 }
 
 /**
- * Nombre del estado sin mapear, sacado del `syncError` (`External state "X" is not mapped…`).
- * Si está sin mapear lo dice `TaskSource.unmapped`; esto es solo para mostrar el nombre.
+ * Name of the unmapped state, taken from `syncError` (`External state "X" is not mapped…`).
+ * Whether it's unmapped is told by `TaskSource.unmapped`; this is only for showing the name.
  */
 export function unmappedStateName(syncError: string): string | null {
   return /"([^"]+)"/.exec(syncError)?.[1] ?? null;

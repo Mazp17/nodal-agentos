@@ -1,4 +1,4 @@
-// API pública de la feature de proveedores (fuentes externas de tareas).
+// Public API of the providers feature (external task sources).
 
 export { IntegrationsSettings } from "./IntegrationsSettings";
 export { ConnectProviderStep, type ConnectProviderStepProps, type ConnectedProvider } from "./ConnectProviderStep";

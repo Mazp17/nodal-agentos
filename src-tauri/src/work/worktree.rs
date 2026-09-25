@@ -1,6 +1,6 @@
-//! Worktrees de las tareas: `~/.nodal/worktrees/<repo>/<task-slug>` con la rama
-//! `nodal/<task-slug>`, creados desde la rama actual del repo antes del primer run y
-//! reusados en los siguientes (incluidos los traspasos). Todo bloqueante.
+//! Task worktrees: `~/.nodal/worktrees/<repo>/<task-slug>` with the branch
+//! `nodal/<task-slug>`, created from the repo's current branch before the first run and
+//! reused by the following ones (handoffs included). All blocking.
 
 use std::path::{Path, PathBuf};
 
@@ -12,7 +12,7 @@ use crate::util::git;
 pub const BRANCH_PREFIX: &str = "nodal/";
 const SLUG_MAX: usize = 48;
 
-/// Minúsculas ASCII, dígitos y `-` (sin repetir ni en los bordes).
+/// Lowercase ASCII, digits and `-` (not repeated, not at the edges).
 pub fn slugify(s: &str, max: usize) -> String {
     let mut out = String::new();
     for c in s.chars() {
@@ -40,7 +40,7 @@ pub fn slugify(s: &str, max: usize) -> String {
     out.trim_end_matches('-').to_string()
 }
 
-/// `pay-1-logo-nuevo-en-el-header`: la key de la tarea (única en la app) más el título.
+/// `pay-1-new-logo-in-the-header`: the task key (unique in the app) plus the title.
 pub fn task_slug(project_key: &str, number: i64, title: &str) -> String {
     let key = slugify(&format!("{project_key}-{number}"), 20);
     let rest = slugify(title, SLUG_MAX.saturating_sub(key.len() + 1));
@@ -55,13 +55,13 @@ pub fn branch_for(slug: &str) -> String {
     format!("{BRANCH_PREFIX}{slug}")
 }
 
-/// Carpeta del worktree: `<root>/<repo>/<slug>` (`root` = `~/.nodal/worktrees`).
+/// Worktree folder: `<root>/<repo>/<slug>` (`root` = `~/.nodal/worktrees`).
 pub fn dir_for(root: &Path, repo_name: &str, slug: &str) -> PathBuf {
     let repo = slugify(repo_name, 60);
     root.join(if repo.is_empty() { "repo".to_string() } else { repo }).join(slug)
 }
 
-/// Rama actual del repo (o el commit si está en detached HEAD): la base del worktree.
+/// The repo's current branch (or the commit if on a detached HEAD): the worktree's base.
 pub fn current_base(repo: &Path) -> Result<String, String> {
     let out = git::run(repo, &["symbolic-ref", "--short", "-q", "HEAD"])?;
     let branch = out.stdout.trim();
@@ -75,7 +75,7 @@ fn branch_exists(repo: &Path, branch: &str) -> Result<bool, String> {
     Ok(git::run(repo, &["rev-parse", "--verify", "--quiet", &format!("refs/heads/{branch}")])?.ok)
 }
 
-/// ¿`dir` es un worktree vivo (su toplevel es él mismo)?
+/// Is `dir` a live worktree (its toplevel is itself)?
 fn is_live_worktree(dir: &Path) -> bool {
     dir.is_dir()
         && git::toplevel(dir)
@@ -86,7 +86,7 @@ fn is_live_worktree(dir: &Path) -> bool {
             .is_some_and(|(a, b)| a == b)
 }
 
-/// Crea (o reusa) el worktree de la tarea. `existing`: el que ya tiene guardado.
+/// Creates (or reuses) the task's worktree. `existing`: the one it already has stored.
 pub fn ensure(repo: &Path, dir: &Path, branch: &str, existing: Option<&WorktreeRef>) -> Result<WorktreeRef, String> {
     if let Some(wt) = existing {
         let p = Path::new(&wt.path);
@@ -102,7 +102,7 @@ pub fn ensure(repo: &Path, dir: &Path, branch: &str, existing: Option<&WorktreeR
         Some(wt) => wt.base.clone(),
         None => current_base(repo)?,
     };
-    // Registros de worktrees borrados a mano.
+    // Records of worktrees deleted by hand.
     let _ = git::run(repo, &["worktree", "prune"]);
     if dir.exists() {
         if is_live_worktree(&dir) {
@@ -126,7 +126,7 @@ pub fn ensure(repo: &Path, dir: &Path, branch: &str, existing: Option<&WorktreeR
     Ok(WorktreeRef { path, branch, base })
 }
 
-/// Borra el worktree (aunque tenga cambios) y su rama. Lo que no existe se ignora.
+/// Deletes the worktree (even with changes) and its branch. Anything missing is ignored.
 pub fn cleanup(repo: &Path, wt: &WorktreeRef) -> Result<(), String> {
     let p = Path::new(&wt.path);
     if p.exists() {
@@ -139,24 +139,24 @@ pub fn cleanup(repo: &Path, wt: &WorktreeRef) -> Result<(), String> {
     Ok(())
 }
 
-/// Estado del worktree de una tarea, para decidir si limpiarlo es seguro.
+/// State of a task's worktree, to decide whether cleaning it up is safe.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WorktreeStatus {
-    /// La carpeta existe y es un worktree vivo.
+    /// The folder exists and is a live worktree.
     pub exists: bool,
     pub branch: Option<String>,
     pub base: Option<String>,
-    /// Commits de la rama que no están en la base.
+    /// Branch commits that aren't in the base.
     pub ahead: u32,
-    /// Commits de la rama que no están ni en la base ni en ningún remoto: se perderían.
+    /// Branch commits that are neither in the base nor in any remote: they would be lost.
     pub unpushed: u32,
-    /// Cambios sin commitear (incluidos archivos nuevos no ignorados).
+    /// Uncommitted changes (including new, non-ignored files).
     pub dirty: bool,
 }
 
-/// `git rev-list --count <args> --`. Un error se propaga: contar 0 por error dejaría
-/// borrar una rama con commits sin publicar.
+/// `git rev-list --count <args> --`. An error is propagated: counting 0 on error would allow
+/// deleting a branch with unpushed commits.
 fn count(repo: &Path, args: &[&str]) -> Result<u32, String> {
     let mut full = vec!["rev-list", "--count"];
     full.extend_from_slice(args);
@@ -165,7 +165,7 @@ fn count(repo: &Path, args: &[&str]) -> Result<u32, String> {
     out.trim().parse().map_err(|_| format!("Unexpected output from git rev-list: {}", out.trim()))
 }
 
-/// Estado de `wt` (`None`: la tarea no tiene worktree).
+/// State of `wt` (`None`: the task has no worktree).
 pub fn status(repo: &Path, wt: Option<&WorktreeRef>) -> Result<WorktreeStatus, String> {
     let Some(wt) = wt else { return Ok(WorktreeStatus::default()) };
     let exists = is_live_worktree(Path::new(&wt.path));
@@ -182,7 +182,7 @@ pub fn status(repo: &Path, wt: Option<&WorktreeRef>) -> Result<WorktreeStatus, S
             st.ahead = count(repo, &[&branch, "--not", &wt.base])?;
             st.unpushed = count(repo, &[&branch, "--not", &wt.base, "--remotes"])?;
         } else {
-            // Sin base (borrada): todo lo que no esté en un remoto se perdería.
+            // No base (deleted): anything not on a remote would be lost.
             st.unpushed = count(repo, &[&branch, "--not", "--remotes"])?;
             st.ahead = st.unpushed;
         }
@@ -193,7 +193,7 @@ pub fn status(repo: &Path, wt: Option<&WorktreeRef>) -> Result<WorktreeStatus, S
     Ok(st)
 }
 
-/// Por qué no se puede limpiar sin `force` (`None`: es seguro).
+/// Why it can't be cleaned up without `force` (`None`: it's safe).
 pub fn cleanup_blocker(st: &WorktreeStatus) -> Option<String> {
     let mut why = Vec::new();
     if st.unpushed > 0 {
@@ -215,10 +215,10 @@ mod tests {
 
     #[test]
     fn slugs() {
-        assert_eq!(task_slug("PAY", 1, "Logo nuevo en el header!"), "pay-1-logo-nuevo-en-el-header");
-        assert_eq!(task_slug("WEB", 12, "Migración de ñandúes"), "web-12-migracion-de-nandues");
+        assert_eq!(task_slug("PAY", 1, "New logo in the header!"), "pay-1-new-logo-in-the-header");
+        assert_eq!(task_slug("WEB", 12, "Crème brûlée for the piñata"), "web-12-creme-brulee-for-the-pinata");
         assert_eq!(task_slug("A1", 3, "  ¿¿??  "), "a1-3");
-        let long = task_slug("PAY", 1, &"palabra ".repeat(20));
+        let long = task_slug("PAY", 1, &"word ".repeat(20));
         assert!(long.len() <= SLUG_MAX, "{long}");
         assert!(!long.ends_with('-'));
         assert_eq!(branch_for("pay-1-x"), "nodal/pay-1-x");
@@ -228,7 +228,7 @@ mod tests {
     #[test]
     fn create_reuse_and_cleanup() {
         if !git_available() {
-            eprintln!("git no disponible: se saltea");
+            eprintln!("git not available: skipping");
             return;
         }
         let t = TempDir::new("worktree");
@@ -241,25 +241,25 @@ mod tests {
         assert!(Path::new(&wt.path).join("README.md").is_file());
         assert_eq!(current_base(Path::new(&wt.path)).unwrap(), "nodal/pay-1-logo");
 
-        // Reusar: mismo worktree, sin tocar lo que haya adentro.
+        // Reuse: same worktree, without touching what's inside.
         std::fs::write(Path::new(&wt.path).join("wip.txt"), "x").unwrap();
         let again = ensure(&repo, &dir, "nodal/pay-1-logo", Some(&wt)).unwrap();
         assert_eq!(again, wt);
         assert!(Path::new(&wt.path).join("wip.txt").is_file());
 
-        // Si lo borran a mano, se recrea sobre la misma rama.
+        // If it's deleted by hand, it's recreated on the same branch.
         std::fs::remove_dir_all(&wt.path).unwrap();
         let recreated = ensure(&repo, &dir, "nodal/pay-1-logo", Some(&wt)).unwrap();
         assert_eq!(recreated.branch, wt.branch);
         assert!(Path::new(&recreated.path).is_dir());
 
-        // Una carpeta ajena con contenido no se pisa.
+        // A foreign folder with content isn't overwritten.
         let foreign = t.0.join("worktrees/repo/other");
         std::fs::create_dir_all(&foreign).unwrap();
         std::fs::write(foreign.join("f"), "x").unwrap();
         assert!(ensure(&repo, &foreign, "nodal/other", None).unwrap_err().contains("not a worktree"));
 
-        // Status: carpeta ajena borrada; el worktree está limpio y sin commits propios.
+        // Status: foreign folder deleted; the worktree is clean and has no commits of its own.
         std::fs::remove_dir_all(&foreign).unwrap();
         let st = status(&repo, Some(&recreated)).unwrap();
         assert!(st.exists && !st.dirty);
@@ -280,7 +280,7 @@ mod tests {
         let msg = cleanup_blocker(&st).unwrap();
         assert!(msg.contains("1 unpushed commit:") && msg.contains("force"), "{msg}");
 
-        // Con la rama publicada en un remoto ya no hay nada que perder.
+        // With the branch pushed to a remote there's nothing left to lose.
         let remote = t.0.join("remote.git");
         git::ok(&t.0, &["init", "-q", "--bare", remote.to_str().unwrap()]).unwrap();
         git::ok(&repo, &["remote", "add", "origin", remote.to_str().unwrap()]).unwrap();
@@ -293,7 +293,7 @@ mod tests {
         assert!(!Path::new(&recreated.path).exists());
         assert!(!status(&repo, Some(&recreated)).unwrap().exists);
         assert!(!branch_exists(&repo, "nodal/pay-1-logo").unwrap());
-        // Idempotente.
+        // Idempotent.
         cleanup(&repo, &recreated).unwrap();
     }
 }

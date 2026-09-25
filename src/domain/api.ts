@@ -1,16 +1,16 @@
-// Firmas de los comandos de F1. El backend todavía no los expone: cada uno lleva un
-// `TODO(F1-X)` con el agente que lo implementa (A: migración y rebrand, B: cola, CRUD y
-// runs, C: proveedores). No usar desde la UI hasta que existan.
+// Signatures for the F1 commands. The backend doesn't expose them yet: each one carries a
+// `TODO(F1-X)` with the agent that implements it (A: migration and rebrand, B: queue, CRUD and
+// runs, C: providers). Don't use them from the UI until they exist.
 //
-// Todos rechazan con un string (en inglés) listo para mostrar. Tauri pasa los argumentos
-// camelCase a los parámetros snake_case del comando.
+// All of them reject with an English string ready to display. Tauri maps the camelCase
+// arguments to the command's snake_case parameters.
 //
-// Los DTOs de este archivo (entradas y reportes) son contrato propuesto: el agente que
-// implementa el comando crea el struct Rust equivalente con serde camelCase.
+// The DTOs in this file (inputs and reports) are a proposed contract: the agent that
+// implements the command creates the equivalent Rust struct with serde camelCase.
 //
-// Patches: campo ausente = no tocar; `null` = borrar. En Rust eso necesita distinguir
-// "falta" de "null" (`Option<Option<T>>` con `#[serde(default, deserialize_with = ...)]`
-// o `serde_with::double_option`): un `Option<Option<T>>` pelado lee `null` como "falta".
+// Patches: absent field = leave as is; `null` = clear. In Rust that requires telling
+// "missing" from "null" apart (`Option<Option<T>>` with `#[serde(default, deserialize_with = ...)]`
+// or `serde_with::double_option`): a bare `Option<Option<T>>` reads `null` as "missing".
 
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
@@ -42,10 +42,10 @@ import type { Transcript } from "../features/runs/types";
 // ---------- DTOs ----------
 
 /**
- * Confianza de Claude Code en una carpeta (solo lectura de `~/.claude.json`):
- * `repo` = entrada de la raíz canónica del repo (el principal, para worktrees); `parent` =
- * la carpeta o un padre dentro del repo; `notTrusted` = va a mostrar el diálogo; `unknown`
- * (con `trusted: null`) = sin config legible.
+ * Claude Code's trust in a folder (read-only from `~/.claude.json`):
+ * `repo` = entry for the repo's canonical root (the main one, for worktrees); `parent` =
+ * the folder or a parent inside the repo; `notTrusted` = it will show the dialog; `unknown`
+ * (with `trusted: null`) = no readable config.
  */
 export interface RepoTrust {
   trusted: boolean | null;
@@ -54,10 +54,10 @@ export interface RepoTrust {
 }
 
 /**
- * `running`/`capacity`: slots ocupados de la concurrencia global (regla del pump). `needYou`:
- * tareas Blocked o movidas de proyecto en el proveedor + runs migrados sin confirmar + sesiones esperando permiso/input, sin contar
- * dos veces la misma tarea. `queued`: listos para salir. `pumpError`: error de la última
- * pasada de la cola (p. ej. `claude agents` falla en cada tick), o `null`.
+ * `running`/`capacity`: occupied slots of the global concurrency (the pump's rule). `needYou`:
+ * Blocked tasks or tasks moved to another project in the provider + unconfirmed migrated runs + sessions waiting for permission/input, without counting
+ * the same task twice. `queued`: ready to go. `pumpError`: error from the queue's last
+ * pass (e.g. `claude agents` fails on every tick), or `null`.
  */
 export interface WorkSummary {
   running: number;
@@ -67,7 +67,7 @@ export interface WorkSummary {
   pumpError: string | null;
 }
 
-/** Sesiones vivas trabajando/esperando y subagentes activos (mismo criterio que `activity_summary`). */
+/** Live sessions working/waiting and active subagents (same criteria as `activity_summary`). */
 export interface RepoActivityCount {
   repoId: string;
   repoPath: string;
@@ -75,7 +75,7 @@ export interface RepoActivityCount {
   agents: number;
 }
 
-/** Totales sin contar dos veces lo que cae en repos anidados. */
+/** Totals without double-counting what falls in nested repos. */
 export interface ProjectActivity {
   projectId: string;
   repos: RepoActivityCount[];
@@ -84,7 +84,7 @@ export interface ProjectActivity {
   generatedAt: number;
 }
 
-/** `exists`: la carpeta es un worktree vivo. `ahead`: commits fuera de la base; `unpushed`: además fuera de todo remoto. */
+/** `exists`: the folder is a live worktree. `ahead`: commits outside the base; `unpushed`: also outside every remote. */
 export interface WorktreeStatus {
   exists: boolean;
   branch: string | null;
@@ -95,9 +95,9 @@ export interface WorktreeStatus {
 }
 
 /**
- * `key`: 2-6 mayúsculas/dígitos, único. `color`: si falta, se asigna uno de la paleta.
- * Cambiar la key renumera los ids visibles (`PAY-1` → `WEB-1`) pero no renombra ramas ni
- * worktrees ya creados.
+ * `key`: 2-6 uppercase letters/digits, unique. `color`: if missing, one from the palette is assigned.
+ * Changing the key renumbers the visible ids (`PAY-1` → `WEB-1`) but doesn't rename branches or
+ * worktrees already created.
  */
 export interface NewProject {
   name: string;
@@ -106,12 +106,12 @@ export interface NewProject {
   description?: string | null;
 }
 
-/** Solo los campos presentes se cambian; `null` borra los opcionales. */
+/** Only the present fields change; `null` clears the optional ones. */
 export type ProjectPatch = Partial<Pick<Project, "name" | "key" | "color" | "description" | "defaultExecutor" | "reviewer">> & {
   archived?: boolean;
 };
 
-/** `path` puede ser cualquier carpeta dentro del repo: se resuelve a la raíz git. */
+/** `path` can be any folder inside the repo: it resolves to the git root. */
 export interface NewRepo extends LaunchOptions {
   path: string;
   name?: string;
@@ -129,7 +129,7 @@ export type RepoPatch = Partial<Omit<NewRepo, "path" | "model" | "effort" | "per
   position?: number;
 };
 
-/** Lo que manda la UI para el plan; el backend lo guarda como `PlanRef`. */
+/** What the UI sends for the plan; the backend stores it as `PlanRef`. */
 export type PlanInput = { kind: "text"; text: string } | { kind: "file"; path: string };
 
 export interface NewTask {
@@ -148,29 +148,29 @@ export interface NewTask {
 }
 
 /**
- * `repoId` mueve la tarea a otro repo del mismo proyecto (sin runs en curso ni worktree; un
- * plan `.md` del repo viejo exige mandar otro `plan`).
- * En las importadas solo se acepta `repoId`, `plan` (queda `planOverridden`), `status`,
- * `acceptance` y las opciones de ejecución.
+ * `repoId` moves the task to another repo of the same project (no runs in progress and no worktree; a
+ * `.md` plan from the old repo requires sending another `plan`).
+ * Imported tasks only accept `repoId`, `plan` (becomes `planOverridden`), `status`,
+ * `acceptance` and the execution options.
  */
 export type TaskPatch = Partial<Omit<NewTask, "projectId">>;
 
 export interface ExecutorInfo {
   executor: Executor;
-  /** Del frontmatter (`description`) o del `meta` del workflow. */
+  /** From the frontmatter (`description`) or the workflow's `meta`. */
   description: string | null;
-  /** Agentes: `tools` del frontmatter. */
+  /** Agents: `tools` from the frontmatter. */
   tools: string[] | null;
-  /** Workflows: sincronizan el proveedor por su cuenta (`meta.managesSource`). */
+  /** Workflows: they sync the provider on their own (`meta.managesSource`). */
   managesSource: string | null;
-  /** Workflows: revisan por su cuenta (`meta.reviews`); se saltan el gate. */
+  /** Workflows: they review on their own (`meta.reviews`); they skip the gate. */
   reviews: boolean;
-  /** Archivo de la definición, para agentes y workflows. */
+  /** Definition file, for agents and workflows. */
   path: string | null;
   source: AgentSource | null;
 }
 
-/** Overrides para este run; lo que falte sale de la tarea → repo → proyecto. */
+/** Overrides for this run; whatever is missing comes from the task → repo → project. */
 export interface LaunchInput {
   executor?: Executor;
   isolation?: Isolation;
@@ -213,36 +213,36 @@ export interface CommitInfo {
   shortSha: string;
   subject: string;
   author: string;
-  /** Fecha del autor, epoch ms. */
+  /** Author date, epoch ms. */
   at: number;
 }
 
 export interface RunDiff {
-  /** Ref base (`git diff <base>...HEAD`). */
+  /** Base ref (`git diff <base>...HEAD`). */
   base: string;
-  /** Rama del run; `null` con HEAD desacoplado. */
+  /** The run's branch; `null` with a detached HEAD. */
   branch: string | null;
-  /** Commits de la rama que no están en `base`, del más nuevo al más viejo (hasta 200). */
+  /** Commits on the branch that aren't in `base`, newest to oldest (up to 200). */
   commits: CommitInfo[];
-  /** El run sigue activo: el diff puede cambiar. */
+  /** The run is still active: the diff may change. */
   live: boolean;
   cwd: string;
-  /** Incluye cambios sin commitear (el run sigue activo). */
+  /** Includes uncommitted changes (the run is still active). */
   includesWorkingTree: boolean;
   files: FileDiff[];
-  /** Patch completo, para "Copy patch". */
+  /** Full patch, for "Copy patch". */
   patch: string;
 }
 
 export interface ProviderStatus {
   provider: string;
   hasKey: boolean;
-  /** Nombre del usuario si la key es válida. */
+  /** The user's name if the key is valid. */
   viewer: string | null;
   error: string | null;
-  /** Últimos 4 caracteres de la key guardada (nunca la key); `null` sin key o si es corta. */
+  /** Last 4 characters of the saved key (never the key); `null` without a key or if it's short. */
   keyHint: string | null;
-  /** Epoch ms hasta el que el sync está en pausa (rate limit o key rechazada); `null` si no. */
+  /** Epoch ms until which sync is paused (rate limit or rejected key); `null` otherwise. */
   pausedUntil: number | null;
   pauseReason: string | null;
 }
@@ -254,9 +254,9 @@ export interface ImportableItem {
   url: string;
   state: ExternalState;
   labels: string[];
-  /** Por `repoRules` o `defaultRepoId`. */
+  /** From `repoRules` or `defaultRepoId`. */
   suggestedRepoId: string | null;
-  /** Si ya está importada, su tarea. */
+  /** If already imported, its task. */
   taskId: string | null;
 }
 
@@ -265,40 +265,40 @@ export interface ImportResult {
   skipped: { externalId: string; reason: string }[];
 }
 
-/** Backfill de una regla de proyecto (`previewRuleImport`). */
+/** Backfill of a project rule (`previewRuleImport`). */
 export interface RulePreview {
-  /** Ítems que se importarían al repo de la regla (abiertos + cerrados en los últimos 14 días). */
+  /** Items that would be imported into the rule's repo (open + closed in the last 14 days). */
   count: number;
-  /** Ya importados en el repo de la regla. */
+  /** Already imported into the rule's repo. */
   alreadyImported: number;
-  /** Ya importados en otro repo: se quedan donde están. */
+  /** Already imported into another repo: they stay where they are. */
   inOtherRepos: number;
 }
 
 export type MovedAction = "move" | "keep";
 
 export interface SyncReport {
-  /** Tareas refrescadas desde el proveedor. */
+  /** Tasks refreshed from the provider. */
   pulled: number;
-  /** Escrituras en el proveedor (estados y comentarios). */
+  /** Writes to the provider (states and comments). */
   pushed: number;
-  /** Tareas nuevas por auto-import. */
+  /** New tasks from auto-import. */
   imported: number;
   errors: string[];
-  /** Avisos: estados nuevos/desaparecidos, ítems sin repo para el auto-import, pushes descartados. */
+  /** Notices: new/vanished states, items without a repo for auto-import, discarded pushes. */
   notices: string[];
 }
 
 export type MapOrigin = "suggested" | "confirmed" | "unmapped";
 
 export interface SourceStatesReport {
-  /** Estados actuales del proveedor para el scope. */
+  /** The provider's current states for the scope. */
   states: ExternalState[];
-  /** Mapeo guardado completado con la propuesta de Nodal para lo que falte. */
+  /** Saved mapping, completed with Nodal's proposal for whatever is missing. */
   proposal: StateMap;
   pullOrigin: Record<string, MapOrigin>;
   pushOrigin: Partial<Record<TaskStatus, MapOrigin>>;
-  /** Contra `knownStates`: estados nuevos y desaparecidos. */
+  /** Against `knownStates`: new and vanished states. */
   added: ExternalState[];
   removed: ExternalState[];
 }
@@ -315,50 +315,50 @@ export interface NewSourceLink {
 export type SourceLinkPatch = Partial<Pick<SourceLink, "defaultRepoId" | "repoRules" | "autoImport">>;
 
 export interface LegacyImportReport {
-  /** Copia intacta de la carpeta elegida (`legacy-backup-<ts>/`). */
+  /** Untouched copy of the chosen folder (`legacy-backup-<ts>/`). */
   backupDir: string;
   projects: number;
   repos: number;
   tasks: number;
   runs: number;
-  /** Ya importados antes (idempotencia). */
+  /** Already imported before (idempotency). */
   alreadyImported: number;
-  /** Archivos o registros salteados, con el motivo. */
+  /** Skipped files or records, with the reason. */
   skipped: string[];
 }
 
-// ---------- Proyectos ----------
+// ---------- Projects ----------
 
 export const listProjects = (includeArchived = false) => invoke<Project[]>("list_projects", { includeArchived });
 export const createProject = (input: NewProject) => invoke<Project>("create_project", { input });
 export const updateProject = (id: string, patch: ProjectPatch) => invoke<Project>("update_project", { id, patch });
-/** Borra en cascada repos, tareas y fuentes. */
+/** Cascade-deletes repos, tasks and sources. */
 export const deleteProject = (id: string) => invoke<void>("delete_project", { id });
 
 // ---------- Repos ----------
 
-/** `null`: todos los proyectos. */
+/** `null`: all projects. */
 export const listRepos = (projectId: string | null) => invoke<Repo[]>("list_repos", { projectId });
-/** Rechaza si no está en un repo git o si ya está en otro proyecto. */
+/** Rejects if it's not in a git repo or if it's already in another project. */
 export const addRepo = (projectId: string, input: NewRepo) => invoke<Repo>("add_repo", { projectId, input });
 export const updateRepo = (id: string, patch: RepoPatch) => invoke<Repo>("update_repo", { id, patch });
-/** Rechaza si el repo tiene tareas. */
+/** Rejects if the repo has tasks. */
 export const deleteRepo = (id: string) => invoke<void>("delete_repo", { id });
 
-// ---------- Tareas ----------
+// ---------- Tasks ----------
 
-/** `null`: todas. */
+/** `null`: all. */
 export const listTasks = (projectId: string | null) => invoke<Task[]>("list_tasks", { projectId });
 export const getTask = (id: string) => invoke<Task>("get_task", { id });
 export const createTask = (input: NewTask) => invoke<Task>("create_task", { input });
 export const updateTask = (id: string, patch: TaskPatch) => invoke<Task>("update_task", { id, patch });
 export const deleteTask = (id: string) => invoke<void>("delete_task", { id });
-/** Arrastre en el board: cambia de columna y/o posición. */
+/** Board drag: changes column and/or position. */
 export const moveTask = (id: string, status: TaskStatus, position: number) =>
   invoke<Task>("move_task", { id, status, position });
 /**
- * Nuevo orden de una columna: renumera posiciones en una transacción. Todas las tareas deben
- * estar en `status` y en el mismo proyecto; las de la columna que falten quedan detrás.
+ * New order for a column: renumbers positions in a transaction. All tasks must
+ * be in `status` and in the same project; the column's missing ones go after.
  */
 export const reorderTasks = (status: TaskStatus, orderedIds: string[]) =>
   invoke<void>("reorder_tasks", { status, orderedIds });
@@ -369,116 +369,116 @@ export const addTaskRelation = (taskId: string, otherId: string, kind: RelationK
 export const removeTaskRelation = (taskId: string, otherId: string, kind: RelationKind) =>
   invoke<void>("remove_task_relation", { taskId, otherId, kind });
 /**
- * Borra el worktree y la rama de la tarea ("Clean up"). Sin `force` rechaza si hay commits
- * sin publicar (`unpushed`) o cambios sin commitear (`dirty`).
+ * Deletes the task's worktree and branch ("Clean up"). Without `force` it rejects if there are
+ * unpublished commits (`unpushed`) or uncommitted changes (`dirty`).
  */
 export const cleanupWorktree = (taskId: string, force = false) =>
   invoke<Task>("cleanup_worktree", { taskId, force });
-/** Ruta absoluta. No lanza nada ni escribe el config de Claude Code. */
+/** Absolute path. Doesn't launch anything or write Claude Code's config. */
 export const repoTrust = (path: string) => invoke<RepoTrust>("repo_trust", { path });
-/** `git version 2.x.y`; rechaza si no hay git en el PATH. */
+/** `git version 2.x.y`; rejects if git isn't on the PATH. */
 export const gitVersion = () => invoke<string>("git_version");
-/** Actividad de Claude Code por repo del proyecto (un solo `claude agents`). */
+/** Claude Code activity per repo of the project (a single `claude agents`). */
 export const projectActivity = (projectId: string) => invoke<ProjectActivity>("project_activity", { projectId });
-/** Todo en cero/false/null si la tarea no tiene worktree. */
+/** Everything zero/false/null if the task has no worktree. */
 export const worktreeStatus = (taskId: string) => invoke<WorktreeStatus>("worktree_status", { taskId });
 
-// ---------- Ejecutores y runs ----------
+// ---------- Executors and runs ----------
 
-/** Agentes, workflows y Claude; con `repoId` suma los del repo. */
+/** Agents, workflows and Claude; with `repoId` it adds the repo's own. */
 export const listExecutors = (repoId: string | null) => invoke<ExecutorInfo[]>("list_executors", { repoId });
-/** Runs de la tarea (o todos con `null`), más recientes primero. */
+/** The task's runs (or all with `null`), most recent first. */
 export const listTaskRuns = (taskId: string | null, projectId: string | null = null) =>
   invoke<Run[]>("list_task_runs", { taskId, projectId });
-/** Como `listTaskRuns` (hasta 500), sin `prompt` ni `extraInstructions`. Un run sin tarea cuenta en el proyecto de su repo. */
+/** Like `listTaskRuns` (up to 500), without `prompt` or `extraInstructions`. A run without a task counts toward its repo's project. */
 export const listRunsLight = (projectId: string | null = null, taskId: string | null = null) =>
   invoke<RunLight[]>("list_runs_light", { projectId, taskId });
-/** Run completo (con `prompt`). */
+/** Full run (with `prompt`). */
 export const getRun = (runId: string) => invoke<Run>("get_run", { runId });
-/** El último run de cada tarea, sin límite de historial. */
+/** The latest run of each task, with no history limit. */
 export const latestRunsByTask = (projectId: string | null = null) =>
   invoke<RunLight[]>("latest_runs_by_task", { projectId });
-/** `null`: global (incluye sesiones de Claude Code ajenas a la app); con proyecto, solo sus runs y tareas. */
+/** `null`: global (includes Claude Code sessions outside the app); with a project, only its runs and tasks. */
 export const workSummary = (projectId: string | null = null) => invoke<WorkSummary>("work_summary", { projectId });
-/** Cola global: runs `queued`, en orden de salida. */
+/** Global queue: `queued` runs, in launch order. */
 export const listQueue = () => invoke<Run[]>("list_queue");
-/** Encola un run de trabajo (o lo lanza si hay slot). */
+/** Queues a work run (or launches it if there's a slot). */
 export const launchTask = (taskId: string, input: LaunchInput = {}) => invoke<Run>("launch_task", { taskId, input });
-/** Siguiente paso de la cadena con otro ejecutor, sobre la misma rama/worktree. */
+/** Next step of the chain with another executor, on the same branch/worktree. */
 export const handOff = (taskId: string, executor: Executor, extraInstructions: string | null = null) =>
   invoke<Run>("hand_off", { taskId, executor, extraInstructions });
-/** Lanza el revisor ahora. `reviewer` null → el configurado. */
+/** Launches the reviewer now. `reviewer` null → the configured one. */
 export const reviewNow = (taskId: string, reviewer: string | null = null) =>
   invoke<Run>("review_now", { taskId, reviewer });
-/** Saca de la cola un run `queued`, o detiene uno lanzado (guarda el patch a medias). */
+/** Removes a `queued` run from the queue, or stops a launched one (saves the partial patch). */
 export const cancelRun = (runId: string) => invoke<Run>("cancel_run", { runId });
 /**
- * Un run migrado que quedó en cola (`status: "queued"` con `legacyLabel`) no se lanza solo:
- * esto lo re-encola como run nuevo (el viejo queda cancelado). Para descartarlo, `cancelRun`.
+ * A migrated run left in the queue (`status: "queued"` with `legacyLabel`) doesn't launch on its own:
+ * this re-queues it as a new run (the old one is cancelled). To discard it, `cancelRun`.
  */
 export const confirmRun = (runId: string) => invoke<Run>("confirm_run", { runId });
-/** Nuevo orden de la cola: ids de todos los runs `queued`. */
+/** New queue order: ids of every `queued` run. */
 export const reorderQueue = (runIds: string[]) => invoke<void>("reorder_queue", { runIds });
 export const runDiff = (runId: string) => invoke<RunDiff>("run_diff", { runId });
 /**
- * Transcript de un run de agente, Claude o revisor (sesión principal; `agentId` = id del run).
- * Rechaza para workflows (usar `getAgentTranscript`). `null` si la sesión aún no tiene archivo.
- * `limit`: items más recientes (default 200, máx. 2000).
+ * Transcript of an agent, Claude or reviewer run (main session; `agentId` = the run's id).
+ * Rejects for workflows (use `getAgentTranscript`). `null` if the session has no file yet.
+ * `limit`: most recent items (default 200, max 2000).
  */
 export const getRunTranscript = (runId: string, limit?: number) =>
   invoke<Transcript | null>("get_run_transcript", { runId, limit: limit ?? null });
-/** Abre la carpeta del run (o `file` dentro de ella) en el editor de Settings. */
+/** Opens the run's folder (or `file` inside it) in the editor from Settings. */
 export const openInEditor = (runId: string, file: string | null = null) =>
   invoke<void>("open_in_editor", { runId, file });
-/** Abre la carpeta del run en Finder. */
+/** Opens the run's folder in Finder. */
 export const openWorktree = (runId: string) => invoke<void>("open_worktree", { runId });
 
-// ---------- Proveedores ----------
+// ---------- Providers ----------
 
 export const providerStatus = (provider: string) => invoke<ProviderStatus>("provider_status", { provider });
-/** Valida la key y la guarda en el keychain; `null` la borra. */
+/** Validates the key and saves it in the keychain; `null` deletes it. */
 export const providerSetKey = (provider: string, key: string | null) =>
   invoke<ProviderStatus>("provider_set_key", { provider, key });
 export const providerClearKey = (provider: string) => invoke<ProviderStatus>("provider_clear_key", { provider });
 export const providerScopes = (provider: string) => invoke<ScopeRef[]>("provider_scopes", { provider });
 export const listSourceLinks = (projectId: string | null) => invoke<SourceLink[]>("list_source_links", { projectId });
-/** Arma la propuesta de mapeo de estados; queda "pendiente" hasta `saveStateMap`. */
+/** Builds the state-mapping proposal; stays "pending" until `saveStateMap`. */
 export const createSourceLink = (input: NewSourceLink) => invoke<SourceLink>("create_source_link", { input });
 export const updateSourceLink = (id: string, patch: SourceLinkPatch) =>
   invoke<SourceLink>("update_source_link", { id, patch });
-/** Disconnect: desvincula sus tareas (quedan locales) y borra el link, en una transacción. */
+/** Disconnect: unlinks its tasks (they become local) and deletes the link, in a transaction. */
 export const deleteSourceLink = (id: string) => invoke<void>("delete_source_link", { id });
-/** Unlink: la tarea pasa a ser local. */
+/** Unlink: the task becomes local. */
 export const unlinkTask = (taskId: string) => invoke<Task>("unlink_task", { taskId });
-/** Hasta 100 ítems del scope. `stateKinds` null o vacío = abiertos (triage, backlog, unstarted, started). */
+/** Up to 100 items from the scope. `stateKinds` null or empty = open (triage, backlog, unstarted, started). */
 export const providerListImportable = (linkId: string, query: string | null = null, stateKinds: ExtKind[] | null = null) =>
   invoke<ImportableItem[]>("provider_list_importable", { linkId, query, stateKinds });
 export const importTasks = (projectId: string, linkId: string, items: { externalId: string; repoId: string }[]) =>
   invoke<ImportResult>("import_tasks", { projectId, linkId, items });
-/** `null`: todas las fuentes. */
+/** `null`: every source. */
 export const syncNow = (linkId: string | null = null) => invoke<SyncReport>("sync_now", { linkId });
 export const sourceStates = (linkId: string) => invoke<SourceStatesReport>("source_states", { linkId });
-/** Guarda y confirma el mapeo (fija `confirmedAt` y `knownStates`). */
+/** Saves and confirms the mapping (sets `confirmedAt` and `knownStates`). */
 export const saveStateMap = (linkId: string, map: StateMap) => invoke<SourceLink>("save_state_map", { linkId, map });
-/** Proyectos del proveedor elegibles como regla del link (Linear: los activos de su team). */
+/** Provider projects eligible as a link rule (Linear: its team's active ones). */
 export const sourceRuleProjects = (linkId: string) => invoke<ScopeRef[]>("source_rule_projects", { linkId });
-/** Cuántos ítems traería el backfill de la regla de proyecto `ruleId` (ya guardada). */
+/** How many items the backfill of project rule `ruleId` (already saved) would bring in. */
 export const previewRuleImport = (linkId: string, ruleId: string) =>
   invoke<RulePreview>("preview_rule_import", { linkId, ruleId });
-/** Backfill: importa al repo de la regla los ítems del proyecto; los ya importados en otro repo van en `skipped`. */
+/** Backfill: imports the project's items into the rule's repo; those already imported into another repo go in `skipped`. */
 export const importRule = (linkId: string, ruleId: string) => invoke<ImportResult>("import_rule", { linkId, ruleId });
-/** `move`: al repo sugerido (falla con run activo o worktree); `keep`: se queda en su repo. */
+/** `move`: to the suggested repo (fails with an active run or worktree); `keep`: stays in its repo. */
 export const resolveMovedTask = (taskId: string, action: MovedAction) =>
   invoke<Task>("resolve_moved_task", { taskId, action });
 
-// ---------- Migración ----------
+// ---------- Migration ----------
 
-/** Copia `folder` a `legacy-backup-<ts>/` y la importa en una transacción. Idempotente. */
+/** Copies `folder` to `legacy-backup-<ts>/` and imports it in a transaction. Idempotent. */
 export const importLegacyData = (folder: string) => invoke<LegacyImportReport>("import_legacy_data", { folder });
 
 // ---------- Settings ----------
 
-/** Salida de `claude --version` (p. ej. `2.1.0 (Claude Code)`); rechaza si no se encuentra el CLI. */
+/** Output of `claude --version` (e.g. `2.1.0 (Claude Code)`); rejects if the CLI isn't found. */
 export const claudeVersion = () => invoke<string>("claude_version");
 
 /** `false` in debug builds ("Nodal Dev"): they never check for updates. */
@@ -489,19 +489,19 @@ export const restartApp = () => invoke<void>("restart_app");
 export const getSettings = () => invoke<Settings>("get_settings");
 export const setSettings = (settings: Settings) => invoke<Settings>("set_settings", { settings });
 
-// ---------- Eventos ----------
+// ---------- Events ----------
 
 export type ChangedKind = "tasks" | "runs" | "queue" | "sources" | "projects";
 
-/** Payload de `nodal://changed`. Sin `projectId`: puede afectar a cualquier proyecto. */
+/** Payload of `nodal://changed`. Without `projectId`: it may affect any project. */
 export interface ChangedEvent {
   kind: ChangedKind;
   projectId?: string;
 }
 
 /**
- * Avisa cuando algo cambió en el backend (cola, sync o comandos que mutan), con debounce
- * del lado Rust. No trae datos: volver a pedir lo que se muestra. Devuelve el unlisten.
+ * Notifies when something changed in the backend (queue, sync or mutating commands), debounced
+ * on the Rust side. Carries no data: re-fetch whatever is displayed. Returns the unlisten.
  */
 export const onChanged = (cb: (e: ChangedEvent) => void): Promise<UnlistenFn> =>
   listen<ChangedEvent>("nodal://changed", (ev) => cb(ev.payload));

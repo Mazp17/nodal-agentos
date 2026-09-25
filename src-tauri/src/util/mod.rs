@@ -1,4 +1,4 @@
-//! Utilidades compartidas: tiempo, ids, rutas, git y E/S bloqueante.
+//! Shared utilities: time, ids, paths, git and blocking I/O.
 
 pub mod git;
 pub mod paths;
@@ -12,16 +12,16 @@ pub fn now_ms() -> i64 {
         .unwrap_or(0)
 }
 
-/// Corre `f` en un hilo bloqueante (disco, git) sin frenar el runtime.
+/// Runs `f` on a blocking thread (disk, git) without stalling the runtime.
 pub async fn blocking<T: Send + 'static>(f: impl FnOnce() -> Result<T, String> + Send + 'static) -> Result<T, String> {
     tauri::async_runtime::spawn_blocking(f).await.map_err(|e| format!("Internal error: {e}"))?
 }
 
 static SEQ: AtomicU32 = AtomicU32::new(0);
 
-/// Id ordenable por tiempo, estilo ULID sin dependencias: `prefix` + ms en base32 (10) +
-/// secuencia del proceso (3) + 5 caracteres aleatorios (hash con semilla de `RandomState`).
-/// Solo `[0-9a-z]`: termina en rutas (`tasks/<id>/`).
+/// Time-sortable id, ULID-style with no dependencies: `prefix` + ms in base32 (10) +
+/// process sequence (3) + 5 random characters (hash seeded by `RandomState`).
+/// Only `[0-9a-z]`: it ends up in paths (`tasks/<id>/`).
 pub fn new_id(prefix: char, now: i64) -> String {
     use std::hash::{BuildHasher, Hasher};
     debug_assert!(prefix.is_ascii_lowercase());
@@ -44,8 +44,8 @@ fn base32(mut n: u64, width: usize) -> String {
     String::from_utf8(out).unwrap_or_default()
 }
 
-/// Un id que viene del frontend y puede terminar en una ruta: minúsculas, dígitos, `-` y `_`.
-/// Acepta los de `new_id` y los deterministas de la migración.
+/// An id coming from the frontend that may end up in a path: lowercase, digits, `-` and `_`.
+/// Accepts those from `new_id` and the deterministic ones from the migration.
 pub fn is_valid_id(id: &str) -> bool {
     (2..=64).contains(&id.len())
         && !id.starts_with('-')
@@ -60,7 +60,7 @@ pub fn check_id(id: &str, what: &str) -> Result<(), String> {
     }
 }
 
-/// Escritura atómica: temporal + rename (crea las carpetas que falten).
+/// Atomic write: temp file + rename (creates any missing folders).
 pub fn write_atomic(path: &std::path::Path, contents: &[u8]) -> Result<(), String> {
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir).map_err(|e| format!("Couldn't create {}: {e}", dir.display()))?;
@@ -70,7 +70,7 @@ pub fn write_atomic(path: &std::path::Path, contents: &[u8]) -> Result<(), Strin
     std::fs::rename(&tmp, path).map_err(|e| format!("Couldn't save {}: {e}", path.display()))
 }
 
-/// Recorta a `max` caracteres (no bytes) agregando `…`.
+/// Clips to `max` characters (not bytes), appending `…`.
 pub fn clip_chars(s: &str, max: usize) -> String {
     if s.chars().count() <= max {
         return s.to_string();
@@ -104,7 +104,7 @@ mod tests {
 
     #[test]
     fn clip() {
-        assert_eq!(clip_chars("hola", 10), "hola");
-        assert_eq!(clip_chars("ñandúes", 4), "ñan…");
+        assert_eq!(clip_chars("hello", 10), "hello");
+        assert_eq!(clip_chars("naïveté", 4), "naï…");
     }
 }

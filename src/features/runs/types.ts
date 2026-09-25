@@ -1,39 +1,39 @@
-// Espejo de src-tauri/src/runs/types.rs (serde rename_all = camelCase): lo que Claude Code
-// dice de una sesión en background (`claude agents`), su workflow y sus subagentes. El run
-// de Nodal (`Run`) vive en `src/domain/types.ts`.
+// Mirror of src-tauri/src/runs/types.rs (serde rename_all = camelCase): what Claude Code
+// reports about a background session (`claude agents`), its workflow and its subagents. The
+// Nodal run (`Run`) lives in `src/domain/types.ts`.
 
-/** Una sesión en background según `claude agents --json --all`. */
+/** A background session as reported by `claude agents --json --all`. */
 export interface RunSummary {
-  /** Id corto de `claude --bg` (`Run.claudeRunId`). */
+  /** Short id from `claude --bg` (`Run.claudeRunId`). */
   id: string;
   sessionId: string;
   cwd: string | null;
   name: string | null;
-  /** Epoch en ms. */
+  /** Epoch in ms. */
   startedAt: number | null;
   pid: number | null;
-  /** "busy" | "idle" | "waiting" (solo sesiones vivas). */
+  /** "busy" | "idle" | "waiting" (live sessions only). */
   status: string | null;
   /** "working" | "blocked" | "done" | "failed" | "stopped". */
   state: string | null;
-  /** Con status "waiting": "permission prompt" | "input needed" | "sandbox request" | ... */
+  /** With status "waiting": "permission prompt" | "input needed" | "sandbox request" | ... */
   waitingFor: string | null;
 }
 
-/** Trabajando o bloqueada esperando al usuario: la sesión sigue viva. */
+/** Working or blocked waiting on the user: the session is still alive. */
 export const isInProgress = (r: RunSummary | null | undefined) => r?.state === "working" || r?.state === "blocked";
 
-/** Campos conocidos del `result` del workflow; todos opcionales. */
+/** Known fields of the workflow's `result`; all optional. */
 export interface RunResult {
   issue: string | null;
-  /** URL http(s) del PR. */
+  /** The PR's http(s) URL. */
   pr: string | null;
   branch: string | null;
   workdir: string | null;
   where: string | null;
   unmetAcceptance: string[] | null;
   nits: string[] | null;
-  /** `result` completo como JSON indentado (recortado). */
+  /** Full `result` as indented JSON (truncated). */
   raw: string | null;
 }
 
@@ -64,10 +64,10 @@ export interface Transcript {
   prompt: string | null;
   items: TranscriptItem[];
   totalItems: number;
-  /** Items más viejos que no se devolvieron. */
+  /** Older items that weren't returned. */
   omitted: number;
   finalOutput: string | null;
-  /** Archivo muy grande: se leyó solo principio y cola. */
+  /** Very large file: only the head and tail were read. */
   partial: boolean;
   bytes: number;
 }
@@ -99,11 +99,11 @@ export interface RunDetail {
   workflowId: string;
   workflowName: string | null;
   source: DetailSource;
-  /** "completed", ... `null` en modo live: cruzar con RunSummary.state. */
+  /** "completed", ... `null` in live mode: cross-check with RunSummary.state. */
   status: string | null;
   phases: PhaseInfo[];
   currentPhase: string | null;
-  /** 1-based dentro de `phases`. */
+  /** 1-based within `phases`. */
   currentPhaseIndex: number | null;
   agents: AgentInfo[];
   agentCount: number;
@@ -112,10 +112,10 @@ export interface RunDetail {
   durationMs: number | null;
   /** "green" | "yellow" | "red". */
   resultStatus: string | null;
-  /** Solo en modo final. */
+  /** Final mode only. */
   result: RunResult | null;
   workflowCount: number;
 }
 
-/** Por qué una sesión en background terminó sin correr su workflow (`get_launch_blocker`). */
+/** Why a background session ended without running its workflow (`get_launch_blocker`). */
 export type LaunchBlocker = { kind: "workflowReview"; workflow: string | null };

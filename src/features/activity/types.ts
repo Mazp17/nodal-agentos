@@ -1,16 +1,16 @@
-// Espejo de src-tauri/src/activity/mod.rs (serde rename_all = camelCase).
+// Mirror of src-tauri/src/activity/mod.rs (serde rename_all = camelCase).
 
 export type SessionKind = "interactive" | "background" | "unlisted" | (string & {});
 
 export interface SessionActivity {
   sessionId: string;
-  /** Id corto (solo background). */
+  /** Short id (background only). */
   id: string | null;
-  /** "unlisted": transcript activo que `claude agents` no lista (`claude -p`, SDK…). */
+  /** "unlisted": active transcript that `claude agents` doesn't list (`claude -p`, SDK…). */
   kind: SessionKind;
   name: string | null;
   cwd: string | null;
-  /** "busy" | "idle" | "waiting" (procesos vivos). */
+  /** "busy" | "idle" | "waiting" (live processes). */
   status: string | null;
   /** "working" | "blocked" | "done" | "stopped" (background). */
   state: string | null;
@@ -37,7 +37,7 @@ export interface SubagentActivity {
   workflowPhase: string | null;
   model: string | null;
   active: boolean;
-  /** Terminó con end_turn. `!active && !finished` = sin actividad reciente. */
+  /** Ended with end_turn. `!active && !finished` = no recent activity. */
   finished: boolean;
   lastActivityAt: number | null;
   lastTool: string | null;

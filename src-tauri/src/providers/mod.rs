@@ -1,17 +1,17 @@
-//! Proveedores de tareas (Linear hoy; Asana, Azure DevOps después) y su sync con Nodal.
+//! Task providers (Linear today; Asana, Azure DevOps later) and their sync with Nodal.
 //!
-//! - `TaskProvider`: interfaz genérica de un proveedor. Despacho estático por el enum
-//!   `Provider` (sin `dyn`); cada adapter vive en su archivo (`linear.rs`).
-//! - `state_map`: propuesta de mapeo de estados (pura).
-//! - `plan`: materialización de `plan.md`, extracción de criterios y comentario de cierre.
-//! - `import`: importación de ítems como tareas.
-//! - `sync`: worker (pull, push del outbox, auto-import) y `sync_now`.
-//! - `store`: SQL sobre `tasks`, `source_links`, `sync_outbox` y `runs` que usa todo lo
-//!   anterior (vive acá para no pisar `db/queries`).
-//! - `commands`: comandos de Tauri.
+//! - `TaskProvider`: generic provider interface. Static dispatch through the `Provider`
+//!   enum (no `dyn`); each adapter lives in its own file (`linear.rs`).
+//! - `state_map`: state mapping proposal (pure).
+//! - `plan`: `plan.md` materialization, criteria extraction and the closing comment.
+//! - `import`: importing items as tasks.
+//! - `sync`: worker (pull, outbox push, auto-import) and `sync_now`.
+//! - `store`: SQL over `tasks`, `source_links`, `sync_outbox` and `runs` used by all of the
+//!   above (lives here so it doesn't collide with `db/queries`).
+//! - `commands`: Tauri commands.
 //!
-//! API para la cola (`work`): `enqueue_status` y `enqueue_comment` agregan filas al outbox en
-//! la misma transacción que la transición, y `plan::closing_comment` arma el comentario.
+//! API for the queue (`work`): `enqueue_status` and `enqueue_comment` add outbox rows in the
+//! same transaction as the transition, and `plan::closing_comment` builds the comment.
 
 pub mod commands;
 mod import;
@@ -33,20 +33,20 @@ use crate::domain::{ExtKind, ExtProject, ExternalState, Priority, ScopeRef};
 
 pub use store::{enqueue_comment, enqueue_status};
 
-/// Los comandos de Tauri rechazan con un string listo para mostrar (en inglés).
+/// Tauri commands reject with a display-ready string (in English).
 pub type PResult<T> = Result<T, String>;
 
-/// Clase de error de un proveedor: decide qué hace el outbox con la fila.
+/// Provider error class: decides what the outbox does with the row.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ErrorKind {
-    /// Red, 5xx: reintentar con backoff (hasta `sync::MAX_ATTEMPTS`).
+    /// Network, 5xx: retry with backoff (up to `sync::MAX_ATTEMPTS`).
     Transient,
-    /// Reintentar más tarde y no seguir drenando este proveedor en esta pasada.
+    /// Retry later and stop draining this provider for this pass.
     RateLimited,
-    /// Key ausente o inválida: igual que `RateLimited`.
+    /// Missing or invalid key: same as `RateLimited`.
     Auth,
-    /// El proveedor rechazó la escritura (ítem borrado, sin permiso, input inválido): no
-    /// tiene sentido reintentar.
+    /// The provider rejected the write (deleted item, no permission, invalid input): retrying
+    /// makes no sense.
     Permanent,
 }
 
@@ -80,7 +80,7 @@ impl From<crate::linear::LinearError> for ProviderError {
         let kind = match &e {
             L::MissingKey | L::InvalidKey => ErrorKind::Auth,
             L::RateLimited => ErrorKind::RateLimited,
-            // La clasificación viene del status HTTP / `extensions.code` (`linear::model`).
+            // The classification comes from the HTTP status / `extensions.code` (`linear::model`).
             L::Network(_) | L::Keychain(_) | L::Unavailable(_) => ErrorKind::Transient,
             L::Api(_) => ErrorKind::Permanent,
         };
@@ -90,15 +90,15 @@ impl From<crate::linear::LinearError> for ProviderError {
 
 pub type ProviderResult<T> = Result<T, ProviderError>;
 
-/// Proveedores que Nodal conoce (el resto se rechaza con "Unknown provider").
+/// Providers Nodal knows about (the rest are rejected with "Unknown provider").
 pub const KNOWN_PROVIDERS: &[&str] = &["linear"];
 
-/// Tipos de estado "abiertos": el default del listado de importables y del auto-import.
+/// "Open" state kinds: the default for the importable listing and for auto-import.
 pub const OPEN_KINDS: &[ExtKind] = &[ExtKind::Triage, ExtKind::Backlog, ExtKind::Unstarted, ExtKind::Started];
 
-// ---------- Modelo genérico ----------
+// ---------- Generic model ----------
 
-/// Referencia liviana a otro ítem (el padre).
+/// Lightweight reference to another item (the parent).
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ItemRef {
@@ -108,7 +108,7 @@ pub struct ItemRef {
     pub url: String,
 }
 
-/// Sub-ítem (sub-issue), con su estado para marcar las ya terminadas.
+/// Sub-item (sub-issue), with its state to mark the ones already done.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ChildItem {
@@ -119,38 +119,38 @@ pub struct ChildItem {
     pub state: ExternalState,
 }
 
-/// Un ítem del proveedor (issue de Linear, tarea de Asana, work item de ADO).
-/// En el listado de importables `description_md`, `parent`, `children` y `assignee` pueden
-/// venir vacíos: para importar se vuelve a pedir el ítem completo con `pull`.
+/// A provider item (Linear issue, Asana task, ADO work item).
+/// In the importable listing `description_md`, `parent`, `children` and `assignee` may
+/// be empty: importing fetches the full item again with `pull`.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ExternalItem {
-    /// Id estable del proveedor (UUID en Linear). Único por proveedor.
+    /// Stable provider id (UUID in Linear). Unique per provider.
     pub external_id: String,
-    /// Id legible (`ENG-142`).
+    /// Human-readable id (`ENG-142`).
     pub identifier: String,
     pub url: String,
     pub title: String,
     pub description_md: Option<String>,
     pub state: ExternalState,
-    /// Scopes a los que pertenece (team y, si tiene, proyecto).
+    /// Scopes it belongs to (team and, if any, project).
     pub scopes: Vec<ScopeRef>,
     pub parent: Option<ItemRef>,
     pub children: Vec<ChildItem>,
     pub labels: Vec<String>,
-    /// Nombre visible del asignado en el proveedor (informativo).
+    /// Assignee's display name in the provider (informational).
     pub assignee: Option<String>,
     pub priority: Priority,
-    /// ISO 8601, tal cual lo da el proveedor.
+    /// ISO 8601, as given by the provider.
     pub updated_at: String,
-    /// ISO 8601. `None` si el proveedor no lo informa.
+    /// ISO 8601. `None` if the provider doesn't report it.
     pub created_at: Option<String>,
-    /// ISO 8601: cuándo se completó o canceló (`None` si está abierto o no se sabe).
+    /// ISO 8601: when it was completed or canceled (`None` if open or unknown).
     pub closed_at: Option<String>,
 }
 
 impl ExternalItem {
-    /// Proyecto del proveedor al que pertenece (scope `project`), si tiene.
+    /// Provider project it belongs to (`project` scope), if any.
     pub fn project(&self) -> Option<ExtProject> {
         self.scopes
             .iter()
@@ -159,20 +159,20 @@ impl ExternalItem {
     }
 }
 
-/// Consulta del listado de importables.
+/// Query for the importable listing.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ImportQuery {
     pub scope: ScopeRef,
-    /// Texto libre: título o identifier.
+    /// Free text: title or identifier.
     pub text: Option<String>,
-    /// Vacío = todos los tipos.
+    /// Empty = all kinds.
     pub state_kinds: Vec<ExtKind>,
-    /// Solo ítems creados después de este instante (epoch ms). Lo usa el auto-import.
+    /// Only items created after this instant (epoch ms). Used by auto-import.
     pub created_after: Option<i64>,
-    /// Solo ítems de este proyecto del proveedor (dentro de `scope`): reglas de proyecto.
+    /// Only items from this provider project (within `scope`): project rules.
     pub project_id: Option<String>,
-    /// Además de `state_kinds`, los completados o cancelados hace menos de estos días
-    /// (backfill de una regla de proyecto).
+    /// Besides `state_kinds`, the ones completed or canceled less than this many days ago
+    /// (backfill of a project rule).
     pub closed_within_days: Option<u32>,
     pub cursor: Option<String>,
 }
@@ -197,41 +197,41 @@ pub struct Page {
     pub next_cursor: Option<String>,
 }
 
-/// Interfaz de un proveedor de tareas. Los adapters normalizan sus estados a `ExtKind`
-/// para que la heurística de mapeo (`state_map`) sirva a todos.
-// Crate privado: el lint de `async fn` en traits públicos (por los bounds `Send`) no aplica;
-// el despacho es por enum concreto, así que los futures son `Send` cuando hace falta.
+/// Task provider interface. Adapters normalize their states to `ExtKind` so the mapping
+/// heuristic (`state_map`) works for all of them.
+// Private crate: the `async fn` in public traits lint (due to `Send` bounds) doesn't apply;
+// dispatch is through a concrete enum, so futures are `Send` when needed.
 #[allow(async_fn_in_trait)]
 pub trait TaskProvider {
-    /// Nombre del proveedor (`"linear"`), igual a `TaskSource.provider`.
+    /// Provider name (`"linear"`), same as `TaskSource.provider`.
     fn name(&self) -> &'static str;
-    /// Valida la key; devuelve el nombre del usuario.
+    /// Validates the key; returns the user's name.
     async fn status(&self) -> ProviderResult<String>;
-    /// Scopes vinculables (en Linear: teams y proyectos activos).
+    /// Linkable scopes (in Linear: teams and active projects).
     async fn scopes(&self) -> ProviderResult<Vec<ScopeRef>>;
-    /// Estados actuales del scope, en orden del proveedor.
+    /// Current states of the scope, in provider order.
     async fn states(&self, scope: &ScopeRef) -> ProviderResult<Vec<ExternalState>>;
-    /// Proyectos del proveedor que pueden ser regla de un link con este scope (en Linear:
-    /// los proyectos activos del team; un link a un proyecto, ese proyecto).
+    /// Provider projects that can be a rule of a link with this scope (in Linear: the team's
+    /// active projects; for a link to a project, that project).
     async fn rule_projects(&self, scope: &ScopeRef) -> ProviderResult<Vec<ScopeRef>>;
     async fn list_importable(&self, query: &ImportQuery) -> ProviderResult<Page>;
-    /// Ítems completos por id. Los que ya no existen (o la key no ve) no vuelven.
+    /// Full items by id. Those that no longer exist (or the key can't see) are not returned.
     async fn pull(&self, external_ids: &[String]) -> ProviderResult<Vec<ExternalItem>>;
-    #[allow(dead_code)] // Para el detalle (hoy `linear_issue_detail`) y proveedores futuros.
+    #[allow(dead_code)] // For the detail view (today `linear_issue_detail`) and future providers.
     async fn fetch(&self, external_id: &str) -> ProviderResult<Option<ExternalItem>> {
         Ok(self.pull(&[external_id.to_string()]).await?.into_iter().next())
     }
-    /// Cambia el estado del ítem. `state_id` sale del mapeo; si pertenece a otro grupo de
-    /// estados que el del ítem (proyecto de Linear con varios teams), el adapter usa el
-    /// equivalente por nombre/tipo del grupo del ítem. Devuelve el estado resultante.
+    /// Changes the item's state. `state_id` comes from the mapping; if it belongs to a different
+    /// state group than the item's (Linear project with several teams), the adapter uses the
+    /// equivalent by name/type in the item's group. Returns the resulting state.
     async fn set_state(&self, external_id: &str, state_id: &str) -> ProviderResult<ExternalState>;
     async fn comment(&self, external_id: &str, body: &str) -> ProviderResult<()>;
-    /// Si el ítem ya tiene un comentario que contiene `marker` (el outbox lo usa para no
-    /// repostear un comentario que salió pero no llegó a marcarse como enviado).
+    /// Whether the item already has a comment containing `marker` (the outbox uses it to avoid
+    /// reposting a comment that went out but wasn't marked as sent).
     async fn has_comment_with(&self, external_id: &str, marker: &str) -> ProviderResult<bool>;
 }
 
-/// Despacho estático de proveedores.
+/// Static provider dispatch.
 pub enum Provider {
     Linear(linear::LinearProvider),
     #[cfg(test)]
@@ -292,13 +292,13 @@ pub fn check_provider(name: &str) -> PResult<()> {
     }
 }
 
-/// Proveedor listo para usar, o `None` si no hay key guardada.
+/// Ready-to-use provider, or `None` if there is no saved key.
 pub async fn resolve(app: &AppHandle, name: &str) -> PResult<Option<Provider>> {
     check_provider(name)?;
     Ok(resolve_with_key(app, name).await?.map(|(p, _)| p))
 }
 
-/// Como `resolve`, más la key leída (para derivar `key_hint` sin leer el keychain dos veces).
+/// Like `resolve`, plus the key read (to derive `key_hint` without reading the keychain twice).
 pub async fn resolve_with_key(app: &AppHandle, name: &str) -> PResult<Option<(Provider, String)>> {
     check_provider(name)?;
     let Some(key) = app.state::<crate::secrets::Secrets>().get(name).await? else { return Ok(None) };
@@ -311,10 +311,10 @@ pub async fn resolve_with_key(app: &AppHandle, name: &str) -> PResult<Option<(Pr
     }
 }
 
-/// Keys más cortas no muestran pista: los últimos 4 serían demasiado de la key.
+/// Shorter keys show no hint: the last 4 would be too much of the key.
 const KEY_HINT_MIN_CHARS: usize = 12;
 
-/// Últimos 4 caracteres de la key para reconocerla en la UI; nunca la key entera.
+/// Last 4 characters of the key to recognize it in the UI; never the whole key.
 pub fn key_hint(key: &str) -> Option<String> {
     let chars: Vec<char> = key.trim().chars().collect();
     (chars.len() >= KEY_HINT_MIN_CHARS).then(|| chars[chars.len() - 4..].iter().collect())
@@ -326,15 +326,15 @@ pub async fn require(app: &AppHandle, name: &str) -> PResult<Provider> {
         .ok_or_else(|| format!("The {name} API key is missing. Add it in Settings → Providers."))
 }
 
-// ---------- Estado y arranque ----------
+// ---------- State and startup ----------
 
 pub struct ProvidersState {
-    /// `app_data_dir`: los planes van en `tasks/<id>/plan.md`.
+    /// `app_data_dir`: plans go in `tasks/<id>/plan.md`.
     pub data_dir: PathBuf,
-    /// Un solo sync a la vez (worker y `sync_now`), con su memoria entre pasadas.
+    /// A single sync at a time (worker and `sync_now`), with its memory between passes.
     pub sync_lock: tokio::sync::Mutex<sync::SyncMemo>,
-    /// Proveedores en pausa por rate limit o key rechazada. Aparte del lock de sync para que
-    /// `provider_status` y el cambio de key no esperen a una pasada en curso.
+    /// Providers paused by rate limit or rejected key. Separate from the sync lock so
+    /// `provider_status` and key changes don't wait for an ongoing pass.
     pauses: std::sync::Mutex<std::collections::HashMap<String, sync::Pause>>,
 }
 
@@ -343,7 +343,7 @@ impl ProvidersState {
         self.pauses.lock().map(|m| m.clone()).unwrap_or_default()
     }
 
-    /// Aplica solo las pausas que una pasada puso, cambió o levantó (`before` → `after`).
+    /// Applies only the pauses a pass set, changed or lifted (`before` → `after`).
     pub fn merge_paused(
         &self,
         before: &std::collections::HashMap<String, sync::Pause>,
@@ -362,13 +362,13 @@ impl ProvidersState {
         }
     }
 
-    /// Pausa vigente de un proveedor.
+    /// Active pause of a provider.
     pub fn pause_of(&self, provider: &str, now: i64) -> Option<sync::Pause> {
         self.paused().remove(provider).filter(|p| p.until > now)
     }
 
-    /// Un rate limit o una key rechazada fuera del sync (backfill de una regla) pausan el
-    /// proveedor igual que en el sync; otros errores no.
+    /// A rate limit or a rejected key outside the sync (a rule backfill) pauses the provider
+    /// just like in the sync; other errors don't.
     pub fn pause_on(&self, provider: &str, err: &ProviderError, now: i64) {
         let ms = match err.kind {
             ErrorKind::RateLimited => sync::RATE_LIMIT_PAUSE_MS,
@@ -380,7 +380,7 @@ impl ProvidersState {
         }
     }
 
-    /// Una key nueva (o borrada) levanta la pausa.
+    /// A new (or deleted) key lifts the pause.
     pub fn clear_pause(&self, provider: &str) {
         if let Ok(mut m) = self.pauses.lock() {
             m.remove(provider);
@@ -388,8 +388,8 @@ impl ProvidersState {
     }
 }
 
-/// Registra el estado y arranca el worker de sync. Necesita `LinearState` y la base
-/// (`db::Db`) ya registrados; si la base no abrió, el worker no hace nada.
+/// Registers the state and starts the sync worker. Needs `LinearState` and the database
+/// (`db::Db`) already registered; if the database didn't open, the worker does nothing.
 pub fn init(app: &AppHandle) -> Result<(), String> {
     let data_dir = crate::util::paths::data_dir(app)?;
     app.manage(ProvidersState {
@@ -401,15 +401,15 @@ pub fn init(app: &AppHandle) -> Result<(), String> {
     Ok(())
 }
 
-// ---------- Utilidades ----------
+// ---------- Utilities ----------
 
-/// Epoch ms → `YYYY-MM-DDTHH:MM:SS.mmmZ` (UTC), sin depender de chrono.
+/// Epoch ms → `YYYY-MM-DDTHH:MM:SS.mmmZ` (UTC), without depending on chrono.
 pub fn iso_from_ms(ms: i64) -> String {
     let secs = ms.div_euclid(1000);
     let millis = ms.rem_euclid(1000);
     let days = secs.div_euclid(86_400);
     let tod = secs.rem_euclid(86_400);
-    // Algoritmo "civil from days" de Howard Hinnant.
+    // Howard Hinnant's "civil from days" algorithm.
     let z = days + 719_468;
     let era = z.div_euclid(146_097);
     let doe = z.rem_euclid(146_097);
@@ -449,7 +449,7 @@ mod tests {
         assert_eq!(kind(400, &gql("AUTHENTICATION_ERROR", "x")), ErrorKind::Auth);
         assert_eq!(kind(400, &gql("RATELIMITED", "x")), ErrorKind::RateLimited);
         assert_eq!(kind(500, &gql("INTERNAL_SERVER_ERROR", "boom")), ErrorKind::Transient);
-        // El texto no decide: un rechazo que menciona "unavailable" sigue siendo permanente.
+        // The text doesn't decide: a rejection that mentions "unavailable" is still permanent.
         assert_eq!(kind(400, &gql("INVALID_INPUT", "state unavailable for this team")), ErrorKind::Permanent);
         assert_eq!(kind(400, &gql("FORBIDDEN", "no")), ErrorKind::Permanent);
     }

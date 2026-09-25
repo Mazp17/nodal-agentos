@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useRef, useState, type ReactNode } from "react";
 
-/** Mismos tonos que los badges (`.tone-*`), más `info`. */
+/** Same tones as the badges (`.tone-*`), plus `info`. */
 export type ToastTone = "accent" | "ok" | "warn" | "danger" | "muted" | "info";
 
 interface Toast {
@@ -14,7 +14,7 @@ type Push = (title: string, body?: string, tone?: ToastTone) => void;
 
 const ToastContext = createContext<Push>(() => {});
 
-/** `toast(title, body?, tone?)`: aviso global abajo a la derecha. */
+/** `toast(title, body?, tone?)`: global notice at the bottom right. */
 export function useToast(): Push {
   return useContext(ToastContext);
 }
@@ -31,7 +31,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     (title, body, tone = "info") => {
       const id = ++seq.current;
       setToasts((t) => [...t.slice(-(MAX_TOASTS - 1)), { id, title, body, tone }]);
-      // Los errores quedan hasta cerrarlos: suelen traer texto para leer (WCAG 2.2.1).
+      // Errors stay until dismissed: they usually carry text to read (WCAG 2.2.1).
       if (tone !== "danger") setTimeout(() => dismiss(id), 5000);
     },
     [dismiss],

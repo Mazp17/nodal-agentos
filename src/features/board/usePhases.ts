@@ -10,8 +10,8 @@ export interface PhaseProgress {
 }
 
 /**
- * Fase actual de los runs de workflow en marcha (para los segmentos de la card). Sale del
- * store compartido de runs, que ya pide `get_run_detail` de los workflows activos.
+ * Current phase of in-flight workflow runs (for the card's segments). Comes from the
+ * shared runs store, which already fetches `get_run_detail` for active workflows.
  */
 export function useRunPhases(runs: RunLight[]): Map<string, PhaseProgress> {
   const { byId } = useRuns();

@@ -1,4 +1,4 @@
-/* Aviso accionable de un run frenado (workspace sin confianza / workflow sin aprobar). */
+/* Actionable notice for a blocked run (untrusted workspace / unapproved workflow). */
 .lb {
   display: flex;
   align-items: center;

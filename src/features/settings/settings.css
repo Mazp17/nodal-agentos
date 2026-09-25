@@ -1,4 +1,4 @@
-/* Settings (global y de proyecto): navegación lateral de 180px + columna de 760px. */
+/* Settings (global and project): 180px side navigation + 760px column. */
 
 .settings { flex: 1; min-height: 0; display: grid; grid-template-columns: 180px minmax(0, 1fr); }
 .settings-nav {

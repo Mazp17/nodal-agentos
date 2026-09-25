@@ -20,12 +20,12 @@ const EMPTY: Record<RunsTab, string> = {
 };
 
 export interface RunsViewProps {
-  /** `null`: todos los proyectos. La cola siempre es global. */
+  /** `null`: all projects. The queue is always global. */
   projectId: string | null;
   onOpenRun: (runId: string) => void;
 }
 
-/** Pantalla "Runs": tabs por estado, tabla de runs y la cola global con sus slots. */
+/** "Runs" screen: tabs by status, runs table and the global queue with its slots. */
 export function RunsView({ projectId, onOpenRun }: RunsViewProps) {
   const state = useRuns({ projectId });
   const summary = useQueueSummary();

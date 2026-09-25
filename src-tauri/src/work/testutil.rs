@@ -1,4 +1,4 @@
-//! Constructores de datos de prueba compartidos por los tests de `work`.
+//! Test data builders shared by the `work` tests.
 
 use crate::domain::*;
 
@@ -8,14 +8,14 @@ pub fn task_of(id: &str) -> Task {
         project_id: "p1".into(),
         repo_id: "r1".into(),
         number: 1,
-        title: "Logo nuevo en el header".into(),
+        title: "New logo in the header".into(),
         status: TaskStatus::Todo,
         priority: Priority::None,
         labels: vec![],
         position: 1.0,
         plan: PlanRef::Text,
         plan_overridden: false,
-        acceptance: vec!["El logo nuevo aparece en el header".into()],
+        acceptance: vec!["The new logo shows up in the header".into()],
         assignee: None,
         isolation: None,
         finish: None,

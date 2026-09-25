@@ -1,5 +1,5 @@
-//! Conversión fila ↔ struct de cada entidad de `domain`.
-//! Solo lo mínimo (insertar, leer por id): el CRUD completo vive en `db/queries` (F1-B).
+//! Row ↔ struct conversion for each `domain` entity.
+//! Only the minimum (insert, read by id): the full CRUD lives in `db/queries` (F1-B).
 
 use rusqlite::types::{FromSql, FromSqlError, FromSqlResult, ToSql, ToSqlOutput, Type, ValueRef};
 use rusqlite::{named_params, Connection, OptionalExtension, Row};
@@ -9,7 +9,7 @@ use serde::Serialize;
 use super::DbError;
 use crate::domain::*;
 
-// ---------- Helpers de columnas ----------
+// ---------- Column helpers ----------
 
 macro_rules! sql_enum {
     ($($ty:ident),+) => {$(
@@ -193,7 +193,7 @@ pub fn task_from_row(row: &Row) -> rusqlite::Result<Task> {
     })
 }
 
-/// Inserta la tarea tal cual (el `number` ya asignado: no toca el contador del proyecto).
+/// Inserts the task as is (with its `number` already assigned: doesn't touch the project counter).
 pub fn insert_task(conn: &Connection, t: &Task) -> Result<(), DbError> {
     let (plan_kind, plan_path) = match &t.plan {
         PlanRef::Text => ("text", None),
@@ -252,7 +252,7 @@ pub fn relation_from_row(row: &Row) -> rusqlite::Result<TaskRelation> {
     Ok(TaskRelation { task_id: row.get("task_id")?, other_id: row.get("other_id")?, kind: row.get("kind")? })
 }
 
-/// `Related` es simétrica: se guarda con los ids ordenados (lo exige un CHECK).
+/// `Related` is symmetric: stored with the ids ordered (a CHECK requires it).
 pub fn insert_relation(conn: &Connection, r: &TaskRelation) -> Result<(), DbError> {
     let (a, b) = match r.kind {
         RelationKind::Related if r.task_id > r.other_id => (&r.other_id, &r.task_id),
@@ -265,7 +265,7 @@ pub fn insert_relation(conn: &Connection, r: &TaskRelation) -> Result<(), DbErro
     Ok(())
 }
 
-/// Relaciones donde participa la tarea, en cualquiera de los dos lados.
+/// Relations the task takes part in, on either side.
 pub fn relations_of(conn: &Connection, task_id: &str) -> Result<Vec<TaskRelation>, DbError> {
     let mut stmt = conn.prepare(
         "SELECT * FROM task_relations WHERE task_id = ?1 OR other_id = ?1 ORDER BY task_id, other_id, kind",
@@ -399,7 +399,7 @@ pub fn outbox_from_row(row: &Row) -> rusqlite::Result<OutboxItem> {
     })
 }
 
-/// Inserta ignorando `item.id` y devuelve el id asignado.
+/// Inserts ignoring `item.id` and returns the assigned id.
 pub fn insert_outbox(conn: &Connection, o: &OutboxItem) -> Result<i64, DbError> {
     conn.execute(
         "INSERT INTO sync_outbox (task_id, provider, kind, payload_json, attempts,
@@ -421,12 +421,12 @@ pub fn get_outbox(conn: &Connection, id: i64) -> Result<Option<OutboxItem>, DbEr
 
 // ---------- Settings ----------
 
-/// Una fila por campo de `Settings`. Los que faltan, o no se pueden leer, toman su default
-/// (un valor corrupto no invalida el resto); `concurrency` se acota a `1..=MAX_CONCURRENCY`.
+/// One row per `Settings` field. Missing or unreadable ones take their default
+/// (a corrupt value doesn't invalidate the rest); `concurrency` is clamped to `1..=MAX_CONCURRENCY`.
 pub fn load_settings(conn: &Connection) -> Result<Settings, DbError> {
-    let serde_json::Value::Object(mut obj) = serde_json::to_value(Settings::default()).expect("Settings serializa")
+    let serde_json::Value::Object(mut obj) = serde_json::to_value(Settings::default()).expect("Settings serializes")
     else {
-        unreachable!("Settings se serializa como objeto");
+        unreachable!("Settings serializes as an object");
     };
     let mut stmt = conn.prepare("SELECT key, value_json FROM settings")?;
     for row in stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))? {
@@ -438,15 +438,15 @@ pub fn load_settings(conn: &Connection) -> Result<Settings, DbError> {
             obj.insert(k, default);
         }
     }
-    let mut out: Settings = serde_json::from_value(serde_json::Value::Object(obj)).expect("defaults válidos");
+    let mut out: Settings = serde_json::from_value(serde_json::Value::Object(obj)).expect("valid defaults");
     out.concurrency = out.concurrency.clamp(1, MAX_CONCURRENCY);
     Ok(out)
 }
 
-/// Guarda todos los campos en una transacción.
+/// Saves every field in a single transaction.
 pub fn save_settings(conn: &mut Connection, s: &Settings) -> Result<(), DbError> {
-    let serde_json::Value::Object(obj) = serde_json::to_value(s).expect("Settings serializa") else {
-        unreachable!("Settings se serializa como objeto");
+    let serde_json::Value::Object(obj) = serde_json::to_value(s).expect("Settings serializes") else {
+        unreachable!("Settings serializes as an object");
     };
     let tx = conn.transaction()?;
     {

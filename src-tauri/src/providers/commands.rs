@@ -1,5 +1,5 @@
-//! Comandos de Tauri de proveedores. Firmas en `src/domain/api.ts` (sección Proveedores).
-//! Todos rechazan con un string listo para mostrar.
+//! Provider Tauri commands. Signatures in `src/domain/api.ts` (Providers section).
+//! All of them reject with a display-ready string.
 
 use std::collections::HashMap;
 
@@ -21,7 +21,7 @@ use crate::secrets::Secrets;
 use crate::util::{new_id, now_ms};
 use super::{check_provider, require, resolve, store, ImportQuery, PResult, Provider, ProvidersState, TaskProvider};
 
-/// Tope del listado de importables por llamada (páginas de 25).
+/// Cap on the importable listing per call (pages of 25).
 const LIST_MAX_PAGES: usize = 4;
 
 fn e(err: DbError) -> String {
@@ -33,20 +33,20 @@ async fn load_link(db: &Db, id: &str) -> PResult<SourceLink> {
     with_db(db, move |c| store::get_link(c, &id)).await.map_err(e)
 }
 
-// ---------- Keys y estado ----------
+// ---------- Keys and status ----------
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ProviderStatus {
     pub provider: String,
     pub has_key: bool,
-    /// Nombre del usuario si la key es válida.
+    /// User name if the key is valid.
     pub viewer: Option<String>,
     pub error: Option<String>,
-    /// Últimos 4 caracteres de la key guardada (nunca la key).
+    /// Last 4 characters of the stored key (never the key).
     pub key_hint: Option<String>,
-    /// El sync automático está en pausa hasta este instante (epoch ms) por rate limit o key
-    /// rechazada; `pause_reason` dice por qué.
+    /// Automatic sync is paused until this instant (epoch ms) due to a rate limit or a
+    /// rejected key; `pause_reason` says why.
     pub paused_until: Option<i64>,
     pub pause_reason: Option<String>,
 }
@@ -90,7 +90,7 @@ pub async fn provider_status(app: AppHandle, provider: String) -> PResult<Provid
     status_of(&app, &provider).await
 }
 
-/// Valida la key contra el proveedor y solo si es válida la guarda. `None` la borra.
+/// Validates the key against the provider and stores it only if valid. `None` deletes it.
 #[tauri::command]
 pub async fn provider_set_key(app: AppHandle, provider: String, key: Option<String>) -> PResult<ProviderStatus> {
     check_provider(&provider)?;
@@ -154,7 +154,7 @@ pub struct NewSourceLink {
     pub auto_import: bool,
 }
 
-/// Distingue "falta" (`None`) de `null` (`Some(None)`).
+/// Distinguishes "missing" (`None`) from `null` (`Some(None)`).
 fn nullable<'de, D: Deserializer<'de>, T: Deserialize<'de>>(d: D) -> Result<Option<Option<T>>, D::Error> {
     Ok(Some(Option::deserialize(d)?))
 }
@@ -176,10 +176,10 @@ fn check_link_repos(conn: &rusqlite::Connection, link: &SourceLink) -> Result<()
     Ok(())
 }
 
-/// Reglas que manda la UI → reglas guardadas. Una regla nueva (sin id, o con otro tipo o
-/// valor que la guardada con ese id) recibe id y `created_at = now`: desde ahí cuenta su
-/// auto-import. Las que no cambiaron conservan id y `created_at` (no se confía en el
-/// cliente). Rechaza valores vacíos y dos reglas para el mismo proyecto.
+/// Rules sent by the UI → stored rules. A new rule (no id, or a different kind or value
+/// than the stored one with that id) gets an id and `created_at = now`: its auto-import
+/// counts from then on. Unchanged ones keep their id and `created_at` (the client is not
+/// trusted). Rejects empty values and two rules for the same project.
 pub fn prepare_rules(old: &[RepoRule], incoming: Vec<RepoRule>, now: i64) -> Result<Vec<RepoRule>, DbError> {
     let mut out: Vec<RepoRule> = Vec::with_capacity(incoming.len());
     for mut r in incoming {
@@ -219,9 +219,9 @@ pub async fn list_source_links(db: State<'_, Db>, project_id: Option<String>) ->
     with_db(&db, move |c| store::list_links(c, project_id.as_deref())).await.map_err(e)
 }
 
-/// Crea el link con la propuesta de mapeo (pendiente hasta `save_state_map`). Si el
-/// proveedor no responde, el link se crea igual con el mapeo vacío y la propuesta se arma
-/// después en `source_states`.
+/// Creates the link with the proposed mapping (pending until `save_state_map`). If the
+/// provider does not respond, the link is created anyway with an empty mapping and the
+/// proposal is built later in `source_states`.
 #[tauri::command]
 pub async fn create_source_link(app: AppHandle, db: State<'_, Db>, input: NewSourceLink) -> PResult<SourceLink> {
     check_provider(&input.provider)?;
@@ -282,7 +282,7 @@ pub async fn update_source_link(app: AppHandle, db: State<'_, Db>, id: String, p
     .inspect(|l| notify(&app, &[Kind::Sources], Some(&l.project_id)))
 }
 
-/// Disconnect: las tareas del link quedan locales y el link se borra (una transacción).
+/// Disconnect: the link's tasks become local and the link is deleted (one transaction).
 #[tauri::command]
 pub async fn delete_source_link(app: AppHandle, db: State<'_, Db>, id: String) -> PResult<()> {
     with_db(&db, move |c| store::disconnect_link(c, &id, now_ms()).map(|_| ())).await.map_err(e)?;
@@ -290,7 +290,7 @@ pub async fn delete_source_link(app: AppHandle, db: State<'_, Db>, id: String) -
     Ok(())
 }
 
-/// Unlink: la tarea pasa a ser local.
+/// Unlink: the task becomes local.
 #[tauri::command]
 pub async fn unlink_task(app: AppHandle, db: State<'_, Db>, task_id: String) -> PResult<Task> {
     with_db(&db, move |c| {
@@ -304,7 +304,7 @@ pub async fn unlink_task(app: AppHandle, db: State<'_, Db>, task_id: String) -> 
     .inspect(|t| notify(&app, &[Kind::Tasks], Some(&t.project_id)))
 }
 
-// ---------- Mapeo de estados ----------
+// ---------- State mapping ----------
 
 #[tauri::command]
 pub async fn source_states(app: AppHandle, db: State<'_, Db>, link_id: String) -> PResult<SourceStatesReport> {
@@ -313,7 +313,7 @@ pub async fn source_states(app: AppHandle, db: State<'_, Db>, link_id: String) -
     Ok(state_map::report(&link.state_map, states))
 }
 
-/// Guarda y confirma el mapeo: fija `confirmed_at` y `known_states` con los estados actuales.
+/// Saves and confirms the mapping: sets `confirmed_at` and `known_states` to the current states.
 #[tauri::command]
 pub async fn save_state_map(app: AppHandle, db: State<'_, Db>, link_id: String, map: StateMap) -> PResult<SourceLink> {
     let mut link = load_link(&db, &link_id).await?;
@@ -321,7 +321,7 @@ pub async fn save_state_map(app: AppHandle, db: State<'_, Db>, link_id: String, 
     state_map::validate(&map, &states)?;
     link.state_map = StateMap { confirmed_at: Some(now_ms()), known_states: states, ..map };
     with_db(&db, move |c| {
-        // Solo el mapeo: un `update_source_link` hecho mientras se iba a la red no se pisa.
+        // Only the mapping: an `update_source_link` made while on the network is not overwritten.
         store::save_state_map(c, &link.id, &link.state_map)?;
         store::get_link(c, &link.id)
     })
@@ -330,10 +330,10 @@ pub async fn save_state_map(app: AppHandle, db: State<'_, Db>, link_id: String, 
     .inspect(|l| notify(&app, &[Kind::Sources], Some(&l.project_id)))
 }
 
-// ---------- Importación ----------
+// ---------- Import ----------
 
-/// Ítems del scope del link (hasta 100), con repo sugerido y marca de ya importados.
-/// `state_kinds` vacío o ausente = abiertos (triage, backlog, unstarted, started).
+/// Items in the link's scope (up to 100), with suggested repo and an already-imported flag.
+/// Empty or missing `state_kinds` = open (triage, backlog, unstarted, started).
 #[tauri::command]
 pub async fn provider_list_importable(
     app: AppHandle,
@@ -401,9 +401,9 @@ pub async fn import_tasks(
     Ok(result)
 }
 
-// ---------- Reglas de proyecto ----------
+// ---------- Project rules ----------
 
-/// Proyectos del proveedor elegibles como regla del link (en Linear: los activos de su team).
+/// Provider projects eligible as a link rule (in Linear: the active ones of its team).
 #[tauri::command]
 pub async fn source_rule_projects(app: AppHandle, db: State<'_, Db>, link_id: String) -> PResult<Vec<ScopeRef>> {
     let link = load_link(&db, &link_id).await?;
@@ -418,9 +418,9 @@ fn find_rule(link: &SourceLink, rule_id: &str) -> PResult<RepoRule> {
         .ok_or_else(|| "Project rule not found. Reload the source and try again.".to_string())
 }
 
-/// Ítems del backfill de la regla (todas las páginas hasta `BACKFILL_MAX_PAGES`), con la
-/// pausa del proveedor: si está en pausa no va a la red, y un rate limit o una key rechazada
-/// lo pausan como en el sync.
+/// Items of the rule's backfill (all pages up to `BACKFILL_MAX_PAGES`), honoring the
+/// provider pause: if paused it does not hit the network, and a rate limit or a rejected key
+/// pauses it as in the sync.
 async fn backfill_items(app: &AppHandle, link: &SourceLink, rule: &RepoRule) -> PResult<(Provider, Vec<super::ExternalItem>)> {
     let state = app.state::<ProvidersState>();
     let now = now_ms();
@@ -468,17 +468,17 @@ async fn backfill_plan(app: &AppHandle, db: &Db, link_id: &str, rule_id: &str) -
     Ok((link, rule, p, plan))
 }
 
-/// Cuántos ítems traería el backfill de la regla (abiertos + cerrados en los últimos 14
-/// días), cuántos ya están en su repo y cuántos en otro (esos no se mueven).
+/// How many items the rule's backfill would bring (open + closed in the last 14 days), how
+/// many are already in its repo and how many in another one (those are not moved).
 #[tauri::command]
 pub async fn preview_rule_import(app: AppHandle, db: State<'_, Db>, link_id: String, rule_id: String) -> PResult<RulePreview> {
     Ok(backfill_plan(&app, &db, &link_id, &rule_id).await?.3.preview())
 }
 
-/// Backfill de una regla de proyecto: importa al repo de la regla los ítems del proyecto
-/// (dentro del scope del link) abiertos o cerrados en los últimos 14 días. Los ya
-/// importados en otro repo no se mueven: vuelven en `skipped`. Corre bajo el lock del sync
-/// para no competir con el auto-import.
+/// Backfill of a project rule: imports into the rule's repo the project's items (within the
+/// link's scope) that are open or were closed in the last 14 days. Those already imported
+/// in another repo are not moved: they come back in `skipped`. Runs under the sync lock so
+/// it does not race the auto-import.
 #[tauri::command]
 pub async fn import_rule(app: AppHandle, db: State<'_, Db>, link_id: String, rule_id: String) -> PResult<ImportResult> {
     let state = app.state::<ProvidersState>();
@@ -505,8 +505,8 @@ pub async fn import_rule(app: AppHandle, db: State<'_, Db>, link_id: String, rul
     let data_dir = state.data_dir.clone();
     let (here, rule_id, repo_id) = (plan.here, rule.id.clone(), rule.repo_id.clone());
     let mut result = with_db(&db, move |c| {
-        // `update_source_link` no toma el lock del sync: si la regla cambió mientras se iba
-        // a la red, no se importa al repo viejo.
+        // `update_source_link` does not take the sync lock: if the rule changed while on the
+        // network, nothing is imported into the old repo.
         let l = store::get_link(c, &link_id)?;
         if !l.repo_rules.iter().any(|r| r.id == rule_id && r.repo_id == repo_id) {
             return Err(DbError::Invalid("The rule changed while importing. Try again.".into()));
@@ -521,8 +521,8 @@ pub async fn import_rule(app: AppHandle, db: State<'_, Db>, link_id: String, rul
     Ok(result)
 }
 
-/// Resuelve el aviso "cambió de proyecto en el proveedor": `move` la pasa al repo
-/// sugerido (rechaza con un run activo o un worktree), `keep` la deja donde está.
+/// Resolves the "moved to another project in the provider" notice: `move` moves it to the
+/// suggested repo (rejects with an active run or a worktree), `keep` leaves it where it is.
 #[tauri::command]
 pub async fn resolve_moved_task(app: AppHandle, db: State<'_, Db>, task_id: String, action: store::MovedAction) -> PResult<Task> {
     with_db(&db, move |c| store::resolve_moved(c, &task_id, action, now_ms()))
@@ -533,7 +533,7 @@ pub async fn resolve_moved_task(app: AppHandle, db: State<'_, Db>, task_id: Stri
 
 // ---------- Sync ----------
 
-/// Una pasada de sync ahora (todas las fuentes, o solo `link_id`).
+/// One sync pass now (all sources, or only `link_id`).
 #[tauri::command]
 pub async fn sync_now(app: AppHandle, link_id: Option<String>) -> PResult<SyncReport> {
     run_for_app(&app, link_id.as_deref(), true).await
@@ -576,12 +576,12 @@ mod tests {
     #[test]
     fn prepare_rules_assigns_ids_and_keeps_created_at() {
         let old = vec![RepoRule::project("proj-a", "A", "r1", 5), RepoRule::label("docs", "r2")];
-        // Sin cambios: conserva id y created_at aunque el cliente mande otro.
+        // Unchanged: keeps id and created_at even if the client sends another.
         let mut same = old.clone();
         same[0].created_at = 999;
         let out = prepare_rules(&old, same, 50).unwrap();
         assert_eq!((out[0].id.as_str(), out[0].created_at), ("rule-proj-a", 5));
-        // Regla nueva (sin id) y regla con el mismo id pero otro proyecto: id y created_at nuevos.
+        // New rule (no id) and rule with the same id but another project: new id and created_at.
         let incoming: Vec<RepoRule> = serde_json::from_value(serde_json::json!([
             {"id": "rule-proj-a", "kind": "project", "value": "proj-b", "name": "B", "repoId": "r1"},
             {"kind": "project", "value": " proj-c ", "repoId": "r2"},
@@ -592,7 +592,7 @@ mod tests {
         assert!(out.iter().all(|r| r.id.starts_with('r') && r.id != "rule-proj-a" && r.created_at == 50), "{out:?}");
         assert_eq!((out[1].value.as_str(), out[1].name.as_str()), ("proj-c", "proj-c"));
         assert_eq!((out[2].kind, out[2].value.as_str()), (RuleKind::Label, "legacy"));
-        // Validaciones.
+        // Validations.
         let dup = vec![RepoRule::project("p", "P", "r1", 1), RepoRule::project("p", "P", "r2", 1)];
         assert!(prepare_rules(&[], dup, 1).unwrap_err().to_string().contains("already has a rule"));
         let empty = vec![RepoRule::label(" ", "r1")];
@@ -603,7 +603,7 @@ mod tests {
     fn key_hint_never_reveals_the_key() {
         use super::super::key_hint;
         assert_eq!(key_hint("  lin_api_0123456789wxyz \n").as_deref(), Some("wxyz"));
-        assert_eq!(key_hint("short-key"), None, "keys cortas no dan pista");
+        assert_eq!(key_hint("short-key"), None, "short keys give no hint");
         assert_eq!(key_hint(""), None);
     }
 }

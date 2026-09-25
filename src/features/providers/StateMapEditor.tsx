@@ -9,9 +9,9 @@ type Pull = Record<string, TaskStatus>;
 type Push = Partial<Record<TaskStatus, string | null>>;
 
 /**
- * Editor del mapeo de estados en las dos direcciones. Parte de la propuesta de
- * `source_states` (lo guardado + sugerencias para lo que falte) y guarda con
- * `save_state_map`, que confirma el mapeo.
+ * Editor for the state mapping in both directions. Starts from the proposal from
+ * `source_states` (what's saved + suggestions for what's missing) and saves with
+ * `save_state_map`, which confirms the mapping.
  */
 export function StateMapEditor({
   link,
@@ -31,7 +31,7 @@ export function StateMapEditor({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Un reporte nuevo (recarga) reemplaza el borrador.
+  // A new report (reload) replaces the draft.
   useEffect(() => {
     setPull(report.proposal.pull);
     setPush(report.proposal.push);

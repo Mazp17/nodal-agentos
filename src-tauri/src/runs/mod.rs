@@ -1,5 +1,5 @@
-//! Runs en background de Claude Code: lanzarlos (`claude --bg`), listarlos
-//! (`claude agents`) y seguir el workflow que corren leyendo sus archivos de sesión.
+//! Claude Code background runs: launch them (`claude --bg`), list them
+//! (`claude agents`) and follow the workflow they run by reading their session files.
 
 pub mod claude_bin;
 pub(crate) mod claude_fs;
@@ -23,32 +23,32 @@ use types::{LaunchBlocker, LaunchOptions, RunDetail, RunRef, RunSummary, Transcr
 const LAUNCH_TIMEOUT: Duration = Duration::from_secs(30);
 const LIST_TIMEOUT: Duration = Duration::from_secs(15);
 
-/// Reenvía cada línea de un stream del hijo al canal.
+/// Forwards each line of a child stream to the channel.
 fn forward_lines<R: AsyncRead + Unpin + Send + 'static>(stream: R, tx: mpsc::UnboundedSender<String>) {
     tauri::async_runtime::spawn(async move {
         let mut lines = BufReader::new(stream).lines();
-        // Se drena hasta EOF aunque ya nadie escuche: cerrar el pipe le daría EPIPE a
-        // `claude` (o a la sesión en background, si heredó el pipe).
+        // Drain until EOF even if nobody listens anymore: closing the pipe would give EPIPE to
+        // `claude` (or to the background session, if it inherited the pipe).
         while let Ok(Some(line)) = lines.next_line().await {
             let _ = tx.send(line);
         }
     });
 }
 
-/// Flags del ejecutor (`--agent`, `--disallowedTools`, …) que van además de las opciones.
-/// Cada valor por separado; los que se arman acá ya vienen validados.
+/// Executor flags (`--agent`, `--disallowedTools`, …) passed on top of the options.
+/// Each value separate; the ones built here are already validated.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ExtraFlags {
     /// `--agent <name>`.
     pub agent: Option<String>,
-    /// `--allowedTools A B C`: cada regla como argumento propio, como indica la doc de
-    /// permisos (`Bash(npm test:*)` lleva un espacio); el `--` antes del prompt corta la lista.
+    /// `--allowedTools A B C`: each rule as its own argument, as the permissions docs say
+    /// (`Bash(npm test:*)` contains a space); the `--` before the prompt ends the list.
     pub allowed_tools: Vec<String>,
-    /// `--disallowedTools A,B,C` (separadas por coma: la opción es variádica y, con
-    /// espacios, se come el prompt; verificado en el spike con 2.1.281).
+    /// `--disallowedTools A,B,C` (comma-separated: the option is variadic and, with
+    /// spaces, swallows the prompt; verified in the spike with 2.1.281).
     pub disallowed_tools: Vec<String>,
-    /// `--append-system-prompt <text>`: un solo argumento, sin escapar (no hay shell);
-    /// verificado con 2.1.282, también con `--agent` (`real_launch_with_append_system_prompt`).
+    /// `--append-system-prompt <text>`: a single argument, unescaped (there's no shell);
+    /// verified with 2.1.282, also with `--agent` (`real_launch_with_append_system_prompt`).
     pub append_system_prompt: Option<String>,
 }
 
@@ -75,11 +75,11 @@ impl ExtraFlags {
     }
 }
 
-/// Por qué falló un `claude --bg`.
+/// Why a `claude --bg` failed.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LaunchError {
     pub message: String,
-    /// No devolvió el id a tiempo: la sesión puede haber arrancado igual.
+    /// It didn't return the id in time: the session may have started anyway.
     pub timed_out: bool,
 }
 
@@ -95,15 +95,15 @@ impl From<&str> for LaunchError {
     }
 }
 
-/// Como `launch_bg`, con el error como texto.
+/// Like `launch_bg`, with the error as text.
 pub async fn launch_with(cwd: String, prompt: String, opts: &LaunchOptions, extra: &ExtraFlags) -> Result<RunRef, String> {
     launch_bg(cwd, prompt, opts, extra).await.map_err(|e| e.message)
 }
 
-/// Lanza `claude --bg [flags] -- <prompt>` en `cwd` y devuelve el id corto de la sesión.
-/// Todo va como argumentos propios (sin shell), así que no hay nada que escapar; los
-/// flags se validan contra las listas permitidas de `options`. El `--` corta las opciones
-/// variádicas antes del prompt.
+/// Launches `claude --bg [flags] -- <prompt>` in `cwd` and returns the session's short id.
+/// Everything goes as separate arguments (no shell), so there's nothing to escape; the
+/// flags are validated against the allowed lists in `options`. The `--` ends the variadic
+/// options before the prompt.
 pub async fn launch_bg(cwd: String, prompt: String, opts: &LaunchOptions, extra: &ExtraFlags) -> Result<RunRef, LaunchError> {
     let dir = Path::new(&cwd);
     if !dir.is_absolute() {
@@ -115,7 +115,7 @@ pub async fn launch_bg(cwd: String, prompt: String, opts: &LaunchOptions, extra:
     if prompt.trim().is_empty() {
         return Err("The prompt is empty.".into());
     }
-    // `claude` lo interpretaría como una opción, no como prompt.
+    // `claude` would read it as an option, not as the prompt.
     if prompt.trim_start().starts_with('-') {
         return Err("The prompt can't start with \"-\".".into());
     }
@@ -132,8 +132,8 @@ pub async fn launch_bg(cwd: String, prompt: String, opts: &LaunchOptions, extra:
         .stderr(Stdio::piped());
     let mut child = cmd.spawn().map_err(|e| format!("Couldn't run `claude --bg`: {e}"))?;
 
-    // No se espera a EOF: basta con ver la línea `backgrounded · <id>` en cualquiera de
-    // los dos streams (no hay garantía de que la sesión en background suelte los pipes).
+    // Don't wait for EOF: seeing the `backgrounded · <id>` line on either stream is enough
+    // (there's no guarantee the background session releases the pipes).
     let (tx, mut rx) = mpsc::unbounded_channel();
     if let Some(out) = child.stdout.take() {
         forward_lines(out, tx.clone());
@@ -156,7 +156,7 @@ pub async fn launch_bg(cwd: String, prompt: String, opts: &LaunchOptions, extra:
 
     match found {
         Ok(Ok(id)) => {
-            // Cosechar el proceso cuando termine, sin bloquear la respuesta.
+            // Reap the process when it exits, without blocking the response.
             tauri::async_runtime::spawn(async move {
                 let _ = child.wait().await;
             });
@@ -188,7 +188,7 @@ pub async fn launch_bg(cwd: String, prompt: String, opts: &LaunchOptions, extra:
     }
 }
 
-/// Opciones del repo cuya raíz es `cwd` (comparando también la ruta canonicalizada).
+/// Options of the repo whose root is `cwd` (also comparing the canonicalized path).
 fn repo_options_for(conn: &rusqlite::Connection, cwd: &str) -> Result<LaunchOptions, db::DbError> {
     let mut keys = vec![cwd.trim_end_matches('/').to_string()];
     if let Ok(c) = Path::new(cwd).canonicalize() {
@@ -202,12 +202,12 @@ fn repo_options_for(conn: &rusqlite::Connection, cwd: &str) -> Result<LaunchOpti
     Ok(LaunchOptions::default())
 }
 
-/// Lanzamiento manual (fuera de la cola): usa el model/effort/permission mode del repo si
-/// `cwd` es un repo registrado.
+/// Manual launch (outside the queue): uses the repo's model/effort/permission mode if
+/// `cwd` is a registered repo.
 #[tauri::command]
 pub async fn launch_run(db: State<'_, Db>, cwd: String, prompt: String) -> Result<RunRef, String> {
     let key = cwd.clone();
-    // Una base ilegible no bloquea el lanzamiento manual: se lanza sin flags.
+    // An unreadable database doesn't block a manual launch: it launches without flags.
     let opts = match db::with_db(&db, move |c| repo_options_for(c, &key)).await {
         Ok(o) => o,
         Err(e) => {
@@ -218,7 +218,7 @@ pub async fn launch_run(db: State<'_, Db>, cwd: String, prompt: String) -> Resul
     launch_with(cwd, prompt, &opts, &ExtraFlags::default()).await
 }
 
-/// Sesiones en background (`claude agents --json --all`), más recientes primero.
+/// Background sessions (`claude agents --json --all`), most recent first.
 #[tauri::command]
 pub async fn list_runs() -> Result<Vec<RunSummary>, String> {
     let mut cmd = claude_bin::claude_command()?;
@@ -236,14 +236,14 @@ fn projects_dir() -> Result<PathBuf, String> {
         .join("projects"))
 }
 
-/// Lo que dejó una sesión terminada, leído de disco (bloqueante). Para la cola.
+/// What a finished session left behind, read from disk (blocking). For the queue.
 #[derive(Debug, Default, Clone)]
 pub struct SessionReadout {
-    /// Detalle del workflow más reciente (solo si la sesión corrió uno).
+    /// Detail of the most recent workflow (only if the session ran one).
     pub detail: Option<RunDetail>,
-    /// Último mensaje del asistente en el transcript principal.
+    /// Last assistant message in the main transcript.
     pub last_message: Option<String>,
-    /// Nombre del workflow si Claude Code pidió aprobarlo y no llegó a correr.
+    /// Workflow name if Claude Code asked to approve it and it never ran.
     pub blocker: Option<Option<String>>,
 }
 
@@ -261,7 +261,7 @@ pub fn read_session(session_id: &str, cwd: &str) -> SessionReadout {
     }
 }
 
-/// Tokens del transcript principal de la sesión (bloqueante). `None` si no hay archivo o usage.
+/// Tokens of the session's main transcript (blocking). `None` if there's no file or usage.
 pub fn session_tokens(session_id: &str, cwd: &str) -> Option<i64> {
     if !claude_fs::is_valid_session_id(session_id) {
         return None;
@@ -270,8 +270,8 @@ pub fn session_tokens(session_id: &str, cwd: &str) -> Option<i64> {
     claude_fs::read_usage_tokens(&claude_fs::find_session_jsonl(&projects, cwd, session_id)?)
 }
 
-/// Detalle del workflow más reciente de la sesión. `None` si la sesión todavía no tiene
-/// carpeta en disco o no lanzó ningún workflow.
+/// Detail of the session's most recent workflow. `None` if the session has no folder on
+/// disk yet or didn't launch any workflow.
 #[tauri::command]
 pub async fn get_run_detail(session_id: String, cwd: String) -> Result<Option<RunDetail>, String> {
     if !claude_fs::is_valid_session_id(&session_id) {
@@ -285,9 +285,9 @@ pub async fn get_run_detail(session_id: String, cwd: String) -> Result<Option<Ru
     .map_err(|e| format!("Internal error reading the session: {e}"))?
 }
 
-/// Si la sesión terminó sin correr su workflow porque Claude Code pidió aprobarlo
-/// ("Review dynamic workflow before running"), lo dice. `None` si no hay transcript o no
-/// aparece ese rechazo. Lee como mucho los primeros 4 MB del transcript principal.
+/// Says whether the session ended without running its workflow because Claude Code asked to
+/// approve it ("Review dynamic workflow before running"). `None` if there's no transcript or
+/// that rejection doesn't show up. Reads at most the first 4 MB of the main transcript.
 #[tauri::command]
 pub async fn get_launch_blocker(session_id: String, cwd: String) -> Result<Option<LaunchBlocker>, String> {
     if !claude_fs::is_valid_session_id(&session_id) {
@@ -303,9 +303,9 @@ pub async fn get_launch_blocker(session_id: String, cwd: String) -> Result<Optio
     .map_err(|e| format!("Internal error reading the session: {e}"))?
 }
 
-/// Transcript de un subagente de un workflow: prompt, conversación (recortada) y salida.
-/// `limit`: cuántos items devolver como mucho, los más recientes (default 200, máx. 2000).
-/// `None` si el agente todavía no tiene archivo.
+/// Transcript of a workflow subagent: prompt, conversation (clipped) and output.
+/// `limit`: max number of items to return, the most recent ones (default 200, max 2000).
+/// `None` if the agent has no file yet.
 #[tauri::command]
 pub async fn get_agent_transcript(
     session_id: String,
@@ -352,8 +352,8 @@ mod tests {
         assert!(ExtraFlags::default().to_args().is_empty());
     }
 
-    /// Contra el `claude` real y los datos de esta máquina: `cargo test -- --ignored`.
-    /// Solo lee (`claude agents` + archivos); no lanza runs.
+    /// Against the real `claude` and this machine's data: `cargo test -- --ignored`.
+    /// Read-only (`claude agents` + files); doesn't launch runs.
     #[test]
     #[ignore]
     fn real_list_and_detail() {
@@ -370,13 +370,13 @@ mod tests {
                 d.map(|d| (d.workflow_id, d.source, d.current_phase, d.agents.len()))
             );
         }
-        let err = tauri::async_runtime::block_on(launch_with("/no/existe".into(), "x".into(), &LaunchOptions::default(), &ExtraFlags::default()))
+        let err = tauri::async_runtime::block_on(launch_with("/no/such/dir".into(), "x".into(), &LaunchOptions::default(), &ExtraFlags::default()))
             .unwrap_err();
-        assert_eq!(err, "The folder doesn't exist or isn't a directory: /no/existe");
+        assert_eq!(err, "The folder doesn't exist or isn't a directory: /no/such/dir");
     }
 
-    /// Contra el `claude` real: `cargo test -- --ignored`. Lanza dos runs (solo y con
-    /// `--agent code-reviewer`, que tiene que existir en `~/.claude/agents`) y los detiene.
+    /// Against the real `claude`: `cargo test -- --ignored`. Launches two runs (plain and with
+    /// `--agent code-reviewer`, which must exist in `~/.claude/agents`) and stops them.
     #[test]
     #[ignore]
     fn real_launch_with_append_system_prompt() {

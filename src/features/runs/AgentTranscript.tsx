@@ -11,7 +11,7 @@ import "./transcript.css";
 const POLL_MS = 3000;
 export const DEFAULT_LIMIT = 200;
 export const FULL_LIMIT = 1000;
-/** Archivos grandes: re-leerlos cada 3 s cuesta; se espacia el polling. */
+/** Large files: re-reading them every 3 s is costly, so polling is spaced out. */
 const BIG_FILE = 4 * 1024 * 1024;
 const POLL_BIG_MS = 10_000;
 
@@ -28,8 +28,8 @@ export const modelName = (m: string | null) => m?.replace(/^claude-/, "") ?? "鈥
 export type Load = { status: "loading" } | { status: "error"; error: string } | { status: "ok"; transcript: Transcript | null };
 
 /**
- * Lee un transcript con `fetch` (clave `key`; `null` no carga) y lo repite mientras `live`.
- * Un fallo en un poll no borra lo que ya se mostraba.
+ * Reads a transcript with `fetch` (key `key`; `null` doesn't load) and repeats while `live`.
+ * A failed poll doesn't clear what was already shown.
  */
 function usePolledTranscript(key: string | null, fetch: () => Promise<Transcript | null>, live: boolean): Load {
   const [state, setState] = useState<{ key: string; load: Load } | null>(null);
@@ -43,7 +43,7 @@ function usePolledTranscript(key: string | null, fetch: () => Promise<Transcript
     let lastBytes = 0;
     let first = true;
     const load = async () => {
-      // Ventana oculta: se saltea la consulta y se reintenta en la pr贸xima vuelta.
+      // Hidden window: skip the query and retry on the next tick.
       if (!first && document.hidden) {
         timer = setTimeout(load, POLL_MS);
         return;
@@ -68,13 +68,13 @@ function usePolledTranscript(key: string | null, fetch: () => Promise<Transcript
   return key !== null && state?.key === key ? state.load : { status: "loading" };
 }
 
-/** Transcript de un subagente de workflow; se repite mientras el agente siga corriendo. */
+/** Transcript of a workflow subagent; repeats while the agent keeps running. */
 function useTranscript(sessionId: string | null, cwd: string, wfId: string | null, agentId: string | null, live: boolean, limit: number): Load {
   const key = sessionId && wfId && agentId ? `${sessionId}|${cwd}|${wfId}|${agentId}|${limit}` : null;
   return usePolledTranscript(key, () => getAgentTranscript(sessionId ?? "", cwd, wfId ?? "", agentId ?? "", limit), live);
 }
 
-/** Transcript de la sesi贸n principal de un run de agente, Claude o revisor. */
+/** Transcript of the main session of an agent, Claude or reviewer run. */
 export function useRunTranscript(runId: string | null, live: boolean, limit: number): Load {
   return usePolledTranscript(runId ? `run|${runId}|${limit}` : null, () => getRunTranscript(runId ?? "", limit), live);
 }
@@ -141,7 +141,7 @@ function Item({ item }: { item: TranscriptItem }) {
   }
 }
 
-/** Conversaci贸n de un transcript (mensajes, herramientas, "Show more" y el estado en vivo). */
+/** A transcript's conversation (messages, tools, "Show more" and the live state). */
 export function TranscriptConversation({
   t,
   limit,
@@ -193,8 +193,8 @@ export function TranscriptConversation({
 }
 
 /**
- * Pantalla "Subagent transcript" (drawer): prompt, conversaci贸n y salida final de un
- * subagente de workflow. Se repite cada 3 s mientras el agente sigue corriendo.
+ * "Subagent transcript" screen (drawer): prompt, conversation and final output of a
+ * workflow subagent. Repeats every 3 s while the agent keeps running.
  */
 export function AgentTranscript({
   agent,
@@ -209,7 +209,7 @@ export function AgentTranscript({
   view: RunView;
   /** `RunDetail.workflowId` (`wf_...`). */
   workflowId: string | null;
-  /** Id visible de la tarea (`PAY-12`), para el subt铆tulo. */
+  /** Visible task id (`PAY-12`), for the subtitle. */
   taskRef?: string | null;
   onClose: () => void;
 }) {
@@ -231,7 +231,7 @@ export function AgentTranscript({
     .join(" 路 ");
   const waiting = agent.state === "running" && view.phase === "waiting";
   const output =
-    // Mientras corre, el "煤ltimo texto" es charla intermedia, no la salida final.
+    // While running, the "last text" is intermediate chatter, not the final output.
     (agent.state === "running" ? null : t?.finalOutput) ??
     agent.resultPreview ??
     (agent.state === "running" ? "No final output yet." : agent.state === "queued" ? "Not started." : "No output recorded.");

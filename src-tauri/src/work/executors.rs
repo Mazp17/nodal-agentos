@@ -1,13 +1,13 @@
-//! Catálogo de ejecutores: agentes (`~/.claude/agents`, `<repo>/.claude/agents` y los
-//! de plugins habilitados), workflows (`runs::workflows`) y Claude.
+//! Executor catalog: agents (`~/.claude/agents`, `<repo>/.claude/agents` and those of
+//! enabled plugins), workflows (`runs::workflows`) and Claude.
 //!
-//! Plugins (verificado en esta máquina con Claude Code 2.1.281):
-//! - habilitados: `enabledPlugins` (`"<plugin>@<marketplace>": true`) en
-//!   `~/.claude/settings.json` y en `<repo>/.claude/settings{,.local}.json`;
-//! - instalados: `~/.claude/plugins/installed_plugins.json` (v2: `plugins` →
-//!   `"<plugin>@<marketplace>"` → lista de instalaciones con `scope`, `projectPath` e
+//! Plugins (verified on this machine with Claude Code 2.1.281):
+//! - enabled: `enabledPlugins` (`"<plugin>@<marketplace>": true`) in
+//!   `~/.claude/settings.json` and in `<repo>/.claude/settings{,.local}.json`;
+//! - installed: `~/.claude/plugins/installed_plugins.json` (v2: `plugins` →
+//!   `"<plugin>@<marketplace>"` → list of installs with `scope`, `projectPath` and
 //!   `installPath`);
-//! - agentes: `<installPath>/agents/*.md`, que Claude Code nombra `<plugin>:<agente>`.
+//! - agents: `<installPath>/agents/*.md`, which Claude Code names `<plugin>:<agent>`.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -41,7 +41,7 @@ pub struct Frontmatter {
     pub tools: Option<Vec<String>>,
 }
 
-/// Nombre usable en `--agent <name>` (con `plugin:agente` para los de plugins).
+/// Name usable in `--agent <name>` (with `plugin:agent` for plugin agents).
 pub fn is_valid_agent_name(name: &str) -> bool {
     !name.is_empty()
         && name.len() <= 100
@@ -49,7 +49,7 @@ pub fn is_valid_agent_name(name: &str) -> bool {
         && name.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | ':' | '.'))
 }
 
-// ---------- Frontmatter YAML (subconjunto) ----------
+// ---------- YAML frontmatter (subset) ----------
 
 fn unquote_double(s: &str) -> Option<String> {
     let inner = s.strip_prefix('"')?;
@@ -111,7 +111,7 @@ fn scalar(raw: &str) -> String {
             return s;
         }
     }
-    // Comentario al final de un escalar plano.
+    // Comment at the end of a plain scalar.
     t.split(" #").next().unwrap_or(t).trim().to_string()
 }
 
@@ -121,8 +121,8 @@ fn split_list(raw: &str) -> Vec<String> {
     t.split(',').map(scalar).filter(|s| !s.is_empty()).collect()
 }
 
-/// Lee el bloque `---` inicial. Soporta escalares planos y entre comillas, bloques `|`/`>`
-/// y listas (`[a, b]`, `a, b` o `- a`). Solo claves de primer nivel.
+/// Reads the leading `---` block. Supports plain and quoted scalars, `|`/`>` blocks and
+/// lists (`[a, b]`, `a, b` or `- a`). Top-level keys only.
 pub fn parse_frontmatter(src: &str) -> Option<Frontmatter> {
     let src = src.strip_prefix('\u{feff}').unwrap_or(src);
     let mut lines = src.lines();
@@ -173,7 +173,7 @@ pub fn parse_frontmatter(src: &str) -> Option<Frontmatter> {
     Some(Frontmatter { name: text("name"), description: text("description"), tools })
 }
 
-/// Descripción para mostrar: el primer párrafo, sin los `<example>`, en una línea.
+/// Description for display: the first paragraph, without the `<example>`s, on one line.
 pub fn short_description(d: &str) -> String {
     let d = d.replace("\\n", "\n");
     let first = d.split("\n\n").next().unwrap_or(&d);
@@ -181,11 +181,11 @@ pub fn short_description(d: &str) -> String {
     clip_chars(&first.split_whitespace().collect::<Vec<_>>().join(" "), DESCRIPTION_MAX)
 }
 
-// ---------- Agentes ----------
+// ---------- Agents ----------
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct AgentDef {
-    /// Nombre para `--agent` (`plugin:agente` en los de plugins).
+    /// Name for `--agent` (`plugin:agent` for plugin agents).
     pub name: String,
     pub source: AgentSource,
     pub description: Option<String>,
@@ -231,7 +231,7 @@ fn read_json(path: &Path) -> Option<Value> {
     serde_json::from_str(&std::fs::read_to_string(path).ok()?).ok()
 }
 
-/// `enabledPlugins` de un settings.json: los `true`.
+/// `enabledPlugins` of a settings.json: the `true` ones.
 fn enabled_in(settings: &Path) -> Vec<String> {
     let Some(Value::Object(map)) = read_json(settings).and_then(|v| v.get("enabledPlugins").cloned()) else {
         return Vec::new();
@@ -239,8 +239,8 @@ fn enabled_in(settings: &Path) -> Vec<String> {
     map.into_iter().filter(|(_, v)| v.as_bool() == Some(true)).map(|(k, _)| k).collect()
 }
 
-/// Plugins habilitados con su carpeta de instalación: `(nombre del plugin, installPath)`.
-/// Una instalación con `scope: "project"` solo cuenta para su `projectPath`.
+/// Enabled plugins with their install folder: `(plugin name, installPath)`.
+/// An install with `scope: "project"` only counts for its `projectPath`.
 pub fn enabled_plugins(claude_dir: &Path, repo: Option<&Path>) -> Vec<(String, PathBuf)> {
     let mut enabled = enabled_in(&claude_dir.join("settings.json"));
     if let Some(r) = repo {
@@ -272,7 +272,7 @@ pub fn enabled_plugins(claude_dir: &Path, repo: Option<&Path>) -> Vec<(String, P
     out
 }
 
-/// Agentes visibles para el repo. Uno del repo pisa al del usuario con el mismo nombre.
+/// Agents visible to the repo. A repo agent overrides the user's one with the same name.
 pub fn list_agents(claude_dir: Option<&Path>, repo: Option<&Path>) -> Vec<AgentDef> {
     let mut out: Vec<AgentDef> = Vec::new();
     let user = claude_dir.map(|d| read_agents_dir(&d.join("agents"), AgentSource::User, None)).unwrap_or_default();
@@ -294,7 +294,7 @@ pub fn list_agents(claude_dir: Option<&Path>, repo: Option<&Path>) -> Vec<AgentD
     out
 }
 
-// ---------- Catálogo ----------
+// ---------- Catalog ----------
 
 pub fn workflow_info(w: &WorkflowInfo) -> ExecutorInfo {
     ExecutorInfo {
@@ -308,7 +308,7 @@ pub fn workflow_info(w: &WorkflowInfo) -> ExecutorInfo {
     }
 }
 
-/// Claude primero, después agentes y workflows (cada grupo por nombre).
+/// Claude first, then agents and workflows (each group by name).
 pub fn catalog(claude_dir: Option<&Path>, repo: Option<&Path>) -> Vec<ExecutorInfo> {
     let mut out = vec![ExecutorInfo {
         executor: Executor::Claude,
@@ -333,7 +333,7 @@ pub fn catalog(claude_dir: Option<&Path>, repo: Option<&Path>) -> Vec<ExecutorIn
     out
 }
 
-/// Meta del workflow (`managesSource`, `reviews`) por nombre, si existe en el catálogo.
+/// Workflow meta (`managesSource`, `reviews`) by name, if it's in the catalog.
 pub fn find_workflow(claude_dir: Option<&Path>, repo: Option<&Path>, name: &str) -> Option<ExecutorInfo> {
     let wf_dir = claude_dir.map(|d| d.join("workflows"));
     workflows::list_from(wf_dir.as_deref(), repo).iter().find(|w| w.name == name).map(workflow_info)
@@ -346,17 +346,17 @@ mod tests {
 
     #[test]
     fn frontmatter_real_shapes() {
-        // Como `~/.claude/agents/frontend-developer.md`: descripción entre comillas dobles con \n.
+        // Like `~/.claude/agents/frontend-developer.md`: double-quoted description with \n.
         let fe = "---\nname: frontend-developer\ndescription: \"Use when building apps. Specifically:\\n\\n<example>\\nContext: x\\n</example>\"\ntools: Read, Write, Edit, Bash, Glob, Grep\n---\n\nYou are a senior frontend developer.\n";
         let f = parse_frontmatter(fe).unwrap();
         assert_eq!(f.name.as_deref(), Some("frontend-developer"));
         assert_eq!(f.tools.as_deref().unwrap(), ["Read", "Write", "Edit", "Bash", "Glob", "Grep"]);
         assert_eq!(short_description(&f.description.unwrap()), "Use when building apps. Specifically:");
-        // Como `code-reviewer.md`: `\\n` literal dentro de comillas dobles.
+        // Like `code-reviewer.md`: a literal `\\n` inside double quotes.
         let cr = "---\nname: code-reviewer\ndescription: \"Reviews code.\\\\n\\\\n<example>\\\\nx\"\ntools: Read, Grep\n---\n";
         let f = parse_frontmatter(cr).unwrap();
         assert_eq!(short_description(&f.description.unwrap()), "Reviews code.");
-        // Lista YAML, bloque plegado, comillas simples.
+        // YAML list, folded block, single quotes.
         let other = "---\nname: 'db-helper'\ndescription: >\n  Helps with\n  databases\ntools:\n  - Read\n  - Bash\nmodel: sonnet\n---\n";
         let f = parse_frontmatter(other).unwrap();
         assert_eq!(f.name.as_deref(), Some("db-helper"));
@@ -392,7 +392,7 @@ mod tests {
         write(&claude.join("agents/.hidden.md"), "---\nname: hidden\n---\n");
         write(&claude.join("agents/notes.txt"), "x");
         write(&repo.join(".claude/agents/code-reviewer.md"), "---\nname: code-reviewer\ndescription: repo version\n---\n");
-        // Plugin habilitado con agentes, otro instalado pero deshabilitado, uno de otro proyecto.
+        // Enabled plugin with agents, another installed but disabled, one from another project.
         let inst = t.0.join("cache/toolkit/1.0");
         write(&inst.join("agents/security.md"), "---\nname: security\ndescription: sec\n---\n");
         let off = t.0.join("cache/off/1.0");
@@ -441,13 +441,13 @@ mod tests {
         assert!(li.reviews);
         assert!(find_workflow(Some(&claude), Some(&repo), "plan-task").unwrap().reviews);
         assert!(find_workflow(Some(&claude), None, "nope").is_none());
-        // Sin repo: solo los del usuario y plugins de scope user.
+        // No repo: only the user's agents and user-scoped plugins.
         let no_repo = catalog(Some(&claude), None);
         assert!(no_repo.iter().any(|e| e.description.as_deref() == Some("user version")));
         assert!(!no_repo.iter().any(|e| matches!(&e.executor, Executor::Agent { name, .. } if name.contains("elsewhere"))));
     }
 
-    /// Contra `~/.claude` de esta máquina: `cargo test -- --ignored`.
+    /// Against this machine's `~/.claude`: `cargo test -- --ignored`.
     #[test]
     #[ignore]
     fn real_catalog() {

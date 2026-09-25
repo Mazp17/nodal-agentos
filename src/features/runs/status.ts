@@ -1,5 +1,5 @@
-// Estado derivado de un run para pintar: cruza la fila de Nodal (`Run`) con lo que dice
-// Claude Code (`claude agents` y el detalle del workflow). Puro: sin hooks ni invoke.
+// Derived run state for rendering: joins Nodal's row (`Run`) with what Claude Code
+// reports (`claude agents` and the workflow detail). Pure: no hooks or invoke.
 
 import { taskKey, type Executor, type Project, type RunLight, type RunOutcome, type Task } from "../../domain/types";
 import type { RunDetail, RunSummary } from "./types";
@@ -7,9 +7,9 @@ import type { RunDetail, RunSummary } from "./types";
 export type BadgeTone = "accent" | "ok" | "warn" | "danger" | "muted";
 
 /**
- * - `awaiting`: run migrado que quedó en cola; espera `confirm_run`.
- * - `starting`: lanzado pero todavía no aparece en `claude agents`.
- * - `waiting`: la sesión espera al usuario (permiso, input).
+ * - `awaiting`: migrated run left in the queue; waits for `confirm_run`.
+ * - `starting`: launched but not yet listed in `claude agents`.
+ * - `waiting`: the session is waiting on the user (permission, input).
  */
 export type RunPhase =
   | "awaiting"
@@ -26,36 +26,36 @@ export type RunsTab = "active" | "queued" | "finished" | "failed";
 
 export interface RunView {
   run: RunLight;
-  /** Sesión en `claude agents`, si ya figura. */
+  /** Session in `claude agents`, if already listed. */
   live: RunSummary | null;
-  /** Detalle del workflow: `undefined` sin pedir aún, `null` si la sesión no corrió uno. */
+  /** Workflow detail: `undefined` if not fetched yet, `null` if the session didn't run one. */
   detail: RunDetail | null | undefined;
   phase: RunPhase;
   tab: RunsTab;
   label: string;
   tone: BadgeTone;
-  /** Algo en marcha: el punto late. */
+  /** Something in progress: the dot pulses. */
   pulse: boolean;
-  /** "permission prompt", "input needed"... si `phase === "waiting"`. */
+  /** "permission prompt", "input needed"... when `phase === "waiting"`. */
   waitingFor: string | null;
-  /** 1-based en la cola global (solo `queued`/`awaiting`). */
+  /** 1-based in the global queue (only `queued`/`awaiting`). */
   queuePos: number | null;
   phaseIndex: number | null;
   phaseTotal: number;
   phaseName: string | null;
   tokens: number | null;
   durationMs: number | null;
-  /** Revisor lanzado sobre este run (el más reciente), si lo hay. */
+  /** Reviewer launched on this run (the most recent), if any. */
   review: RunLight | null;
 }
 
-/** Espejo de `LAUNCH_GRACE_MS` en src-tauri/src/work/queue.rs. */
+/** Mirror of `LAUNCH_GRACE_MS` in src-tauri/src/work/queue.rs. */
 export const LAUNCH_GRACE_MS = 90_000;
 
-/** En cola, lanzándose o lanzado: la tarea tiene trabajo en curso. */
+/** Queued, launching or launched: the task has work in progress. */
 export const isActive = (run: RunLight) => run.status === "queued" || run.status === "launching" || run.status === "launched";
 
-/** Run migrado en cola que no se lanza hasta confirmarlo (`confirm_run`). */
+/** Migrated queued run that won't launch until confirmed (`confirm_run`). */
 export const awaitingConfirmation = (run: RunLight) => run.status === "queued" && run.legacyLabel !== null;
 
 export function executorLabel(e: Executor): string {
@@ -89,7 +89,7 @@ export const OUTCOME_TONE: Record<RunOutcome, BadgeTone> = {
   unknown: "muted",
 };
 
-/** "#482" para URLs de PR de GitHub; si no, `null`. */
+/** "#482" for GitHub PR URLs; otherwise `null`. */
 export function prNumber(url: string | null | undefined): string | null {
   const m = url ? /\/pull\/(\d+)/.exec(url) : null;
   return m ? `#${m[1]}` : null;
@@ -115,9 +115,9 @@ function finishedLabel(run: RunLight): { label: string; tone: BadgeTone } {
 export interface DeriveContext {
   live: RunSummary[];
   details: Record<string, RunDetail | null>;
-  /** Id de run → posición 1-based en la cola global. */
+  /** Run id → 1-based position in the global queue. */
   queuePos: Map<string, number>;
-  /** Id de run de trabajo → su revisor más reciente. */
+  /** Work run id → its most recent reviewer. */
   reviews: Map<string, RunLight>;
   now: number;
 }
@@ -234,10 +234,10 @@ export function deriveRunView(run: RunLight, ctx: DeriveContext): RunView {
   };
 }
 
-/** Texto corto del estado ("Phase 3/9 · Implement", "Needs permission", "PR #12 · Green"). */
+/** Short status text ("Phase 3/9 · Implement", "Needs permission", "PR #12 · Green"). */
 export const runStatusLabel = (v: RunView) => v.label;
 
-/** Texto para la columna Phase de la tabla y su porcentaje de avance. */
+/** Text for the table's Phase column and its progress percentage. */
 export function phaseProgress(v: RunView): { text: string; pct: number } {
   const n = v.phaseTotal;
   switch (v.phase) {
@@ -265,14 +265,14 @@ export function phaseProgress(v: RunView): { text: string; pct: number } {
   }
 }
 
-/** Id visible de la tarea del run (`PAY-12`) y su título; sin tarea, la etiqueta migrada. */
+/** Visible id of the run's task (`PAY-12`) and its title; without a task, the migrated label. */
 export function runTaskRef(run: RunLight, task: Task | undefined, project: Project | undefined): { key: string | null; title: string } {
   if (task) return { key: project ? taskKey(project.key, task.number) : null, title: task.title };
   if (run.legacyLabel) return { key: null, title: run.legacyLabel };
   return { key: null, title: run.taskId ? "(deleted task)" : `${executorLabel(run.executor)} run` };
 }
 
-/** Nombre corto para toasts y confirmaciones. */
+/** Short name for toasts and confirmations. */
 export function runName(run: RunLight, task: Task | undefined, project: Project | undefined): string {
   const ref = runTaskRef(run, task, project);
   return ref.key ?? ref.title;

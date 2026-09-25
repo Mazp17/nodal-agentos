@@ -12,7 +12,7 @@ fn fixture(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("src/migrate/fixtures").join(name)
 }
 
-/// Carpeta temporal propia del test; se borra al soltarla.
+/// The test's own temporary folder; deleted when dropped.
 struct TempDir(PathBuf);
 
 impl TempDir {
@@ -30,7 +30,7 @@ impl Drop for TempDir {
     }
 }
 
-/// Todos los archivos de un árbol, con su contenido (ruta relativa → bytes).
+/// Every file in a tree, with its content (relative path → bytes).
 fn snapshot(root: &Path) -> BTreeMap<String, Vec<u8>> {
     fn walk(root: &Path, dir: &Path, out: &mut BTreeMap<String, Vec<u8>>) {
         for e in fs::read_dir(dir).unwrap() {
@@ -93,15 +93,15 @@ fn legacy_import_is_idempotent_and_maps_everything() {
     assert!(r1.skipped.iter().any(|s| s.starts_with("issue-runs.json: record #3")));
     let after_first = counts(&conn);
 
-    // Segunda vez: nada nuevo, todo cuenta como ya importado.
+    // Second time: nothing new, everything counts as already imported.
     let r2 = import_folder(&mut conn, &fixture("legacy"), &data.0, T0 + 1).unwrap();
     assert_eq!((r2.projects, r2.repos, r2.tasks, r2.runs), (0, 0, 0, 0), "{r2:#?}");
-    // 3 repos + 3 links + concurrency + 3 tareas + 6 runs.
+    // 3 repos + 3 links + concurrency + 3 tasks + 6 runs.
     assert_eq!(r2.already_imported, 16);
     assert_eq!(counts(&conn), after_first);
     assert_eq!(r1.backup_dir, r2.backup_dir, "same content: the backup is reused");
 
-    // Proyectos: uno por repo mapeado (nombre de carpeta: el legacy no guarda nombres) + Local.
+    // Projects: one per mapped repo (folder name: legacy doesn't store names) + Local.
     let mut names: Vec<(String, String)> = conn
         .prepare("SELECT name, key FROM projects ORDER BY name")
         .unwrap()
@@ -116,14 +116,14 @@ fn legacy_import_is_idempotent_and_maps_everything() {
             .map(|(a, b)| (a.to_string(), b.to_string()))
     );
 
-    // Repos: opciones y finish del mapeo; el `/` final se normaliza.
+    // Repos: options and finish from the mapping; the trailing `/` is normalized.
     let api = rows::get_repo(&conn, &repo_id_of(&conn, "/Users/me/Code/acme-api")).unwrap().unwrap();
     assert_eq!(api.launch.model.as_deref(), Some("opus"));
     assert_eq!(api.launch.effort.as_deref(), Some("high"));
     assert_eq!(api.default_finish, Finish::Commit);
     let web_id = repo_id_of(&conn, "/Users/me/Code/acme-web");
 
-    // SourceLinks: team solo → team; team + proyecto → proyecto. Mapeo pendiente.
+    // SourceLinks: team alone → team; team + project → project. Mapping pending.
     let links: Vec<SourceLink> = conn
         .prepare("SELECT * FROM source_links ORDER BY scope_id")
         .unwrap()
@@ -137,7 +137,7 @@ fn legacy_import_is_idempotent_and_maps_everything() {
     let web_link = links.iter().find(|l| l.scope.id == "proj-web").unwrap();
     assert_eq!(web_link.default_repo_id.as_deref(), Some(web_id.as_str()));
 
-    // Tareas: numeradas por fecha de creación; la de un repo sin mapeo va a "Local".
+    // Tasks: numbered by creation date; the one from an unmapped repo goes to "Local".
     let t1 = rows::get_task(&conn, "t01aaaaaaaa").unwrap().unwrap();
     assert_eq!((t1.number, t1.status, t1.plan.clone()), (1, TaskStatus::Todo, PlanRef::Text));
     assert_eq!(t1.repo_id, api.id);
@@ -151,7 +151,7 @@ fn legacy_import_is_idempotent_and_maps_everything() {
     assert_eq!(t3.plan, PlanRef::File { path: "/Users/me/Code/acme-web/docs/plan.md".into() });
     assert_eq!(t3.repo_id, web_id);
 
-    // Planes copiados a `<data>/tasks/<id>/plan.md`.
+    // Plans copied to `<data>/tasks/<id>/plan.md`.
     assert_eq!(
         fs::read(data.0.join("tasks/t01aaaaaaaa/plan.md")).unwrap(),
         fs::read(fixture("legacy/tasks/t01aaaaaaaa/plan.md")).unwrap()
@@ -167,7 +167,7 @@ fn legacy_import_is_idempotent_and_maps_everything() {
 
     let q = run_by_label(&conn, "Limpiar scripts de deploy");
     assert_eq!((q.status, q.error.as_deref()), (RunStatus::Queued, None));
-    assert!(crate::work::queue::awaiting_confirmation(&q), "no se lanza sin confirmar");
+    assert!(crate::work::queue::awaiting_confirmation(&q), "not launched without confirmation");
 
     let orphan = run_by_label(&conn, "t09zzzzzzzz");
     assert_eq!(orphan.task_id, None);
@@ -183,11 +183,11 @@ fn legacy_import_is_idempotent_and_maps_everything() {
     assert_eq!(eng1.repo_id.as_deref(), Some(api.id.as_str()));
     assert_eq!(eng1.prompt, "/linear-issue ENG-1");
     assert_eq!(eng1.options.model.as_deref(), Some("opus"));
-    assert_eq!(eng1.finish, Finish::Commit, "el finish sale del repo mapeado");
+    assert_eq!(eng1.finish, Finish::Commit, "finish comes from the mapped repo");
     let eng2 = run_by_label(&conn, "ENG-2");
     assert_eq!((eng2.repo_id.as_deref(), eng2.status), (None, RunStatus::Queued));
 
-    // Lo que quedó en cola espera confirmación: ninguno sin `legacy_label`.
+    // Whatever was left queued awaits confirmation: none without `legacy_label`.
     let unconfirmed: i64 = conn
         .query_row("SELECT COUNT(*) FROM runs WHERE status = 'queued' AND legacy_label IS NULL", [], |r| r.get(0))
         .unwrap();
@@ -199,7 +199,7 @@ fn legacy_import_is_idempotent_and_maps_everything() {
 
 #[test]
 fn source_folder_stays_intact_and_backup_is_a_full_copy() {
-    // Se importa desde una copia en temp, para poder comparar metadatos sin tocar el repo.
+    // Import from a copy in temp, so metadata can be compared without touching the repo.
     let src = TempDir::new("src");
     let data = TempDir::new("data");
     copy_tree(&fixture("legacy"), &src.0);
@@ -214,12 +214,12 @@ fn source_folder_stays_intact_and_backup_is_a_full_copy() {
     let db = open_in_memory().unwrap();
     let report = import_folder(&mut db.lock().unwrap(), &src.0, &data.0, T0).unwrap();
 
-    assert_eq!(snapshot(&src.0), before, "el origen no cambia byte a byte");
+    assert_eq!(snapshot(&src.0), before, "the source is unchanged byte for byte");
     assert_eq!(mtimes(&src.0), mtimes_before);
     let backup = PathBuf::from(&report.backup_dir);
     assert_eq!(backup.parent().unwrap(), data.0);
     assert!(backup.file_name().unwrap().to_string_lossy().starts_with(BACKUP_PREFIX));
-    assert_eq!(snapshot(&backup), before, "el backup es una copia exacta");
+    assert_eq!(snapshot(&backup), before, "the backup is an exact copy");
 }
 
 #[test]
@@ -247,7 +247,7 @@ fn corrupt_files_are_skipped_without_aborting() {
     assert_eq!((r.projects, r.repos, r.tasks, r.runs), (1, 1, 0, 1), "{r:#?}");
     assert!(r.skipped.iter().any(|s| s.starts_with("tasks.json: corrupt JSON")), "{:?}", r.skipped);
     assert!(r.skipped.iter().any(|s| s.starts_with("task-runs.json: corrupt JSON")), "{:?}", r.skipped);
-    assert_eq!(rows::load_settings(&conn).unwrap().concurrency, MAX_CONCURRENCY, "se acota");
+    assert_eq!(rows::load_settings(&conn).unwrap().concurrency, MAX_CONCURRENCY, "it is clamped");
     let eng1 = run_by_label(&conn, "ENG-1");
     assert_eq!((eng1.status, eng1.error.as_deref()), (RunStatus::Failed, Some(LAUNCHING_ERROR)));
 }
@@ -285,7 +285,7 @@ fn existing_repo_is_reused_and_keys_do_not_collide() {
     let data = TempDir::new("existing");
     let db = open_in_memory().unwrap();
     let mut conn = db.lock().unwrap();
-    // El usuario ya creó un proyecto con el repo web y otro que usa la key "AA".
+    // The user already created a project with the web repo and another using the key "AA".
     for (id, key) in [("mine", "WEB"), ("other", "AA")] {
         rows::insert_project(
             &conn,
@@ -324,7 +324,7 @@ fn existing_repo_is_reused_and_keys_do_not_collide() {
     .unwrap();
 
     let r = import_folder(&mut conn, &fixture("legacy"), &data.0, T0).unwrap();
-    assert_eq!((r.projects, r.repos), (3, 3), "acme-web ya existía");
+    assert_eq!((r.projects, r.repos), (3, 3), "acme-web already existed");
     let link_project: String = conn
         .query_row("SELECT project_id FROM source_links WHERE scope_id = 'proj-web'", [], |r| r.get(0))
         .unwrap();
@@ -339,7 +339,7 @@ fn existing_repo_is_reused_and_keys_do_not_collide() {
         )
         .unwrap();
     assert_eq!(api_key, "AA2");
-    // El repo del usuario no se toca.
+    // The user's repo is left untouched.
     assert_eq!(rows::get_repo(&conn, "web").unwrap().unwrap().default_finish, Finish::Changes);
 }
 
@@ -353,7 +353,7 @@ fn helpers() {
     assert_eq!(fnv("abc"), fnv("abc"));
     assert_eq!(fnv(""), "cbf29ce484222325");
     assert_eq!(executor_from_prompt("/plan-task {}"), Executor::Workflow { name: "plan-task".into() });
-    assert_eq!(executor_from_prompt("hola"), Executor::Claude);
+    assert_eq!(executor_from_prompt("hello"), Executor::Claude);
     assert!(map_run_status("weird", None).is_err());
 }
 
@@ -361,7 +361,7 @@ fn helpers() {
 fn reimport_after_state_changes_and_duplicate_entries() {
     let src = TempDir::new("changing");
     let data = TempDir::new("changing-data");
-    // Mismo path en dos entradas (team y proyecto): un repo, dos links, nada "ya importado".
+    // Same path in two entries (team and project): one repo, two links, nothing "already imported".
     fs::write(
         src.0.join("config.json"),
         r#"{"repos":[{"teamId":"team-a","path":"/Users/me/Code/acme-one"},
@@ -378,11 +378,11 @@ fn reimport_after_state_changes_and_duplicate_entries() {
     assert_eq!((r1.projects, r1.repos, r1.runs, r1.already_imported), (1, 1, 1, 0), "{r1:#?}");
     assert_eq!(count(&conn, "source_links"), 2);
 
-    // La versión vieja lanzó el run después: ahora tiene runId. No se duplica.
+    // The old version launched the run later: now it has a runId. It isn't duplicated.
     let launched = queued.replace(r#""status":"queued""#, r#""status":"launched","runId":"abcd1234""#);
     fs::write(src.0.join("issue-runs.json"), launched).unwrap();
     let r2 = import_folder(&mut conn, &src.0, &data.0, T0 + 1).unwrap();
-    // Por registro: 2 entradas de repo + 2 links + 1 run.
+    // Per record: 2 repo entries + 2 links + 1 run.
     assert_eq!((r2.runs, r2.already_imported), (0, 5), "{r2:#?}");
     assert_eq!(count(&conn, "runs"), 1);
 }
@@ -403,7 +403,7 @@ fn reimport_reuses_a_repo_whose_path_changed() {
     let repo = repo_id_of(&conn, "/Users/me/Code/acme-tools");
     conn.execute("UPDATE repos SET path = '/Users/me/Code/tools-moved' WHERE id = ?1", [&repo]).unwrap();
 
-    // La versión vieja siguió creando tareas con el path viejo.
+    // The old version kept creating tasks with the old path.
     fs::write(src.0.join("tasks.json"), format!(r#"{{"tasks":[{},{}]}}"#, task("ta1", 1), task("ta2", 2))).unwrap();
     let r = import_folder(&mut conn, &src.0, &data.0, T0 + 1).unwrap();
     assert_eq!((r.tasks, r.repos), (1, 0), "{r:#?}");
@@ -423,12 +423,12 @@ fn first_import_keeps_a_configured_concurrency() {
 
 #[test]
 fn folder_without_legacy_files_is_rejected_and_nothing_is_copied() {
-    // Como elegir `~`: mucho de todo, nada del formato viejo (lo anidado no cuenta).
+    // Like choosing `~`: lots of everything, nothing in the old format (nested files don't count).
     let src = TempDir::new("home");
     let data = TempDir::new("home-data");
     fs::create_dir_all(src.0.join("Code/app/data")).unwrap();
     fs::write(src.0.join("Code/app/data/tasks.json"), b"{\"tasks\":[]}").unwrap();
-    fs::write(src.0.join("notes.txt"), b"hola").unwrap();
+    fs::write(src.0.join("notes.txt"), b"hello").unwrap();
     let db = open_in_memory().unwrap();
     let e = import_folder(&mut db.lock().unwrap(), &src.0, &data.0, T0).unwrap_err();
     assert!(e.contains("doesn't look like a data folder") && e.contains("Nothing was copied"), "{e}");
@@ -457,7 +457,7 @@ fn only_known_files_are_copied() {
 fn oversized_data_is_rejected_before_copying() {
     let src = TempDir::new("huge");
     let data = TempDir::new("huge-data");
-    // Archivo disperso: ocupa `len` sin escribir 64 MB.
+    // Sparse file: takes up `len` without writing 64 MB.
     let f = fs::File::create(src.0.join("tasks.json")).unwrap();
     f.set_len(MAX_BACKUP_BYTES + 1).unwrap();
     let e = backup(&src.0, &data.0, T0).unwrap_err();

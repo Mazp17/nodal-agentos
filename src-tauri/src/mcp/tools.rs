@@ -50,7 +50,7 @@ fn to_value<T: serde::Serialize>(v: &T) -> Result<Value, String> {
     serde_json::to_value(v).map_err(|e| format!("Internal error: {e}"))
 }
 
-// ---------- Resolución de proyecto, repo y tarea ----------
+// ---------- Project, repo and task resolution ----------
 
 /// Id or key (`PAY`, any case).
 fn resolve_project(conn: &Connection, s: &str) -> Result<Project, String> {

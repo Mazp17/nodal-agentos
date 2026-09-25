@@ -1,4 +1,4 @@
-//! Rutas: `~`, raíz git canónica y la carpeta de Nodal en el home.
+//! Paths: `~`, the canonical git root and Nodal's folder in the home directory.
 
 use std::path::PathBuf;
 
@@ -8,7 +8,7 @@ pub fn home() -> Option<PathBuf> {
     std::env::var_os("HOME").map(PathBuf::from)
 }
 
-/// `~` y `~/x` → home. El resto queda igual.
+/// `~` and `~/x` → home. Everything else stays as is.
 pub fn expand_home(path: &str) -> PathBuf {
     match (path.strip_prefix("~/"), home()) {
         (Some(rest), Some(h)) => h.join(rest),
@@ -21,7 +21,7 @@ pub fn expand_home(path: &str) -> PathBuf {
 /// so they never touch the data of an installed Nodal.
 pub const DEV: bool = cfg!(debug_assertions);
 
-/// `~/.nodal` (`~/.nodal-dev` in debug builds): worktrees de las tareas.
+/// `~/.nodal` (`~/.nodal-dev` in debug builds): the tasks' worktrees.
 pub fn nodal_home() -> Result<PathBuf, String> {
     let name = if DEV { ".nodal-dev" } else { ".nodal" };
     home().map(|h| h.join(name)).ok_or_else(|| "$HOME is not set.".to_string())
@@ -56,7 +56,7 @@ fn dev_sibling(dir: &std::path::Path) -> PathBuf {
     dir.with_file_name(name)
 }
 
-/// Carpeta absoluta y existente (con `~` expandido).
+/// Absolute, existing folder (with `~` expanded).
 fn existing_dir(path: &str) -> Result<PathBuf, String> {
     let dir = expand_home(path.trim());
     if !dir.is_absolute() {
@@ -68,21 +68,21 @@ fn existing_dir(path: &str) -> Result<PathBuf, String> {
     Ok(dir)
 }
 
-/// Raíz git canónica (symlinks resueltos) del repo que contiene `path`. `Ok(None)` si no
-/// está dentro de un repo git.
+/// Canonical git root (symlinks resolved) of the repo containing `path`. `Ok(None)` if it's
+/// not inside a git repo.
 pub fn git_root_of(path: &str) -> Result<Option<PathBuf>, String> {
     let dir = existing_dir(path)?;
     let Some(root) = git::toplevel(&dir)? else { return Ok(None) };
     Ok(Some(root.canonicalize().map_err(|e| format!("Couldn't resolve {}: {e}", root.display()))?))
 }
 
-/// Raíz git canónica o error listo para mostrar.
+/// Canonical git root, or an error ready to display.
 pub fn require_git_root(path: &str) -> Result<PathBuf, String> {
     git_root_of(path)?.ok_or_else(|| format!("{} is not inside a git repository.", path.trim()))
 }
 
-/// Raíz del repo git que contiene `path`, o `None` si no está dentro de un repo. Para
-/// ofrecer la raíz cuando eligen una subcarpeta.
+/// Root of the git repo containing `path`, or `None` if it's not inside a repo. Used to
+/// offer the root when a subfolder is picked.
 #[tauri::command]
 pub async fn resolve_git_root(path: String) -> Result<Option<String>, String> {
     blocking(move || Ok(git_root_of(&path)?.map(|p| p.to_string_lossy().into_owned()))).await
@@ -94,7 +94,7 @@ pub(crate) mod tests {
 
     use super::*;
 
-    /// Carpeta temporal propia que se borra al soltarla.
+    /// Private temp folder, deleted on drop.
     pub struct TempDir(pub PathBuf);
     impl TempDir {
         pub fn new(name: &str) -> Self {
@@ -114,7 +114,7 @@ pub(crate) mod tests {
         std::process::Command::new("git").arg("--version").output().is_ok_and(|o| o.status.success())
     }
 
-    /// `git init` con un commit inicial en `main` y una identidad local de prueba.
+    /// `git init` with an initial commit on `main` and a local test identity.
     pub fn init_repo(dir: &Path) {
         let run = |args: &[&str]| {
             let out = std::process::Command::new("git").arg("-C").arg(dir).args(args).output().unwrap();
@@ -151,7 +151,7 @@ pub(crate) mod tests {
     #[test]
     fn git_root_of_subfolder() {
         if !git_available() {
-            eprintln!("git no disponible: se saltea");
+            eprintln!("git not available: skipping");
             return;
         }
         let t = TempDir::new("git-root");
@@ -165,7 +165,7 @@ pub(crate) mod tests {
         std::fs::create_dir_all(&outside).unwrap();
         assert_eq!(git_root_of(outside.to_str().unwrap()).unwrap(), None);
         assert!(require_git_root(outside.to_str().unwrap()).unwrap_err().contains("not inside a git repository"));
-        assert!(tauri::async_runtime::block_on(resolve_git_root("relativa".into())).is_err());
+        assert!(tauri::async_runtime::block_on(resolve_git_root("relative".into())).is_err());
         assert!(git_root_of("/no/such/dir").unwrap_err().contains("doesn't exist"));
     }
 

@@ -15,13 +15,13 @@ import { useRunPhases } from "./usePhases";
 import "./board.css";
 
 export interface BoardViewProps {
-  /** `null`: todos los proyectos (la card muestra el proyecto). */
+  /** `null`: every project (the card shows the project). */
   projectId: string | null;
   onOpenTask: (taskId: string) => void;
   onOpenRun: (runId: string) => void;
-  /** Estado "sin proyectos": si viene, muestra "New project". */
+  /** "No projects" state: when set, shows "New project". */
   onNewProject?: () => void;
-  /** Estado "sin repos": si viene, muestra "Project settings". */
+  /** "No repos" state: when set, shows "Project settings". */
   onOpenProjectSettings?: (projectId: string) => void;
 }
 
@@ -36,7 +36,7 @@ const NO_FILTERS: Filters = { q: "", repo: null, source: null, status: null, lab
 
 const DRAG_TYPE = "text/x-nodal-task";
 
-/** Mismo orden que el backend (`position, created_at, id`), para que `reorder_tasks` reciba lo que se ve. */
+/** Same order as the backend (`position, created_at, id`), so `reorder_tasks` gets what is shown. */
 const byPosition = (a: Task, b: Task) =>
   a.position - b.position || a.createdAt - b.createdAt || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
 
@@ -53,7 +53,7 @@ export function BoardView({ projectId, onOpenTask, onOpenRun, onNewProject, onOp
   const [showHidden, setShowHidden] = useState<Record<string, boolean>>({});
   const [newTask, setNewTask] = useState(false);
   const [busy, setBusy] = useState<Set<string>>(new Set());
-  // Cambios locales (arrastre) hasta que el polling traiga algo igual o más nuevo.
+  // Local changes (drag) until polling brings something equal or newer.
   const [patched, setPatched] = useState<Map<string, Task>>(new Map());
   const [drag, setDrag] = useState<{ id: string; status: TaskStatus; index: number } | null>(null);
 
@@ -75,7 +75,7 @@ export function BoardView({ projectId, onOpenTask, onOpenRun, onNewProject, onOp
     });
   }, [tasks.data, patched]);
 
-  // Olvida los parches que el servidor ya superó.
+  // Drop the patches the server has already caught up with.
   useEffect(() => {
     if (!patched.size || !tasks.data) return;
     const stale = tasks.data.filter((t) => {
@@ -159,7 +159,7 @@ export function BoardView({ projectId, onOpenTask, onOpenRun, onNewProject, onOp
     });
   };
 
-  // ---------- Arrastre ----------
+  // ---------- Drag ----------
 
   const onDragStart = (t: Task) => (e: DragEvent<HTMLElement>) => {
     e.dataTransfer.setData(DRAG_TYPE, t.id);
@@ -188,7 +188,7 @@ export function BoardView({ projectId, onOpenTask, onOpenRun, onNewProject, onOp
   };
 
   const setPatch = (t: Task) => setPatched((m) => new Map(m).set(t.id, t));
-  /** Descarta estos parches, salvo los que un arrastre posterior ya reemplazó. */
+  /** Discards these patches, except those a later drag already replaced. */
   const dropPatches = (mine: Task[]) =>
     setPatched((m) => {
       const n = new Map(m);
@@ -197,14 +197,14 @@ export function BoardView({ projectId, onOpenTask, onOpenRun, onNewProject, onOp
     });
 
   /**
-   * Coloca `task` en `status`, antes de `others[index]` (la columna visible ordenada, sin la
-   * tarea). Manda el orden completo de la columna del proyecto (`reorder_tasks`, una sola
-   * transacción); las tareas ocultas por filtros conservan su lugar relativo.
+   * Places `task` in `status`, before `others[index]` (the sorted visible column, without the
+   * task). Sends the full order of the project's column (`reorder_tasks`, a single
+   * transaction); tasks hidden by filters keep their relative place.
    */
   const place = async (task: Task, status: TaskStatus, others: Task[], index: number) => {
     const from = byColumn(task.status).findIndex((t) => t.id === task.id);
     if (task.status === status && from === index) return;
-    // `reorder_tasks` exige un solo proyecto: en "All projects" se ordena el de la tarea.
+    // `reorder_tasks` requires a single project: in "All projects" the task's one is reordered.
     const column = allTasks
       .filter((t) => t.status === status && t.projectId === task.projectId && t.id !== task.id)
       .sort(byPosition);
@@ -221,8 +221,8 @@ export function BoardView({ projectId, onOpenTask, onOpenRun, onNewProject, onOp
     } catch (err) {
       push("Couldn't move the task", String(err), "danger");
     } finally {
-      // Los parches sólo cubren el viaje de ida: releída la lista, manda el servidor. Si no,
-      // un parche con el mismo `updatedAt` podría tapar indefinidamente lo que diga el backend.
+      // Patches only cover the outbound trip: once the list is re-read, the server wins. Otherwise
+      // a patch with the same `updatedAt` could mask whatever the backend says indefinitely.
       await invalidate("tasks");
       dropPatches(mine);
     }
@@ -237,7 +237,7 @@ export function BoardView({ projectId, onOpenTask, onOpenRun, onNewProject, onOp
     if (task) void place(task, status, others, index);
   };
 
-  /** Teclado: Alt+↑/↓ reordena en la columna; Alt+←/→ la pasa a la columna vecina. */
+  /** Keyboard: Alt+↑/↓ reorders within the column; Alt+←/→ moves it to the neighboring column. */
   const onKeyMove = (task: Task, key: string) => {
     const others = byColumn(task.status).filter((t) => t.id !== task.id);
     const from = byColumn(task.status).findIndex((t) => t.id === task.id);
@@ -250,7 +250,7 @@ export function BoardView({ projectId, onOpenTask, onOpenRun, onNewProject, onOp
     }
   };
 
-  // ---------- Estados ----------
+  // ---------- States ----------
 
   const loadError = tasks.error ?? repos.error ?? projects.error;
   const noProjects = projects.data !== undefined && projects.data.length === 0;

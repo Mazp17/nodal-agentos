@@ -3,7 +3,7 @@ import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 export interface FilterOption {
   value: string;
   label: string;
-  /** Color del punto (variable CSS o color). */
+  /** Dot color (CSS variable or color). */
   dot?: string;
 }
 
@@ -14,7 +14,7 @@ interface Props {
   onChange: (value: string | null) => void;
 }
 
-/** Chip de filtro con menú ("Repo", "Source", "Status", "Label"). */
+/** Filter chip with a menu ("Repo", "Source", "Status", "Label"). */
 export function FilterMenu({ label, value, options, onChange }: Props) {
   const [open, setOpen] = useState(false);
   const wrap = useRef<HTMLDivElement>(null);

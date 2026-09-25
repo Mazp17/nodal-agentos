@@ -49,14 +49,14 @@ fn local_task(id: &str, project_id: &str, repo_id: &str, number: i64) -> Task {
         project_id: project_id.into(),
         repo_id: repo_id.into(),
         number,
-        title: "Rebrand de la web".into(),
+        title: "Website rebrand".into(),
         status: TaskStatus::Todo,
         priority: Priority::High,
         labels: vec!["frontend".into(), "brand".into()],
         position: 1.5,
         plan: PlanRef::Text,
         plan_overridden: false,
-        acceptance: vec!["El logo nuevo aparece en el header".into()],
+        acceptance: vec!["The new logo shows up in the header".into()],
         assignee: Some(Executor::Claude),
         isolation: None,
         finish: Some(Finish::Pr),
@@ -146,7 +146,7 @@ fn file_db_uses_wal() {
         let mode: String = c.query_row("PRAGMA journal_mode", [], |r| r.get(0)).unwrap();
         assert_eq!(mode, "wal");
     }
-    // Reabrir no re-aplica nada ni falla.
+    // Reopening neither re-applies anything nor fails.
     let db = open(&path).unwrap();
     assert_eq!(user_version(&db.lock().unwrap()).unwrap(), MIGRATIONS.len() as i64);
     drop(db);
@@ -172,7 +172,7 @@ fn migrate_is_idempotent_and_rejects_newer_schema() {
 fn migrates_v1_data_to_v2() {
     let mut c = Connection::open_in_memory().unwrap();
     c.pragma_update(None, "foreign_keys", "ON").unwrap();
-    // Base v1 con datos, escrita a mano (las columnas v2 todavía no existen).
+    // v1 database with data, written by hand (the v2 columns don't exist yet).
     c.execute_batch(MIGRATIONS[0]).unwrap();
     c.pragma_update(None, "user_version", 1).unwrap();
     c.execute_batch(
@@ -198,7 +198,7 @@ fn migrates_v1_data_to_v2() {
     let mut s = load_settings(&c).unwrap();
     assert_eq!((s.concurrency, s.default_executor.clone()), (2, None));
 
-    // Los campos nuevos se guardan y se leen.
+    // The new fields are saved and read back.
     let changes = StateChanges {
         added: vec![ExternalState { id: "s9".into(), name: "QA".into(), kind: ExtKind::Started, color: None }],
         removed: vec![],
@@ -221,7 +221,7 @@ fn migrates_v2_data_to_v3() {
     c.execute_batch(MIGRATIONS[0]).unwrap();
     c.execute_batch(MIGRATIONS[1]).unwrap();
     c.pragma_update(None, "user_version", 2).unwrap();
-    // Base v2: reglas con el JSON viejo y una tarea vinculada sin columnas de proyecto.
+    // v2 database: rules with the old JSON and a linked task without project columns.
     c.execute_batch(
         r#"INSERT INTO projects (id, name, key, color, created_at) VALUES ('p1', 'Pay', 'PAY', '#fff', 1);
          INSERT INTO repos (id, project_id, path, name, created_at) VALUES ('r1', 'p1', '/r1', 'web', 1);
@@ -242,7 +242,7 @@ fn migrates_v2_data_to_v3() {
     assert_eq!(rules.len(), 1);
     assert_eq!((rules[0].kind, rules[0].value.as_str(), rules[0].created_at), (RuleKind::Label, "frontend", 7));
 
-    // Las columnas nuevas se escriben y se leen.
+    // The new columns are written and read back.
     let moved = MovedInfo {
         from_project: ExtProject { id: "pa".into(), name: "A".into() },
         to_project: None,
@@ -282,7 +282,7 @@ fn deleting_project_cascades_repos_tasks_and_links() {
     for t in ["projects", "repos", "tasks", "task_relations", "source_links"] {
         assert_eq!(count(&c, t), 0, "{t}");
     }
-    // El historial de runs se conserva, desvinculado.
+    // Run history is kept, unlinked.
     let r = get_run(&c, "run1").unwrap().unwrap();
     assert_eq!((r.task_id, r.repo_id), (None, None));
 }
@@ -320,16 +320,16 @@ fn external_ids_are_unique_per_provider() {
     let err = insert_task(&c, &imported_task("t2", "p1", "r1", 2, "ext-1")).unwrap_err();
     assert!(err.to_string().contains("UNIQUE"), "{err}");
 
-    // Otro proveedor con el mismo id externo sí puede.
+    // Another provider with the same external id is allowed.
     let mut other = imported_task("t3", "p1", "r1", 3, "ext-1");
     other.source.as_mut().unwrap().provider = "asana".into();
     insert_task(&c, &other).unwrap();
 
-    // Las locales (NULL, NULL) no chocan entre sí.
+    // Local ones (NULL, NULL) don't clash with each other.
     insert_task(&c, &local_task("t4", "p1", "r1", 4)).unwrap();
     insert_task(&c, &local_task("t5", "p1", "r1", 5)).unwrap();
 
-    // El número es único dentro del proyecto.
+    // The number is unique within the project.
     assert!(insert_task(&c, &local_task("t6", "p1", "r1", 5)).is_err());
 }
 
@@ -342,17 +342,17 @@ fn run(id: &str, task: Option<&str>, repo: Option<&str>) -> Run {
         executor: Executor::Agent { name: "code-reviewer".into(), source: AgentSource::Plugin },
         kind: RunKind::Review,
         parent_run_id: None,
-        prompt: "Revisá contra los criterios".into(),
-        extra_instructions: Some("Mirá también los tests".into()),
+        prompt: "Review against the criteria".into(),
+        extra_instructions: Some("Check the tests too".into()),
         options: LaunchOptions { model: Some("sonnet".into()), ..Default::default() },
         finish: Finish::Changes,
         isolation: Some(Isolation::Worktree),
         review: true,
         verdict: Some(Verdict {
             pass: false,
-            unmet: vec!["Falta el logo".into()],
-            nits: vec!["Nombre de variable".into()],
-            summary: Some("Casi".into()),
+            unmet: vec!["Logo is missing".into()],
+            nits: vec!["Variable name".into()],
+            summary: Some("Almost".into()),
         }),
         status: RunStatus::Finished,
         queue_position: 3.25,
@@ -362,7 +362,7 @@ fn run(id: &str, task: Option<&str>, repo: Option<&str>) -> Run {
         launched_at: Some(2),
         finished_at: Some(3),
         outcome: Some(RunOutcome::Red),
-        summary: Some("Reporte".into()),
+        summary: Some("Report".into()),
         pr_url: Some("https://github.com/acme/web/pull/1".into()),
         branch: Some("nodal/pay-1".into()),
         error: None,
@@ -480,7 +480,7 @@ fn settings_round_trip_and_defaults() {
     let s = Settings { concurrency: 5, editor: Some("cursor".into()), reviewer: "strict-reviewer".into(), default_executor: None };
     save_settings(&mut c, &s).unwrap();
     assert_eq!(load_settings(&c).unwrap(), s);
-    // Sobrescribir actualiza en lugar de duplicar.
+    // Overwriting updates instead of duplicating.
     let s2 = Settings { editor: None, ..s };
     save_settings(&mut c, &s2).unwrap();
     assert_eq!(load_settings(&c).unwrap(), s2);
@@ -525,7 +525,7 @@ fn source_link_with_linked_tasks_cannot_be_deleted() {
     insert_task(&c, &t).unwrap();
     assert!(c.execute("DELETE FROM source_links WHERE id = 'l1'", []).is_err());
 
-    // Desvincular (la tarea queda local) y después borrar.
+    // Unlink (the task becomes local) and then delete.
     c.execute(
         "UPDATE tasks SET src_provider = NULL, src_link_id = NULL, src_external_id = NULL,
                 src_identifier = NULL, src_url = NULL, src_state_json = NULL WHERE id = 't1'",
@@ -562,10 +562,10 @@ fn related_relations_are_stored_once() {
     insert_task(&c, &local_task("t2", "p1", "r1", 2)).unwrap();
     insert_relation(&c, &TaskRelation { task_id: "t2".into(), other_id: "t1".into(), kind: RelationKind::Related })
         .unwrap();
-    // El inverso es la misma relación.
+    // The inverse is the same relation.
     assert!(insert_relation(&c, &TaskRelation { task_id: "t1".into(), other_id: "t2".into(), kind: RelationKind::Related })
         .is_err());
-    // `blocks` es dirigida: se guarda como vino.
+    // `blocks` is directed: stored as given.
     insert_relation(&c, &TaskRelation { task_id: "t2".into(), other_id: "t1".into(), kind: RelationKind::Blocks })
         .unwrap();
     let rels = relations_of(&c, "t1").unwrap();

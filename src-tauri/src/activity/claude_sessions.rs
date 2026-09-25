@@ -1,28 +1,28 @@
-//! ATENCIÓN: formato interno y SIN DOCUMENTAR de Claude Code (observado en v2.1.280/281).
+//! WARNING: Claude Code's internal, UNDOCUMENTED format (observed in v2.1.280/281).
 //!
-//! Todo lo que este módulo necesita saber de cómo Claude Code guarda sus sesiones vive
-//! acá y solo acá (lo demás, en `runs::claude_fs`):
-//! - `claude agents --json --all`: lista con `kind` "interactive" | "background".
-//!   Interactivas: `pid`, `status` ("busy" | "idle" | "waiting"), `waitingFor`, sin `id`
-//!   ni `state`. Background: `id` corto, `state` ("working" | "blocked" | "done" |
-//!   "stopped"); `pid`/`status` solo mientras el proceso vive.
-//! - `~/.claude/projects/<slug(cwd)>/<sessionId>.jsonl`: transcript de la sesión. Cada
-//!   línea trae `cwd` (el directorio actual en ese momento), `timestamp`, `entrypoint`
+//! Everything this module needs to know about how Claude Code stores its sessions lives
+//! here and only here (the rest, in `runs::claude_fs`):
+//! - `claude agents --json --all`: list with `kind` "interactive" | "background".
+//!   Interactive: `pid`, `status` ("busy" | "idle" | "waiting"), `waitingFor`, no `id`
+//!   or `state`. Background: short `id`, `state` ("working" | "blocked" | "done" |
+//!   "stopped"); `pid`/`status` only while the process is alive.
+//! - `~/.claude/projects/<slug(cwd)>/<sessionId>.jsonl`: the session transcript. Each
+//!   line carries `cwd` (the current directory at that moment), `timestamp`, `entrypoint`
 //!   ("cli", "sdk-cli", …).
 //! - `~/.claude/projects/<slug>/<sessionId>/subagents/agent-<agentId>.jsonl` (+ `.meta.json`):
-//!   subagentes lanzados con la tool Agent. Los de workflows, en
+//!   subagents launched with the Agent tool. Workflow ones, in
 //!   `subagents/workflows/<wf_id>/agent-<agentId>.jsonl`.
-//!   `meta.json`: `agentType`, `description`, `worktreePath` (si se creó un worktree),
-//!   `inheritedWorktreePath` (hijo de un agente con worktree), `parentAgentId`,
+//!   `meta.json`: `agentType`, `description`, `worktreePath` (if a worktree was created),
+//!   `inheritedWorktreePath` (child of an agent with a worktree), `parentAgentId`,
 //!   `workflowPhase`, `model`.
-//! - Un subagente terminó cuando su última línea es `assistant` con
-//!   `message.stop_reason == "end_turn"`; mientras trabaja, la última línea es un bloque
-//!   `assistant` con `stop_reason: null` (thinking/text/tool_use) o un `user` con
-//!   `tool_result`. Si se lo retoma (SendMessage) se agregan líneas nuevas y vuelve a
-//!   estar activo.
+//! - A subagent is finished when its last line is an `assistant` with
+//!   `message.stop_reason == "end_turn"`; while it works, the last line is an `assistant`
+//!   block with `stop_reason: null` (thinking/text/tool_use) or a `user` with
+//!   `tool_result`. If it's resumed (SendMessage), new lines get appended and it becomes
+//!   active again.
 //!
-//! Criterio: tolerar todo lo desconocido y degradar a `None` en vez de fallar. Los
-//! transcripts pesan MB: solo se lee la cola.
+//! Policy: tolerate anything unknown and degrade to `None` instead of failing.
+//! Transcripts weigh MBs: only the tail is read.
 
 use std::fs;
 use std::io::{Read, Seek, SeekFrom};
@@ -48,7 +48,7 @@ where
 // `claude agents --json --all`
 // ---------------------------------------------------------------------------
 
-/// Una sesión según `claude agents` (interactiva o en background).
+/// A session as reported by `claude agents` (interactive or background).
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AgentSession {
@@ -75,13 +75,13 @@ pub struct AgentSession {
 }
 
 impl AgentSession {
-    /// Proceso vivo (`pid`), o background que `claude agents` da por activo.
+    /// Live process (`pid`), or a background session that `claude agents` reports as active.
     pub fn alive(&self) -> bool {
         self.pid.is_some() || matches!(self.state.as_deref(), Some("working") | Some("blocked"))
     }
 }
 
-/// Todas las sesiones con `sessionId` válido; entradas raras se descartan.
+/// All sessions with a valid `sessionId`; odd entries are dropped.
 pub fn parse_agents(text: &str) -> Result<Vec<AgentSession>, String> {
     let values: Vec<Value> = serde_json::from_str(text.trim())
         .map_err(|e| format!("`claude agents --json` didn't return the expected JSON list: {e}"))?;
@@ -93,7 +93,7 @@ pub fn parse_agents(text: &str) -> Result<Vec<AgentSession>, String> {
 }
 
 // ---------------------------------------------------------------------------
-// Archivos de sesión
+// Session files
 // ---------------------------------------------------------------------------
 
 pub fn mtime_ms(path: &Path) -> Option<i64> {
@@ -101,7 +101,7 @@ pub fn mtime_ms(path: &Path) -> Option<i64> {
     Some(t.duration_since(UNIX_EPOCH).ok()?.as_millis() as i64)
 }
 
-/// `<projects>/<slug>/<sessionId>.jsonl`; si el slug no coincide, lo busca en cualquier proyecto.
+/// `<projects>/<slug>/<sessionId>.jsonl`; if the slug doesn't match, looks in any project.
 pub fn find_session_jsonl(projects: &Path, cwd: Option<&str>, session_id: &str) -> Option<PathBuf> {
     let file = format!("{session_id}.jsonl");
     if let Some(cwd) = cwd {
@@ -113,7 +113,7 @@ pub fn find_session_jsonl(projects: &Path, cwd: Option<&str>, session_id: &str) 
     fs::read_dir(projects).ok()?.flatten().map(|e| e.path().join(&file)).find(|p| p.is_file())
 }
 
-/// Últimos `window` bytes del archivo, sin la primera línea si quedó cortada.
+/// Last `window` bytes of the file, without the first line if it was cut off.
 pub fn read_tail(path: &Path, window: u64) -> Option<String> {
     let mut file = fs::File::open(path).ok()?;
     let len = file.metadata().ok()?.len();
@@ -125,21 +125,21 @@ pub fn read_tail(path: &Path, window: u64) -> Option<String> {
     Some(if start > 0 { text.split_once('\n').map_or(String::new(), |(_, r)| r.to_string()) } else { text })
 }
 
-/// Lo que se saca de la cola de un transcript.
+/// What's extracted from a transcript's tail.
 #[derive(Debug, Default, Clone, PartialEq)]
 pub struct TailInfo {
-    /// La última entrada es un `assistant` con `stop_reason` "end_turn"/"stop_sequence".
+    /// The last entry is an `assistant` with `stop_reason` "end_turn"/"stop_sequence".
     pub finished: bool,
-    /// Hubo al menos una línea de conversación (user/assistant) en la cola.
+    /// There was at least one conversation line (user/assistant) in the tail.
     pub has_turns: bool,
-    /// `cwd` de la línea más reciente que lo trae.
+    /// `cwd` of the most recent line that has one.
     pub cwd: Option<String>,
     pub entrypoint: Option<String>,
     pub last_tool: Option<String>,
     pub last_tool_summary: Option<String>,
-    /// Rutas absolutas que tocaron las tools de la cola (`file_path`, `path`,
-    /// `notebook_path`): un agente sin worktree que no hizo `cd` igual puede estar
-    /// editando el repo con rutas absolutas.
+    /// Absolute paths touched by the tools in the tail (`file_path`, `path`,
+    /// `notebook_path`): an agent without a worktree that didn't `cd` may still be
+    /// editing the repo through absolute paths.
     pub touched_paths: Vec<String>,
 }
 
@@ -192,7 +192,7 @@ pub fn parse_tail(text: &str) -> TailInfo {
                     decided = true;
                     info.has_turns = true;
                 }
-                // queue-operation, attachment, system, … no dicen si terminó.
+                // queue-operation, attachment, system, … don't say whether it finished.
                 _ => {}
             }
         }
@@ -227,13 +227,13 @@ pub fn parse_meta(text: &str) -> SubagentMeta {
     serde_json::from_str(text).unwrap_or_default()
 }
 
-/// Transcript de un subagente encontrado en disco.
+/// A subagent transcript found on disk.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SubagentFile {
     pub agent_id: String,
     pub transcript: PathBuf,
     pub meta: Option<PathBuf>,
-    /// `wf_…` si es un agente de workflow.
+    /// `wf_…` if it's a workflow agent.
     pub workflow_id: Option<String>,
 }
 
@@ -255,7 +255,7 @@ fn agent_files_in(dir: &Path, workflow_id: Option<&str>, out: &mut Vec<SubagentF
     }
 }
 
-/// `subagents/agent-*.jsonl` y `subagents/workflows/<wf>/agent-*.jsonl` de una sesión.
+/// A session's `subagents/agent-*.jsonl` and `subagents/workflows/<wf>/agent-*.jsonl`.
 pub fn subagent_files(session_dir: &Path) -> Vec<SubagentFile> {
     let root = session_dir.join("subagents");
     let mut out = Vec::new();
@@ -269,10 +269,10 @@ pub fn subagent_files(session_dir: &Path) -> Vec<SubagentFile> {
     out
 }
 
-/// Transcripts de sesión (`<sessionId>.jsonl`) de los proyectos cuyo slug empieza con
-/// `slug_prefix` (el repo y sus worktrees en `.claude/worktrees/…`), modificados desde
-/// `since_ms`. El prefijo puede atrapar repos hermanos (`nodal-sandbox`): quien
-/// llama filtra por el `cwd` real del transcript.
+/// Session transcripts (`<sessionId>.jsonl`) of the projects whose slug starts with
+/// `slug_prefix` (the repo and its worktrees in `.claude/worktrees/…`), modified since
+/// `since_ms`. The prefix may catch sibling repos (`nodal-sandbox`): the caller
+/// filters by the transcript's real `cwd`.
 pub fn recent_session_transcripts(projects: &Path, slug_prefix: &str, since_ms: i64) -> Vec<(String, PathBuf, i64)> {
     let Ok(dirs) = fs::read_dir(projects) else { return Vec::new() };
     let mut out = Vec::new();
@@ -308,7 +308,7 @@ mod tests {
     fn agents_real_format_all_kinds() {
         let text = fs::read_to_string(fixtures().join("agents.json")).unwrap();
         let a = parse_agents(&text).unwrap();
-        assert_eq!(a.len(), 5, "la entrada sin sessionId se descarta");
+        assert_eq!(a.len(), 5, "the entry without sessionId is dropped");
         let coord = a.iter().find(|x| x.kind.as_deref() == Some("interactive")).unwrap();
         assert_eq!(coord.id, None);
         assert_eq!(coord.status.as_deref(), Some("busy"));
@@ -334,7 +334,7 @@ mod tests {
         assert_eq!(live.last_tool_summary.as_deref(), Some("cargo test"));
         assert_eq!(live.cwd.as_deref(), Some("/Users/me/Code/repo/.claude/worktrees/agent-alive0000000001"));
         assert_eq!(done.touched_paths, vec!["/Users/me/Code/x.rs".to_string()]);
-        // Cola cortada a mitad de línea y basura: no rompe.
+        // Tail cut mid-line plus garbage: doesn't break.
         let t = parse_tail("{\"type\":\"assi\n{bad json\n");
         assert_eq!(t, TailInfo::default());
     }

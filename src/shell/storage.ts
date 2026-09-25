@@ -1,12 +1,12 @@
-// Preferencias de UI en localStorage, todas con prefijo `nodal.`.
+// UI preferences in localStorage, all prefixed with `nodal.`.
 
 const PREFIX = "nodal.";
 const LEGACY_PREFIX = "agent-desk.";
 const MIGRATED_FLAG = `${PREFIX}storageMigrated`;
 
 /**
- * Una sola vez: copia las claves `agent-desk.*` a `nodal.*` (sin pisar las nuevas) y
- * borra las viejas. Idempotente; si localStorage no está disponible, no hace nada.
+ * One-off: copies the `agent-desk.*` keys to `nodal.*` (without overwriting new ones) and
+ * deletes the old ones. Idempotent; if localStorage is unavailable, does nothing.
  */
 export function migrateLegacyStorage() {
   try {
@@ -24,11 +24,11 @@ export function migrateLegacyStorage() {
     }
     localStorage.setItem(MIGRATED_FLAG, "1");
   } catch {
-    /* localStorage no disponible */
+    /* localStorage unavailable */
   }
 }
 
-/** `key` sin prefijo: `readPref("route")` lee `nodal.route`. */
+/** `key` without prefix: `readPref("route")` reads `nodal.route`. */
 export function readPref(key: string): string | null {
   try {
     return localStorage.getItem(PREFIX + key);
@@ -42,7 +42,7 @@ export function writePref(key: string, value: string | null) {
     if (value === null) localStorage.removeItem(PREFIX + key);
     else localStorage.setItem(PREFIX + key, value);
   } catch {
-    /* la preferencia no se recuerda */
+    /* the preference is not remembered */
   }
 }
 

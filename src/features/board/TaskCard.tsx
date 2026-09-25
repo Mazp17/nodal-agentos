@@ -18,7 +18,7 @@ export interface CardModel {
   phase: PhaseProgress | undefined;
 }
 
-/** Acción principal de la card según repo, run vigente y estado. */
+/** The card's main action based on repo, current run and status. */
 export function cardAction(m: CardModel): CardAction | null {
   const { task, repo, run } = m;
   if (!repo) return "choose-repo";
@@ -47,7 +47,7 @@ interface Props {
   onAction: (a: CardAction) => void;
   onDragStart: (e: DragEvent<HTMLElement>) => void;
   onDragEnd: () => void;
-  /** Alt+flechas sobre la card: reordenar o cambiar de columna sin mouse. */
+  /** Alt+arrows on the card: reorder or change column without a mouse. */
   onKeyMove: (key: "ArrowUp" | "ArrowDown" | "ArrowLeft" | "ArrowRight") => void;
 }
 
@@ -97,7 +97,7 @@ export function TaskCard({ model, showProject, busy, dragging, onOpen, onAction,
         </span>
       </div>
 
-      {/* Botón real para abrir con teclado; la card entera también abre con click. */}
+      {/* Real button to open with the keyboard; the whole card also opens on click. */}
       <button
         type="button"
         className="bd-card-title"

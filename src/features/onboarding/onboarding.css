@@ -1,4 +1,4 @@
-/* Onboarding a pantalla completa: columna de 520px con tres pasos. */
+/* Full-screen onboarding: 520px column with three steps. */
 
 .onboarding { position: fixed; inset: 0; z-index: 70; background: var(--bg-sidebar); display: flex; flex-direction: column; }
 .onboarding-scroll { flex: 1; overflow: auto; display: flex; justify-content: center; padding: 56px 24px 36px; }

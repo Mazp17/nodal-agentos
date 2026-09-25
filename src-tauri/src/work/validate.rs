@@ -1,5 +1,5 @@
-//! Validación de entradas (proyectos, repos, tareas, ejecutores, settings). Lo que toca
-//! disco es bloqueante: se llama desde `blocking`.
+//! Input validation (projects, repos, tasks, executors, settings). Anything that touches
+//! disk is blocking: it's called from `blocking`.
 
 use std::path::{Path, PathBuf};
 
@@ -10,7 +10,7 @@ use super::executors::is_valid_agent_name;
 
 pub const MAX_TITLE_CHARS: usize = 200;
 pub const MAX_NAME_CHARS: usize = 80;
-/// Tope para planes en texto y para leer un plan (archivo o texto).
+/// Cap for text plans and for reading a plan (file or text).
 pub const MAX_PLAN_BYTES: u64 = 512 * 1024;
 const MAX_LABELS: usize = 20;
 const MAX_LABEL_CHARS: usize = 40;
@@ -18,10 +18,10 @@ const MAX_CRITERIA: usize = 50;
 const MAX_CRITERION_CHARS: usize = 1000;
 const MAX_EXTRA_CHARS: usize = 8000;
 
-/// Editores permitidos para "Open in editor" (binario que se busca en PATH).
+/// Editors allowed for "Open in editor" (binary looked up in PATH).
 pub const EDITORS: [&str; 9] = ["code", "code-insiders", "cursor", "windsurf", "zed", "subl", "idea", "webstorm", "fleet"];
 
-/// Paleta por defecto de proyectos (si no mandan color).
+/// Default project palette (when no color is sent).
 pub const PALETTE: [&str; 8] = [
     "oklch(0.74 0.15 55)",
     "oklch(0.72 0.13 250)",
@@ -59,7 +59,7 @@ pub fn name(name: &str, what: &str) -> Result<String, String> {
     Ok(t)
 }
 
-/// 2 a 6 mayúsculas o dígitos, empezando por letra (`PAY`, `WEB2`). Se pasa a mayúsculas.
+/// 2 to 6 uppercase letters or digits, starting with a letter (`PAY`, `WEB2`). Uppercased.
 pub fn project_key(key: &str) -> Result<String, String> {
     let k = key.trim().to_ascii_uppercase();
     let ok = (2..=6).contains(&k.len())
@@ -72,7 +72,7 @@ pub fn project_key(key: &str) -> Result<String, String> {
     }
 }
 
-/// `#rgb`/`#rrggbb` u `oklch(...)` con números.
+/// `#rgb`/`#rrggbb` or `oklch(...)` with numbers.
 pub fn color(c: &str) -> Result<String, String> {
     let c = c.trim();
     let hex = c.strip_prefix('#').is_some_and(|h| matches!(h.len(), 3 | 6) && h.chars().all(|x| x.is_ascii_hexdigit()));
@@ -101,8 +101,8 @@ pub fn plan_text(text: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// Archivo de plan: `.md`, existe, es archivo y queda dentro de `repo` después de resolver
-/// symlinks y `..` (canonicalize). `path` puede ser absoluta o relativa al repo.
+/// Plan file: `.md`, exists, is a file and stays inside `repo` after resolving symlinks and
+/// `..` (canonicalize). `path` can be absolute or relative to the repo.
 pub fn plan_file(repo: &Path, path: &str) -> Result<PathBuf, String> {
     let raw = path.trim();
     if raw.is_empty() {
@@ -132,7 +132,7 @@ pub fn plan_file(repo: &Path, path: &str) -> Result<PathBuf, String> {
     Ok(canon)
 }
 
-/// Sin vacíos ni repetidos (sin distinguir mayúsculas), cada uno en una línea.
+/// No empty or repeated ones (case-insensitive), each on a single line.
 pub fn labels(labels: &[String]) -> Result<Vec<String>, String> {
     let mut out: Vec<String> = Vec::new();
     for l in labels {
@@ -151,7 +151,7 @@ pub fn labels(labels: &[String]) -> Result<Vec<String>, String> {
     Ok(out)
 }
 
-/// Criterios de aceptación: sin vacíos, con saltos de línea colapsados.
+/// Acceptance criteria: no empty ones, with line breaks collapsed.
 pub fn acceptance(items: &[String]) -> Result<Vec<String>, String> {
     let out: Vec<String> = items.iter().map(|s| one_line(s)).filter(|s| !s.is_empty()).collect();
     if out.len() > MAX_CRITERIA {
@@ -201,7 +201,7 @@ pub fn concurrency(n: u32) -> Result<u32, String> {
 
 const MAX_DESCRIPTION_CHARS: usize = 2000;
 
-/// Descripción de proyecto: recortada; vacía → `None`.
+/// Project description: trimmed; empty → `None`.
 pub fn description(s: Option<&str>) -> Result<Option<String>, String> {
     let Some(t) = s.map(str::trim).filter(|t| !t.is_empty()) else { return Ok(None) };
     if t.chars().count() > MAX_DESCRIPTION_CHARS {
@@ -223,7 +223,7 @@ mod tests {
     use super::*;
     use crate::util::paths::tests::TempDir;
 
-    /// Dos carpetas hermanas: `repo` y `outside`.
+    /// Two sibling folders: `repo` and `outside`.
     fn setup(name: &str) -> (TempDir, PathBuf, PathBuf) {
         let t = TempDir::new(name);
         let repo = t.0.join("repo");

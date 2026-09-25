@@ -41,7 +41,7 @@ fn queue_order_reorder_and_pending() {
 
     runs::reorder_queue(&mut c, &["c".into(), "a".into(), "b".into()]).unwrap();
     assert_eq!(ids(runs::queue(&c).unwrap()), ["c", "a", "b"]);
-    // Tiene que ser exactamente el conjunto en cola.
+    // It must be exactly the queued set.
     assert!(runs::reorder_queue(&mut c, &["c".into(), "a".into()]).is_err());
     assert!(runs::reorder_queue(&mut c, &["c".into(), "a".into(), "a".into()]).is_err());
     assert!(runs::reorder_queue(&mut c, &["c".into(), "a".into(), "d".into()]).is_err());
@@ -60,7 +60,7 @@ fn queue_order_reorder_and_pending() {
     runs::update(&c, &b).unwrap();
     assert_eq!(runs::launched_refs(&c).unwrap(), vec![(Some("abcd1234".into()), None)]);
 
-    // Borrar la tarea deja sus runs con task_id NULL.
+    // Deleting the task leaves its runs with a NULL task_id.
     tasks::delete(&c, "t1").unwrap();
     assert_eq!(runs::get(&c, "b").unwrap().task_id, None);
 }
@@ -76,7 +76,7 @@ fn task_number_counter_and_status() {
     tasks::set_status(&c, "t1", TaskStatus::Done, 50).unwrap();
     assert_eq!(tasks::get(&c, "t1").unwrap().closed_at, Some(50));
     tasks::set_status(&c, "t1", TaskStatus::Canceled, 60).unwrap();
-    assert_eq!(tasks::get(&c, "t1").unwrap().closed_at, Some(50), "conserva el primer cierre");
+    assert_eq!(tasks::get(&c, "t1").unwrap().closed_at, Some(50), "keeps the first close");
     tasks::set_status(&c, "t1", TaskStatus::Todo, 70).unwrap();
     assert_eq!(tasks::get(&c, "t1").unwrap().closed_at, None);
     assert!(repos::find_by_path(&c, "/r1").unwrap().is_some());
@@ -116,7 +116,7 @@ fn runs_filtered_by_project_and_latest_by_task() {
     let ids = |v: Vec<Run>| v.into_iter().map(|r| r.id).collect::<Vec<_>>();
     assert_eq!(ids(runs::list_filtered(&c, None, None).unwrap()), ["e", "d", "b", "c", "a"]);
     assert_eq!(ids(runs::list_filtered(&c, Some("p1"), None).unwrap()), ["b", "c", "a"]);
-    // Un run sin tarea cuenta en el proyecto de su repo.
+    // A run without a task counts toward its repo's project.
     assert_eq!(ids(runs::list_filtered(&c, Some("p2"), None).unwrap()), ["e", "d"]);
     assert_eq!(ids(runs::list_filtered(&c, Some("p1"), Some("t2")).unwrap()), ["c"]);
     assert!(runs::list_filtered(&c, Some("p2"), Some("t1")).unwrap().is_empty());

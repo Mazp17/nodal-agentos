@@ -1,12 +1,12 @@
-//! Tipos que el módulo `runs` expone al frontend. Espejo en `src/features/runs/types.ts`.
-//! Son nuestros, no de Claude Code: el parseo del formato interno vive en `claude_fs.rs`.
+//! Types the `runs` module exposes to the frontend. Mirrored in `src/features/runs/types.ts`.
+//! They're ours, not Claude Code's: parsing of the internal format lives in `claude_fs.rs`.
 
 use serde::Serialize;
 
-/// Movido a `domain`; se reexporta para no romper los usos actuales.
+/// Moved to `domain`; re-exported so current uses don't break.
 pub use crate::domain::LaunchOptions;
 
-/// Lo que devuelve `launch_run`: el id corto que imprime `claude --bg`.
+/// What `launch_run` returns: the short id that `claude --bg` prints.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RunRef {
@@ -14,16 +14,16 @@ pub struct RunRef {
     pub cwd: String,
 }
 
-/// Por qué una sesión en background terminó sin llegar a correr su workflow.
+/// Why a background session ended without getting to run its workflow.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum LaunchBlocker {
-    /// La tool `Workflow` se rechazó con "Review dynamic workflow before running".
+    /// The `Workflow` tool was rejected with "Review dynamic workflow before running".
     WorkflowReview { workflow: Option<String> },
 }
 
-/// Una sesión en background según `claude agents --json --all`.
-/// Las sesiones detenidas no traen `pid` ni `status`.
+/// A background session as reported by `claude agents --json --all`.
+/// Stopped sessions have no `pid` or `status`.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RunSummary {
@@ -31,33 +31,33 @@ pub struct RunSummary {
     pub session_id: String,
     pub cwd: Option<String>,
     pub name: Option<String>,
-    /// Epoch en ms.
+    /// Epoch in ms.
     pub started_at: Option<i64>,
     pub pid: Option<u32>,
-    /// "busy" | "idle" | "waiting" (solo sesiones vivas).
+    /// "busy" | "idle" | "waiting" (live sessions only).
     pub status: Option<String>,
     /// "working" | "blocked" | "done" | "failed" | "stopped".
     pub state: Option<String>,
-    /// Con `status == "waiting"`: "permission prompt", "input needed", "sandbox request",
-    /// "worker request", "dialog open" (valores de la doc de agent view; verificado el primero).
+    /// With `status == "waiting"`: "permission prompt", "input needed", "sandbox request",
+    /// "worker request", "dialog open" (values from the agent view docs; the first one verified).
     pub waiting_for: Option<String>,
 }
 
 impl RunSummary {
-    /// La sesión sigue en curso: trabajando, o bloqueada esperando al usuario (permiso,
-    /// input). En ambos casos ocupa un slot y la issue no se puede relanzar.
+    /// The session is still in progress: working, or blocked waiting on the user (permission,
+    /// input). Either way it takes a slot and the issue can't be relaunched.
     pub fn is_in_progress(&self) -> bool {
         matches!(self.state.as_deref(), Some("working" | "blocked"))
     }
 }
 
-/// De dónde salió el detalle.
+/// Where the detail came from.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum DetailSource {
-    /// `workflows/wf_*.json`: el workflow terminó (o al menos escribió su resumen).
+    /// `workflows/wf_*.json`: the workflow finished (or at least wrote its summary).
     Final,
-    /// Reconstruido desde `journal.jsonl`: en curso, o cortado sin resumen.
+    /// Rebuilt from `journal.jsonl`: in progress, or cut off without a summary.
     Live,
 }
 
@@ -101,65 +101,65 @@ pub struct RunDetail {
     pub workflow_id: String,
     pub workflow_name: Option<String>,
     pub source: DetailSource,
-    /// Estado del workflow según Claude Code ("completed", ...). `None` en modo `live`:
-    /// el journal no distingue "en curso" de "cortado"; cruzarlo con `RunSummary.state`.
+    /// Workflow status according to Claude Code ("completed", ...). `None` in `live` mode:
+    /// the journal doesn't tell "in progress" from "cut off"; cross-check with `RunSummary.state`.
     pub status: Option<String>,
     pub phases: Vec<PhaseInfo>,
     pub current_phase: Option<String>,
-    /// 1-based dentro de `phases`.
+    /// 1-based within `phases`.
     pub current_phase_index: Option<u32>,
     pub agents: Vec<AgentInfo>,
     pub agent_count: u32,
     pub total_tokens: Option<u64>,
     pub total_tool_calls: Option<u64>,
     pub duration_ms: Option<u64>,
-    /// `result.status` del workflow si es "green" | "yellow" | "red".
+    /// The workflow's `result.status` if it's "green" | "yellow" | "red".
     pub result_status: Option<String>,
-    /// Campos conocidos del `result` del workflow (solo en modo `final`).
+    /// Known fields of the workflow's `result` (only in `final` mode).
     pub result: Option<RunResult>,
-    /// Cuántos workflows tiene la sesión (se devuelve solo el más reciente).
+    /// How many workflows the session has (only the most recent one is returned).
     pub workflow_count: u32,
 }
 
-/// Campos conocidos del `result` que devuelve un workflow (p. ej. `linear-issue`).
-/// `result` es libre: cada campo es opcional y se ignora si no tiene el tipo esperado.
+/// Known fields of the `result` a workflow returns (e.g. `linear-issue`).
+/// `result` is free-form: each field is optional and ignored if it lacks the expected type.
 #[derive(Debug, Clone, PartialEq, Serialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct RunResult {
     pub issue: Option<String>,
-    /// URL del PR (solo http/https).
+    /// PR URL (http/https only).
     pub pr: Option<String>,
     pub branch: Option<String>,
     pub workdir: Option<String>,
-    /// Dónde se cortó (linear-issue en Blocked).
+    /// Where it stopped (linear-issue in Blocked).
     #[serde(rename = "where")]
     pub where_: Option<String>,
     pub unmet_acceptance: Option<Vec<String>>,
     pub nits: Option<Vec<String>>,
-    /// `result` completo como JSON indentado (recortado), para mostrar lo que no se conoce.
+    /// Full `result` as indented JSON (clipped), to show what isn't known.
     pub raw: Option<String>,
 }
 
-/// Una entrada de la conversación de un subagente.
+/// An entry in a subagent's conversation.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum TranscriptItem {
-    /// Texto del asistente.
+    /// Assistant text.
     #[serde(rename_all = "camelCase")]
     Text { text: String, truncated: bool },
-    /// Razonamiento del asistente (solo si viene en claro; casi siempre viene vacío).
+    /// Assistant reasoning (only when in plain text; almost always empty).
     #[serde(rename_all = "camelCase")]
     Thinking { text: String, truncated: bool },
-    /// Mensaje del lado del usuario que no es un resultado de tool.
+    /// User-side message that isn't a tool result.
     #[serde(rename_all = "camelCase")]
     User { text: String, truncated: bool },
     #[serde(rename_all = "camelCase")]
     ToolUse {
         id: Option<String>,
         name: String,
-        /// Una línea: el argumento principal (comando, ruta, patrón...).
+        /// One line: the main argument (command, path, pattern...).
         summary: Option<String>,
-        /// Input completo como JSON indentado, recortado.
+        /// Full input as indented JSON, clipped.
         input: Option<String>,
         result: Option<ToolResultInfo>,
     },
@@ -180,15 +180,15 @@ pub struct Transcript {
     pub label: Option<String>,
     pub model: Option<String>,
     pub phase: Option<String>,
-    /// Tarea que recibió el agente (texto calculado por el workflow).
+    /// Task the agent received (text computed by the workflow).
     pub prompt: Option<String>,
     pub items: Vec<TranscriptItem>,
-    /// Items totales en lo leído; los primeros `omitted` no se devuelven.
+    /// Total items in what was read; the first `omitted` aren't returned.
     pub total_items: u32,
     pub omitted: u32,
-    /// Salida final: input de `StructuredOutput` o último texto del asistente.
+    /// Final output: the `StructuredOutput` input or the last assistant text.
     pub final_output: Option<String>,
-    /// El archivo era demasiado grande y solo se leyó su principio y su cola.
+    /// The file was too large and only its head and tail were read.
     pub partial: bool,
     pub bytes: u64,
 }

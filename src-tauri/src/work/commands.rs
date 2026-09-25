@@ -1,5 +1,5 @@
-//! Comandos de Tauri de F1-B (firmas en `src/domain/api.ts`). Delgados: validan ids,
-//! corren `ops`/`launch` con la base y disparan la cola.
+//! F1-B Tauri commands (signatures in `src/domain/api.ts`). Thin: they validate ids, run
+//! `ops`/`launch` against the database and kick the queue.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -24,10 +24,10 @@ use super::transitions::{RunEnd, NOTE_STOPPED};
 use super::{kick, launch, ops, pump, validate, worktree, Inner, WorkState};
 
 const OPEN_TIMEOUT: Duration = Duration::from_secs(3);
-/// Lo que cambia al encolar, lanzar o cancelar un run.
+/// What changes when a run is enqueued, launched or cancelled.
 const RUN_KINDS: &[Kind] = &[Kind::Runs, Kind::Queue, Kind::Tasks];
 
-/// Corre `f` con la conexión; los errores de `ops` ya vienen listos para mostrar.
+/// Runs `f` with the connection; `ops` errors already come ready to display.
 async fn db<T, F>(inner: &Arc<Inner>, f: F) -> Result<T, String>
 where
     T: Send + 'static,
@@ -44,7 +44,7 @@ fn opt_id(id: Option<String>, what: &str) -> Result<Option<String>, String> {
     Ok(id)
 }
 
-// ---------- Proyectos ----------
+// ---------- Projects ----------
 
 #[tauri::command]
 pub async fn list_projects(state: State<'_, WorkState>, include_archived: Option<bool>) -> Result<Vec<Project>, String> {
@@ -90,7 +90,7 @@ pub async fn list_repos(state: State<'_, WorkState>, project_id: Option<String>)
     db(&state.0, move |c| Ok(repos::list(c, project_id.as_deref())?)).await
 }
 
-/// `path` puede ser cualquier carpeta dentro del repo: se resuelve a la raíz git.
+/// `path` can be any folder inside the repo: it's resolved to the git root.
 #[tauri::command]
 pub async fn add_repo(state: State<'_, WorkState>, project_id: String, input: NewRepo) -> Result<Repo, String> {
     check_id(&project_id, "project")?;
@@ -117,7 +117,7 @@ pub async fn delete_repo(state: State<'_, WorkState>, id: String) -> Result<(), 
     Ok(())
 }
 
-// ---------- Tareas ----------
+// ---------- Tasks ----------
 
 #[tauri::command]
 pub async fn list_tasks(state: State<'_, WorkState>, project_id: Option<String>) -> Result<Vec<Task>, String> {
@@ -170,7 +170,7 @@ pub async fn move_task(state: State<'_, WorkState>, id: String, status: TaskStat
     Ok(t)
 }
 
-/// Nuevo orden de una columna del board (ids de un mismo proyecto, todos con `status`).
+/// New order of a board column (ids from a single project, all with `status`).
 #[tauri::command]
 pub async fn reorder_tasks(state: State<'_, WorkState>, status: TaskStatus, ordered_ids: Vec<String>) -> Result<(), String> {
     for id in &ordered_ids {
@@ -236,12 +236,12 @@ pub async fn worktree_status(state: State<'_, WorkState>, task_id: String) -> Re
     blocking(move || worktree::status(Path::new(&repo.path), task.worktree.as_ref())).await
 }
 
-/// "Clean up": borra el worktree y la rama de la tarea. Rechaza con runs en curso y, sin
-/// `force`, si hay commits sin publicar o cambios sin commitear.
+/// "Clean up": deletes the task's worktree and branch. Refuses with runs in progress and,
+/// without `force`, if there are unpushed commits or uncommitted changes.
 ///
-/// La tarea queda marcada en `cleaning` (en la misma sección que chequea los pendientes,
-/// con la base tomada) hasta el final: mientras tanto `enqueue_work` la rechaza, así un
-/// launch no reusa el worktree que se está borrando.
+/// The task stays marked in `cleaning` (in the same section that checks for pending runs,
+/// while holding the database) until the end: meanwhile `enqueue_work` rejects it, so a
+/// launch doesn't reuse the worktree being deleted.
 #[tauri::command]
 pub async fn cleanup_worktree(state: State<'_, WorkState>, task_id: String, force: Option<bool>) -> Result<Task, String> {
     check_id(&task_id, "task")?;
@@ -266,7 +266,7 @@ pub async fn cleanup_worktree(state: State<'_, WorkState>, task_id: String, forc
                 return Err(why);
             }
         }
-        // Con la marca puesta no puede aparecer un run nuevo; se vuelve a mirar por las dudas.
+        // With the mark set no new run can appear; checked again just in case.
         if !qruns::pending_for_task(&launch::lock(&dbh), &id)?.is_empty() {
             return Err(PENDING_ERR.into());
         }
@@ -287,7 +287,7 @@ pub async fn cleanup_worktree(state: State<'_, WorkState>, task_id: String, forc
 
 const PENDING_ERR: &str = "The task has a queued or running run: cancel it first.";
 
-// ---------- Ejecutores y runs ----------
+// ---------- Executors and runs ----------
 
 #[tauri::command]
 pub async fn list_executors(state: State<'_, WorkState>, repo_id: Option<String>) -> Result<Vec<ExecutorInfo>, String> {
@@ -300,7 +300,7 @@ pub async fn list_executors(state: State<'_, WorkState>, repo_id: Option<String>
     blocking(move || Ok(executors::catalog(claude.as_deref(), repo_path.as_deref().map(Path::new)))).await
 }
 
-/// `project_id` (opcional) filtra por proyecto además de por tarea.
+/// `project_id` (optional) filters by project in addition to task.
 #[tauri::command]
 pub async fn list_task_runs(
     state: State<'_, WorkState>,
@@ -312,7 +312,7 @@ pub async fn list_task_runs(
     db(&state.0, move |c| Ok(qruns::list_filtered(c, project_id.as_deref(), task_id.as_deref())?)).await
 }
 
-/// Como `list_task_runs`, sin `prompt` ni `extraInstructions`.
+/// Like `list_task_runs`, without `prompt` or `extraInstructions`.
 #[tauri::command]
 pub async fn list_runs_light(
     state: State<'_, WorkState>,
@@ -331,7 +331,7 @@ pub async fn get_run(state: State<'_, WorkState>, run_id: String) -> Result<Run,
     db(&state.0, move |c| Ok(qruns::get(c, &run_id)?)).await
 }
 
-/// El último run de cada tarea (sin límite de historial), liviano.
+/// The last run of each task (no history limit), lightweight.
 #[tauri::command]
 pub async fn latest_runs_by_task(state: State<'_, WorkState>, project_id: Option<String>) -> Result<Vec<RunLight>, String> {
     let project_id = opt_id(project_id, "project")?;
@@ -339,15 +339,16 @@ pub async fn latest_runs_by_task(state: State<'_, WorkState>, project_id: Option
     Ok(runs.into_iter().map(RunLight::from).collect())
 }
 
-/// Slots ocupados/capacidad, cola y lo que espera al usuario (`project_id` null: todo, con
-/// las sesiones ajenas). Si `claude agents` falla, se calcula sin las sesiones vivas.
+/// Occupied slots/capacity, queue and what's waiting on the user (`project_id` null:
+/// everything, including foreign sessions). If `claude agents` fails, it's computed without
+/// the live sessions.
 #[tauri::command]
 pub async fn work_summary(state: State<'_, WorkState>, project_id: Option<String>) -> Result<super::queue::WorkSummary, String> {
     let project_id = opt_id(project_id, "project")?;
     let global = project_id.is_none();
     let (runs, blocked, settings) = db(&state.0, move |c| {
         let p = project_id.as_deref();
-        // Las tareas que cambiaron de proyecto en el proveedor también esperan al usuario.
+        // Tasks that changed project in the provider are also waiting on the user.
         let mut need = tasks::blocked_ids(c, p)?;
         need.extend(crate::providers::store::moved_ids(c, p)?);
         Ok((qruns::pending_of(c, p)?, need, rows::load_settings(c)?))
@@ -407,7 +408,7 @@ pub async fn review_now(state: State<'_, WorkState>, task_id: String, reviewer: 
     Ok(run)
 }
 
-/// Confirma un run migrado que quedó en cola (no se lanza solo).
+/// Confirms a migrated run that was left queued (it doesn't launch on its own).
 #[tauri::command]
 pub async fn confirm_run(state: State<'_, WorkState>, run_id: String) -> Result<Run, String> {
     check_id(&run_id, "run")?;
@@ -429,14 +430,14 @@ pub async fn reorder_queue(state: State<'_, WorkState>, run_ids: Vec<String>) ->
     Ok(())
 }
 
-/// Base del diff de un run: la del worktree de la tarea si el run corrió ahí.
+/// Diff base of a run: the task worktree's base if the run ran there.
 fn diff_base(task: Option<&Task>, run: &Run) -> Option<String> {
     let wt = task.and_then(|t| t.worktree.as_ref())?;
     (run.isolation == Some(Isolation::Worktree) && Path::new(&wt.path) == Path::new(&run.cwd)).then(|| wt.base.clone())
 }
 
-/// Saca de la cola un run `queued`, o detiene uno lanzado: guarda lo que dejó a medias como
-/// patch en `<app_data>/runs/<id>/stopped.patch` y la tarea pasa a Blocked.
+/// Dequeues a `queued` run, or stops a launched one: saves whatever it left half-done as a
+/// patch in `<app_data>/runs/<id>/stopped.patch` and the task moves to Blocked.
 #[tauri::command]
 pub async fn cancel_run(state: State<'_, WorkState>, run_id: String) -> Result<Run, String> {
     let r = cancel_run_inner(&state.0, run_id).await;
@@ -447,8 +448,8 @@ pub async fn cancel_run(state: State<'_, WorkState>, run_id: String) -> Result<R
 async fn cancel_run_inner(inner: &Arc<Inner>, run_id: String) -> Result<Run, String> {
     check_id(&run_id, "run")?;
     let inner = inner.clone();
-    // Con el turno de la cola: la pasada no puede cerrar este run en el medio (quedaría
-    // `finished`, sin la nota del patch, y hasta con el revisor encolado).
+    // Holding the queue's turn: the pass can't close this run midway (it would end up
+    // `finished`, without the patch note, and even with the reviewer enqueued).
     let _turn = inner.pump.lock().await;
     let id = run_id.clone();
     let (run, task, repo_path) = db(&inner, move |c| {
@@ -475,8 +476,8 @@ async fn cancel_run_inner(inner: &Arc<Inner>, run_id: String) -> Result<Run, Str
                 }
                 tx.execute("UPDATE runs SET finished_at = ?2 WHERE id = ?1", rusqlite::params![id, now])
                     .map_err(|e| e.to_string())?;
-                // Sin otros runs pendientes, la tarea no queda en In Progress: vuelve a Todo si
-                // era trabajo, o a Blocked si era el revisor (el gate no pasó).
+                // With no other pending runs, the task doesn't stay In Progress: back to Todo if
+                // it was work, or to Blocked if it was the reviewer (the gate didn't pass).
                 if let Some(t) = task {
                     if t.status == TaskStatus::InProgress && qruns::pending_for_task(&tx, &t.id)?.is_empty() {
                         let next = match run.kind {
@@ -494,7 +495,7 @@ async fn cancel_run_inner(inner: &Arc<Inner>, run_id: String) -> Result<Run, Str
         RunStatus::Launching => Err("The run is launching: wait for it to start and stop it then.".into()),
         RunStatus::Launched => {
             let claude_id = run.claude_run_id.clone().ok_or("The run has no session id yet.")?;
-            // Lo que haya a medias, antes de detenerlo (los workflows trabajan en su worktree).
+            // Whatever is half-done, before stopping it (workflows work in their own worktree).
             let patch_path = if matches!(run.executor, Executor::Workflow { .. }) {
                 None
             } else {
@@ -552,9 +553,9 @@ async fn cancel_run_inner(inner: &Arc<Inner>, run_id: String) -> Result<Run, Str
     }
 }
 
-/// Transcript de un run de agente, Claude o revisor (la sesión principal). Los workflows
-/// tienen uno por agente: `get_agent_transcript`. `None` si la sesión todavía no tiene archivo.
-/// `limit`: items más recientes (default 200, máx. 2000).
+/// Transcript of an agent, Claude or reviewer run (the main session). Workflows have one per
+/// agent: `get_agent_transcript`. `None` if the session has no file yet.
+/// `limit`: most recent items (default 200, max 2000).
 #[tauri::command]
 pub async fn get_run_transcript(
     state: State<'_, WorkState>,
@@ -602,7 +603,7 @@ pub async fn run_diff(state: State<'_, WorkState>, run_id: String) -> Result<Run
     .await?;
     let live = matches!(run.status, RunStatus::Launching | RunStatus::Launched);
     blocking(move || {
-        // Un workflow trabaja en su propio worktree: se mira su rama desde el repo.
+        // A workflow works in its own worktree: its branch is inspected from the repo.
         if let (Executor::Workflow { .. }, Some(branch), Some(repo)) = (&run.executor, &run.branch, &repo) {
             let repo_dir = Path::new(&repo.path);
             let base = worktree::current_base(repo_dir)?;
@@ -653,8 +654,9 @@ async fn run_cwd(inner: &Arc<Inner>, run_id: String) -> Result<PathBuf, String> 
     Ok(p)
 }
 
-/// Lanza el proceso y espera un poco: si sale con error enseguida se informa; si sigue
-/// corriendo (algunos CLIs de editores no vuelven), se lo deja y se cosecha en segundo plano.
+/// Spawns the process and waits a bit: if it exits with an error right away, that's
+/// reported; if it keeps running (some editor CLIs don't return), it's left alone and reaped
+/// in the background.
 async fn spawn_open(mut cmd: tokio::process::Command, what: &str) -> Result<(), String> {
     cmd.stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
@@ -680,7 +682,7 @@ async fn spawn_open(mut cmd: tokio::process::Command, what: &str) -> Result<(), 
     }
 }
 
-/// Abre la carpeta del run en Finder.
+/// Opens the run's folder in Finder.
 #[tauri::command]
 pub async fn open_worktree(state: State<'_, WorkState>, run_id: String) -> Result<(), String> {
     if !cfg!(target_os = "macos") {
@@ -692,7 +694,7 @@ pub async fn open_worktree(state: State<'_, WorkState>, run_id: String) -> Resul
     spawn_open(cmd, "open").await
 }
 
-/// Abre la carpeta del run (o `file` dentro de ella) en el editor de Settings. Without one set,
+/// Opens the run's folder (or `file` inside it) in the Settings editor. Without one set,
 /// uses the first known editor whose CLI is installed, and only then the system text editor.
 #[tauri::command]
 pub async fn open_in_editor(state: State<'_, WorkState>, run_id: String, file: Option<String>) -> Result<(), String> {
@@ -735,8 +737,8 @@ pub async fn open_in_editor(state: State<'_, WorkState>, run_id: String, file: O
             if !cfg!(target_os = "macos") {
                 return Err("Set an editor in Settings.".into());
             }
-            // `-t`: siempre como texto. Sin eso, un `.command` o `.app` que dejó el agente
-            // se ejecutaría. La carpeta se abre en Finder.
+            // `-t`: always as text. Without it, a `.command` or `.app` left by the agent would
+            // be executed. The folder opens in Finder.
             let mut cmd = tokio::process::Command::new("/usr/bin/open");
             if target.is_some() {
                 cmd.arg("-t");
@@ -774,7 +776,7 @@ pub async fn get_settings(state: State<'_, WorkState>) -> Result<Settings, Strin
 pub async fn set_settings(state: State<'_, WorkState>, settings: Settings) -> Result<Settings, String> {
     let s = db(&state.0, move |c| ops::set_settings(c, &settings)).await?;
     state.0.events.notify(Kind::Projects, None);
-    // Más concurrencia puede liberar lugar para lo encolado.
+    // More concurrency may free up room for queued runs.
     kick(&state.0);
     Ok(s)
 }

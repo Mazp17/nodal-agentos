@@ -3,8 +3,8 @@ import { ExternalLink } from "../../ui/ExternalLink";
 import { SafeMarkdown } from "../../ui/Markdown";
 import "./issue-panel.css";
 
-// Secciones del detalle de una issue (descripción, padre, sub-issues, relaciones y
-// comentarios). Las usa la pestaña Source del detalle de tarea.
+// Sections of an issue's detail (description, parent, sub-issues, relations and
+// comments). Used by the Source tab of the task detail.
 
 const FINISHED = new Set(["completed", "canceled"]);
 export function isFinished(state: StateRef): boolean {
@@ -28,7 +28,7 @@ export interface NavProps {
   onOpenIssue: (id: string) => void;
 }
 
-/** Fila de issue relacionada: botón si está en el board (abre su detalle), texto si no. */
+/** Related issue row: a button if it's on the board (opens its detail), plain text otherwise. */
 function IssueRow({ issue, note, warn, nav }: { issue: IssueRef; note?: string; warn?: boolean; nav: NavProps }) {
   const inner = (
     <>

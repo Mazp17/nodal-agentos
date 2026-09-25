@@ -1,9 +1,9 @@
-//! Catálogo de workflows: `~/.claude/workflows/*.js` y `<repo>/.claude/workflows/*.js`.
+//! Workflow catalog: `~/.claude/workflows/*.js` and `<repo>/.claude/workflows/*.js`.
 //!
-//! El `export const meta = {...}` es JS, no JSON, y no se ejecuta: se escanea el literal
-//! respetando strings y comentarios y se leen `name`, `description`, `whenToUse`,
-//! `managesSource` (string) y `reviews` (booleano) del primer nivel. Si algo no se
-//! entiende, el workflow se lista igual con el nombre del archivo.
+//! The `export const meta = {...}` is JS, not JSON, and isn't executed: the literal is
+//! scanned respecting strings and comments, and the top-level `name`, `description`,
+//! `whenToUse`, `managesSource` (string) and `reviews` (boolean) are read. If something
+//! can't be understood, the workflow is still listed under its file name.
 
 use std::path::{Path, PathBuf};
 
@@ -24,10 +24,10 @@ pub struct WorkflowInfo {
     pub name: String,
     pub description: Option<String>,
     pub when_to_use: Option<String>,
-    /// Proveedor que el workflow sincroniza por su cuenta (`"linear"`): la app no le hace
-    /// push de estado ni comenta.
+    /// Provider the workflow syncs on its own (`"linear"`): the app doesn't push status to it
+    /// or comment.
     pub manages_source: Option<String>,
-    /// El workflow ya revisa (su resultado es el veredicto): se salta el gate de Nodal.
+    /// The workflow already reviews (its result is the verdict): Nodal's gate is skipped.
     pub reviews: bool,
     pub source: WorkflowSource,
     pub path: String,
@@ -42,9 +42,9 @@ pub struct Meta {
     pub reviews: Option<bool>,
 }
 
-/// Recorre `s` y devuelve una copia del mismo largo en bytes donde los comentarios y
-/// todo lo anidado a profundidad > 0 quedan en blanco. Si `stop_at_close`, corta en la
-/// `}` que cierra el nivel 0 y devuelve su índice.
+/// Walks `s` and returns a copy of the same byte length where comments and everything
+/// nested at depth > 0 are blanked out. If `stop_at_close`, stops at the `}` that closes
+/// level 0 and returns its index.
 fn scan_top_level(s: &str, stop_at_close: bool) -> (String, Option<usize>) {
     let bytes = s.as_bytes();
     let mut out = String::with_capacity(s.len());
@@ -53,7 +53,7 @@ fn scan_top_level(s: &str, stop_at_close: bool) -> (String, Option<usize>) {
     let mut escaped = false;
     let mut i = 0;
     let blank = |out: &mut String, c: char| {
-        // Mismo largo en bytes para que los índices de `out` sirvan sobre `s`.
+        // Same byte length so that indices into `out` work on `s`.
         for _ in 0..c.len_utf8() {
             out.push(' ');
         }
@@ -73,7 +73,7 @@ fn scan_top_level(s: &str, stop_at_close: bool) -> (String, Option<usize>) {
             i += len;
             continue;
         }
-        // Comentarios: se blanquean (pueden tener comillas sueltas).
+        // Comments: blanked out (they may contain stray quotes).
         if s[i..].starts_with("//") {
             let end = s[i..].find('\n').map_or(s.len(), |n| i + n);
             s[i..end].chars().for_each(|c| blank(&mut out, c));
@@ -113,7 +113,7 @@ fn scan_top_level(s: &str, stop_at_close: bool) -> (String, Option<usize>) {
     (out, None)
 }
 
-/// Valor string de `key` en el primer nivel, con la clave sin comillas o entre comillas.
+/// String value of `key` at the top level, with the key unquoted or quoted.
 fn top_level_prop(flat: &str, key: &str) -> Option<String> {
     [key.to_string(), format!("\"{key}\""), format!("'{key}'")]
         .iter()
@@ -122,7 +122,7 @@ fn top_level_prop(flat: &str, key: &str) -> Option<String> {
         .filter(|v| !v.is_empty())
 }
 
-/// Valor booleano literal (`true`/`false`) de `key` en el primer nivel.
+/// Literal boolean value (`true`/`false`) of `key` at the top level.
 fn top_level_bool(flat: &str, key: &str) -> Option<bool> {
     for k in [key.to_string(), format!("\"{key}\""), format!("'{key}'")] {
         let mut search = flat;
@@ -148,7 +148,7 @@ fn top_level_bool(flat: &str, key: &str) -> Option<bool> {
     None
 }
 
-/// Lee `export const meta = { ... }`. `None` si no hay meta reconocible.
+/// Reads `export const meta = { ... }`. `None` if there's no recognizable meta.
 pub fn parse_meta(src: &str) -> Option<Meta> {
     let start = src.find("export const meta")?;
     let after = &src[start + "export const meta".len()..];
@@ -174,7 +174,7 @@ pub fn parse_meta(src: &str) -> Option<Meta> {
     Some(meta)
 }
 
-/// Archivos de backup (`x.js.bak`, `x.js.bak-2026…`, `x.bak.js`) y ocultos no cuentan.
+/// Backup files (`x.js.bak`, `x.js.bak-2026…`, `x.bak.js`) and hidden ones don't count.
 fn is_workflow_file(p: &Path) -> bool {
     let Some(name) = p.file_name().and_then(|n| n.to_str()) else { return false };
     p.is_file() && name.ends_with(".js") && !name.starts_with('.') && !name.contains(".bak")
@@ -202,7 +202,7 @@ fn read_dir_workflows(dir: &Path, source: WorkflowSource) -> Vec<WorkflowInfo> {
         .collect()
 }
 
-/// Catálogo ordenado por nombre. Un workflow del repo pisa al del usuario con el mismo nombre.
+/// Catalog sorted by name. A repo workflow overrides the user's one with the same name.
 pub fn list_from(user_dir: Option<&Path>, repo: Option<&Path>) -> Vec<WorkflowInfo> {
     let mut out: Vec<WorkflowInfo> = Vec::new();
     let user = user_dir.map(|d| read_dir_workflows(d, WorkflowSource::User)).unwrap_or_default();
@@ -219,7 +219,7 @@ pub fn list_from(user_dir: Option<&Path>, repo: Option<&Path>) -> Vec<WorkflowIn
     out
 }
 
-/// Nombre usable en `/<workflow> ...`: sin espacios ni nada que `claude` lea como opción.
+/// Name usable in `/<workflow> ...`: no spaces or anything `claude` would read as an option.
 pub fn is_valid_workflow_name(name: &str) -> bool {
     !name.is_empty()
         && name.len() <= 80
@@ -250,16 +250,16 @@ mod tests {
         let m = parse_meta(&src).unwrap();
         assert_eq!(m.name.as_deref(), Some("demo-board"));
         assert!(m.description.unwrap().starts_with("Workflow de juguete"));
-        // Viene en la línea siguiente a `whenToUse:` y tiene comillas dobles adentro.
+        // It's on the line after `whenToUse:` and has double quotes inside.
         assert!(m.when_to_use.unwrap().contains(r#"args: "volcanes""#));
     }
 
     #[test]
     fn nested_name_and_comments_do_not_confuse() {
-        let src = "// meta = { name: 'falso' }\nexport const meta = {\n  /* name: 'otro' */\n  phases: [{ name: 'fase' }],\n  \"name\": \"real\",\n  description: 'con \\'escape\\' y ñandú',\n}\n";
+        let src = "// meta = { name: 'fake' }\nexport const meta = {\n  /* name: 'other' */\n  phases: [{ name: 'phase' }],\n  \"name\": \"real\",\n  description: 'with \\'escape\\' and naïveté',\n}\n";
         let m = parse_meta(src).unwrap();
         assert_eq!(m.name.as_deref(), Some("real"));
-        assert_eq!(m.description.as_deref(), Some("con 'escape' y ñandú"));
+        assert_eq!(m.description.as_deref(), Some("with 'escape' and naïveté"));
         assert_eq!(m.when_to_use, None);
     }
 
@@ -272,10 +272,10 @@ mod tests {
         let m = parse_meta("export const meta = { name: 'y', 'reviews': false, noreviews: true }").unwrap();
         assert_eq!(m.reviews, Some(false));
         assert_eq!(m.manages_source, None);
-        // Solo el anidado: no cuenta.
+        // Only the nested one: doesn't count.
         let m = parse_meta("export const meta = { name: 'z', opts: { reviews: true } }").unwrap();
         assert_eq!(m.reviews, None);
-        // Las fixtures reales todavía no lo declaran.
+        // The real fixtures don't declare it yet.
         let src = std::fs::read_to_string(fixtures().join("user/linear-issue.js")).unwrap();
         assert_eq!(parse_meta(&src).unwrap().reviews, None);
     }
@@ -283,9 +283,9 @@ mod tests {
     #[test]
     fn broken_or_missing_meta() {
         assert_eq!(parse_meta("const x = 1"), None);
-        assert_eq!(parse_meta("export const meta = { name: 'sin cierre'"), None);
+        assert_eq!(parse_meta("export const meta = { name: 'unclosed'"), None);
         assert_eq!(parse_meta("export const meta = loadMeta()"), None);
-        let m = parse_meta("export const meta = { name: nombreVariable }").unwrap();
+        let m = parse_meta("export const meta = { name: someVariable }").unwrap();
         assert_eq!(m.name, None);
     }
 
@@ -303,10 +303,10 @@ mod tests {
         let only_user = list_from(Some(&root.join("user")), None);
         assert_eq!(only_user.len(), 2);
         assert!(only_user.iter().all(|w| w.source == WorkflowSource::User));
-        assert!(list_from(Some(Path::new("/no/existe")), None).is_empty());
+        assert!(list_from(Some(Path::new("/no/such/dir")), None).is_empty());
     }
 
-    /// Contra `~/.claude/workflows` de esta máquina: `cargo test -- --ignored`.
+    /// Against this machine's `~/.claude/workflows`: `cargo test -- --ignored`.
     #[test]
     #[ignore]
     fn real_user_catalog() {

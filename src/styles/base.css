@@ -1,5 +1,5 @@
-/* Reset, elementos base y primitivas compartidas (botones, inputs, badges, menús,
- * diálogos, segmentados, switches). */
+/* Reset, base elements and shared primitives (buttons, inputs, badges, menus,
+ * dialogs, segmented controls, switches). */
 
 *, *::before, *::after { box-sizing: border-box; }
 
@@ -17,7 +17,7 @@ button { cursor: default; }
 h1, h2, h3, p { margin: 0; }
 a { color: var(--accent); text-decoration: none; }
 a:hover { color: var(--accent-hover); text-decoration: underline; }
-/* ExternalLink: <a> sin href (no navega el webview), igual se ve clickeable. */
+/* ExternalLink: <a> without href (doesn't navigate the webview), still looks clickable. */
 .ext-link { cursor: pointer; }
 input::placeholder, textarea::placeholder { color: var(--text-dim); }
 
@@ -44,7 +44,7 @@ input:focus-visible, textarea:focus-visible, select:focus-visible { outline-offs
 .faint { color: var(--text-dim); }
 .spacer { flex: 1; }
 
-/* ---- Botones ---- */
+/* ---- Buttons ---- */
 .btn {
   height: var(--h-xl);
   padding: 0 var(--sp-5);
@@ -89,7 +89,7 @@ input:focus-visible, textarea:focus-visible, select:focus-visible { outline-offs
 }
 .icon-btn:hover { background: var(--fill-5); color: var(--text); }
 
-/* ---- Campos ---- */
+/* ---- Fields ---- */
 .input {
   height: var(--h-2xl);
   padding: 0 var(--sp-4);
@@ -128,7 +128,7 @@ input:focus-visible, textarea:focus-visible, select:focus-visible { outline-offs
 .field-hint { font-size: var(--fs-sm); color: var(--text-dim); line-height: var(--lh-snug); }
 .field-error { font-size: var(--fs-md); color: var(--red); line-height: var(--lh-snug); white-space: pre-line; }
 
-/* Muestras de color (proyectos). Objetivo mínimo 24×24 (WCAG 2.5.8). */
+/* Color swatches (projects). Minimum target 24×24 (WCAG 2.5.8). */
 .swatches { display: flex; gap: var(--sp-3); flex-wrap: wrap; }
 .swatch {
   width: 24px;
@@ -140,7 +140,7 @@ input:focus-visible, textarea:focus-visible, select:focus-visible { outline-offs
 }
 .swatch[aria-checked="true"] { border-color: var(--text); }
 
-/* Segmentado con opciones (opciones del repo, editor, etc.). */
+/* Segmented control with options (repo options, editor, etc.). */
 .seg {
   display: inline-flex;
   flex-wrap: wrap;
@@ -193,14 +193,14 @@ input:focus-visible, textarea:focus-visible, select:focus-visible { outline-offs
 .switch[aria-checked="true"] { background: var(--accent); }
 .switch[aria-checked="true"]::after { left: 14px; }
 
-/* Stepper numérico (− n +). */
+/* Numeric stepper (− n +). */
 .stepper { display: inline-flex; align-items: center; border: 1px solid var(--border-3); border-radius: var(--r-lg); overflow: hidden; }
 .stepper button { width: 28px; height: var(--h-lg); border: 0; background: var(--fill-2); }
 .stepper button:hover:not(:disabled) { background: var(--fill-5); }
 .stepper button:disabled { opacity: 0.4; }
 .stepper-value { width: 34px; text-align: center; font-variant-numeric: tabular-nums; }
 
-/* ---- Puntos y badges de estado ---- */
+/* ---- Status dots and badges ---- */
 .dot {
   width: 7px;
   height: 7px;
@@ -232,7 +232,7 @@ input:focus-visible, textarea:focus-visible, select:focus-visible { outline-offs
 .badge-sm { height: 18px; font-size: var(--fs-2xs); border-radius: 9px; }
 button.badge:hover { filter: brightness(1.2); }
 
-/* Tonos: definen --tone; lo usan badges, puntos y barras. */
+/* Tones: they define --tone; used by badges, dots and bars. */
 .tone-accent { --tone: var(--run-running); }
 .tone-ok { --tone: var(--run-done); }
 .tone-warn { --tone: var(--run-warn); }
@@ -240,7 +240,7 @@ button.badge:hover { filter: brightness(1.2); }
 .tone-muted { --tone: var(--run-queued); }
 .tone-info { --tone: var(--info); }
 
-/* ---- Menú desplegable ---- */
+/* ---- Dropdown menu ---- */
 .menu {
   position: absolute;
   z-index: 30;
@@ -272,7 +272,7 @@ button.badge:hover { filter: brightness(1.2); }
 .menu-mark { width: 12px; color: var(--accent); flex: none; }
 .menu-label { padding: 5px var(--sp-3) var(--sp-1); font-size: var(--fs-2xs); color: var(--text-dim); }
 
-/* ---- Tarjetas de sección ---- */
+/* ---- Section cards ---- */
 .panel {
   border-radius: var(--r-panel);
   background: var(--surface-card);
@@ -280,7 +280,7 @@ button.badge:hover { filter: brightness(1.2); }
 }
 .section-label { font-size: var(--fs-xs); font-weight: var(--fw-medium); color: var(--text-dim); }
 
-/* ---- Estados centrados (vacío / error) ---- */
+/* ---- Centered states (empty / error) ---- */
 .center-state { flex: 1; min-height: 0; display: grid; place-items: center; padding: 40px; }
 .center-state-body {
   display: flex;
@@ -354,7 +354,7 @@ button.badge:hover { filter: brightness(1.2); }
 .toast .icon-btn { width: 24px; height: 24px; font-size: var(--fs-xs); color: var(--text-dim); }
 
 /* ---- Overlays ---- */
-/* Drawers: cubren el área de contenido debajo de la barra superior. */
+/* Drawers: cover the content area below the top bar. */
 .scrim { position: absolute; inset: var(--h-bar) 0 0 0; z-index: 20; background: var(--scrim); }
 .sheet {
   position: absolute;
@@ -369,7 +369,7 @@ button.badge:hover { filter: brightness(1.2); }
   animation: slidein var(--dur-base) ease-out;
 }
 
-/* Diálogos modales centrados arriba (New task, Import, New project). */
+/* Modal dialogs centered near the top (New task, Import, New project). */
 .dialog-scrim { position: fixed; inset: 0; z-index: 55; background: var(--scrim-strong); }
 .dialog {
   position: fixed;
@@ -414,7 +414,7 @@ button.badge:hover { filter: brightness(1.2); }
   border-top: 1px solid var(--border);
 }
 
-/* Tabla simple con grid (runs, agentes, repos). */
+/* Simple grid table (runs, agents, repos). */
 .table-head {
   display: grid;
   gap: var(--sp-4);
@@ -425,7 +425,7 @@ button.badge:hover { filter: brightness(1.2); }
 }
 .text-right { text-align: right; }
 
-/* Segmentado (tabs compactas). */
+/* Segmented (compact tabs). */
 .segmented {
   display: flex;
   padding: var(--sp-0);

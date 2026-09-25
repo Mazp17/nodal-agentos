@@ -1,4 +1,4 @@
-//! Importación de ítems del proveedor como tareas de Nodal.
+//! Importing provider items as Nodal tasks.
 
 use std::path::Path;
 
@@ -13,7 +13,7 @@ use super::state_map::{propose_pull, pull_status};
 use super::{iso_from_ms, store, ExternalItem, ImportQuery, OPEN_KINDS};
 use crate::util::new_id;
 
-/// Espejo de `ImportableItem` en `api.ts`.
+/// Mirror of `ImportableItem` in `api.ts`.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ImportableItem {
@@ -23,9 +23,9 @@ pub struct ImportableItem {
     pub url: String,
     pub state: ExternalState,
     pub labels: Vec<String>,
-    /// Por `repo_rules` o `default_repo_id`.
+    /// From `repo_rules` or `default_repo_id`.
     pub suggested_repo_id: Option<String>,
-    /// Si ya está importada, su tarea.
+    /// If already imported, its task.
     pub task_id: Option<String>,
 }
 
@@ -43,7 +43,7 @@ pub struct Skipped {
     pub reason: String,
 }
 
-/// Espejo de `ImportResult` en `api.ts`.
+/// Mirror of `ImportResult` in `api.ts`.
 #[derive(Debug, Clone, PartialEq, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ImportResult {
@@ -51,14 +51,14 @@ pub struct ImportResult {
     pub skipped: Vec<Skipped>,
 }
 
-/// Regla de proyecto del link para ese proyecto del proveedor.
+/// The link's project rule for that provider project.
 pub fn project_rule<'a>(link: &'a SourceLink, project_id: Option<&str>) -> Option<&'a RepoRule> {
     let project_id = project_id?;
     link.repo_rules.iter().find(|r| r.is_project() && r.value == project_id)
 }
 
-/// Repo sugerido. Precedencia: la regla del proyecto del ítem > la primera regla cuyo label
-/// tenga el ítem (sin distinguir mayúsculas) > el repo por defecto del link.
+/// Suggested repo. Precedence: the item's project rule > the first rule whose label the item
+/// has (case-insensitive) > the link's default repo.
 pub fn suggest_repo(link: &SourceLink, project_id: Option<&str>, labels: &[String]) -> Option<String> {
     project_rule(link, project_id)
         .or_else(|| {
@@ -70,20 +70,20 @@ pub fn suggest_repo(link: &SourceLink, project_id: Option<&str>, labels: &[Strin
         .or_else(|| link.default_repo_id.clone())
 }
 
-/// `suggest_repo` de un ítem.
+/// `suggest_repo` for an item.
 pub fn suggest_repo_for(link: &SourceLink, item: &ExternalItem) -> Option<String> {
     suggest_repo(link, item.project().as_ref().map(|p| p.id.as_str()), &item.labels)
 }
 
-// ---------- Reglas de proyecto: backfill ----------
+// ---------- Project rules: backfill ----------
 
-/// El backfill trae, además de las abiertas, las cerradas hace menos de esto.
+/// Besides the open ones, the backfill brings those closed less than this ago.
 pub const BACKFILL_CLOSED_DAYS: u32 = 14;
-/// Tope de páginas del backfill (25 por página).
+/// Backfill page cap (25 per page).
 pub const BACKFILL_MAX_PAGES: usize = 40;
 
-/// Consulta de una regla de proyecto: el backfill (abiertas + cerradas hace menos de
-/// `BACKFILL_CLOSED_DAYS`) o el auto-import (abiertas creadas después de la regla).
+/// Query for a project rule: the backfill (open + closed less than `BACKFILL_CLOSED_DAYS`
+/// ago) or auto-import (open ones created after the rule).
 pub fn rule_query(link: &SourceLink, rule: &RepoRule, backfill: bool) -> ImportQuery {
     ImportQuery {
         project_id: Some(rule.value.clone()),
@@ -93,9 +93,9 @@ pub fn rule_query(link: &SourceLink, rule: &RepoRule, backfill: bool) -> ImportQ
     }
 }
 
-/// Control local del filtro del backfill (el proveedor ya filtra; esto cubre una respuesta
-/// más amplia): abiertas, o completadas/canceladas hace menos de `BACKFILL_CLOSED_DAYS`. Una
-/// cerrada sin fecha de cierre se deja pasar (el proveedor la eligió por su fecha).
+/// Local check of the backfill filter (the provider already filters; this covers a broader
+/// response): open, or completed/canceled less than `BACKFILL_CLOSED_DAYS` ago. A closed one
+/// with no close date is let through (the provider picked it by its date).
 pub fn backfill_keeps(item: &ExternalItem, now: i64) -> bool {
     if OPEN_KINDS.contains(&item.state.kind) {
         return true;
@@ -107,28 +107,28 @@ pub fn backfill_keeps(item: &ExternalItem, now: i64) -> bool {
     item.closed_at.as_deref().is_none_or(|c| c > since.as_str())
 }
 
-/// Espejo de `RulePreview` en `api.ts`.
+/// Mirror of `RulePreview` in `api.ts`.
 #[derive(Debug, Clone, PartialEq, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RulePreview {
-    /// Ítems que se importarían al repo de la regla.
+    /// Items that would be imported into the rule's repo.
     pub count: usize,
-    /// Ya importados en el repo de la regla.
+    /// Already imported into the rule's repo.
     pub already_imported: usize,
-    /// Ya importados en otro repo (u otro proyecto): no se mueven.
+    /// Already imported into another repo (or another project): not moved.
     pub in_other_repos: usize,
 }
 
-/// Cómo se reparte el backfill de una regla.
+/// How a rule's backfill is split.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct BackfillPlan {
-    /// External ids a importar.
+    /// External ids to import.
     pub to_import: Vec<String>,
-    /// Tareas (ids) ya importadas en el repo de la regla.
+    /// Tasks (ids) already imported into the rule's repo.
     pub here: Vec<String>,
-    /// Ya importadas en otro repo: (external id, motivo).
+    /// Already imported into another repo: (external id, reason).
     pub elsewhere: Vec<Skipped>,
-    /// Desvinculadas a mano (lápida): no se traen.
+    /// Unlinked by hand (tombstone): not brought in.
     pub unlinked: usize,
 }
 
@@ -177,7 +177,7 @@ pub fn plan_backfill(
     Ok(plan)
 }
 
-/// Filas del listado: sugiere repo y marca las ya importadas.
+/// Listing rows: suggests a repo and marks the ones already imported.
 pub fn importable_rows(conn: &Connection, link: &SourceLink, items: Vec<ExternalItem>) -> Result<Vec<ImportableItem>, DbError> {
     items
         .into_iter()
@@ -197,8 +197,8 @@ pub fn importable_rows(conn: &Connection, link: &SourceLink, items: Vec<External
         .collect()
 }
 
-/// Importa `items` (ítems completos, con su repo ya elegido) en el proyecto del link. Cada
-/// ítem va en su propia transacción: uno que falla se reporta y no frena al resto.
+/// Imports `items` (full items, with their repo already chosen) into the link's project. Each
+/// item goes in its own transaction: one that fails is reported and doesn't stop the rest.
 pub fn import_items(
     conn: &mut Connection,
     data_dir: &Path,
@@ -229,10 +229,10 @@ fn import_one(
         let where_ = if t.project_id == link.project_id { "" } else { " in another project" };
         return Err(DbError::Invalid(format!("{} is already imported{where_}.", item.identifier)));
     }
-    // Un estado sin mapear no tiene estado Nodal: la tarea nueva arranca con la propuesta.
+    // An unmapped state has no Nodal status: the new task starts with the proposal.
     let status = pull_status(&link.state_map, &item.state).unwrap_or_else(|| propose_pull(&item.state));
     let acceptance = item.description_md.as_deref().map(extract_acceptance).unwrap_or_default();
-    // Llegó por regla de proyecto si su proyecto tiene regla y el repo elegido es el de ella.
+    // It arrived through a project rule if its project has a rule and the chosen repo is the rule's.
     let rule_id = project_rule(link, item.project().as_ref().map(|p| p.id.as_str()))
         .filter(|r| r.repo_id == repo_id)
         .map(|r| r.id.clone());
@@ -252,7 +252,7 @@ fn import_one(
             now,
         },
     )?;
-    // El archivo va antes del commit: si no se puede escribir, la tarea no queda a medias.
+    // The file goes before the commit: if it can't be written, the task isn't left half-done.
     let path = plan_path(data_dir, &task.id);
     write_plan(&path, &render_plan(item))
         .map_err(|e| DbError::Invalid(format!("Could not write the plan for {}: {e}", item.identifier)))?;
@@ -362,7 +362,7 @@ pub mod tests {
         assert_eq!(suggest_repo(&link, None, &["frontend".into()]).as_deref(), Some("r-web"));
     }
 
-    /// Un ítem del proyecto `proj` (id `proj-{proj}`) del proveedor.
+    /// An item of the provider's project `proj` (id `proj-{proj}`).
     pub fn in_project(mut it: ExternalItem, proj: &str) -> ExternalItem {
         it.scopes.retain(|s| s.kind != "project");
         it.scopes.push(ScopeRef { kind: "project".into(), id: format!("proj-{proj}"), name: proj.into() });
@@ -378,13 +378,13 @@ pub mod tests {
         link.repo_rules.push(RepoRule::project("proj-site", "Site", "r-web", 1));
         link.repo_rules.push(RepoRule::project("proj-guides", "Guides", "r-docs", 1));
         let labels = vec!["docs".to_string()];
-        // Proyecto con regla gana al label.
+        // A project with a rule beats the label.
         assert_eq!(suggest_repo(&link, Some("proj-site"), &labels).as_deref(), Some("r-web"));
         assert_eq!(suggest_repo(&link, Some("proj-guides"), &[]).as_deref(), Some("r-docs"));
-        // Proyecto sin regla: label, y si no, default.
+        // Project without a rule: label, otherwise default.
         assert_eq!(suggest_repo(&link, Some("proj-other"), &labels).as_deref(), Some("r-docs"));
         assert_eq!(suggest_repo(&link, Some("proj-other"), &[]).as_deref(), Some("r-web"));
-        // Una regla de label cuyo valor coincide con un id de proyecto no es de proyecto.
+        // A label rule whose value matches a project id is not a project rule.
         link.repo_rules.push(RepoRule::label("proj-x", "r-docs"));
         assert_eq!(suggest_repo(&link, Some("proj-x"), &[]).as_deref(), Some("r-web"));
         assert_eq!(suggest_repo_for(&link, &in_project(item(1, None), "site")).as_deref(), Some("r-web"));
@@ -402,19 +402,19 @@ pub mod tests {
         .unwrap();
         let a = store::get_link(&conn, &link.id).unwrap();
         let b = store::get_link(&conn, &link.id).unwrap();
-        assert_eq!(a.repo_rules, b.repo_rules, "ids estables entre lecturas");
+        assert_eq!(a.repo_rules, b.repo_rules, "stable ids across reads");
         let r = &a.repo_rules[1];
         assert_eq!((r.kind, r.value.as_str(), r.name.as_str(), r.repo_id.as_str()), (RuleKind::Label, "api", "api", "r-web"));
         assert_eq!((r.id.as_str(), r.created_at), ("rule-1", link.created_at));
         assert_eq!(suggest_repo(&a, None, &["DOCS".into()]).as_deref(), Some("r-docs"));
-        // Guardado y releído: formato nuevo, mismos datos.
+        // Saved and read back: new format, same data.
         store::save_link(&conn, &a).unwrap();
         let json: String =
             conn.query_row("SELECT repo_rules_json FROM source_links WHERE id = ?1", [&link.id], |r| r.get(0)).unwrap();
         assert!(json.contains(r#""kind":"label""#) && json.contains(r#""value":"api""#), "{json}");
         assert_eq!(store::get_link(&conn, &link.id).unwrap().repo_rules, a.repo_rules);
 
-        // Un tipo desconocido (versión futura) no rompe la lectura ni rutea.
+        // An unknown kind (future version) doesn't break reading or routing.
         conn.execute(
             r#"UPDATE source_links SET repo_rules_json = '[{"kind":"milestone","value":"m1","repoId":"r-docs"}]' WHERE id = ?1"#,
             [&link.id],
@@ -441,7 +441,7 @@ pub mod tests {
         assert!(backfill_keeps(&closed(ExtKind::Canceled, Some(13)), now));
         assert!(!backfill_keeps(&closed(ExtKind::Completed, Some(15)), now));
         assert!(!backfill_keeps(&closed(ExtKind::Canceled, Some(40)), now));
-        assert!(backfill_keeps(&closed(ExtKind::Completed, None), now), "sin fecha: confía en el proveedor");
+        assert!(backfill_keeps(&closed(ExtKind::Completed, None), now), "no date: trust the provider");
         assert!(!backfill_keeps(&closed(ExtKind::Unknown, None), now));
     }
 
@@ -454,7 +454,7 @@ pub mod tests {
         link.repo_rules.push(rule.clone());
         let dir = tmp_dir();
         let items: Vec<_> = (1..=5).map(|n| in_project(item(n, None), "guides")).collect();
-        // 1 ya en el repo de la regla, 2 en otro repo, 3 desvinculada, 4 y 5 nuevas.
+        // 1 already in the rule's repo, 2 in another repo, 3 unlinked, 4 and 5 new.
         let r = import_items(
             &mut conn,
             &dir,
@@ -473,12 +473,12 @@ pub mod tests {
         assert_eq!(plan.elsewhere.len(), 1);
         assert!(plan.elsewhere[0].reason.contains("ENG-2 is already imported in r-web"), "{:?}", plan.elsewhere);
         assert_eq!(plan.preview(), RulePreview { count: 2, already_imported: 1, in_other_repos: 1 });
-        // Importada al repo de su regla: queda asociada a la regla y con el proyecto.
+        // Imported into its rule's repo: stays tied to the rule and has the project.
         let t = &r.imported[0];
         let src = t.source.as_ref().unwrap();
         assert_eq!(src.rule_id.as_deref(), Some("rule-proj-guides"));
         assert_eq!(src.project.as_ref().map(|p| p.id.as_str()), Some("proj-guides"));
-        assert_eq!(r.imported[1].source.as_ref().unwrap().rule_id, None, "otro repo: no llegó por la regla");
+        assert_eq!(r.imported[1].source.as_ref().unwrap().rule_id, None, "another repo: didn't arrive through the rule");
         std::fs::remove_dir_all(dir).ok();
     }
 
@@ -502,7 +502,7 @@ pub mod tests {
         let mut conn = db.lock().unwrap();
         let link = seed(&conn);
         let dir = tmp_dir();
-        let mut it = item(142, Some("Texto.\n\n## Acceptance\n- Logo nuevo\n- Tests verdes\n"));
+        let mut it = item(142, Some("Text.\n\n## Acceptance\n- New logo\n- Green tests\n"));
         it.labels = vec!["frontend".into()];
         it.priority = Priority::High;
         it.state = team_states().into_iter().find(|s| s.id == "s-review").unwrap();
@@ -514,7 +514,7 @@ pub mod tests {
         assert_eq!(t.status, TaskStatus::InReview);
         assert_eq!(t.priority, Priority::High);
         assert_eq!(t.labels, vec!["frontend"]);
-        assert_eq!(t.acceptance, vec!["Logo nuevo", "Tests verdes"]);
+        assert_eq!(t.acceptance, vec!["New logo", "Green tests"]);
         let src = t.source.as_ref().unwrap();
         assert_eq!(src.identifier, "ENG-142");
         assert_eq!(src.link_id.as_deref(), Some("l1"));
@@ -523,7 +523,7 @@ pub mod tests {
         assert!(plan.starts_with("# ENG-142 · Issue 142\n"));
         assert_eq!(crate::db::rows::get_task(&conn, &t.id).unwrap().as_ref(), Some(t));
 
-        // Segunda vez: ya importada. Repo de otro proyecto: rechazado.
+        // Second time: already imported. Repo from another project: rejected.
         let mut other = item(7, None);
         other.external_id = "uuid-7".into();
         let r = import_items(&mut conn, &dir, &link, vec![(it, "r-web".into()), (other, "r-ops".into())], 11).unwrap();

@@ -2,7 +2,7 @@ import type { Priority, TaskStatus } from "../../domain/types";
 import { PRIORITY_LABEL, STATUS_META } from "./status";
 import "./tasks.css";
 
-/** Anillo de estado (punteado si está en curso). */
+/** Status ring (dashed while in progress). */
 export function StatusRing({ status, size = 12 }: { status: TaskStatus; size?: number }) {
   const m = STATUS_META[status];
   return (
@@ -14,7 +14,7 @@ export function StatusRing({ status, size = 12 }: { status: TaskStatus; size?: n
   );
 }
 
-/** Tres barras de prioridad, como en Linear. Urgente en rojo. */
+/** Three priority bars, like Linear. Urgent in red. */
 export function PriorityBars({ priority }: { priority: Priority }) {
   const on = { urgent: 3, high: 3, medium: 2, low: 1, none: 0 }[priority];
   return (

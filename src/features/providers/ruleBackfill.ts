@@ -1,5 +1,5 @@
-// Reglas de proyecto (proyecto del proveedor → repo): guardar y backfill.
-// Lo usan Project settings → Repos (selector por repo) y → Sources (reglas del link).
+// Project rules (provider project → repo): save and backfill.
+// Used by Project settings → Repos (per-repo picker) and → Sources (link rules).
 
 import { useCallback, useState } from "react";
 import { importRule, listSourceLinks, previewRuleImport, updateSourceLink, type ImportResult } from "../../domain/api";
@@ -9,12 +9,12 @@ import { useConfirm } from "../../ui/ConfirmDialog";
 import { useToast } from "../../ui/Toasts";
 import { plural } from "./meta";
 
-/** Regla nueva: el backend le asigna `id` y `createdAt` al guardar. */
+/** New rule: the backend assigns `id` and `createdAt` on save. */
 export function newProjectRule(project: ScopeRef, repoId: string): RepoRule {
   return { id: "", kind: "project", value: project.id, name: project.name, repoId, createdAt: 0 };
 }
 
-/** Regla de proyecto recién creada/cambiada que hay que ofrecer importar. */
+/** Newly created/changed project rule to offer importing for. */
 export interface BackfillTarget {
   projectId: string;
   projectName: string;
@@ -22,7 +22,7 @@ export interface BackfillTarget {
   repoName: string;
 }
 
-/** Cambio de reglas de un link: `update` recibe la lista recién leída del backend, no la renderizada. */
+/** Rule change on a link: `update` gets the list freshly read from the backend, not the rendered one. */
 export interface RuleEdit {
   link: SourceLink;
   update: (rules: RepoRule[]) => RepoRule[];
@@ -30,26 +30,26 @@ export interface RuleEdit {
 
 export interface RuleSaver {
   busy: boolean;
-  /** Qué está haciendo ahora ("Checking Linear…", "Importing 12 issues…"); null si nada. */
+  /** What it's doing now ("Checking Linear…", "Importing 12 issues…"); null if nothing. */
   phase: string | null;
-  /** Resultado del último backfill/sync ("Imported 3 issues"), para mostrarlo junto al control. */
+  /** Result of the last backfill/sync ("Imported 3 issues"), shown next to the control. */
   last: { ruleId: string; text: string; tone: "ok" | "warn" | "danger"; at: number } | null;
-  /** Hay un `resync` en curso. */
+  /** A `resync` is in progress. */
   syncing: boolean;
   /**
-   * Aplica `edits` en orden. Si uno falla, deshace los anteriores (re-guarda su lista previa).
-   * Con `backfill`, después ofrece importar lo que ya existe en ese proyecto
-   * (preview → confirmación → `importRule` → toast). Devuelve false si no se guardó (ya avisó).
+   * Applies `edits` in order. If one fails, undoes the previous ones (re-saves their prior list).
+   * With `backfill`, then offers to import what already exists in that project
+   * (preview → confirmation → `importRule` → toast). Returns false if not saved (already reported).
    */
   save: (edits: RuleEdit | RuleEdit[], backfill?: BackfillTarget) => Promise<boolean>;
-  /** Re-importa lo que ya existe en el proyecto de una regla guardada, sin confirmación. */
+  /** Re-imports what already exists in a saved rule's project, without confirmation. */
   resync: (link: SourceLink, rule: RepoRule, repoName: string) => Promise<void>;
 }
 
 /*
- * Todas las escrituras de reglas (y sus confirmaciones) pasan por una sola cola: dos cards o
- * dos clicks seguidos no se pisan, y cada una parte de la lista guardada, no de la que quedó
- * renderizada antes de que `invalidateProviders("links")` recargue.
+ * All rule writes (and their confirmations) go through a single queue: two cards or
+ * two quick clicks don't clobber each other, and each starts from the saved list, not the one left
+ * rendered before `invalidateProviders("links")` reloads.
  */
 let queue: Promise<unknown> = Promise.resolve();
 
@@ -78,7 +78,7 @@ export function useRuleBackfill(): RuleSaver {
     [],
   );
 
-  /** `importRule` con fase visible, toast y resultado inline. */
+  /** `importRule` with a visible phase, toast and inline result. */
   const runImport = useCallback(
     async (linkId: string, ruleId: string, repoName: string, count?: number) => {
       setPhase(count ? `Importing ${plural(count, "issue")}…` : "Importing issues…");
@@ -139,7 +139,7 @@ export function useRuleBackfill(): RuleSaver {
       setPending((n) => n + 1);
       return enqueue(async () => {
         setPhase("Saving…");
-        /** Lista previa de cada edit ya guardado, para deshacer. */
+        /** Prior list of each already-saved edit, for undoing. */
         const done: { link: SourceLink; before: RepoRule[] }[] = [];
         const saved: SourceLink[] = [];
         try {
@@ -187,7 +187,7 @@ export function useRuleBackfill(): RuleSaver {
   return { busy: pending > 0, syncing: syncing > 0, phase, last, save, resync };
 }
 
-/** Re-guarda las listas previas (en orden inverso). Devuelve qué no se pudo restaurar, si algo. */
+/** Re-saves the prior lists (in reverse order). Returns what couldn't be restored, if anything. */
 async function undo(done: { link: SourceLink; before: RepoRule[] }[]): Promise<string | null> {
   const lost: string[] = [];
   for (const d of [...done].reverse()) {
@@ -208,7 +208,7 @@ async function undo(done: { link: SourceLink; before: RepoRule[] }[]): Promise<s
 function importToast(r: ImportResult, repoName: string): [string, string | undefined, "ok" | "warn"] {
   const title = r.imported.length ? `Imported ${plural(r.imported.length, "issue")} into ${repoName}` : "No issues imported";
   if (!r.skipped.length) return [title, undefined, "ok"];
-  // Agrupa por motivo: "Already imported in another repo (×3)".
+  // Groups by reason: "Already imported in another repo (×3)".
   const byReason = new Map<string, number>();
   for (const s of r.skipped) byReason.set(s.reason, (byReason.get(s.reason) ?? 0) + 1);
   const lines = [...byReason].map(([reason, n]) => (n > 1 ? `${reason} (×${n})` : reason));

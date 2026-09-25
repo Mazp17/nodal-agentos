@@ -2,9 +2,9 @@ import { useCallback, useEffect, useState } from "react";
 import { linearApi, toLinearError, type IssueDetail, type LinearError } from "./api";
 
 /**
- * Caché del detalle por issue mientras el panel está abierto (App la vacía al cerrarlo).
- * Guarda también la petición en vuelo para no duplicarla si se navega ida y vuelta
- * entre sub-issues antes de que responda.
+ * Per-issue detail cache while the panel is open (App clears it on close).
+ * Also stores the in-flight request so it isn't duplicated when navigating back and forth
+ * between sub-issues before it responds.
  */
 export class IssueDetailCache {
   private done = new Map<string, IssueDetail>();
@@ -28,7 +28,7 @@ export class IssueDetailCache {
           return d;
         },
         (err) => {
-          // Los errores no se cachean: "Retry" vuelve a pedir.
+          // Errors aren't cached: "Retry" fetches again.
           if (this.inflight.get(id) === p) this.inflight.delete(id);
           throw err;
         },
@@ -72,6 +72,6 @@ export function useIssueDetail(issueId: string, cache: IssueDetailCache): [Detai
   }, [issueId, cache, attempt]);
 
   const retry = useCallback(() => setAttempt((n) => n + 1), []);
-  // Mientras el efecto no corrió para un id nuevo, no mostrar datos del anterior.
+  // Until the effect has run for a new id, don't show the previous one's data.
   return [state.id === issueId ? state.s : { status: "loading" }, retry];
 }

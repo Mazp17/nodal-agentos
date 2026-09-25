@@ -1,14 +1,15 @@
-//! Mapeo de estados entre el proveedor y Nodal. Todo puro.
+//! State mapping between the provider and Nodal. All pure.
 //!
-//! - Pull (externo → Nodal): triage/backlog → Backlog, unstarted → Todo, started → In Review
-//!   o Blocked si el nombre dice "review"/"block" (si no, In Progress), completed → Done,
-//!   canceled → Canceled. Los `unknown` (proveedores sin tipos) van por nombre.
-//! - Push (Nodal → externo): solo Todo, In Progress, In Review y Blocked. Van al estado del
-//!   mismo nombre o, si no hay, al más parecido del mismo tipo (`started`; `unstarted` para
-//!   Todo, que la cola empuja al cancelar un run en cola) cuyo nombre lo justifique; sin
-//!   equivalente queda en "No sincronizar" (`None`: solo comentario). Un mapeo confirmado
-//!   sin fila para un estado (p. ej. Todo en uno guardado antes) no empuja nada.
-//! - Cada fila del reporte marca su origen: sugerido, confirmado o sin mapear.
+//! - Pull (external → Nodal): triage/backlog → Backlog, unstarted → Todo, started → In Review
+//!   or Blocked if the name says "review"/"block" (otherwise In Progress), completed → Done,
+//!   canceled → Canceled. `unknown` ones (providers without types) go by name.
+//! - Push (Nodal → external): only Todo, In Progress, In Review and Blocked. They go to the
+//!   state with the same name or, if there is none, to the closest one of the same type
+//!   (`started`; `unstarted` for Todo, which the queue pushes when a queued run is canceled)
+//!   whose name justifies it; with no equivalent they stay on "Don't sync" (`None`: comment
+//!   only). A confirmed mapping with no row for a status (e.g. Todo in one saved earlier)
+//!   pushes nothing.
+//! - Each report row marks its origin: suggested, confirmed or unmapped.
 
 use std::collections::BTreeMap;
 
@@ -16,11 +17,11 @@ use serde::Serialize;
 
 use crate::domain::{ExtKind, ExternalState, StateMap, TaskStatus};
 
-/// Estados Nodal que se empujan al proveedor.
+/// Nodal statuses that are pushed to the provider.
 pub const PUSHED: [TaskStatus; 4] =
     [TaskStatus::Todo, TaskStatus::InProgress, TaskStatus::InReview, TaskStatus::Blocked];
 
-/// Minúsculas, sin acentos ni signos: "In-Review " → "inreview".
+/// Lowercase, without accents or punctuation: "In-Review " → "inreview".
 fn norm(s: &str) -> String {
     s.chars()
         .flat_map(char::to_lowercase)
@@ -44,7 +45,7 @@ fn says_block(n: &str) -> bool {
     n.contains("block") || n.contains("bloque")
 }
 
-/// Propuesta pull para un estado externo.
+/// Pull proposal for an external state.
 pub fn propose_pull(state: &ExternalState) -> TaskStatus {
     let n = norm(&state.name);
     match state.kind {
@@ -87,15 +88,15 @@ fn status_name(s: TaskStatus) -> &'static str {
     }
 }
 
-/// Propuesta push para un estado Nodal. `None` = "No sincronizar".
+/// Push proposal for a Nodal status. `None` = "Don't sync".
 pub fn propose_push(status: TaskStatus, states: &[ExternalState]) -> Option<String> {
     let want = norm(status_name(status));
-    // 1. Mismo nombre (ignorando mayúsculas, espacios y el prefijo "ENG · " de multi-team).
+    // 1. Same name (ignoring case, spaces and the multi-team "ENG · " prefix).
     if let Some(s) = states.iter().find(|s| norm(s.name.rsplit('·').next().unwrap_or(&s.name)) == want) {
         return Some(s.id.clone());
     }
-    // 2. El más parecido de su tipo: `started` para In Progress, In Review y Blocked (o
-    //    `unknown` en proveedores sin tipos); Todo, el primero que el pull mapea a Todo
+    // 2. The closest one of its type: `started` for In Progress, In Review and Blocked (or
+    //    `unknown` in providers without types); for Todo, the first one pull maps to Todo
     //    (`unstarted`).
     let candidates = states.iter().filter(|s| matches!(s.kind, ExtKind::Started | ExtKind::Unknown));
     let found = match status {
@@ -115,7 +116,7 @@ pub fn propose_push(status: TaskStatus, states: &[ExternalState]) -> Option<Stri
     found.map(|s| s.id.clone())
 }
 
-/// Mapeo propuesto desde cero (pendiente de confirmar).
+/// Mapping proposed from scratch (pending confirmation).
 pub fn propose(states: &[ExternalState]) -> StateMap {
     StateMap {
         pull: states.iter().map(|s| (s.id.clone(), propose_pull(s))).collect(),
@@ -125,7 +126,7 @@ pub fn propose(states: &[ExternalState]) -> StateMap {
     }
 }
 
-/// Estados nuevos y desaparecidos respecto de `known`, por id.
+/// States added and removed relative to `known`, by id.
 pub fn diff_known(known: &[ExternalState], current: &[ExternalState]) -> (Vec<ExternalState>, Vec<ExternalState>) {
     let added = current.iter().filter(|c| !known.iter().any(|k| k.id == c.id)).cloned().collect();
     let removed = known.iter().filter(|k| !current.iter().any(|c| c.id == k.id)).cloned().collect();
@@ -140,12 +141,12 @@ pub enum MapOrigin {
     Unmapped,
 }
 
-/// Respuesta de `source_states` (espejo de `SourceStatesReport` en `api.ts`).
+/// Response of `source_states` (mirror of `SourceStatesReport` in `api.ts`).
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SourceStatesReport {
     pub states: Vec<ExternalState>,
-    /// Mapeo guardado completado con la propuesta para lo que falte.
+    /// Saved mapping, filled in with the proposal for whatever is missing.
     pub proposal: StateMap,
     pub pull_origin: BTreeMap<String, MapOrigin>,
     pub push_origin: BTreeMap<TaskStatus, MapOrigin>,
@@ -153,10 +154,10 @@ pub struct SourceStatesReport {
     pub removed: Vec<ExternalState>,
 }
 
-/// Completa el mapeo guardado con la propuesta y marca el origen de cada fila:
-/// - mapa sin confirmar: todo es "sugerido";
-/// - confirmado: lo guardado es "confirmado"; lo que falta (estado nuevo, o push hacia un
-///   estado que desapareció) es "sin mapear", con la propuesta como valor.
+/// Fills in the saved mapping with the proposal and marks the origin of each row:
+/// - unconfirmed map: everything is "suggested";
+/// - confirmed: what was saved is "confirmed"; what is missing (a new state, or a push to a
+///   state that disappeared) is "unmapped", with the proposal as its value.
 pub fn report(saved: &StateMap, current: Vec<ExternalState>) -> SourceStatesReport {
     let confirmed = saved.confirmed_at.is_some();
     let kept = if confirmed { MapOrigin::Confirmed } else { MapOrigin::Suggested };
@@ -205,20 +206,20 @@ pub fn report(saved: &StateMap, current: Vec<ExternalState>) -> SourceStatesRepo
     }
 }
 
-/// Estado Nodal para un estado externo según el mapeo guardado. `None` = sin mapear.
+/// Nodal status for an external state per the saved mapping. `None` = unmapped.
 pub fn pull_status(map: &StateMap, state: &ExternalState) -> Option<TaskStatus> {
     map.pull.get(&state.id).copied()
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SkipReason {
-    /// Mapeo sin confirmar.
+    /// Unconfirmed mapping.
     Pending,
-    /// "No sincronizar".
+    /// "Don't sync".
     NoSync,
-    /// El estado Nodal no está en el mapeo push.
+    /// The Nodal status is not in the push mapping.
     NotMapped,
-    /// El estado externo destino ya no existe en el proveedor.
+    /// The target external state no longer exists in the provider.
     TargetGone(String),
 }
 
@@ -228,8 +229,8 @@ pub enum PushTarget {
     Skip(SkipReason),
 }
 
-/// Destino del push de `status`. `current`: estados actuales del proveedor si se conocen
-/// (para no empujar a uno que desapareció).
+/// Push target for `status`. `current`: the provider's current states, if known (so as not
+/// to push to one that disappeared).
 pub fn push_target(map: &StateMap, status: TaskStatus, current: Option<&[ExternalState]>) -> PushTarget {
     if map.confirmed_at.is_none() {
         return PushTarget::Skip(SkipReason::Pending);
@@ -241,7 +242,7 @@ pub fn push_target(map: &StateMap, status: TaskStatus, current: Option<&[Externa
     }
 }
 
-/// Push a un id externo explícito (outbox con un id que no es un estado Nodal).
+/// Push to an explicit external id (outbox with an id that is not a Nodal status).
 pub fn literal_target(map: &StateMap, id: &str, current: Option<&[ExternalState]>) -> PushTarget {
     if map.confirmed_at.is_none() {
         return PushTarget::Skip(SkipReason::Pending);
@@ -252,7 +253,7 @@ pub fn literal_target(map: &StateMap, id: &str, current: Option<&[ExternalState]
     }
 }
 
-/// Valida un mapeo antes de guardarlo: los destinos push tienen que existir.
+/// Validates a mapping before saving it: push targets must exist.
 pub fn validate(map: &StateMap, current: &[ExternalState]) -> Result<(), String> {
     for (st, target) in &map.push {
         if let Some(id) = target {
@@ -275,7 +276,7 @@ pub mod tests {
         ExternalState { id: id.into(), name: name.into(), kind, color: Some("#999999".into()) }
     }
 
-    /// Team ficticio con los estados típicos de un workspace de Linear.
+    /// Fictional team with the typical states of a Linear workspace.
     pub fn team_states() -> Vec<ExternalState> {
         vec![
             st("s-triage", "Triage", ExtKind::Triage),
@@ -315,8 +316,8 @@ pub mod tests {
 
     #[test]
     fn push_falls_back_to_similar_or_no_sync() {
-        // Sin "Blocked" ni "In Review": In Progress va al started más parecido, Blocked y
-        // In Review quedan en "No sincronizar".
+        // No "Blocked" or "In Review": In Progress goes to the closest started state, Blocked
+        // and In Review stay on "Don't sync".
         let states = vec![
             st("a", "Todo", ExtKind::Unstarted),
             st("b", "Doing", ExtKind::Started),
@@ -369,10 +370,10 @@ pub mod tests {
         let mut states = team_states();
         let mut saved = propose(&states);
         saved.confirmed_at = Some(1);
-        // El usuario decidió no sincronizar Blocked.
+        // The user chose not to sync Blocked.
         saved.push.insert(TaskStatus::Blocked, None);
 
-        // Aparece "QA", desaparece "In Review".
+        // "QA" appears, "In Review" disappears.
         states.retain(|s| s.id != "s-review");
         states.push(st("s-qa", "QA", ExtKind::Started));
         let r = report(&saved, states);
@@ -383,7 +384,7 @@ pub mod tests {
         assert_eq!(r.proposal.pull["s-qa"], TaskStatus::InReview);
         assert_eq!(r.pull_origin["s-todo"], MapOrigin::Confirmed);
         assert!(!r.proposal.pull.contains_key("s-review"));
-        // Push a In Review apuntaba a un estado que ya no está: sin mapear, con propuesta nueva.
+        // Push for In Review pointed to a state that is gone: unmapped, with a new proposal.
         assert_eq!(r.push_origin[&TaskStatus::InReview], MapOrigin::Unmapped);
         assert_eq!(r.proposal.push[&TaskStatus::InReview].as_deref(), Some("s-qa"));
         assert_eq!(r.push_origin[&TaskStatus::Blocked], MapOrigin::Confirmed);
@@ -406,7 +407,7 @@ pub mod tests {
             push_target(&m, TaskStatus::InReview, Some(&gone)),
             PushTarget::Skip(SkipReason::TargetGone("s-review".into()))
         );
-        // Sin estados actuales conocidos se empuja igual.
+        // Without known current states it pushes anyway.
         assert_eq!(push_target(&m, TaskStatus::InReview, None), PushTarget::Push("s-review".into()));
     }
 

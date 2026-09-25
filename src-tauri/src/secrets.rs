@@ -1,28 +1,28 @@
-//! API keys de los proveedores en el llavero de macOS (crate `keyring`), con caché en memoria.
-//! Servicio `io.github.mazp17.nodal`, cuenta `<provider>-api-key` (p. ej. `linear-api-key`).
-//! Las keys nunca se serializan hacia el frontend ni se loguean.
+//! Provider API keys in the macOS keychain (crate `keyring`), with an in-memory cache.
+//! Service `io.github.mazp17.nodal`, account `<provider>-api-key` (e.g. `linear-api-key`).
+//! Keys are never serialized to the frontend or logged.
 //!
-//! Hay una sola instancia (`Secrets::keychain()`, creada en `lib.rs`): se registra como
-//! estado de Tauri (`State<Secrets>`, la usan los proveedores) y `linear::LinearState` guarda
-//! un clon (misma caché) para los comandos `linear_*`.
+//! There is a single instance (`Secrets::keychain()`, created in `lib.rs`): it is registered as
+//! Tauri state (`State<Secrets>`, used by the providers) and `linear::LinearState` keeps a
+//! clone (same cache) for the `linear_*` commands.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
-// Las llamadas al llavero son bloqueantes (y pueden esperar un diálogo del sistema).
+// Keychain calls are blocking (and may wait on a system dialog).
 use crate::util::blocking;
 
 /// Debug builds use their own service so they don't read or overwrite the installed app's keys.
 pub const SERVICE: &str = if crate::util::paths::DEV { "io.github.mazp17.nodal.dev" } else { "io.github.mazp17.nodal" };
 
-/// Dónde se guardan de verdad las keys. En la app es el llavero; en tests, memoria.
+/// Where the keys are actually stored. In the app it's the keychain; in tests, memory.
 pub trait SecretBackend: Send + Sync + 'static {
     fn read(&self, account: &str) -> Result<Option<String>, String>;
     fn write(&self, account: &str, value: &str) -> Result<(), String>;
     fn delete(&self, account: &str) -> Result<(), String>;
 }
 
-/// Llavero del sistema.
+/// System keychain.
 pub struct Keychain;
 
 impl Keychain {
@@ -52,7 +52,7 @@ impl SecretBackend for Keychain {
     }
 }
 
-/// `linear` → `linear-api-key`. El nombre del proveedor tiene que ser `[a-z0-9_]+`.
+/// `linear` → `linear-api-key`. The provider name must be `[a-z0-9_]+`.
 pub fn account_for(provider: &str) -> Result<String, String> {
     let ok = !provider.is_empty()
         && provider.len() <= 40
@@ -63,16 +63,16 @@ pub fn account_for(provider: &str) -> Result<String, String> {
     Ok(format!("{provider}-api-key"))
 }
 
-/// Keys por proveedor. Cada proveedor se lee del backend solo la primera vez.
+/// Keys per provider. Each provider is read from the backend only the first time.
 #[derive(Clone)]
 pub struct Secrets {
     backend: Arc<dyn SecretBackend>,
-    /// Ausente = todavía no se leyó; `Some(None)` = se leyó y no hay key.
+    /// Absent = not read yet; `Some(None)` = read and there is no key.
     cache: Arc<Mutex<HashMap<String, Option<String>>>>,
 }
 
 impl Secrets {
-    /// Llavero del sistema. Los clones comparten backend y caché.
+    /// System keychain. Clones share the backend and cache.
     pub fn keychain() -> Self {
         Self::with_backend(Keychain)
     }
@@ -89,7 +89,7 @@ impl Secrets {
         self.cache.lock().unwrap_or_else(|e| e.into_inner()).insert(provider.to_string(), v);
     }
 
-    /// Key del proveedor (recortada; vacía cuenta como ausente).
+    /// The provider's key (trimmed; empty counts as absent).
     pub async fn get(&self, provider: &str) -> Result<Option<String>, String> {
         if let Some(v) = self.cached(provider) {
             return Ok(v);
@@ -98,12 +98,12 @@ impl Secrets {
         let backend = self.backend.clone();
         let loaded = blocking(move || backend.read(&account)).await?;
         let loaded = loaded.map(|k| k.trim().to_string()).filter(|k| !k.is_empty());
-        // Si un set/delete terminó mientras leíamos, su valor gana sobre esta lectura.
+        // If a set/delete finished while we were reading, its value wins over this read.
         let mut cache = self.cache.lock().unwrap_or_else(|e| e.into_inner());
         Ok(cache.entry(provider.to_string()).or_insert(loaded).clone())
     }
 
-    /// Guarda la key (recortada). Una key vacía equivale a borrarla.
+    /// Saves the key (trimmed). An empty key is the same as deleting it.
     pub async fn set(&self, provider: &str, key: &str) -> Result<(), String> {
         let key = key.trim().to_string();
         if key.is_empty() {
@@ -130,7 +130,7 @@ impl Secrets {
 pub mod testing {
     use super::*;
 
-    /// Backend en memoria que cuenta las lecturas (para probar la caché).
+    /// In-memory backend that counts reads (to test the cache).
     #[derive(Default, Clone)]
     pub struct MemoryBackend {
         pub data: Arc<Mutex<HashMap<String, String>>>,
@@ -176,7 +176,7 @@ mod tests {
 
             assert_eq!(s.get("linear").await.unwrap().as_deref(), Some("lin_abc"));
             assert_eq!(s.get("linear").await.unwrap().as_deref(), Some("lin_abc"));
-            assert_eq!(*mem.reads.lock().unwrap(), 1, "la segunda lectura sale de la caché");
+            assert_eq!(*mem.reads.lock().unwrap(), 1, "the second read comes from the cache");
 
             assert_eq!(s.get("asana").await.unwrap(), None);
             s.set("asana", " as_1 ").await.unwrap();

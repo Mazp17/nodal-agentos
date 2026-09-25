@@ -6,7 +6,7 @@ import { useFocusTrap } from "../../ui/useFocusTrap";
 import { runTaskRef } from "./status";
 import "./diff.css";
 
-/** Mientras el run sigue activo, el diff incluye el working tree: se refresca. */
+/** While the run is still active, the diff includes the working tree: it gets refreshed. */
 const LIVE_POLL_MS = 5000;
 
 const STATUS_BADGE: Record<DiffFileStatus, { letter: string; cls: string; label: string }> = {
@@ -25,7 +25,7 @@ function useRunDiff(runId: string, live: boolean): Load {
     let timer: ReturnType<typeof setTimeout>;
     let first = true;
     const load = async () => {
-      // Ventana oculta: se saltea la consulta y se reintenta en la próxima vuelta.
+      // Hidden window: skip the query and retry on the next tick.
       if (!first && document.hidden) {
         timer = setTimeout(load, LIVE_POLL_MS);
         return;
@@ -35,7 +35,7 @@ function useRunDiff(runId: string, live: boolean): Load {
         const diff = await runDiff(runId);
         if (!cancelled) setState({ id: runId, load: { status: "ok", diff } });
       } catch (e) {
-        // Un fallo en un refresco no borra lo que ya se mostraba.
+        // A failed refresh doesn't clear what was already shown.
         if (!cancelled) {
           setState((prev) => (prev?.id === runId && prev.load.status === "ok" ? prev : { id: runId, load: { status: "error", error: String(e) } }));
         }
@@ -61,11 +61,11 @@ export interface RunDiffDrawerProps {
   onClose: () => void;
 }
 
-/** Pantalla "Diff": cambios del run contra su base, archivo por archivo. */
+/** "Diff" screen: the run's changes against its base, file by file. */
 export function RunDiffDrawer({ runId, onClose }: RunDiffDrawerProps) {
   const ref = useFocusTrap<HTMLDivElement>(onClose);
   const toast = useToast();
-  // Sin `useRun`: el drawer no necesita el run completo (prompt) ni el detalle del workflow.
+  // No `useRun`: the drawer needs neither the full run (prompt) nor the workflow detail.
   const state = useRuns();
   const view = state.byId.get(runId);
   const live = view ? view.phase === "running" || view.phase === "waiting" || view.phase === "starting" : false;

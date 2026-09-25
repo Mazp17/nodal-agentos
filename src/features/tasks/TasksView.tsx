@@ -9,7 +9,7 @@ import { isClosed, STATUS_META } from "./status";
 import "./tasks.css";
 
 export interface TasksViewProps {
-  /** `null`: todos los proyectos. */
+  /** `null`: every project. */
   projectId: string | null;
   onOpenTask: (taskId: string) => void;
 }
@@ -22,7 +22,7 @@ const SCOPES: [Scope, string][] = [
   ["all", "All"],
 ];
 
-/** Lista de tareas agrupada por repo. */
+/** Task list grouped by repo. */
 export function TasksView({ projectId, onOpenTask }: TasksViewProps) {
   const [scope, setScope] = useState<Scope>("open");
   const [newTask, setNewTask] = useState(false);
