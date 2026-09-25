@@ -17,14 +17,15 @@ default-run = "nodal"
 name = "nodal_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
-# Behind a feature so `tauri build` leaves it out of the bundle: a universal build only lipos
-# the main binary and would fail copying this one. Build it with `--features mcp-cli`.
+# Behind a feature so tauri-cli's binary discovery skips it: a universal build only lipos the
+# main binary and fails copying this one. Build and lint it with `--features mcp-cli`.
 [[bin]]
 name = "nodal-mcp"
 path = "src/bin/nodal-mcp.rs"
 required-features = ["mcp-cli"]
 
 [features]
+# Never in `default`: it would put `nodal-mcp` back in the release bundle.
 mcp-cli = []
 
 [build-dependencies]
