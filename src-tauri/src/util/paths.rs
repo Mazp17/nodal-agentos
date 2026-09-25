@@ -34,6 +34,21 @@ pub fn data_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     Ok(if DEV { dev_sibling(&dir) } else { dir })
 }
 
+/// `identifier` of `tauri.conf.json`: names the app data folder.
+pub const APP_IDENTIFIER: &str = "io.github.mazp17.nodal";
+
+/// `data_dir` without an `AppHandle`, for `nodal-mcp`. Same folder Tauri resolves on macOS.
+pub fn data_dir_standalone() -> Result<PathBuf, String> {
+    let home = home().ok_or_else(|| "$HOME is not set.".to_string())?;
+    let dir = home.join("Library/Application Support").join(APP_IDENTIFIER);
+    Ok(if DEV { dev_sibling(&dir) } else { dir })
+}
+
+/// Unix socket of the MCP server, inside the app data folder.
+pub fn mcp_socket(data_dir: &std::path::Path) -> PathBuf {
+    data_dir.join("mcp.sock")
+}
+
 /// `/x/io.github.mazp17.nodal` → `/x/io.github.mazp17.nodal.dev`.
 fn dev_sibling(dir: &std::path::Path) -> PathBuf {
     let mut name = dir.file_name().unwrap_or_default().to_os_string();
@@ -121,6 +136,16 @@ pub(crate) mod tests {
         assert_eq!(dev_sibling(dir), Path::new("/Users/me/Library/Application Support/io.github.mazp17.nodal.dev"));
         // `cargo test` is a debug build unless run with --release.
         assert_eq!(nodal_home().unwrap().ends_with(".nodal-dev"), DEV);
+    }
+
+    #[test]
+    fn standalone_data_dir_matches_the_app_and_keeps_debug_apart() {
+        let conf: serde_json::Value = serde_json::from_str(include_str!("../../tauri.conf.json")).unwrap();
+        assert_eq!(conf["identifier"], APP_IDENTIFIER);
+        let dir = data_dir_standalone().unwrap();
+        assert_eq!(dir.parent().unwrap(), home().unwrap().join("Library/Application Support"));
+        assert_eq!(dir.to_string_lossy().ends_with(".nodal.dev"), DEV);
+        assert_eq!(mcp_socket(&dir), dir.join("mcp.sock"));
     }
 
     #[test]

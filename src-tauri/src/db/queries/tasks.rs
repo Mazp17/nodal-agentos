@@ -18,6 +18,14 @@ pub fn get(conn: &Connection, id: &str) -> Result<Task, DbError> {
     get_task(conn, id)?.ok_or_else(|| not_found("task"))
 }
 
+/// La tarea `{KEY}-{number}` de un proyecto.
+pub fn find_by_number(conn: &Connection, project_id: &str, number: i64) -> Result<Option<Task>, DbError> {
+    use rusqlite::OptionalExtension;
+    Ok(conn
+        .query_row("SELECT * FROM tasks WHERE project_id = ?1 AND number = ?2", rusqlite::params![project_id, number], task_from_row)
+        .optional()?)
+}
+
 pub fn insert(conn: &Connection, t: &Task) -> Result<(), DbError> {
     insert_task(conn, t)
 }
