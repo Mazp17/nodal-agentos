@@ -84,7 +84,7 @@ Tests that hit real services or real local data are `#[ignore]`. Linear live tes
 - **Database changes** are additive migrations: bump `PRAGMA user_version` and add a migration test from the previous version.
 - **Native dialogs don't work under Tauri.** Don't use `window.confirm`, `alert` or `prompt`; use `useConfirm()` from `src/ui/ConfirmDialog.tsx`. `pnpm build` fails if you do.
 - **Links** to external sites open through the opener plugin (`src/ui/ExternalLink.tsx`), never by navigating the webview.
-- **UI text is in English.** Code comments are currently mixed English/Spanish; new comments in English are preferred.
+- **English only.** UI text, code, comments and test data are in English.
 - Keep changes focused. Match the style of the surrounding code.
 
 ## Commits and pull requests
