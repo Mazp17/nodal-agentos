@@ -90,11 +90,13 @@ jobs:
             on && /^## \[/ { exit }
             on { print }
           ' CHANGELOG.md > notes.md
+          # The in-app updater shows plain notes: drop the PR and commit links.
+          sed -E 's/ \(\[[^]]*\]\([^)]*\)\)//g' notes.md > notes-app.md
           # Universal build: both architectures download the same bundle.
           url="https://github.com/$GITHUB_REPOSITORY/releases/download/$TAG/$update"
           jq -n \
             --arg version "$VERSION" \
-            --rawfile notes notes.md \
+            --rawfile notes notes-app.md \
             --arg pub_date "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
             --arg url "$url" \
             --rawfile sig "dist-release/$update.sig" \

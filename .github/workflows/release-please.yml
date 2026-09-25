@@ -10,14 +10,14 @@ on:
 permissions:
   contents: read
 
-concurrency:
-  group: release-please
-  cancel-in-progress: false
-
 jobs:
   release-please:
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    # Only this job: pushes to main shouldn't queue behind a 45-minute build.
+    concurrency:
+      group: release-please
+      cancel-in-progress: false
     permissions:
       contents: write # release commits, tags and the draft release
       pull-requests: write # the release PR
