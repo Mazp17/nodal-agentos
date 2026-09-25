@@ -1,5 +1,5 @@
-// Elegir la carpeta de un repo: selector nativo de macOS, después `resolve_git_root` y los
-// mensajes del diseño ("not inside a git repository", "Use repo root", "already added to…").
+// Picking a repo folder: native macOS picker, then `resolve_git_root` and the
+// design's messages ("not inside a git repository", "Use repo root", "already added to…").
 
 import { useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
@@ -7,12 +7,12 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { basename } from "../../domain/hooks/projects";
 import "./projects.css";
 
-/** Raíz git canónica de la carpeta, o `null` si no está en un repo. */
+/** Canonical git root of the folder, or `null` if it isn't in a repo. */
 export const resolveGitRoot = (path: string) => invoke<string | null>("resolve_git_root", { path });
 
 /**
- * La raíz viene canónica (symlinks resueltos) y la carpeta elegida no: con el mismo
- * nombre final se toma como la raíz (p. ej. `/tmp/x` vs `/private/tmp/x`).
+ * The root comes back canonical (symlinks resolved) and the picked folder doesn't: with the same
+ * final name it counts as the root (e.g. `/tmp/x` vs `/private/tmp/x`).
  */
 const isSubfolder = (path: string, root: string) =>
   path.replace(/\/+$/, "") !== root.replace(/\/+$/, "") && basename(path) !== basename(root);
@@ -23,12 +23,12 @@ export type RepoNotice =
   | { kind: "dup"; text: string };
 
 interface Options {
-  /** Si el repo ya está en uso, dónde (`"Payments"`), o `""` si es un borrador sin nombre. */
+  /** If the repo is already in use, where (`"Payments"`), or `""` if it's an unnamed draft. */
   whereAdded: (root: string) => string | null;
   onPicked: (root: string) => void | Promise<void>;
 }
 
-/** Selector de repos con su aviso. `pick()` abre el diálogo nativo. */
+/** Repo picker with its notice. `pick()` opens the native dialog. */
 export function useRepoPicker({ whereAdded, onPicked }: Options) {
   const [notice, setNotice] = useState<RepoNotice | null>(null);
   const [busy, setBusy] = useState(false);
@@ -112,7 +112,7 @@ export function RepoNoticeBar({
   );
 }
 
-/** Fila de un repo en borrador (onboarding, New project). */
+/** Row for a draft repo (onboarding, New project). */
 export function DraftRepoRow({ path, onRemove }: { path: string; onRemove: () => void }) {
   return (
     <div className="draft-repo">

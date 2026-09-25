@@ -1,6 +1,6 @@
-// Proyectos y repos para toda la app (sidebar, settings, diálogos, vistas), sobre los
-// stores compartidos de `store.ts`: sin consultas propias. Las mutaciones de este módulo
-// invalidan solas; otras features pueden llamar `refresh()` tras cambiar algo.
+// Projects and repos for the whole app (sidebar, settings, dialogs, views), on top of the
+// shared stores in `store.ts`: no queries of their own. This module's mutations
+// invalidate on their own; other features can call `refresh()` after changing something.
 
 import { useMemo } from "react";
 import * as api from "../api";
@@ -10,7 +10,7 @@ import { invalidate, KEYS, setData, useProjectList, useRepoList } from "./store"
 export interface ProjectsState {
   projects: Project[];
   repos: Repo[];
-  /** `false` hasta la primera respuesta (buena o mala). */
+  /** `false` until the first response (good or bad). */
   loaded: boolean;
   error: string | null;
   projectById: Map<string, Project>;
@@ -27,7 +27,7 @@ export interface ProjectsState {
 
 const refresh = () => invalidate("projects", "repos");
 
-/** Espera la relectura: quien crea algo ve el estado ya actualizado al seguir. */
+/** Awaits the re-read: whoever creates something sees the already-updated state when continuing. */
 const after = <T,>(p: Promise<T>): Promise<T> =>
   p.then(
     async (v) => {
@@ -43,7 +43,7 @@ const after = <T,>(p: Promise<T>): Promise<T> =>
 const MUTATIONS = {
   refresh,
   createProject: (input: api.NewProject) => after(api.createProject(input)),
-  // Optimista: segmentados y colores responden al instante; la relectura corrige si falló.
+  // Optimistic: segmented controls and colors respond instantly; the re-read corrects it if it failed.
   updateProject: (id: string, patch: api.ProjectPatch) => {
     setData<Project[]>(KEYS.projects, (ps) => ps.map((p) => (p.id === id ? ({ ...p, ...patch } as Project) : p)));
     return after(api.updateProject(id, patch));
@@ -82,13 +82,13 @@ export function useProjects(): ProjectsState {
   }, [projects, repos, loaded, error]);
 }
 
-/** Última carpeta del path (`/a/b/repo` → `repo`). */
+/** Last folder of the path (`/a/b/repo` → `repo`). */
 export const basename = (p: string) => p.replace(/\/+$/, "").split("/").pop() || p;
 
 /**
- * Key de proyecto a partir del nombre: 3 letras en mayúscula ("Payments" → "PAY"),
- * con un dígito si choca con una existente. Cumple `validate::project_key` (2-6, empieza
- * con letra).
+ * Project key from the name: 3 uppercase letters ("Payments" → "PAY"),
+ * with a digit if it clashes with an existing one. Satisfies `validate::project_key` (2-6, starts
+ * with a letter).
  */
 export function suggestProjectKey(name: string, taken: Iterable<string>): string {
   const used = new Set([...taken].map((k) => k.toUpperCase()));

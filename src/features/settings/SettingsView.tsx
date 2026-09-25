@@ -36,7 +36,7 @@ interface Props {
   updates: Updates;
 }
 
-/** La píldora y los diálogos leen la concurrencia del store compartido. */
+/** The pill and the dialogs read concurrency from the shared store. */
 function onSettingsSaved(s: Settings) {
   setData<Settings>(KEYS.settings, () => s);
   void invalidate("settings");
@@ -122,7 +122,7 @@ function UpdatesSettings({ updates: u }: { updates: Updates }) {
 
 // ---------- Execution ----------
 
-/** Valores que acepta el backend (`validate::EDITORS`). */
+/** Values the backend accepts (`validate::EDITORS`). */
 const EDITORS = ["code", "cursor", "windsurf", "zed", "subl", "idea", "webstorm", "fleet", "code-insiders"] as const;
 const EDITOR_LABEL: Record<string, string> = {
   code: "VS Code",
@@ -151,8 +151,8 @@ function ExecutionSettings({ onSaved }: { onSaved: (s: Settings) => void }) {
     if (s) setReviewer(s.reviewer);
   }, [s?.reviewer]);
 
-  // Un guardado a la vez (los controles se deshabilitan): sin respuestas desordenadas.
-  // Optimista sobre el store compartido; si falla, la relectura lo corrige.
+  // One save at a time (controls are disabled): no out-of-order responses.
+  // Optimistic on the shared store; if it fails, the reload corrects it.
   const save = async (next: Settings) => {
     setData<Settings>(KEYS.settings, () => next);
     setSaving(true);
@@ -302,7 +302,7 @@ function DiagnosticsSettings() {
       (v): Check => ({ name: "git", value: v, state: "ok" }),
       (e): Check => ({ name: "git", value: String(e), state: "error" }),
     );
-    // Solo lee `~/.claude.json`: no lanza nada.
+    // Only reads `~/.claude.json`: launches nothing.
     const trustChecks = Promise.all(
       repos.map((repo) =>
         repoTrust(repo.path).then(
@@ -329,7 +329,7 @@ function DiagnosticsSettings() {
         { name: "Linear", value: "Not checked", state: "na" },
       ],
     );
-    // Sin comando propio de git: cada repo se resuelve con `git rev-parse` en el backend.
+    // No dedicated git command: each repo is resolved with `git rev-parse` in the backend.
     const repoChecks = Promise.all(
       repos.map((r) =>
         resolveGitRoot(r.path).then(
@@ -368,7 +368,7 @@ function DiagnosticsSettings() {
 
   useEffect(() => {
     void run();
-    // Solo al entrar; "Run again" vuelve a correrlo.
+    // Only on entry; "Run again" runs it again.
   }, []);
 
   const rows: Check[] =

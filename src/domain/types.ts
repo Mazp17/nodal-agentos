@@ -1,14 +1,14 @@
-// Espejo exacto de `src-tauri/src/domain/mod.rs`. Cualquier cambio va en los dos lados.
-// Convenciones: campos camelCase, enums de valor snake_case, enums con datos
-// discriminados por `kind`, fechas en epoch ms. `Option<T>` de Rust llega como `T | null`
-// (salvo `LaunchOptions`, cuyos campos se omiten si están vacíos).
+// Exact mirror of `src-tauri/src/domain/mod.rs`. Any change goes on both sides.
+// Conventions: camelCase fields, snake_case value enums, data-carrying enums
+// discriminated by `kind`, dates in epoch ms. Rust's `Option<T>` arrives as `T | null`
+// (except `LaunchOptions`, whose fields are omitted when empty).
 
-// ---------- Proyectos y repos ----------
+// ---------- Projects and repos ----------
 
 export interface Project {
   id: string;
   name: string;
-  /** Prefijo de los ids de tarea (`PAY` → `PAY-1`). */
+  /** Prefix for task ids (`PAY` → `PAY-1`). */
   key: string;
   nextTaskNumber: number;
   color: string;
@@ -21,18 +21,18 @@ export interface Project {
   archivedAt: number | null;
 }
 
-/** Flags opcionales de `claude --bg`. */
+/** Optional `claude --bg` flags. */
 export interface LaunchOptions {
   model?: string;
   effort?: string;
   permissionMode?: string;
 }
 
-/** `model`, `effort` y `permissionMode` van planos (flatten en Rust). */
+/** `model`, `effort` and `permissionMode` are flat (flatten in Rust). */
 export interface Repo extends LaunchOptions {
   id: string;
   projectId: string;
-  /** Raíz git canónica. */
+  /** Canonical git root. */
   path: string;
   name: string;
   defaultExecutor: Executor | null;
@@ -44,7 +44,7 @@ export interface Repo extends LaunchOptions {
   createdAt: number;
 }
 
-// ---------- Ejecutores y opciones ----------
+// ---------- Executors and options ----------
 
 export type AgentSource = "user" | "repo" | "plugin";
 
@@ -55,10 +55,10 @@ export type Executor =
 
 export type Isolation = "worktree" | "in_place";
 
-/** `changes`: sin commitear · `commit`: commit sin push · `pr`: commit, push y PR. */
+/** `changes`: uncommitted · `commit`: commit without push · `pr`: commit, push and PR. */
 export type Finish = "changes" | "commit" | "pr";
 
-// ---------- Tareas ----------
+// ---------- Tasks ----------
 
 export type TaskStatus = "backlog" | "todo" | "in_progress" | "in_review" | "blocked" | "done" | "canceled";
 
@@ -93,22 +93,22 @@ export interface ExternalState {
 
 export interface TaskSource {
   provider: string;
-  /** Para borrar el link, antes se desvinculan sus tareas. */
+  /** To delete the link, its tasks are unlinked first. */
   linkId: string | null;
   externalId: string;
-  /** Id legible del proveedor (`ENG-142`). */
+  /** The provider's human-readable id (`ENG-142`). */
   identifier: string;
   url: string;
   externalState: ExternalState | null;
   lastSyncedAt: number | null;
   syncError: string | null;
-  /** El estado externo actual no está en el mapeo pull ("estado externo sin mapear"). */
+  /** The current external state isn't in the pull mapping ("unmapped external state"). */
   unmapped: boolean;
-  /** Proyecto del proveedor (proyecto de Linear) visto en el último import/pull. */
+  /** Provider project (Linear project) seen in the last import/pull. */
   project: ExtProject | null;
-  /** Regla de proyecto por la que llegó a su repo. */
+  /** Project rule through which it reached its repo. */
   ruleId: string | null;
-  /** La issue cambió de proyecto en el proveedor: falta decidir (`resolveMovedTask`). */
+  /** The issue changed project in the provider: pending a decision (`resolveMovedTask`). */
   moved: MovedInfo | null;
 }
 
@@ -119,9 +119,9 @@ export interface ExtProject {
 
 export interface MovedInfo {
   fromProject: ExtProject;
-  /** `null`: quedó sin proyecto. */
+  /** `null`: it was left without a project. */
   toProject: ExtProject | null;
-  /** Repo que le tocaría por las reglas; `null` si ninguna aplica. */
+  /** Repo it would get by the rules; `null` if none applies. */
   suggestedRepoId: string | null;
 }
 
@@ -129,7 +129,7 @@ export interface Task {
   id: string;
   projectId: string;
   repoId: string;
-  /** El id visible es `taskKey(project.key, number)`. */
+  /** The visible id is `taskKey(project.key, number)`. */
   number: number;
   title: string;
   status: TaskStatus;
@@ -139,7 +139,7 @@ export interface Task {
   plan: PlanRef;
   planOverridden: boolean;
   acceptance: string[];
-  /** `null` → default del repo → del proyecto → Claude. */
+  /** `null` → repo default → project default → Claude. */
   assignee: Executor | null;
   isolation: Isolation | null;
   finish: Finish | null;
@@ -153,7 +153,7 @@ export interface Task {
 
 export const taskKey = (projectKey: string, number: number) => `${projectKey}-${number}`;
 
-/** `blocks`: `taskId` bloquea a `otherId`. */
+/** `blocks`: `taskId` blocks `otherId`. */
 export type RelationKind = "related" | "blocks";
 
 export interface TaskRelation {
@@ -189,9 +189,9 @@ export interface Run {
   extraInstructions: string | null;
   options: LaunchOptions;
   finish: Finish;
-  /** Resuelta al encolar; `null` en workflows. */
+  /** Resolved when queued; `null` for workflows. */
   isolation: Isolation | null;
-  /** Resuelto al encolar: al terminar, se encola el revisor. */
+  /** Resolved when queued: when it finishes, the reviewer is queued. */
   review: boolean;
   verdict: Verdict | null;
   status: RunStatus;
@@ -207,14 +207,14 @@ export interface Run {
   branch: string | null;
   error: string | null;
   legacyLabel: string | null;
-  /** Tokens del transcript (agente/Claude/revisor), sumados al cerrar. */
+  /** Transcript tokens (agent/Claude/reviewer), summed on close. */
   tokens: number | null;
 }
 
-/** `Run` sin `prompt` ni `extraInstructions`, para listas. */
+/** `Run` without `prompt` or `extraInstructions`, for lists. */
 export type RunLight = Omit<Run, "prompt" | "extraInstructions">;
 
-// ---------- Fuentes externas ----------
+// ---------- External sources ----------
 
 export interface ScopeRef {
   kind: string;
@@ -225,34 +225,34 @@ export interface ScopeRef {
 export type RuleKind = "label" | "project";
 
 /**
- * Ruteo al importar. Precedencia: regla de proyecto > regla de label > `defaultRepoId`.
- * Al guardar, una regla sin `id` (o con otro `kind`/`value`) es nueva: el backend le da `id`
- * y `createdAt` (desde ahí auto-importa; lo anterior lo trae `importRule`).
+ * Routing on import. Precedence: project rule > label rule > `defaultRepoId`.
+ * On save, a rule without `id` (or with a different `kind`/`value`) is new: the backend gives it `id`
+ * and `createdAt` (it auto-imports from then on; earlier items are brought in by `importRule`).
  */
 export interface RepoRule {
-  /** `""` en una regla nueva. */
+  /** `""` on a new rule. */
   id: string;
   kind: RuleKind;
-  /** Label, o id del proyecto del proveedor. */
+  /** Label, or the provider project's id. */
   value: string;
-  /** Nombre visible (el del proyecto; en las de label, el label). */
+  /** Display name (the project's; for label rules, the label). */
   name: string;
   repoId: string;
-  /** Lo fija el backend. */
+  /** Set by the backend. */
   createdAt: number;
 }
 
 export interface StateMap {
-  /** `externalState.id` → estado Nodal. Ausente = sin mapear. */
+  /** `externalState.id` → Nodal status. Absent = unmapped. */
   pull: Record<string, TaskStatus>;
-  /** Estado Nodal → `externalState.id`; `null` = "No sincronizar". */
+  /** Nodal status → `externalState.id`; `null` = "Don't sync". */
   push: Partial<Record<TaskStatus, string | null>>;
-  /** `null` = mapeo pendiente (no se hace push). */
+  /** `null` = mapping pending (no push is done). */
   confirmedAt: number | null;
   knownStates: ExternalState[];
 }
 
-/** Estados del proveedor que cambiaron contra `knownStates`; se limpia con `saveStateMap`. */
+/** Provider states that changed against `knownStates`; cleared by `saveStateMap`. */
 export interface StateChanges {
   added: ExternalState[];
   removed: ExternalState[];
@@ -270,7 +270,7 @@ export interface SourceLink {
   createdAt: number;
   lastSyncedAt: number | null;
   lastSyncError: string | null;
-  /** `null` = nada pendiente. */
+  /** `null` = nothing pending. */
   pendingStateChanges: StateChanges | null;
 }
 
@@ -291,9 +291,9 @@ export interface OutboxItem {
 
 export interface Settings {
   concurrency: number;
-  /** `code`, `cursor`... `null` → el del sistema. */
+  /** `code`, `cursor`... `null` → the system's. */
   editor: string | null;
   reviewer: string;
-  /** Último fallback del ejecutor: repo → proyecto → este → Claude. */
+  /** Last executor fallback: repo → project → this → Claude. */
   defaultExecutor: Executor | null;
 }

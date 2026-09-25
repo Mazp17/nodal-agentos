@@ -1,17 +1,17 @@
 /*
- * Design tokens de Nodal. Fuente: diseño "Nodal" de Claude Design (dark, paleta cálida).
- * Todo color, radio, sombra o duración de la UI sale de acá; los componentes no
- * deberían tener literales de color. Los nombres se mantienen estables entre rediseños:
- * cambian los valores.
+ * Nodal design tokens. Source: the "Nodal" design in Claude Design (dark, warm palette).
+ * Every color, radius, shadow or duration in the UI comes from here; components
+ * shouldn't have color literals. Names stay stable across redesigns:
+ * the values change.
  */
 
 :root {
   color-scheme: dark;
 
-  /* ---- Paleta base ---- */
+  /* ---- Base palette ---- */
   --accent: oklch(0.74 0.15 55);
   --accent-hover: oklch(0.82 0.12 60);
-  /* Amarillo de estado (In Review, "need you", warnings). */
+  /* Status yellow (In Review, "need you", warnings). */
   --amber: oklch(0.82 0.13 88);
   --amber-text: oklch(0.88 0.1 88);
   --red: oklch(0.68 0.16 25);
@@ -20,11 +20,11 @@
   --info: oklch(0.74 0.1 240);
   --gray: #8a837a;
   --gray-dim: #5f5850;
-  /* Texto sobre rellenos de acento / ámbar. */
+  /* Text on accent / amber fills. */
   --on-accent: #1a120a;
   --on-amber: #1a1608;
 
-  /* ---- Superficies (de más profunda a más elevada) ---- */
+  /* ---- Surfaces (from deepest to most elevated) ---- */
   --bg-deep: #0c0a09;
   --bg-sidebar: #141210;
   --bg-rail: #171513;
@@ -41,7 +41,7 @@
   --surface-menu: #2a2622;
   --surface-float: #2a2622;
 
-  /* Rellenos translúcidos (tinte cálido) para controles sobre cualquier superficie. */
+  /* Translucent fills (warm tint) for controls on any surface. */
   --fill-1: rgb(255 236 214 / 0.03);
   --fill-2: rgb(255 236 214 / 0.04);
   --fill-3: rgb(255 236 214 / 0.05);
@@ -54,7 +54,7 @@
   --scrim: rgb(8 6 5 / 0.3);
   --scrim-strong: rgb(8 6 5 / 0.45);
 
-  /* ---- Bordes ---- */
+  /* ---- Borders ---- */
   --border-faint: rgb(255 236 214 / 0.035);
   --border: rgb(255 236 214 / 0.07);
   --border-2: rgb(255 236 214 / 0.09);
@@ -67,7 +67,7 @@
   --brand-ring: #ece7e1;
   --brand-dot: var(--accent);
 
-  /* ---- Texto (de más a menos énfasis) ---- */
+  /* ---- Text (from most to least emphasis) ---- */
   --text-strong: #f5f1ec;
   --text: #ece7e1;
   --text-2: #e0d9d1;
@@ -80,7 +80,7 @@
   --text-dim: #6d665e;
   --text-disabled: #5f5850;
 
-  /* ---- Estados de tarea (Nodal) ---- */
+  /* ---- Task states (Nodal) ---- */
   --st-backlog: var(--gray-dim);
   --st-todo: var(--gray);
   --st-in-progress: var(--accent);
@@ -89,14 +89,14 @@
   --st-done: var(--green);
   --st-canceled: var(--gray-dim);
 
-  /* ---- Estados de run ---- */
+  /* ---- Run states ---- */
   --run-running: var(--accent);
   --run-queued: var(--gray);
   --run-done: var(--green);
   --run-warn: var(--amber);
   --run-failed: var(--red);
 
-  /* ---- Colores de proyecto (misma paleta que el backend, `validate::PALETTE`) ---- */
+  /* ---- Project colors (same palette as the backend, `validate::PALETTE`) ---- */
   --project-1: oklch(0.74 0.15 55);
   --project-2: oklch(0.72 0.13 250);
   --project-3: oklch(0.74 0.12 150);
@@ -106,7 +106,7 @@
   --project-7: oklch(0.72 0.1 200);
   --project-8: oklch(0.7 0.12 290);
 
-  /* ---- Tipografía ---- */
+  /* ---- Typography ---- */
   --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", Helvetica, Arial, sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
   --fs-2xs: 10.5px;
@@ -130,7 +130,7 @@
   --lh-snug: 1.4;
   --lh-body: 1.5;
 
-  /* ---- Espaciado ---- */
+  /* ---- Spacing ---- */
   --sp-0: 2px;
   --sp-1: 4px;
   --sp-2: 6px;
@@ -143,7 +143,7 @@
   --sp-9: 22px;
   --sp-10: 26px;
 
-  /* ---- Tamaños de control ---- */
+  /* ---- Control sizes ---- */
   --h-xs: 20px;
   --h-sm: 22px;
   --h-md: 24px;
@@ -160,7 +160,7 @@
   --w-dialog: 540px;
   --w-palette: 600px;
 
-  /* ---- Radios ---- */
+  /* ---- Radii ---- */
   --r-xs: 3px;
   --r-sm: 4px;
   --r-md: 5px;
@@ -172,7 +172,7 @@
   --r-3xl: 12px;
   --r-pill: 999px;
 
-  /* ---- Sombras ---- */
+  /* ---- Shadows ---- */
   --shadow-menu: 0 14px 34px rgb(0 0 0 / 0.5);
   --shadow-float: 0 12px 30px rgb(0 0 0 / 0.45);
   --shadow-drawer: -24px 0 50px rgb(0 0 0 / 0.4);
@@ -187,11 +187,11 @@
   --pulse: pulse 1.6s ease-in-out infinite;
   --pulse-skeleton: pulse 1.4s ease-in-out infinite;
 
-  /* ---- Foco (WCAG 2.2: 2px con contraste) ---- */
+  /* ---- Focus (WCAG 2.2: 2px with contrast) ---- */
   --focus-ring: 0 0 0 2px var(--accent);
 }
 
-/* Tintes: `tint(color, %)` sin relative color syntax. */
+/* Tints: `tint(color, %)` without relative color syntax. */
 :root {
   --accent-tint-12: color-mix(in oklch, var(--accent) 12%, transparent);
   --accent-tint-16: color-mix(in oklch, var(--accent) 16%, transparent);

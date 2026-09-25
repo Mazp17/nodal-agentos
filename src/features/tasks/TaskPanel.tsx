@@ -45,11 +45,11 @@ export interface TaskPanelProps {
   taskId: string;
   onClose: () => void;
   onOpenRun: (runId: string) => void;
-  /** Abre el diff de un run (RunDiffDrawer). */
+  /** Opens a run's diff (RunDiffDrawer). */
   onOpenDiff: (runId: string) => void;
-  /** Navegar a una tarea relacionada; sin él, las relaciones no son clickeables. */
+  /** Navigate to a related task; without it, relations aren't clickable. */
   onOpenTask?: (taskId: string) => void;
-  /** "Review mapping" de la pestaña Source: Project settings → Sources. */
+  /** "Review mapping" in the Source tab: Project settings → Sources. */
   onOpenSources?: (projectId: string) => void;
 }
 
@@ -66,7 +66,7 @@ function useOutside(open: boolean, close: () => void) {
   return ref;
 }
 
-/** Detalle de tarea (drawer): estado, repo, plan, criterios, relaciones, cadena de pasos y lanzamiento. */
+/** Task detail (drawer): status, repo, plan, criteria, relations, step chain and launch. */
 export function TaskPanel({ taskId, onClose, onOpenRun, onOpenDiff, onOpenTask, onOpenSources }: TaskPanelProps) {
   const ref = useFocusTrap<HTMLElement>(onClose);
   const headingId = useId();
@@ -89,7 +89,7 @@ export function TaskPanel({ taskId, onClose, onOpenRun, onOpenDiff, onOpenTask, 
   const [launchExec, setLaunchExec] = useState<Executor | null>(null);
   const [extra, setExtra] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
-  /** Motivo por el que el backend rechazó el "Clean up" sin forzar. */
+  /** Why the backend rejected the non-forced "Clean up". */
   const [cleanupBlocked, setCleanupBlocked] = useState<string | null>(null);
   const wt = useWorktreeStatus(taskQ.data?.worktree ? taskId : null);
 
@@ -182,7 +182,7 @@ export function TaskPanel({ taskId, onClose, onOpenRun, onOpenDiff, onOpenTask, 
     }
   };
 
-  /** Sin forzar, el backend rechaza si hay commits sin publicar o cambios sin commitear. */
+  /** Without forcing, the backend refuses if there are unpushed commits or uncommitted changes. */
   const cleanUp = async () => {
     const w = task.worktree;
     if (!w) return;
@@ -213,16 +213,16 @@ export function TaskPanel({ taskId, onClose, onOpenRun, onOpenDiff, onOpenTask, 
   const cleanUpAnyway = async () => {
     const w = task.worktree;
     if (!w) return;
-    // Ocupado desde ya: el await de abajo deja una ventana para un segundo clic.
+    // Busy right away: the await below leaves a window for a second click.
     setBusy("cleanup");
-    // Estado fresco: el del polling puede tener hasta 20 s.
+    // Fresh status: the polled one can be up to 20 s old.
     const s = await worktreeStatus(task.id).catch(() => wt.data);
     const losses = [
       s && s.unpushed > 0 ? `${s.unpushed} commit${s.unpushed === 1 ? "" : "s"} that exist nowhere else` : null,
       s?.dirty ? "uncommitted changes" : null,
     ].filter(Boolean);
-    // Libre durante el confirm (modal: no hay doble clic posible) para que el foco
-    // vuelva al botón al cancelar; `act` lo vuelve a marcar.
+    // Not busy during the confirm (modal: no double click possible) so focus
+    // returns to the button on cancel; `act` sets it again.
     setBusy(null);
     const ok = await ask({
       title: `Force clean up ${w.branch}?`,
@@ -722,8 +722,8 @@ function MenuList({ label, items, onEscape }: { label: string; items: MenuItem[]
 function PlanSection({ task }: { task: Task }) {
   const plan = useTaskPlan(task.id);
   const { refresh } = plan;
-  // El plan de una importada lo rematerializa el sync: se relee cuando cambia la tarea
-  // (no al montar: eso ya lo hace el hook).
+  // An imported task's plan is rematerialized by the sync: re-read it when the task changes
+  // (not on mount: the hook already does that).
   const seen = useRef(task.updatedAt);
   useEffect(() => {
     if (seen.current === task.updatedAt) return;
@@ -1062,7 +1062,7 @@ function StepRow({
   );
 }
 
-/** "2 ahead · 1 unpushed · Uncommitted changes" del worktree de la tarea. */
+/** "2 ahead · 1 unpushed · Uncommitted changes" for the task's worktree. */
 function WorktreeState({ status, error }: { status: WorktreeStatus | undefined; error: string | null }) {
   if (!status) return <span className="tk-muted">{error ? `Couldn't read git status: ${error}` : "Checking…"}</span>;
   if (!status.exists) return <span className="tp-danger">Worktree folder is missing</span>;
@@ -1094,7 +1094,7 @@ function WorktreeState({ status, error }: { status: WorktreeStatus | undefined; 
   );
 }
 
-/** La issue cambió de proyecto en el proveedor: mover la tarea al repo que le toca o dejarla. */
+/** The issue changed project in the provider: move the task to the repo it maps to, or keep it. */
 function MovedBanner({
   provider,
   from,
@@ -1108,7 +1108,7 @@ function MovedBanner({
   provider: string;
   from: string;
   to: string;
-  /** Repo que le tocaría por las reglas; `null` si ninguna aplica (o ya no existe). */
+  /** Repo the rules would map it to; `null` if none applies (or it no longer exists). */
   suggested: string | null;
   current: string | null;
   busy: boolean;

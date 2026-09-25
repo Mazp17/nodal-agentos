@@ -1,14 +1,14 @@
-// Recurso "runs" de la capa de datos (ver `store.ts`): UN solo polling para toda la app.
-// Cada vista se suscribe con `useRuns`/`useRun`/`useAllRuns`; el polling corre mientras haya
-// al menos un suscriptor, se pausa con la ventana oculta y se detiene con el último. Las
-// mutaciones y los avisos `nodal://changed` llaman a `invalidate("runs")` (o `refreshRuns()`).
+// "runs" resource of the data layer (see `store.ts`): ONE single polling loop for the whole app.
+// Each view subscribes with `useRuns`/`useRun`/`useAllRuns`; polling runs while there is
+// at least one subscriber, pauses while the window is hidden and stops with the last one.
+// Mutations and `nodal://changed` notices call `invalidate("runs")` (or `refreshRuns()`).
 //
-// En cada vuelta se leen de la base los runs livianos (`list_runs_light`, hasta 500) y el
-// último de cada tarea (`latest_runs_by_task`, sin límite, para los badges), y de Claude Code
-// las sesiones en background (`claude agents`), que no avisan: por eso el polling sigue. Los
-// runs que abre una vista (`useRun`) se piden completos con `get_run`. El detalle del workflow
-// (`get_run_detail`) se pide solo para runs de workflow: los activos en cada vuelta, los
-// terminados hasta que se asienta. El resumen de la píldora sale de `work_summary`.
+// Each pass reads from the database the light runs (`list_runs_light`, up to 500) and the
+// latest of each task (`latest_runs_by_task`, unlimited, for the badges), and from Claude Code
+// the background sessions (`claude agents`), which don't notify: that's why polling continues.
+// Runs opened by a view (`useRun`) are fetched in full with `get_run`. The workflow detail
+// (`get_run_detail`) is fetched only for workflow runs: active ones on every pass, finished
+// ones until they settle. The pill's summary comes from `work_summary`.
 
 import { useEffect, useMemo, useSyncExternalStore } from "react";
 import { getRun, latestRunsByTask, listRunsLight, workSummary, type WorkSummary } from "../api";
@@ -28,27 +28,27 @@ import { deriveRunView, type RunView } from "../../features/runs/status";
 import { isInProgress, type RunDetail, type RunSummary } from "../../features/runs/types";
 
 const POLL_MS = POLL.live;
-/** Polls que se sigue pidiendo el detalle de un run terminado sin resumen final. */
+/** Polls during which the detail of a finished run without a final summary keeps being fetched. */
 const SETTLE_TRIES = 3;
-/** Runs terminados cuyo detalle se pide sin que nadie lo pida explícitamente. */
+/** Finished runs whose detail is fetched without anyone explicitly asking for it. */
 const MAX_HISTORY_DETAILS = 40;
 
 export interface RunsSnapshot {
-  /** Hasta 500 runs, más recientes primero. */
+  /** Up to 500 runs, most recent first. */
   runs: RunLight[];
-  /** Último run de cada tarea (cualquier tipo), sin límite de historial. */
+  /** Latest run of each task (any kind), with no history limit. */
   latest: RunLight[];
-  /** Runs completos (con `prompt`) que pidió una vista con `useRun`; `null`: no existe o falló. */
+  /** Full runs (with `prompt`) requested by a view with `useRun`; `null`: doesn't exist or failed. */
   full: Record<string, Run | null>;
   live: RunSummary[];
   details: Record<string, RunDetail | null>;
-  /** Errores de la base en la última vuelta (en inglés, listos para mostrar). */
+  /** Database errors from the last pass (in English, ready to display). */
   error: string | null;
-  /** Error de `claude agents` (CLI), aparte: no afecta a los datos de la base. */
+  /** `claude agents` (CLI) error, kept separate: it doesn't affect the database data. */
   liveError: string | null;
-  /** La base respondió al menos una vez (`runs` vacío ya significa "no hay"). */
+  /** The database answered at least once (an empty `runs` now means "there are none"). */
   loaded: boolean;
-  /** `claude agents` respondió al menos una vez. */
+  /** `claude agents` answered at least once. */
   liveLoaded: boolean;
   now: number;
 }
@@ -69,14 +69,14 @@ const EMPTY: RunsSnapshot = {
 let snapshot: RunsSnapshot = EMPTY;
 const listeners = new Set<() => void>();
 let timer: ReturnType<typeof setTimeout> | null = null;
-/** Hay un bucle de polling vivo (esperando el timer o con una vuelta en curso). */
+/** There's a live polling loop (waiting on the timer or with a pass in progress). */
 let looping = false;
 let inFlight: Promise<void> | null = null;
 let again = false;
-/** Detalles que ya no cambian: no se vuelven a pedir. Se podan a los runs que siguen visibles. */
+/** Details that no longer change: they aren't fetched again. Pruned to the runs still visible. */
 const settled = new Set<string>();
 const settleTries = new Map<string, number>();
-/** Runs abiertos por una vista (`useRun`), con la cantidad de vistas que los usan. */
+/** Runs opened by a view (`useRun`), with the number of views using them. */
 const wanted = new Map<string, number>();
 
 function emit(next: Partial<RunsSnapshot>) {
@@ -91,7 +91,7 @@ function needsDetail(run: RunLight, live: RunSummary | null, historyIds: Set<str
   return historyIds.has(run.id) || wanted.has(run.id);
 }
 
-/** Deja en `map` solo las claves de `keep`. */
+/** Keeps only the keys of `keep` in `map`. */
 function prune<K>(set: { keys(): Iterable<K>; delete(k: K): unknown }, keep: Set<K>) {
   for (const k of [...set.keys()]) if (!keep.has(k)) set.delete(k);
 }
@@ -102,7 +102,7 @@ async function pollOnce() {
     listRunsLight(null),
     latestRunsByTask(null),
     listRuns(),
-    // Solo "no existe" se guarda como `null`; un error pasajero conserva lo anterior.
+    // Only "doesn't exist" is stored as `null`; a transient error keeps the previous value.
     Promise.all(
       wantedIds.map((id) =>
         getRun(id).then(
@@ -135,7 +135,7 @@ async function pollOnce() {
 
   const runs = candidates(snapshot);
   const live = snapshot.live;
-  // Lo que ya no está en ninguna lista no se vuelve a mirar: se olvida su estado.
+  // Whatever is no longer in any list isn't looked at again: its state is forgotten.
   const present = new Set(runs.map((r) => r.id));
   prune(settled, present);
   prune(settleTries, present);
@@ -159,14 +159,14 @@ async function pollOnce() {
       try {
         const d = await getRunDetail(r.sessionId!, r.cwd);
         if (r.status !== "launched") {
-          // Al terminar, el resumen final puede tardar en aparecer: se reintenta un par de veces.
+          // After finishing, the final summary may take a while to appear: retry a couple of times.
           const n = (settleTries.get(r.id) ?? 0) + 1;
           settleTries.set(r.id, n);
           if (d === null || d.source === "final" || n >= SETTLE_TRIES) settled.add(r.id);
         }
         return [r.id, d] as const;
       } catch {
-        return null; // se reintenta en la próxima vuelta
+        return null; // retried on the next pass
       }
     }),
   );
@@ -174,7 +174,7 @@ async function pollOnce() {
   if (updates.length) emit({ details: { ...snapshot.details, ...Object.fromEntries(updates) } });
 }
 
-/** Todos los runs conocidos, sin repetir: la lista, los últimos por tarea y los abiertos. */
+/** Every known run, without duplicates: the list, the latest per task and the opened ones. */
 function candidates(s: RunsSnapshot): RunLight[] {
   const seen = new Set(s.runs.map((r) => r.id));
   const out: RunLight[] = [...s.runs];
@@ -186,7 +186,7 @@ function candidates(s: RunsSnapshot): RunLight[] {
   return out;
 }
 
-/** Vuelve a leer todo ya (sin solapar: si hay una vuelta en curso, se repite al terminar). */
+/** Re-reads everything now (without overlapping: if a pass is in progress, it repeats when done). */
 export function refreshRuns(): Promise<void> {
   if (inFlight) {
     again = true;
@@ -214,7 +214,7 @@ function loop() {
     if (listeners.size) timer = setTimeout(loop, POLL_MS);
     else looping = false;
   };
-  // Ventana oculta: no se consulta; al volver, `visibilitychange` relee al instante.
+  // Hidden window: no querying; on return, `visibilitychange` re-reads immediately.
   if (typeof document !== "undefined" && document.hidden) next();
   else void refreshRuns().finally(next);
 }
@@ -227,8 +227,8 @@ if (typeof document !== "undefined") {
 
 function subscribe(listener: () => void) {
   listeners.add(listener);
-  // Un solo bucle: si el último suscriptor se fue con una vuelta en curso y llega otro
-  // antes de que termine, el mismo bucle sigue (no se arranca un segundo).
+  // A single loop: if the last subscriber left with a pass in progress and another one arrives
+  // before it finishes, the same loop continues (a second one isn't started).
   if (!looping) {
     looping = true;
     loop();
@@ -245,12 +245,12 @@ function subscribe(listener: () => void) {
 
 const getSnapshot = () => snapshot;
 
-/** Snapshot crudo del store (se re-renderiza en cada vuelta del polling). */
+/** Raw store snapshot (re-renders on every polling pass). */
 export function useRunsSnapshot(): RunsSnapshot {
   return useSyncExternalStore(subscribe, getSnapshot);
 }
 
-/** Proyecto de un run: por su tarea o, si no tiene, por su repo. */
+/** A run's project: through its task or, if it has none, through its repo. */
 export function projectIdOf(run: RunLight, tasks: Map<string, Task>, repos: Map<string, Repo>): string | null {
   const t = run.taskId ? tasks.get(run.taskId) : undefined;
   if (t) return t.projectId;
@@ -259,19 +259,19 @@ export function projectIdOf(run: RunLight, tasks: Map<string, Task>, repos: Map<
 }
 
 export interface RunsFilter {
-  /** `null`/ausente: todos los proyectos. */
+  /** `null`/absent: all projects. */
   projectId?: string | null;
   taskId?: string | null;
 }
 
 export interface RunsState {
-  /** Runs filtrados, más recientes primero. */
+  /** Filtered runs, most recent first. */
   views: RunView[];
-  /** Todos los runs (sin filtrar), por id. */
+  /** Every run (unfiltered), by id. */
   byId: Map<string, RunView>;
-  /** Run más reciente de cada tarea, de cualquier tipo (sin filtrar ni límite de historial). */
+  /** Most recent run of each task, of any kind (unfiltered and with no history limit). */
   latestByTask: Map<string, RunView>;
-  /** Cola global (sin filtrar), en orden de salida. */
+  /** Global queue (unfiltered), in launch order. */
   queue: RunView[];
   projects: Map<string, Project>;
   repos: Map<string, Repo>;
@@ -292,7 +292,7 @@ interface Derived {
   queue: RunView[];
 }
 
-// Derivado una vez por snapshot, compartido por todos los suscriptores.
+// Derived once per snapshot, shared by every subscriber.
 let derivedFor: RunsSnapshot | null = null;
 let derived: Derived | null = null;
 
@@ -315,7 +315,7 @@ function derive(s: RunsSnapshot): Derived {
     const all = s.runs.map((r) => byId.get(r.id)!);
     const latestByTask = new Map<string, RunView>();
     for (const r of s.latest) if (r.taskId) latestByTask.set(r.taskId, byId.get(r.id)!);
-    // Sin respuesta de `latest_runs_by_task` todavía: lo que haya en la lista.
+    // No response from `latest_runs_by_task` yet: whatever is in the list.
     if (!s.latest.length) {
       for (const v of all) if (v.run.taskId && !latestByTask.has(v.run.taskId)) latestByTask.set(v.run.taskId, v);
     }
@@ -326,7 +326,7 @@ function derive(s: RunsSnapshot): Derived {
   return derived;
 }
 
-/** Mapa por id de una lista del store, cacheado por identidad (una vez por respuesta). */
+/** By-id map of a store list, cached by identity (once per response). */
 const mapCache = new WeakMap<object, Map<string, unknown>>();
 const EMPTY_LIST: never[] = [];
 function byIdOf<T extends { id: string }>(list: T[] | undefined): Map<string, T> {
@@ -340,8 +340,8 @@ function byIdOf<T extends { id: string }>(list: T[] | undefined): Map<string, T>
 }
 
 /**
- * Runs con su estado derivado. Todas las vistas comparten el mismo polling, así que se
- * puede llamar desde tantos componentes como haga falta.
+ * Runs with their derived state. Every view shares the same polling, so it can be
+ * called from as many components as needed.
  */
 export function useRuns(filter: RunsFilter = {}): RunsState {
   const s = useRunsSnapshot();
@@ -378,7 +378,7 @@ export function useRuns(filter: RunsFilter = {}): RunsState {
   };
 }
 
-/** Lista cruda de runs livianos (más recientes primero, hasta 500) con el contrato `Loadable`. */
+/** Raw list of light runs (most recent first, up to 500) with the `Loadable` contract. */
 export function useAllRuns(): Loadable<RunLight[]> {
   const s = useRunsSnapshot();
   return useMemo(
@@ -387,13 +387,13 @@ export function useAllRuns(): Loadable<RunLight[]> {
   );
 }
 
-/** Último run de cada tarea (cualquier tipo), sin límite de historial: para badges. */
+/** Latest run of each task (any kind), with no history limit: for badges. */
 export function useLatestRunByTask(): Map<string, RunLight> {
   const latest = useRunsSnapshot().latest;
   return useMemo(() => new Map(latest.flatMap((r) => (r.taskId ? [[r.taskId, r] as const] : []))), [latest]);
 }
 
-/** Runs de una tarea (más recientes primero), sin el tope de la lista global. */
+/** A task's runs (most recent first), without the global list's cap. */
 export function useTaskRuns(taskId: string | null): Loadable<RunLight[]> {
   return usePolled<RunLight[]>(
     taskId ? `runs:task:${taskId}` : null,
@@ -406,12 +406,12 @@ export function useTaskRuns(taskId: string | null): Loadable<RunLight[]> {
 export const isRunActive = (r: RunLight) => r.status === "queued" || r.status === "launching" || r.status === "launched";
 
 /**
- * Un run por id, aunque sea más viejo que la lista: se pide completo (`get_run`, con el
- * prompt) mientras la vista esté montada, y con su detalle de workflow.
+ * A run by id, even if it's older than the list: fetched in full (`get_run`, with the
+ * prompt) while the view is mounted, along with its workflow detail.
  */
 export function useRun(runId: string | null): {
   view: RunView | undefined;
-  /** Completo, con `prompt`; `undefined` mientras se pide, `null` si no existe. */
+  /** Full, with `prompt`; `undefined` while fetching, `null` if it doesn't exist. */
   full: Run | null | undefined;
   state: RunsState;
 } {
@@ -441,24 +441,24 @@ export function useRun(runId: string | null): {
 }
 
 export interface QueueSummary {
-  /** Slots ocupados de la concurrencia global (mismo criterio que la cola del backend). */
+  /** Occupied slots of the global concurrency (same criteria as the backend queue). */
   running: number;
-  /** Concurrencia global (Settings). */
+  /** Global concurrency (Settings). */
   capacity: number;
-  /** Tareas Blocked, runs migrados sin confirmar y sesiones esperando permiso/input (sin duplicar). */
+  /** Blocked tasks, unconfirmed migrated runs and sessions waiting for permission/input (no duplicates). */
   needYou: number;
-  /** Runs listos para salir. */
+  /** Runs ready to go. */
   queued: number;
-  /** Error de la última pasada de la cola, o `null`. */
+  /** Error from the queue's last pass, or `null`. */
   pumpError: string | null;
-  /** "2/4 running · 1 need you · 3 queued" (partes vacías omitidas). */
+  /** "2/4 running · 1 need you · 3 queued" (empty parts omitted). */
   label: string;
   loaded: boolean;
 }
 
 /**
- * Resumen de trabajo (`work_summary`): fuente única de la píldora, la paleta y el badge del
- * Dock. `null`: global (incluye sesiones de Claude Code ajenas a la app).
+ * Work summary (`work_summary`): single source for the pill, the palette and the Dock
+ * badge. `null`: global (includes Claude Code sessions outside the app).
  */
 export function useQueueSummary(projectId: string | null = null): QueueSummary {
   const q = usePolled<WorkSummary>(`work-summary:${projectId ?? "*"}`, () => workSummary(projectId), ["runs", "tasks"], POLL.live);

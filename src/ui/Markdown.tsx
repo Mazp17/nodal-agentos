@@ -6,20 +6,20 @@ import { EXTERNAL, ExternalLink } from "./ExternalLink";
 import "./markdown.css";
 
 /*
- * Markdown de terceros (Linear) renderizado de forma segura:
- * - Sin rehype-raw y con `skipHtml`: el HTML crudo se descarta, nunca llega al DOM.
- * - `urlTransform` por defecto de react-markdown: neutraliza `javascript:`, `data:`, etc.
- * - Los links no llevan `href` real: así ni el menú contextual nativo de WebKit
- *   ("Open Link"), ni arrastrar, ni el click medio pueden navegar el webview. Se abren
- *   en el navegador del sistema con plugin-opener, y sólo si son http(s) o mailto;
- *   el resto (relativos, anclas, footnotes) se muestra como texto.
- * - Las imágenes no se cargan (la CSP las bloquearía y además filtrarían la IP a
- *   hosts de terceros): se muestran como link externo.
+ * Third-party Markdown (Linear) rendered safely:
+ * - No rehype-raw and `skipHtml` on: raw HTML is dropped and never reaches the DOM.
+ * - react-markdown's default `urlTransform`: neutralizes `javascript:`, `data:`, etc.
+ * - Links carry no real `href`: that way neither WebKit's native context menu
+ *   ("Open Link"), nor dragging, nor middle-click can navigate the webview. They open
+ *   in the system browser via plugin-opener, and only if they're http(s) or mailto;
+ *   the rest (relative, anchors, footnotes) shows as text.
+ * - Images aren't loaded (the CSP would block them and they'd leak the IP to
+ *   third-party hosts): they show as an external link.
  */
 
 const components: Components = {
   a: ({ href, children, node }) => {
-    // `[![alt](img)](url)`: la imagen ya se muestra como link; anidar <a> abriría dos URLs.
+    // `[![alt](img)](url)`: the image already shows as a link; nesting <a> would open two URLs.
     const img = node?.children.find((c) => c.type === "element" && c.tagName === "img");
     if (img && img.type === "element") {
       const alt = typeof img.properties.alt === "string" ? img.properties.alt : "";

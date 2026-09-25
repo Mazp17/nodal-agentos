@@ -1,4 +1,4 @@
-/* Pantalla "Diff" (hoja lateral ancha). */
+/* "Diff" screen (wide side sheet). */
 
 .diff-panel { width: min(820px, 92%); background: var(--surface-sheet); }
 /* Full height and above the task panel (.tp, fixed at z 21), which can be open underneath. */

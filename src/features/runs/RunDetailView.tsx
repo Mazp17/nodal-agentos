@@ -34,9 +34,9 @@ export interface RunDetailViewProps {
   runId: string;
   onBack: () => void;
   onOpenTask: (taskId: string) => void;
-  /** Para saltar al revisor de este run (o al run que revisa). */
+  /** To jump to this run's reviewer (or to the run it reviews). */
   onOpenRun?: (runId: string) => void;
-  /** Abre el diff en el drawer que monta el shell. */
+  /** Opens the diff in the drawer mounted by the shell. */
   onOpenDiff: (runId: string) => void;
 }
 
@@ -49,7 +49,7 @@ function lastAction(a: AgentInfo): string {
   return a.lastToolSummary ? `${a.lastToolName} ${a.lastToolSummary}` : a.lastToolName;
 }
 
-/** Pantalla "Run detail": cabecera, avisos, fases y subagentes (o sesión), y resultado. */
+/** "Run detail" screen: header, notices, phases and subagents (or session), and result. */
 export function RunDetailView({ runId, onBack, onOpenTask, onOpenRun, onOpenDiff }: RunDetailViewProps) {
   const { view, full, state } = useRun(runId);
   const actions = useRunActions();
@@ -79,7 +79,7 @@ export function RunDetailView({ runId, onBack, onOpenTask, onOpenRun, onOpenDiff
   const branch = run.branch ?? detail?.result?.branch ?? task?.worktree?.branch ?? null;
   const live = view.phase === "running" || view.phase === "waiting" || view.phase === "starting";
   const ended = view.tab === "finished" || view.tab === "failed";
-  // `error` también guarda notas ("Stopped before finishing."...): banner solo si falló.
+  // `error` also stores notes ("Stopped before finishing."...): banner only if it failed.
   const genericError = view.phase === "failed" && run.error && !classifyLaunchError(run.error, run.cwd) && !blocker ? run.error : null;
   const parent = run.parentRunId ? state.byId.get(run.parentRunId) : undefined;
 
@@ -172,7 +172,7 @@ export function RunDetailView({ runId, onBack, onOpenTask, onOpenRun, onOpenDiff
       </div>
 
       {view.phase === "waiting" && (
-        // Claude Code no expone forma de responder desde fuera de la sesión: se responde con attach.
+        // Claude Code exposes no way to respond from outside the session: respond via attach.
         <div className="rd-alert rd-alert-amber" role="status">
           <span className="dot dot-lg pulse" aria-hidden />
           <div className="rd-alert-body">
@@ -408,7 +408,7 @@ function SubagentsPanel({
   const waiting = view.phase === "waiting";
   const stopped = view.tab === "failed";
 
-  // Subagentes por fase (en el orden del workflow); los que no tienen fase van al final.
+  // Subagents by phase (in workflow order); those without a phase go last.
   const groups: { title: string; num: number | null; agents: [AgentInfo, number][] }[] = phases.map((ph, i) => ({
     title: ph.title,
     num: i + 1,
@@ -527,14 +527,14 @@ function SubagentsPanel({
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
 
 /**
- * Runs de agente, de Claude o del revisor: no hay fases ni subagentes que leer. Se muestra el
- * reporte final, el prompt que armó Nodal y el transcript de la sesión principal
- * (`get_run_transcript`), que se repite mientras la sesión sigue viva.
+ * Agent, Claude or reviewer runs: there are no phases or subagents to read. Shows the
+ * final report, the prompt Nodal built and the main session's transcript
+ * (`get_run_transcript`), which repeats while the session is still alive.
  */
 function SessionPanel({ view, full, live }: { view: RunView; full: Run | null | undefined; live: boolean }) {
   const run = view.run;
   const [limit, setLimit] = useState(DEFAULT_LIMIT);
-  // Solo "running"/"waiting" cambian el archivo; "starting" todavía no tiene sesión.
+  // Only "running"/"waiting" change the file; "starting" has no session yet.
   const polling = view.phase === "running" || view.phase === "waiting";
   const load = useRunTranscript(run.sessionId ? run.id : null, polling, limit);
   const t = load.status === "ok" ? load.transcript : null;
@@ -661,7 +661,7 @@ function VerdictBody({ verdict }: { verdict: Verdict }) {
   );
 }
 
-/** JSON con lo que Nodal leyó del run (o el `result` del workflow). */
+/** JSON with what Nodal read from the run (or the workflow's `result`). */
 function rawResult(run: RunLight, workflowResult: RunResult | null | undefined): string | null {
   if (workflowResult?.raw) return workflowResult.raw;
   const out: Record<string, unknown> = {};
@@ -773,7 +773,7 @@ function ResultCard({
   );
 }
 
-/** Veredicto del revisor de Nodal sobre un run de trabajo. */
+/** Nodal reviewer's verdict on a work run. */
 function VerdictCard({ review, state, onOpenRun }: { review: RunLight; state: RunsState; onOpenRun?: (id: string) => void }) {
   const rv = state.byId.get(review.id);
   return (

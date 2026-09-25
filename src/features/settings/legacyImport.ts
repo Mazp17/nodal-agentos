@@ -1,5 +1,5 @@
-// "Import data from a previous version…": carpeta elegida con el selector nativo, copia a
-// `legacy-backup-<ts>/` e importación idempotente (`import_legacy_data`).
+// "Import data from a previous version…": folder picked with the native picker, copied to
+// `legacy-backup-<ts>/`, and imported idempotently (`import_legacy_data`).
 
 import { useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";

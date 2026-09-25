@@ -1,5 +1,5 @@
-/* Vista Runs: tabs + tabla y columna de cola global. También los helpers compartidos
- * (RunBadge, PhaseSegments, swatch de proyecto). */
+/* Runs view: tabs + table and the global queue column. Also the shared helpers
+ * (RunBadge, PhaseSegments, project swatch). */
 
 .proj-swatch { width: 7px; height: 7px; flex: none; border-radius: 2px; }
 
@@ -81,7 +81,7 @@
 .runs-result .dot { flex: none; }
 .runs-empty { padding: 40px var(--sp-7); text-align: center; font-size: var(--fs-base); color: var(--text-dim); }
 
-/* ---- Cola ---- */
+/* ---- Queue ---- */
 .queue {
   border-left: 1px solid var(--border);
   padding: var(--sp-6);

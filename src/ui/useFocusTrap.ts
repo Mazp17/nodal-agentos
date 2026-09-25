@@ -3,13 +3,13 @@ import { useEffect, useLayoutEffect, useRef } from "react";
 export const FOCUSABLE =
   'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
-/** Diálogos montados, el último arriba: sólo ése atiende teclado. */
+/** Mounted dialogs, the latest on top: only that one handles the keyboard. */
 const stack: HTMLElement[] = [];
 
 /**
- * Foco atrapado para diálogos: al montar enfoca `[data-autofocus]` (o el primer
- * elemento enfocable), Tab/Shift+Tab ciclan dentro, Escape llama a `onEscape`, y al
- * desmontar el foco vuelve a donde estaba. El root necesita `tabIndex={-1}`.
+ * Focus trap for dialogs: on mount it focuses `[data-autofocus]` (or the first
+ * focusable element), Tab/Shift+Tab cycle inside, Escape calls `onEscape`, and on
+ * unmount focus returns to where it was. The root needs `tabIndex={-1}`.
  */
 export function useFocusTrap<T extends HTMLElement>(onEscape?: () => void) {
   const ref = useRef<T>(null);
@@ -30,8 +30,8 @@ export function useFocusTrap<T extends HTMLElement>(onEscape?: () => void) {
     }
 
     stack.push(root);
-    // En `document` (no en el root): si el elemento enfocado se desmonta, el foco cae
-    // en el body y el diálogo igual tiene que responder a Escape y Tab.
+    // On `document` (not the root): if the focused element unmounts, focus falls
+    // to the body and the dialog still has to respond to Escape and Tab.
     const onKey = (e: KeyboardEvent) => {
       if (stack[stack.length - 1] !== root) return;
       if (e.key === "Escape" && escRef.current) {
@@ -64,7 +64,7 @@ export function useFocusTrap<T extends HTMLElement>(onEscape?: () => void) {
     return () => {
       document.removeEventListener("keydown", onKey);
       stack.splice(stack.indexOf(root), 1);
-      // Solo se devuelve el foco si sigue dentro del diálogo (o se perdió en el body).
+      // Focus is only returned if it's still inside the dialog (or was lost to the body).
       if (previous?.isConnected && (root.contains(document.activeElement) || document.activeElement === document.body)) {
         previous.focus();
       }

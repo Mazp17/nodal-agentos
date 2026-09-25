@@ -11,7 +11,7 @@ import { useToast } from "../../ui/Toasts";
 import { InlineConfirm, KeyForm, ProviderMark } from "./parts";
 import { PROVIDERS, plural } from "./meta";
 
-/** Settings → Integrations: key de Linear y proveedores por venir. */
+/** Settings → Integrations: Linear key and upcoming providers. */
 export function IntegrationsSettings() {
   return (
     <section className="pv-page" aria-labelledby="pv-int-title">

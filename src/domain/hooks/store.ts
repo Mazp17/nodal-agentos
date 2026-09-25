@@ -1,12 +1,12 @@
-// Capa de datos compartida. Un store por recurso (projects, repos, tasks, settings; los runs
-// viven en `runs.ts` con el mismo contrato) con UN timer por recurso: se lee la lista global y
-// cada vista filtra lo suyo, así board, panel, sidebar y paleta comparten una sola consulta.
-// El polling corre mientras haya alguien suscripto y se pausa con la ventana oculta; tras una
-// mutación, `invalidate(...)` relee al instante (y devuelve la promesa de esa relectura).
-// Las consultas por clave sin polling (relaciones, plan, ejecutores) usan el mismo motor con
-// intervalo 0 y se releen al invalidar su recurso.
-// El backend avisa con `nodal://changed` (ver `onChanged`): cada aviso invalida el recurso
-// que corresponde, así que el polling queda solo de respaldo (más lento).
+// Shared data layer. One store per resource (projects, repos, tasks, settings; runs
+// live in `runs.ts` with the same contract) with ONE timer per resource: the global list is read
+// and each view filters its own, so board, panel, sidebar and palette share a single query.
+// Polling runs while someone is subscribed and pauses while the window is hidden; after a
+// mutation, `invalidate(...)` re-reads immediately (and returns that re-read's promise).
+// Keyed queries without polling (relations, plan, executors) use the same engine with
+// interval 0 and are re-read when their resource is invalidated.
+// The backend notifies with `nodal://changed` (see `onChanged`): each notice invalidates the
+// matching resource, so polling is only a (slower) fallback.
 
 import { useCallback, useLayoutEffect, useMemo, useRef, useSyncExternalStore } from "react";
 import {
@@ -28,8 +28,8 @@ import type { Project, Repo, Settings, Task, TaskRelation } from "../types";
 export type Resource = "projects" | "repos" | "tasks" | "runs" | "settings" | "sources";
 
 /**
- * Intervalos de polling (ms), de respaldo: los cambios llegan por `nodal://changed`. `live`
- * es para lo que depende de sesiones de Claude Code (`claude agents`), que no avisan.
+ * Fallback polling intervals (ms): changes arrive through `nodal://changed`. `live`
+ * is for whatever depends on Claude Code sessions (`claude agents`), which don't notify.
  */
 export const POLL = { tasks: 20_000, live: 5000, slow: 60_000 } as const;
 
@@ -53,13 +53,13 @@ interface Entry {
   interval: number;
   listeners: Set<() => void>;
   timer: number | undefined;
-  /** Borrado diferido de la entrada sin suscriptores (se cancela si alguien vuelve). */
+  /** Deferred deletion of the entry with no subscribers (cancelled if someone comes back). */
   evict: number | undefined;
   seq: number;
   inflight: Promise<void> | null;
 }
 
-/** Tiempo que se conserva en caché una clave sin nadie montado. */
+/** How long a key with nobody mounted stays cached. */
 const EVICT_MS = 60_000;
 
 const store = new Map<string, Entry>();
@@ -92,7 +92,7 @@ function load(key: string): Promise<void> {
   return p;
 }
 
-/** Recursos con store propio (runs): se releen con su función al invalidar. */
+/** Resources with their own store (runs): re-read with their function on invalidation. */
 const externals = new Map<Resource, () => Promise<void>>();
 
 export function registerResource(resource: Resource, reload: () => Promise<void>) {
@@ -100,8 +100,8 @@ export function registerResource(resource: Resource, reload: () => Promise<void>
 }
 
 /**
- * Relee ya las claves de esos recursos. Las que no tienen a nadie montado se descartan de la
- * caché (al volver se cargan de cero en vez de mostrar datos viejos).
+ * Re-reads those resources' keys now. Those with nobody mounted are dropped from the
+ * cache (on return they load from scratch instead of showing stale data).
  */
 export function invalidate(...resources: Resource[]): Promise<void> {
   const jobs: Promise<void>[] = [];
@@ -120,11 +120,11 @@ export function invalidate(...resources: Resource[]): Promise<void> {
   return Promise.all(jobs).then(() => undefined);
 }
 
-/** Cambio optimista del valor en caché de `key` (la relectura posterior lo corrige). */
+/** Optimistic change to `key`'s cached value (the subsequent re-read corrects it). */
 export function setData<T>(key: string, update: (prev: T) => T) {
   const e = store.get(key);
   if (!e || !e.snap.hasValue) return;
-  // Descarta la respuesta de una lectura ya en curso (traería el valor anterior al cambio).
+  // Discards the response of a read already in flight (it would bring the pre-change value).
   e.seq++;
   e.snap = { ...e.snap, value: update(e.snap.value as T) };
   notify(e);
@@ -137,26 +137,26 @@ if (typeof document !== "undefined") {
   });
 }
 
-// ---------- Avisos del backend ----------
+// ---------- Backend notices ----------
 
-/** Qué recursos relee cada `kind` de `nodal://changed`. */
+/** Which resources each `nodal://changed` `kind` re-reads. */
 const CHANGED_RESOURCES: Record<ChangedKind, Resource[]> = {
   tasks: ["tasks"],
   runs: ["runs"],
   queue: ["runs"],
   sources: ["sources"],
-  // Repos y settings también avisan como `projects`.
+  // Repos and settings also notify as `projects`.
   projects: ["projects", "repos", "settings"],
 };
 
-/** Los avisos llegan por `kind` (runs, queue y tasks juntos): se agrupan en una sola relectura. */
+/** Notices arrive per `kind` (runs, queue and tasks together): they're batched into a single re-read. */
 const CHANGE_BATCH_MS = 50;
 let pendingChanges = new Set<Resource>();
 let changeTimer: number | undefined;
 
 function flushChanges() {
   changeTimer = undefined;
-  // Ventana oculta: se acumulan y se releen al volver.
+  // Hidden window: they accumulate and are re-read on return.
   if (document.hidden || !pendingChanges.size) return;
   const rs = [...pendingChanges];
   pendingChanges = new Set();
@@ -177,7 +177,7 @@ if (typeof document !== "undefined") {
 if (typeof window !== "undefined" && "__TAURI_INTERNALS__" in window) {
   const unlisten = onChanged((e) => onBackendChange(e.kind));
   unlisten.catch((err: unknown) => console.error("nodal://changed", err));
-  // En dev, HMR recarga el módulo: sin esto los listeners se acumulan.
+  // In dev, HMR reloads the module: without this the listeners pile up.
   import.meta.hot?.dispose(() => void unlisten.then((u) => u(), () => {}));
 }
 
@@ -201,9 +201,9 @@ function entry(key: string, fetcher: () => Promise<unknown>, resources: Resource
 }
 
 /**
- * Carga `fetcher` para `key` (compartido entre componentes), lo repite cada `intervalMs`
- * (0 = nunca) mientras haya alguien montado y cuando se invalida uno de `resources`.
- * La clave tiene que codificar los argumentos del fetcher.
+ * Loads `fetcher` for `key` (shared across components), repeats it every `intervalMs`
+ * (0 = never) while someone is mounted and whenever one of `resources` is invalidated.
+ * The key must encode the fetcher's arguments.
  */
 export function usePolled<T>(
   key: string | null,
@@ -260,21 +260,21 @@ export function usePolled<T>(
   };
 }
 
-/** Deriva un `Loadable` filtrado/transformado de otro sin volver a consultar. */
+/** Derives a filtered/transformed `Loadable` from another without querying again. */
 function useSelect<T, U>(src: Loadable<T>, pick: (v: T) => U, deps: unknown[]): Loadable<U> {
   const { data, error, loading, refresh } = src;
   const out = useMemo(() => (data === undefined ? undefined : pick(data)), [data, ...deps]);
   return useMemo(() => ({ data: out, error, loading, refresh }), [out, error, loading, refresh]);
 }
 
-// ---------- Recursos base (una clave y un timer cada uno) ----------
+// ---------- Base resources (one key and one timer each) ----------
 
 export const KEYS = { projects: "projects", repos: "repos", tasks: "tasks", settings: "settings" } as const;
 
 export const useProjectList = () =>
   usePolled<Project[]>(KEYS.projects, () => listProjects(false), ["projects"], POLL.slow);
 
-/** Todos los repos, ordenados por posición. */
+/** Every repo, sorted by position. */
 export const useRepoList = () =>
   usePolled<Repo[]>(
     KEYS.repos,
@@ -287,19 +287,19 @@ export const useTaskList = () => usePolled<Task[]>(KEYS.tasks, () => listTasks(n
 
 export const useSettings = () => usePolled<Settings>(KEYS.settings, getSettings, ["settings"], POLL.slow);
 
-// ---------- Selecciones ----------
+// ---------- Selections ----------
 
-/** `null`: repos de todos los proyectos. */
+/** `null`: repos of every project. */
 export function useRepos(projectId: string | null): Loadable<Repo[]> {
   return useSelect(useRepoList(), (rs) => (projectId ? rs.filter((r) => r.projectId === projectId) : rs), [projectId]);
 }
 
-/** `null`: tareas de todos los proyectos. */
+/** `null`: tasks of every project. */
 export function useTasks(projectId: string | null): Loadable<Task[]> {
   return useSelect(useTaskList(), (ts) => (projectId ? ts.filter((t) => t.projectId === projectId) : ts), [projectId]);
 }
 
-/** Una tarea de la lista compartida; error si la lista cargó y no está (borrada). */
+/** A task from the shared list; error if the list loaded and it isn't there (deleted). */
 export function useTask(taskId: string | null): Loadable<Task> {
   const all = useTaskList();
   const task = taskId && all.data ? all.data.find((t) => t.id === taskId) : undefined;
@@ -315,19 +315,19 @@ export function useTask(taskId: string | null): Loadable<Task> {
   );
 }
 
-// ---------- Por clave, sin polling ----------
+// ---------- Keyed, without polling ----------
 
 export const useTaskRelations = (taskId: string | null) =>
   usePolled<TaskRelation[]>(taskId ? `rels:${taskId}` : null, () => listTaskRelations(taskId as string), ["tasks"], 0);
 
-/** Se relee al invalidar tareas (o con `refresh` cuando cambia `updatedAt`). */
+/** Re-read when tasks are invalidated (or with `refresh` when `updatedAt` changes). */
 export const useTaskPlan = (taskId: string | null) =>
   usePolled<string>(taskId ? `plan:${taskId}` : null, () => readTaskPlan(taskId as string), ["tasks"], 0);
 
-/** Estado git del worktree de la tarea (ahead/unpushed/dirty); cambia mientras el agente trabaja. */
+/** Git status of the task's worktree (ahead/unpushed/dirty); changes while the agent works. */
 export const useWorktreeStatus = (taskId: string | null) =>
   usePolled<WorktreeStatus>(taskId ? `worktree:${taskId}` : null, () => worktreeStatus(taskId as string), ["tasks", "runs"], POLL.tasks);
 
-/** Catálogo de ejecutores; lee disco, así que no se repite (solo al invalidar). */
+/** Executor catalog; it reads disk, so it isn't repeated (only on invalidation). */
 export const useExecutors = (repoId: string | null) =>
   usePolled<ExecutorInfo[]>(`executors:${repoId ?? "*"}`, () => listExecutors(repoId), ["repos"], 0);

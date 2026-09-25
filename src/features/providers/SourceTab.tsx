@@ -13,15 +13,15 @@ import { formatAgo, providerName, unmappedStateName } from "./meta";
 
 export interface SourceTabProps {
   task: Task;
-  /** La tarea cambió (sync o unlink): el padre reemplaza la suya. */
+  /** The task changed (sync or unlink): the parent replaces its copy. */
   onTaskChange?: (task: Task) => void;
-  /** Abre otra tarea de Nodal (sub-issues y relaciones ya importadas). */
+  /** Opens another Nodal task (already-imported sub-issues and relations). */
   onOpenTask?: (taskId: string) => void;
-  /** "Review mapping": lleva a Project settings → Sources. */
+  /** "Review mapping": goes to Project settings → Sources. */
   onReviewMapping?: () => void;
 }
 
-/** Pestaña Source del detalle de tarea: vínculo con el proveedor y detalle de la issue. */
+/** Source tab of the task detail: link to the provider and issue detail. */
 export function SourceTab({ task, onTaskChange, onOpenTask, onReviewMapping }: SourceTabProps) {
   const src = task.source;
   if (!src) {
@@ -59,9 +59,9 @@ function LinkedSource({
   const [confirmUnlink, setConfirmUnlink] = useState(false);
   const [unlinking, setUnlinking] = useState(false);
 
-  // El backend lo marca (`unmapped`); el nombre del estado nuevo solo viene en `syncError`.
+  // The backend flags it (`unmapped`); the new state's name only comes in `syncError`.
   const unmappedByPull = src.unmapped;
-  // Estado registrado que dejó de estar en el mapeo confirmado (p. ej. se editó el mapeo).
+  // Recorded state that is no longer in the confirmed mapping (e.g. the mapping was edited).
   const unmappedByMap =
     !!link && link.stateMap.confirmedAt !== null && !!src.externalState && !(src.externalState.id in link.stateMap.pull);
   const unmapped = unmappedByPull || unmappedByMap;
@@ -232,7 +232,7 @@ function LinearDetail({
   );
 }
 
-/** externalId → id de tarea, para navegar a sub-issues y relaciones ya importadas. */
+/** externalId → task id, to navigate to already-imported sub-issues and relations. */
 function useTasksByExternalId(projectId: string | null): Map<string, string> {
   const { data } = useTasks(projectId);
   return useMemo(() => {

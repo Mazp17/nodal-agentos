@@ -1,7 +1,7 @@
-/* Proveedores: Integrations, Sources (con mapeo de estados), Import y pestaña Source.
- * Solo variables de tokens; nada de literales de color. */
+/* Providers: Integrations, Sources (with state mapping), Import and the Source tab.
+ * Token variables only; no color literals. */
 
-/* ---- Página y tarjetas ---- */
+/* ---- Page and cards ---- */
 .pv-page { display: flex; flex-direction: column; gap: var(--sp-5); max-width: 760px; }
 .pv-page-head { display: flex; flex-direction: column; gap: var(--sp-1); }
 .pv-page-head-row { flex-direction: row; align-items: flex-end; justify-content: space-between; gap: var(--sp-7); }
@@ -100,7 +100,7 @@
 }
 .pv-confirm-text { flex: 1; min-width: 0; font-size: var(--fs-md); color: var(--text-2); line-height: var(--lh-snug); }
 
-/* ---- Campos ---- */
+/* ---- Fields ---- */
 .pv-field { display: flex; align-items: center; gap: var(--sp-5); min-width: 0; }
 .pv-field.top { align-items: flex-start; }
 .pv-field.top .pv-field-label { padding-top: var(--sp-1); }
@@ -150,7 +150,7 @@
 }
 .pv-switch.on .pv-switch-knob { left: 14px; }
 
-/* Foco visible (WCAG 2.4.11): 2px en todo lo interactivo propio. */
+/* Visible focus (WCAG 2.4.11): 2px on all of our own interactive elements. */
 .pv-switch:focus-visible,
 .pv-seg-opt:focus-visible,
 .pv-src-id:focus-visible,
@@ -177,7 +177,7 @@
 .pv-step-title { margin: 0; font-size: var(--fs-2xl); font-weight: var(--fw-semibold); }
 .pv-step-foot { display: flex; align-items: center; gap: var(--sp-3); }
 
-/* ---- Reglas ---- */
+/* ---- Rules ---- */
 .pv-rules { display: flex; flex-direction: column; gap: var(--sp-2); align-items: stretch; width: 100%; }
 .pv-rule { display: flex; align-items: center; gap: var(--sp-3); font-size: var(--fs-md); flex-wrap: wrap; }
 .pv-rule-label { color: var(--text-3); font-size: var(--fs-sm); padding: var(--sp-0) var(--sp-3); border-radius: var(--r-md); background: var(--fill-3); }
@@ -185,7 +185,7 @@
 .pv-rule-input { height: var(--h-xl); width: 160px; }
 .pv-rule-add { align-self: flex-start; padding-left: 0; }
 
-/* ---- Mapeo de estados ---- */
+/* ---- State mapping ---- */
 .pv-map { display: flex; flex-direction: column; gap: var(--sp-5); width: 100%; }
 .pv-map-table { border-radius: var(--r-card); border: 1px solid var(--border); overflow: hidden; }
 .pv-map-caption { display: flex; align-items: baseline; gap: var(--sp-3); padding: var(--sp-3) var(--sp-4) 0; }
@@ -210,7 +210,7 @@
 .pv-ring { width: 10px; height: 10px; border-radius: 50%; flex: none; }
 .pv-ring-dashed { border-style: dashed; }
 
-/* ---- Diálogo de importación ---- */
+/* ---- Import dialog ---- */
 .pv-scrim { position: fixed; inset: 0; z-index: 55; background: var(--scrim-strong); }
 .pv-dialog {
   position: fixed;
@@ -259,7 +259,7 @@
 .pv-imp-repo .pv-select { min-width: 0; flex: 1; }
 .pv-imp-msg { margin: var(--sp-3); }
 
-/* ---- Pestaña Source ---- */
+/* ---- Source tab ---- */
 .pv-src { display: flex; flex-direction: column; gap: var(--sp-5); }
 .pv-src-head { display: flex; align-items: center; gap: var(--sp-4); flex-wrap: wrap; font-size: var(--fs-md); }
 .pv-src-id { font-size: var(--fs-sm); color: var(--text-2); }

@@ -1,9 +1,9 @@
-/* Confirmación modal (useConfirm): por encima de drawers y diálogos, debajo de los toasts. */
+/* Modal confirmation (useConfirm): above drawers and dialogs, below the toasts. */
 .confirm-scrim { position: fixed; inset: 0; z-index: 80; background: var(--scrim-strong); }
 .confirm {
   position: fixed;
   top: 96px;
-  /* Centrado sin transform: la animación `drop` lo pisaría. */
+  /* Centered without transform: the `drop` animation would override it. */
   left: 0;
   right: 0;
   margin: 0 auto;

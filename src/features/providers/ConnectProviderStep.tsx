@@ -9,8 +9,8 @@ export interface ConnectedProvider {
   provider: string;
   status: ProviderStatus;
   /**
-   * Team o proyecto elegido para la fuente del proyecto nuevo; `null` = conectar la cuenta
-   * sin fuente. Quien crea el proyecto llama a `createSourceLink` con esto.
+   * Team or project chosen for the new project's source; `null` = connect the account
+   * without a source. Whoever creates the project calls `createSourceLink` with this.
    */
   scope: ScopeRef | null;
 }
@@ -19,13 +19,13 @@ export interface ConnectProviderStepProps {
   onConnected: (result: ConnectedProvider) => void;
   onSkip: () => void;
   onBack?: () => void;
-  /** Texto del botón final (el onboarding termina acá: "Create project"). */
+  /** Label of the final button (onboarding ends here: "Create project"). */
   submitLabel?: string;
-  /** Deshabilita los botones mientras el que llama crea el proyecto. */
+  /** Disables the buttons while the caller creates the project. */
   busy?: boolean;
 }
 
-/** Paso 3 del onboarding: conectar un task manager (opcional). */
+/** Onboarding step 3: connect a task manager (optional). */
 export function ConnectProviderStep({ onConnected, onSkip, onBack, submitLabel = "Continue", busy }: ConnectProviderStepProps) {
   const st = useProviderStatus("linear");
   const connected = st.connection === "connected" && st.status !== null;

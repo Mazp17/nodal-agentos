@@ -31,7 +31,7 @@ interface Props {
   section: ProjectSection;
   onSection: (s: ProjectSection) => void;
   onDeleted: () => void;
-  /** Sources sin key de Linear: ir a Settings → Integrations. */
+  /** Sources without a Linear key: go to Settings → Integrations. */
   onOpenIntegrations?: () => void;
 }
 
@@ -502,20 +502,20 @@ function RepoCard({
   );
 }
 
-// ---------- Proyecto de Linear del repo ----------
+// ---------- Repo's Linear project ----------
 
-/** Fuentes de Linear del proyecto y sus proyectos elegibles, cargados una vez para todas las cards. */
+/** The project's Linear sources and their eligible projects, loaded once for all cards. */
 interface LinearCtx {
   links: Loaded<SourceLink[]>;
   linearLinks: SourceLink[];
   projects: Loaded<RuleProject[]>;
-  /** Sin key válida no se piden los proyectos. */
+  /** Without a valid key, projects aren't fetched. */
   connection: ProviderConnection;
   repos: Repo[];
   onOpenSources: () => void;
 }
 
-/** Regla de proyecto → repo (Linear project del repo). Se guarda en el link del que sale el proyecto. */
+/** Project → repo rule (the repo's Linear project). Saved on the link the project comes from. */
 function LinearProjectRow({ repo, ctx }: { repo: Repo; ctx: LinearCtx }) {
   const toast = useToast();
   const saver = useRuleBackfill();
@@ -526,21 +526,21 @@ function LinearProjectRow({ repo, ctx }: { repo: Repo; ctx: LinearCtx }) {
     link.repoRules.filter((r) => r.kind === "project" && r.repoId === repo.id).map((rule) => ({ rule, link })),
   );
   const current = owned[0] ?? null;
-  /** Proyecto → repo que ya lo tiene (otro repo): no se ofrece. */
+  /** Project → repo that already has it (another repo): not offered. */
   const takenBy = new Map<string, string>();
   for (const l of linearLinks)
     for (const r of l.repoRules)
       if (r.kind === "project" && r.repoId !== repo.id)
         takenBy.set(r.value, ctx.repos.find((x) => x.id === r.repoId)?.name ?? "another repo");
 
-  /** Proyectos que ya van a este repo (fuera del actual): no se ofrecen de nuevo. */
+  /** Projects already routed to this repo (other than the current one): not offered again. */
   const ownedIds = new Set(owned.slice(1).map((o) => o.rule.value));
   const without = (rule: RepoRule) => (rs: RepoRule[]) => rs.filter((r) => r.id !== rule.id);
 
   const pick = async (projectId: string) => {
     if (projectId === (current?.rule.value ?? "")) return;
     if (!projectId) {
-      // Con varias reglas se gestionan en Sources ("None" está deshabilitado).
+      // With several rules they're managed in Sources ("None" is disabled).
       if (!current || owned.length > 1) return;
       const ok = await saver.save({ link: current.link, update: without(current.rule) });
       if (ok) toast("Linear project removed", `New issues in ${current.rule.name} no longer go to ${repo.name}.`, "ok");
@@ -551,8 +551,8 @@ function LinearProjectRow({ repo, ctx }: { repo: Repo; ctx: LinearCtx }) {
     if (!choice || !link) return;
     const rule = newProjectRule(choice.project, repo.id);
     const add = (rs: RepoRule[]) => [...rs, rule];
-    // Cambio entre links: primero se saca la vieja y después se agrega la nueva; si lo segundo
-    // falla, `save` restaura la vieja.
+    // Switching links: the old one is removed first and then the new one is added; if the second
+    // step fails, `save` restores the old one.
     const edits: RuleEdit[] = !current
       ? [{ link, update: add }]
       : current.link.id === link.id

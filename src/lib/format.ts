@@ -1,4 +1,4 @@
-/** 1.2k · 108k · 1.24M (mismo criterio que el diseño). */
+/** 1.2k · 108k · 1.24M (same rule as the design). */
 export function formatTokens(n: number | null | undefined): string {
   if (n == null) return "—";
   if (n >= 1e6) return `${(n / 1e6).toFixed(2)}M`;
@@ -6,7 +6,7 @@ export function formatTokens(n: number | null | undefined): string {
   return String(n);
 }
 
-/** m:ss por debajo de una hora; si no, `1h 05m`. */
+/** m:ss under an hour; otherwise `1h 05m`. */
 export function formatDuration(ms: number | null | undefined): string {
   if (ms == null) return "—";
   const s = Math.max(0, Math.floor(ms / 1000));
@@ -20,7 +20,7 @@ export function formatDateTime(ms: number): string {
   return new Date(ms).toLocaleString([], { dateStyle: "medium", timeStyle: "short" });
 }
 
-/** Iniciales para el avatar: "Marta Ríos" → "MR". */
+/** Avatar initials: "Jane Doe" → "JD". */
 export function initials(name: string | null | undefined): string {
   if (!name) return "";
   const parts = name.trim().split(/[\s._-]+/).filter(Boolean);
@@ -28,7 +28,7 @@ export function initials(name: string | null | undefined): string {
   return letters.toUpperCase();
 }
 
-/** Tono estable por nombre para avatares (misma luminancia, distinto matiz). */
+/** Stable hue per name for avatars (same lightness, different hue). */
 export function avatarHue(name: string): number {
   let h = 0;
   for (const c of name) h = (h * 31 + c.charCodeAt(0)) % 360;

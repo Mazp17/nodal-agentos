@@ -4,7 +4,7 @@ import { errorText, setProviderStatus } from "../../domain/hooks/providers";
 import { PROVIDERS } from "./meta";
 import "./providers.css";
 
-/** Cuadradito de marca del proveedor (neutro: sin logos de terceros). */
+/** Small provider brand square (neutral: no third-party logos). */
 export function ProviderMark() {
   return <span className="pv-mark" aria-hidden />;
 }
@@ -72,7 +72,7 @@ export function Segmented<T extends string>({
   );
 }
 
-/** Fila etiqueta + control, como en Project settings. */
+/** Label + control row, as in Project settings. */
 export function Field({ label, children, top }: { label: string; children: ReactNode; top?: boolean }) {
   return (
     <div className={`pv-field${top ? " top" : ""}`}>
@@ -83,8 +83,8 @@ export function Field({ label, children, top }: { label: string; children: React
 }
 
 /**
- * Pegar una key y validarla contra el proveedor ("Save and test"). Solo se guarda si es
- * válida; la key nunca vuelve del backend.
+ * Paste a key and validate it against the provider ("Save and test"). It's only saved if
+ * valid; the key never comes back from the backend.
  */
 export function KeyForm({
   provider,
@@ -157,7 +157,7 @@ export function KeyForm({
   );
 }
 
-/** Confirmación en línea (sin modal) para acciones destructivas. */
+/** Inline confirmation (no modal) for destructive actions. */
 export function InlineConfirm({
   text,
   confirmLabel,

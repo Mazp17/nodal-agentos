@@ -1,7 +1,7 @@
-// Hooks de proveedores (fuentes externas): estado de la key, links por proyecto, scopes,
-// estados para el mapeo e importables. Los datos viven en el backend; acá solo hay caché
-// compartida para el estado de la key (lo leen el sidebar, la píldora y Settings a la vez)
-// y un bus mínimo para que una mutación refresque a los demás consumidores.
+// Provider hooks (external sources): key status, links per project, scopes,
+// states for the mapping and importables. The data lives in the backend; here there's only a
+// shared cache for the key status (read by the sidebar, the pill and Settings at once)
+// and a minimal bus so a mutation refreshes the other consumers.
 
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import {
@@ -18,14 +18,14 @@ import {
 import type { ScopeRef, SourceLink } from "../types";
 import { registerResource } from "./store";
 
-/** Los comandos rechazan con un string listo para mostrar; cualquier otra cosa se normaliza. */
+/** Commands reject with a string ready to display; anything else is normalized. */
 export function errorText(err: unknown): string {
   if (typeof err === "string") return err;
   if (err && typeof err === "object" && "message" in err && typeof err.message === "string") return err.message;
   return String(err);
 }
 
-// ---------- Bus de invalidación ----------
+// ---------- Invalidation bus ----------
 
 export type ProviderTopic = "links" | "status";
 
@@ -38,7 +38,7 @@ function subscribeTopic(topic: ProviderTopic, fn: () => void): () => void {
   return () => set.delete(fn);
 }
 
-/** Avisa a los hooks suscriptos que `topic` cambió (después de una mutación). */
+/** Tells the subscribed hooks that `topic` changed (after a mutation). */
 export function invalidateProviders(topic: ProviderTopic) {
   if (topic === "status") {
     for (const p of statusCache.keys()) void fetchStatus(p);
@@ -46,10 +46,10 @@ export function invalidateProviders(topic: ProviderTopic) {
   topicSubs.get(topic)?.forEach((fn) => fn());
 }
 
-// `nodal://changed` con `kind: "sources"` (sync, links) llega como el recurso "sources".
+// `nodal://changed` with `kind: "sources"` (sync, links) arrives as the "sources" resource.
 registerResource("sources", async () => invalidateProviders("links"));
 
-// ---------- Carga genérica ----------
+// ---------- Generic loading ----------
 
 export interface Loaded<T> {
   data: T | null;
@@ -59,8 +59,8 @@ export interface Loaded<T> {
 }
 
 /**
- * Corre `load` cuando cambia `key` (o al invalidar `topic`). `key === null` no carga.
- * Descarta respuestas viejas si la key cambió mientras tanto.
+ * Runs `load` when `key` changes (or when `topic` is invalidated). `key === null` doesn't load.
+ * Discards stale responses if the key changed in the meantime.
  */
 function useLoad<T>(key: string | null, load: () => Promise<T>, topic?: ProviderTopic): Loaded<T> {
   const [state, setState] = useState<{ key: string | null; data: T | null; error: string | null; loading: boolean }>({
@@ -82,7 +82,7 @@ function useLoad<T>(key: string | null, load: () => Promise<T>, topic?: Provider
       return;
     }
     let alive = true;
-    // Al recargar la misma key se conservan los datos (sin parpadeo); con otra key no.
+    // Reloading the same key keeps the data (no flicker); with another key it doesn't.
     setState((s) => (s.key === key ? { ...s, loading: true } : { key, data: null, error: null, loading: true }));
     loadRef.current().then(
       (data) => alive && setState({ key, data, error: null, loading: false }),
@@ -102,13 +102,13 @@ function useLoad<T>(key: string | null, load: () => Promise<T>, topic?: Provider
   };
 }
 
-// ---------- Estado del proveedor (compartido) ----------
+// ---------- Provider status (shared) ----------
 
 export type ProviderConnection = "loading" | "disconnected" | "connected" | "error";
 
 interface StatusSnap {
   status: ProviderStatus | null;
-  /** El comando falló (no la key: eso viene en `status.error`). */
+  /** The command failed (not the key: that comes in `status.error`). */
   error: string | null;
   loading: boolean;
 }
@@ -117,7 +117,7 @@ const EMPTY_SNAP: StatusSnap = { status: null, error: null, loading: true };
 const statusCache = new Map<string, StatusSnap>();
 const statusSubs = new Set<() => void>();
 const statusInflight = new Map<string, Promise<void>>();
-/** `provider_status` consulta al proveedor: con la app abierta, se refresca cada 5 min. */
+/** `provider_status` queries the provider: with the app open, it refreshes every 5 min. */
 const STATUS_TTL_MS = 5 * 60_000;
 const statusFetchedAt = new Map<string, number>();
 
@@ -126,7 +126,7 @@ function setSnap(provider: string, snap: StatusSnap) {
   statusSubs.forEach((fn) => fn());
 }
 
-/** Sube con cada `setProviderStatus`: una lectura lanzada antes ya no pisa ese valor. */
+/** Bumped on every `setProviderStatus`: a read launched earlier no longer overwrites that value. */
 const statusGen = new Map<string, number>();
 
 function fetchStatus(provider: string): Promise<void> {
@@ -160,7 +160,7 @@ function subscribeStatus(fn: () => void) {
   };
 }
 
-/** Fija el estado sin consultar (p. ej. con la respuesta de `providerSetKey`). */
+/** Sets the status without querying (e.g. with the response from `providerSetKey`). */
 export function setProviderStatus(status: ProviderStatus) {
   statusGen.set(status.provider, (statusGen.get(status.provider) ?? 0) + 1);
   statusFetchedAt.set(status.provider, Date.now());
@@ -170,19 +170,19 @@ export function setProviderStatus(status: ProviderStatus) {
 export interface ProviderStatusView {
   provider: string;
   status: ProviderStatus | null;
-  /** Resumen para pintar: sin key, conectado, o key presente pero inválida / sin red. */
+  /** Summary for rendering: no key, connected, or key present but invalid / offline. */
   connection: ProviderConnection;
-  /** Nombre del usuario si la key es válida. */
+  /** The user's name if the key is valid. */
   viewer: string | null;
-  /** Error de la key o del comando, listo para mostrar. */
+  /** Key or command error, ready to display. */
   error: string | null;
   loading: boolean;
   refresh: () => Promise<void>;
 }
 
 /**
- * Estado de la key de un proveedor (por defecto Linear), compartido entre todos los que lo
- * usan: el sidebar, la píldora global, Settings → Integrations y el onboarding.
+ * Key status of a provider (Linear by default), shared among everyone who uses
+ * it: the sidebar, the global pill, Settings → Integrations and onboarding.
  */
 export function useProviderStatus(provider = "linear"): ProviderStatusView {
   const snap = useSyncExternalStore(subscribeStatus, () => statusCache.get(provider) ?? EMPTY_SNAP);
@@ -218,27 +218,27 @@ export function useProviderStatus(provider = "linear"): ProviderStatusView {
   };
 }
 
-// ---------- Links, scopes, estados, importables ----------
+// ---------- Links, scopes, states, importables ----------
 
-/** Fuentes de un proyecto (o de todos con `null`). Se refresca al invalidar `"links"`. */
+/** A project's sources (or all with `null`). Refreshes when `"links"` is invalidated. */
 export function useSourceLinks(projectId: string | null): Loaded<SourceLink[]> {
   return useLoad(`links:${projectId ?? "*"}`, () => listSourceLinks(projectId), "links");
 }
 
-/** Teams y proyectos del proveedor. `enabled: false` no consulta (sin key). */
+/** The provider's teams and projects. `enabled: false` doesn't query (no key). */
 export function useProviderScopes(provider: string, enabled: boolean): Loaded<ScopeRef[]> {
   return useLoad(enabled ? `scopes:${provider}` : null, () => providerScopes(provider));
 }
 
-/** Proyecto del proveedor elegible como regla, con el link del que salió. */
+/** Provider project eligible as a rule, with the link it came from. */
 export interface RuleProject {
   project: ScopeRef;
   linkId: string;
 }
 
 /**
- * Proyectos del proveedor para reglas de proyecto, unidos sobre `linkIds` (sin repetir: gana
- * el primer link). Va a la red; `enabled: false` o sin links no consulta.
+ * Provider projects for project rules, merged across `linkIds` (no duplicates: the first
+ * link wins). Hits the network; `enabled: false` or no links doesn't query.
  */
 export function useRuleProjects(linkIds: string[], enabled = true): Loaded<RuleProject[]> {
   const key = enabled && linkIds.length ? `rule-projects:${linkIds.join(",")}` : null;
@@ -257,12 +257,12 @@ export function useRuleProjects(linkIds: string[], enabled = true): Loaded<RuleP
   });
 }
 
-/** Estados actuales, propuesta de mapeo y altas/bajas contra lo conocido. Va a la red. */
+/** Current states, mapping proposal and additions/removals against the known ones. Hits the network. */
 export function useSourceStates(linkId: string | null): Loaded<SourceStatesReport> {
   return useLoad(linkId ? `states:${linkId}` : null, () => sourceStates(linkId ?? ""));
 }
 
-/** Ítems importables del link, filtrados por `query` (ya con debounce). */
+/** The link's importable items, filtered by `query` (already debounced). */
 export function useImportable(linkId: string | null, query: string): Loaded<ImportableItem[]> {
   const q = query.trim();
   return useLoad(linkId ? `importable:${linkId}:${q}` : null, () =>
@@ -270,7 +270,7 @@ export function useImportable(linkId: string | null, query: string): Loaded<Impo
   );
 }
 
-/** `value` después de `ms` sin cambios. */
+/** `value` after `ms` without changes. */
 export function useDebounced<T>(value: T, ms: number): T {
   const [v, setV] = useState(value);
   useEffect(() => {
@@ -280,7 +280,7 @@ export function useDebounced<T>(value: T, ms: number): T {
   return v;
 }
 
-/** `Date.now()` que se actualiza cada `ms` (para "Synced 3m ago"). */
+/** `Date.now()` that updates every `ms` (for "Synced 3m ago"). */
 export function useNow(ms = 30_000): number {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {

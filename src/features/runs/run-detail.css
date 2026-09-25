@@ -1,4 +1,4 @@
-/* Run detail (vista completa) y panel de subagente. */
+/* Run detail (full view) and subagent panel. */
 
 .rd {
   flex: 1;
@@ -49,7 +49,7 @@
 .rd-alert-title { font-size: var(--fs-base); font-weight: var(--fw-semibold); color: var(--red-text); }
 .rd-alert-text { font-size: var(--fs-base); color: var(--text-2); white-space: pre-line; overflow-wrap: anywhere; }
 
-/* ---- Timeline de fases ---- */
+/* ---- Phase timeline ---- */
 .rd-timeline { padding: var(--sp-6) var(--sp-7) var(--sp-5); overflow-x: auto; }
 .tl { list-style: none; margin: 0; padding: 0; display: grid; min-width: min-content; }
 /* Each step is centered in its column; the line runs from its mark to the next one. */
@@ -88,7 +88,7 @@
 }
 .tl-current .tl-name, .tl-failed .tl-name { color: var(--text-strong); font-weight: var(--fw-semibold); }
 
-/* ---- Subagentes + resultado ---- */
+/* ---- Subagents + result ---- */
 .rd-grid { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: var(--sp-7); align-items: start; }
 .rd-agents { overflow: hidden; }
 .rd-agents-empty { padding: var(--sp-8) var(--sp-6); font-size: var(--fs-base); color: var(--text-faint); }
@@ -155,7 +155,7 @@
 .rd-result-label { font-size: var(--fs-md); font-weight: var(--fw-semibold); color: var(--text-muted); }
 .rd-result-note { font-size: var(--fs-base); color: var(--text-subtle); line-height: var(--lh-body); }
 .rd-result-status { display: flex; align-items: center; gap: var(--sp-3); font-size: var(--fs-lg); font-weight: var(--fw-semibold); color: var(--tone); }
-/* Resultado tipado (PR, criterios, nits) */
+/* Typed result (PR, criteria, nits) */
 .rd-pr {
   display: flex;
   flex-direction: column;
@@ -199,7 +199,7 @@
 .rd-stats dt { font-size: var(--fs-xs); color: var(--text-dim); }
 .rd-stats dd { margin: 0; font-size: var(--fs-2xl); font-weight: var(--fw-semibold); }
 
-/* ---- Panel de subagente ---- */
+/* ---- Subagent panel ---- */
 .agent-panel { width: var(--w-agent-panel); max-width: 100%; background: var(--surface-sheet); box-shadow: var(--shadow-drawer); }
 .ap-head { padding: var(--sp-6) var(--sp-8); display: flex; align-items: center; gap: var(--sp-4); border-bottom: 1px solid var(--border); }
 .ap-head-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: var(--sp-1); }
@@ -236,7 +236,7 @@
 .ap-out-ok { background: var(--green-tint-8); color: var(--text-2); }
 .ap-out-danger { background: var(--red-tint-10); color: var(--text-2); }
 
-/* ---- Cabecera: breadcrumb y título ---- */
+/* ---- Header: breadcrumb and title ---- */
 .rd-crumbs { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-3); font-size: var(--fs-md); color: var(--text-muted); }
 .rd-crumb-sep { color: var(--text-dim); }
 .rd-crumb-task {
@@ -262,7 +262,7 @@
   color: var(--text-muted);
 }
 
-/* ---- Paneles ---- */
+/* ---- Panels ---- */
 .rd-panel-head {
   display: flex;
   align-items: center;
@@ -288,7 +288,7 @@
   overflow-wrap: anywhere;
 }
 
-/* ---- Resultado ---- */
+/* ---- Result ---- */
 .rd-res-row { display: flex; justify-content: space-between; gap: var(--sp-4); min-width: 0; font-size: var(--fs-md); }
 .rd-raw { border-radius: var(--r-card); border: 1px solid var(--border); overflow: hidden; }
 .rd-raw-toggle {

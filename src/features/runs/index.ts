@@ -1,4 +1,4 @@
-// API pública de runs para el shell (D) y el board/tareas (E).
+// Public runs API for the shell (D) and the board/tasks (E).
 
 export { RunsView, type RunsViewProps } from "./RunsView";
 export { RunDetailView, type RunDetailViewProps } from "./RunDetailView";

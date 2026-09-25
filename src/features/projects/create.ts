@@ -1,5 +1,5 @@
-// Alta de un proyecto con sus repos y, opcionalmente, una fuente de Linear. La usan el
-// onboarding y el diálogo "New project".
+// Creates a project with its repos and, optionally, a Linear source. Used by
+// onboarding and the "New project" dialog.
 
 import { addRepo, createProject, createSourceLink } from "../../domain/api";
 import { invalidateProviders } from "../../domain/hooks/providers";
@@ -7,7 +7,7 @@ import { suggestProjectKey, type ProjectsState } from "../../domain/hooks/projec
 import type { Project, ScopeRef } from "../../domain/types";
 const LINEAR = "linear";
 
-/** Misma paleta que el backend (`validate::PALETTE`), en el mismo orden. */
+/** Same palette as the backend (`validate::PALETTE`), in the same order. */
 export const PROJECT_COLORS = [
   "oklch(0.74 0.15 55)",
   "oklch(0.72 0.13 250)",
@@ -23,13 +23,13 @@ export interface ProjectDraft {
   name: string;
   key: string;
   color: string;
-  /** Opcional; vacío = sin descripción. */
+  /** Optional; empty = no description. */
   description?: string;
-  /** Raíces git ya resueltas. */
+  /** Already-resolved git roots. */
   repos: string[];
-  /** Team o project de Linear a conectar, si hay. */
+  /** Linear team or project to connect, if any. */
   scope: ScopeRef | null;
-  /** La key la sugirió Nodal: si choca (p. ej. con un proyecto archivado), prueba otra. */
+  /** The key was suggested by Nodal: if it collides (e.g. with an archived project), try another. */
   autoKey?: boolean;
 }
 
@@ -37,13 +37,13 @@ export interface CreateOutcome {
   project: Project;
   reposAdded: number;
   sourceConnected: boolean;
-  /** Pasos que fallaron después de crear el proyecto (repos, fuente). */
+  /** Steps that failed after creating the project (repos, source). */
   failures: string[];
 }
 
 /**
- * Crea el proyecto y después cada repo y la fuente. Si falla un repo o la fuente, el
- * proyecto queda creado y el error se devuelve para mostrarlo (se agregan desde Settings).
+ * Creates the project, then each repo and the source. If a repo or the source fails, the
+ * project stays created and the error is returned for display (they can be added from Settings).
  */
 export async function createProjectWithRepos(ctx: ProjectsState, d: ProjectDraft): Promise<CreateOutcome> {
   let key = d.key.trim().toUpperCase();
@@ -51,8 +51,8 @@ export async function createProjectWithRepos(ctx: ProjectsState, d: ProjectDraft
   let project: Project;
   for (;;) {
     try {
-      // Directo a la API: relee una sola vez al final. Releer ya haría que el shell viera
-      // un proyecto y desmontara el onboarding con los repos todavía por agregar.
+      // Straight to the API: reloads only once at the end. Reloading now would make the shell see
+      // a project and unmount onboarding with the repos still to be added.
       project = await createProject({ name: d.name.trim(), key, color: d.color, description: d.description?.trim() || null });
       break;
     } catch (e) {

@@ -1,4 +1,4 @@
-/* Pantalla "Activity": sesiones de Claude Code y sus subagentes, por repo. */
+/* "Activity" screen: Claude Code sessions and their subagents, per repo. */
 
 .activity-view { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .act-bar { display: flex; align-items: center; gap: var(--sp-5); padding: var(--sp-4) var(--sp-7); border-bottom: 1px solid var(--border); }

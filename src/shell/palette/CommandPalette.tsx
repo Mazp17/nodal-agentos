@@ -7,15 +7,15 @@ export interface PaletteItem {
   kind: "Action" | "Run" | "Task";
   label: string;
   sub?: string;
-  /** Texto extra para el filtro (p. ej. identifier + título). */
+  /** Extra text for the filter (e.g. identifier + title). */
   keywords?: string;
   run: () => void;
 }
 
 interface Props {
-  /** Acciones fijas; se filtran por texto. */
+  /** Fixed actions; filtered by text. */
   actions: PaletteItem[];
-  /** Resultados según la búsqueda (tareas y "Run X"). */
+  /** Results for the query (tasks and "Run X"). */
   search: (query: string) => PaletteItem[];
   onClose: () => void;
 }
@@ -35,7 +35,7 @@ export function CommandPalette({ actions, search, onClose }: Props) {
   ].slice(0, MAX_ITEMS);
   const active = Math.min(index, Math.max(0, items.length - 1));
 
-  // Con las flechas, la opción activa queda a la vista.
+  // With the arrow keys, the active option stays in view.
   useEffect(() => {
     document.getElementById(`${listId}-${active}`)?.scrollIntoView({ block: "nearest" });
   }, [active, listId]);

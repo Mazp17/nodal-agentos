@@ -1,10 +1,10 @@
-// Navegación de la app: una ruta chica en estado (no hay URLs en una app de escritorio),
-// persistida en `nodal.route` para volver a donde estabas.
+// App navigation: a small route held in state (there are no URLs in a desktop app),
+// persisted in `nodal.route` to return to where you were.
 
 import { useCallback, useEffect, useState } from "react";
 import { readJsonPref, writePref } from "./storage";
 
-/** Páginas de un proyecto (y las globales `board`/`runs` con `projectId: null`). */
+/** Project pages (and the global `board`/`runs` with `projectId: null`). */
 export type ProjectPage = "board" | "tasks" | "runs" | "activity" | "project-settings";
 export type Page = ProjectPage | "settings" | "run";
 
@@ -12,14 +12,14 @@ export type SettingsSection = "integrations" | "execution" | "updates" | "diagno
 export type ProjectSection = "general" | "repos" | "sources";
 
 export interface Route {
-  /** `null`: vista global ("All projects", Runs, Settings). */
+  /** `null`: global view ("All projects", Runs, Settings). */
   projectId: string | null;
   page: Page;
-  /** Solo en `page: "run"`. */
+  /** Only with `page: "run"`. */
   runId?: string;
 }
 
-/** Estas páginas necesitan proyecto; sin proyecto se cae a `board` global. */
+/** These pages need a project; without one they fall back to the global `board`. */
 const NEEDS_PROJECT: ReadonlySet<Page> = new Set(["tasks", "activity", "project-settings"]);
 const PAGES: ReadonlySet<string> = new Set(["board", "tasks", "runs", "activity", "project-settings", "settings", "run"]);
 const HOME: Route = { projectId: null, page: "board" };
@@ -40,7 +40,7 @@ const normalize = (r: Route): Route => {
 
 export interface Nav {
   route: Route;
-  /** De dónde se abrió el run (para "Back" y Esc). */
+  /** Where the run was opened from (for "Back" and Esc). */
   runFrom: Route;
   expanded: ReadonlySet<string>;
   settingsSection: SettingsSection;
@@ -52,14 +52,14 @@ export interface Nav {
   setExpanded: (projectId: string, open: boolean) => void;
   setSettingsSection: (s: SettingsSection) => void;
   setProjectSection: (s: ProjectSection) => void;
-  /** Si el proyecto de la ruta ya no existe, vuelve a "All projects". */
+  /** If the route's project no longer exists, go back to "All projects". */
   forgetProject: (projectId: string) => void;
 }
 
 export function useNav(): Nav {
   const [route, setRoute] = useState<Route>(() => {
     const saved = readJsonPref<Route>("route", HOME, isRoute);
-    // Un run abierto no se restaura: su contexto (de dónde vino) se perdió.
+    // An open run is not restored: its context (where it came from) is lost.
     return saved.page === "run" ? HOME : normalize(saved);
   });
   const [runFrom, setRunFrom] = useState<Route>(HOME);

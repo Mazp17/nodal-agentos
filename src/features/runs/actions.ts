@@ -9,17 +9,17 @@ import { launchErrorHint } from "./LaunchBlockerNotice";
 import type { RunView } from "./status";
 
 export interface RunActions {
-  /** Hay una acción en vuelo (para deshabilitar botones). */
+  /** An action is in flight (to disable buttons). */
   busy: boolean;
-  /** Detiene un run lanzado (pide confirmación). Sólo usa `v.run`. */
+  /** Stops a launched run (asks for confirmation). Only uses `v.run`. */
   stop: (v: Pick<RunView, "run">, name: string) => Promise<boolean>;
-  /** Saca de la cola un run `queued` (confirmación liviana). Sólo usa `v.run`. */
+  /** Removes a `queued` run from the queue (light confirmation). Only uses `v.run`. */
   remove: (v: Pick<RunView, "run">, name: string) => Promise<boolean>;
   confirm: (v: RunView, name: string) => Promise<boolean>;
   attach: (v: RunView) => Promise<void>;
-  /** Encola otro run de la tarea con el mismo ejecutor. */
+  /** Queues another run of the task with the same executor. */
   runAgain: (v: RunView, task: Task | undefined, name: string) => Promise<boolean>;
-  /** Nuevo orden de la cola global: ids de todos los runs `queued`. */
+  /** New global queue order: ids of every `queued` run. */
   reorder: (ids: string[]) => Promise<void>;
 }
 
@@ -62,8 +62,8 @@ export function useRunActions(): RunActions {
 
   const remove = useCallback(
     async (v: Pick<RunView, "run">, name: string) => {
-      // Confirmación liviana, no undo: la cola no tiene "re-encolar en el mismo lugar";
-      // deshacer sería lanzar un run nuevo al final de la cola.
+      // Light confirmation, not undo: the queue has no "re-queue in the same spot";
+      // undoing would mean launching a new run at the end of the queue.
       const confirmed = await ask({
         title: `Remove ${name} from the queue?`,
         body: "It won't run and loses its place in the queue. The task itself is kept; you can launch it again.",

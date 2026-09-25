@@ -21,7 +21,7 @@ import { newProjectRule, useRuleBackfill } from "./ruleBackfill";
 
 export interface ProjectSourcesSettingsProps {
   projectId: string;
-  /** "Fix key" / "Connect Linear": lleva a Settings → Integrations. */
+  /** "Fix key" / "Connect Linear": goes to Settings → Integrations. */
   onOpenIntegrations?: () => void;
 }
 
@@ -30,7 +30,7 @@ export function ProjectSourcesSettings({ projectId, onOpenIntegrations }: Projec
   const links = useSourceLinks(projectId);
   const repos = useRepos(projectId);
   const [connecting, setConnecting] = useState(false);
-  /** Link recién conectado: abre su mapeo. */
+  /** Newly connected link: opens its mapping. */
   const [justConnected, setJustConnected] = useState<string | null>(null);
 
   return (
@@ -93,7 +93,7 @@ export function ProjectSourcesSettings({ projectId, onOpenIntegrations }: Projec
   );
 }
 
-// ---------- Conectar ----------
+// ---------- Connect ----------
 
 function ConnectSource({
   projectId,
@@ -207,7 +207,7 @@ function ConnectSource({
   );
 }
 
-// ---------- Tarjeta de fuente ----------
+// ---------- Source card ----------
 
 function SourceCard({
   link,
@@ -225,7 +225,7 @@ function SourceCard({
   const st = useProviderStatus(link.provider);
   const keyOk = st.connection === "connected";
   const [mapOpen, setMapOpen] = useState(openMapInitially);
-  // `source_states` va a la red: solo con el editor de mapeo abierto.
+  // `source_states` hits the network: only with the mapping editor open.
   const states = useSourceStates(keyOk && mapOpen ? link.id : null);
   const [confirmDisconnect, setConfirmDisconnect] = useState(false);
   const [busy, setBusy] = useState<"patch" | "disconnect" | "sync" | null>(null);
@@ -233,7 +233,7 @@ function SourceCard({
 
   const pending = link.stateMap.confirmedAt === null;
   const report = states.data;
-  // Altas/bajas de estados que detectó el último sync (se limpian al guardar el mapeo).
+  // State additions/removals detected by the last sync (cleared when the mapping is saved).
   const changes = link.pendingStateChanges;
   const added = changes?.added.length ?? 0;
   const removed = changes?.removed.length ?? 0;
@@ -460,7 +460,7 @@ function SourceCard({
   );
 }
 
-/** `: "QA", "Staging"` (hasta 3 nombres). */
+/** `: "QA", "Staging"` (up to 3 names). */
 function stateNames(states: ExternalState[]): string {
   if (!states.length) return "";
   const names = states.slice(0, 3).map((s) => `"${s.name}"`);
@@ -511,7 +511,7 @@ function SourceStatus({
   );
 }
 
-// ---------- Repo por defecto y reglas ----------
+// ---------- Default repo and rules ----------
 
 function RepoChoice({
   repos,
@@ -562,12 +562,12 @@ function RoutingRules({
   link: SourceLink;
   repos: Repo[];
   disabled?: boolean;
-  /** Sin key válida no se piden los proyectos del proveedor. */
+  /** Without a valid key, the provider's projects aren't fetched. */
   keyOk: boolean;
 }) {
   const rules = link.repoRules;
   const saver = useRuleBackfill();
-  /** `project` con `editing`: id de la regla que se reemplaza (`null` = nueva). */
+  /** `project` with `editing`: id of the rule being replaced (`null` = new). */
   const [form, setForm] = useState<{ kind: "label" } | { kind: "project"; editing: string | null } | null>(null);
   const [label, setLabel] = useState("");
   const [projectId, setProjectId] = useState("");
@@ -582,7 +582,7 @@ function RoutingRules({
     form?.kind === "label" &&
     rules.some((r) => r.kind === "label" && r.value.trim().toLowerCase() === label.trim().toLowerCase());
   const editing = form?.kind === "project" ? form.editing : null;
-  // Un proyecto va a un solo repo: fuera los que ya tienen regla (salvo la que se edita).
+  // A project goes to a single repo: exclude those that already have a rule (except the one being edited).
   const taken = new Set(rules.filter((r) => r.kind === "project" && r.id !== editing).map((r) => r.value));
   const options = projects.data?.filter((p) => !taken.has(p.project.id)).map((p) => p.project) ?? null;
   const project = options?.find((p) => p.id === projectId) ?? null;
@@ -613,7 +613,7 @@ function RoutingRules({
       setForm(null);
       return;
     }
-    // Nueva o cambiada: `id: ""` (el backend la trata como nueva) y se reemplaza en su lugar.
+    // New or changed: `id: ""` (the backend treats it as new) and it's replaced in place.
     const rule = newProjectRule(project, target);
     const editingId = form.editing;
     const update = (rs: RepoRule[]) =>

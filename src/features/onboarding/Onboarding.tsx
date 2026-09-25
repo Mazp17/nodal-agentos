@@ -18,7 +18,7 @@ const STEPS: { id: Step; label: string }[] = [
 
 interface Props {
   onDone: (p: Project) => void;
-  /** Solo si ya hay proyectos (se abrió desde la paleta). */
+  /** Only if there are already projects (opened from the palette). */
   onCancel?: () => void;
   /** "Import data from a previous version…" (Settings → Diagnostics). */
   onImportLegacy: () => void;
@@ -47,7 +47,7 @@ export function Onboarding({ onDone, onCancel, onImportLegacy, importingLegacy }
 
   const idx = STEPS.findIndex((s) => s.id === step);
 
-  // Al cambiar de paso el botón con foco se desmonta: el foco va al título del paso nuevo.
+  // Changing steps unmounts the focused button: focus moves to the new step's title.
   const headingRef = useRef<HTMLHeadingElement>(null);
   const firstStep = useRef(true);
   useEffect(() => {
@@ -55,8 +55,8 @@ export function Onboarding({ onDone, onCancel, onImportLegacy, importingLegacy }
       firstStep.current = false;
       return;
     }
-    // El paso de proveedor (ConnectProviderStep) trae su propio título; si ya enfocó su
-    // campo de key (autoFocus), no se le quita.
+    // The provider step (ConnectProviderStep) brings its own title; if it already focused its
+    // key field (autoFocus), focus isn't taken away.
     if (headingRef.current) headingRef.current.focus();
     else if (!document.activeElement || document.activeElement === document.body) {
       const h = document.getElementById("pv-step-title");

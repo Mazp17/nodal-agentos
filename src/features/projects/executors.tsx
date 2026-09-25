@@ -1,5 +1,5 @@
-// Selector compacto de ejecutor por defecto (proyecto y repo). El selector rico con
-// descripciones es de Tasks (E); acá alcanza con un <select> agrupado.
+// Compact default-executor picker (project and repo). The rich picker with
+// descriptions belongs to Tasks (E); a grouped <select> is enough here.
 
 import { useEffect, useState } from "react";
 import { listExecutors, type ExecutorInfo } from "../../domain/api";
@@ -27,8 +27,8 @@ export function useExecutors(repoId: string | null) {
 }
 
 /**
- * `value: null` = hereda (`inheritLabel`). Si el valor guardado ya no está en el catálogo
- * (agente borrado), igual se muestra para no perderlo en silencio.
+ * `value: null` = inherits (`inheritLabel`). If the saved value is no longer in the catalog
+ * (deleted agent), it is still shown so it isn't lost silently.
  */
 export function ExecutorSelect({
   id,

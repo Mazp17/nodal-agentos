@@ -2,9 +2,9 @@ import type { Finish, Isolation, Priority, TaskStatus } from "../../domain/types
 
 export interface StatusMeta {
   label: string;
-  /** Variable CSS del color del estado. */
+  /** CSS variable for the status color. */
   color: string;
-  /** Anillo punteado (en curso). */
+  /** Dashed ring (in progress). */
   dashed: boolean;
 }
 
@@ -18,7 +18,7 @@ export const STATUS_META: Record<TaskStatus, StatusMeta> = {
   canceled: { label: "Canceled", color: "var(--text-disabled)", dashed: false },
 };
 
-/** Columnas visibles por defecto; Backlog y Canceled quedan detrás de un filtro. */
+/** Columns visible by default; Backlog and Canceled sit behind a filter. */
 export const BOARD_COLUMNS: TaskStatus[] = ["todo", "in_progress", "in_review", "blocked", "done"];
 export const HIDDEN_COLUMNS: TaskStatus[] = ["backlog", "canceled"];
 

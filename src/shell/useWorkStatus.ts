@@ -1,6 +1,6 @@
-// Estado global de trabajo para el shell: contadores del sidebar y búsqueda de la paleta.
-// Solo deriva de los stores compartidos (tareas y runs): no consulta nada por su cuenta. La
-// píldora del topbar usa `useQueueSummary` de runs.
+// Global work status for the shell: sidebar counters and palette search.
+// Derived only from the shared stores (tasks and runs): it queries nothing on its own. The
+// topbar pill uses `useQueueSummary` from runs.
 
 import { useMemo } from "react";
 import { isRunActive, projectIdOf, useAllRuns, useRunsSnapshot } from "../domain/hooks/runs";
@@ -11,19 +11,19 @@ const RUNNING: ReadonlySet<RunLight["status"]> = new Set(["launching", "launched
 const NONE: never[] = [];
 
 export interface WorkStatus {
-  /** Error de la última lectura de tareas o runs (base de datos). */
+  /** Error from the last read of tasks or runs (database). */
   error: string | null;
-  /** Error de `claude agents` (CLI), en un banner aparte. */
+  /** Error from `claude agents` (CLI), shown in a separate banner. */
   cliError: string | null;
   tasks: Task[];
-  /** Tareas bloqueadas (revisión fallida, agente bloqueado, run detenido). */
+  /** Blocked tasks (failed review, blocked agent, stopped run). */
   blocked: Task[];
-  /** Tareas abiertas (ni Done ni Canceled). */
+  /** Open tasks (neither Done nor Canceled). */
   openTotal: number;
-  /** Runs `launching`/`launched` en total y por proyecto. */
+  /** `launching`/`launched` runs, in total and per project. */
   activeTotal: number;
   activeByProject: Map<string, number>;
-  /** Tareas con un run en cola o en marcha (la paleta no ofrece "Run X" para ellas). */
+  /** Tasks with a queued or running run (the palette doesn't offer "Run X" for them). */
   activeTaskIds: ReadonlySet<string>;
 }
 
@@ -49,7 +49,7 @@ export function useWorkStatus(): WorkStatus {
       if (r.taskId) activeTaskIds.add(r.taskId);
       if (!RUNNING.has(r.status)) continue;
       activeTotal++;
-      // Los runs sin tarea cuentan en el proyecto de su repo.
+      // Runs without a task count toward their repo's project.
       const p = projectIdOf(r, taskById, repoById);
       if (p) activeByProject.set(p, (activeByProject.get(p) ?? 0) + 1);
     }

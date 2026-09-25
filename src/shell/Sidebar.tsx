@@ -16,17 +16,17 @@ export interface ProviderFoot {
 }
 
 interface Props {
-  /** Ruta "visible" (en un run, la de origen). */
+  /** "Visible" route (on a run, the one it came from). */
   current: Route;
   projects: Project[];
   expanded: ReadonlySet<string>;
   openTotal: number;
   activeTotal: number;
   activeByProject: Map<string, number>;
-  /** Proyectos con fuentes cuyos estados cambiaron en el proveedor (mapeo por revisar). */
+  /** Projects with sources whose states changed in the provider (mapping to review). */
   mappingDrift: ReadonlySet<string>;
   provider: ProviderFoot;
-  /** Versión instalada, y la más nueva si el chequeo de updates encontró una. */
+  /** Installed version, and the newest one if the update check found one. */
   version: string | null;
   updateAvailable: string | null;
   updating: boolean;

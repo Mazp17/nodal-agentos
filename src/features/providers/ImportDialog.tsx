@@ -17,15 +17,15 @@ import { plural, providerName } from "./meta";
 
 export interface ImportDialogProps {
   projectId: string;
-  /** Nombre para el título ("Import into Payments"); sin él, "Import tasks". */
+  /** Name for the title ("Import into Payments"); without it, "Import tasks". */
   projectName?: string;
   onClose: () => void;
   onImported: (result: ImportResult) => void;
-  /** Sin fuentes conectadas: botón para ir a Project settings → Sources. */
+  /** No connected sources: button to go to Project settings → Sources. */
   onOpenSources?: () => void;
 }
 
-/** Diálogo de importación: elegir ítems del proveedor y el repo de cada uno. */
+/** Import dialog: pick provider items and the repo for each one. */
 export function ImportDialog({ projectId, projectName, onClose, onImported, onOpenSources }: ImportDialogProps) {
   const ref = useFocusTrap<HTMLDivElement>(onClose);
   const titleId = useId();
@@ -114,7 +114,7 @@ function ImportBody({
   const [query, setQuery] = useState("");
   const q = useDebounced(query, 300);
   const items = useImportable(keyOk ? link.id : null, q);
-  /** Seleccionados, con el repo elegido (o `null` = el sugerido). */
+  /** Selected items, with the chosen repo (or `null` = the suggested one). */
   const [sel, setSel] = useState<Map<string, ImportableItem>>(new Map());
   const [repoOverride, setRepoOverride] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
@@ -149,7 +149,7 @@ function ImportBody({
       onImported(r);
       if (!r.skipped.length) onClose();
       else {
-        // Quedan seleccionados solo los que fallaron, para reintentar o cambiar de repo.
+        // Only the failed ones stay selected, to retry or change repo.
         const failed = new Set(r.skipped.map((s) => s.externalId));
         const names = new Map(selected.map((it) => [it.externalId, it.identifier]));
         setError(r.skipped.map((s) => `${names.get(s.externalId) ?? s.externalId}: ${s.reason}`).join("\n"));
@@ -346,8 +346,8 @@ function ImportRow({
 }
 
 /**
- * Mismo criterio que `suggest_repo` en Rust para las reglas de label: igual sin distinguir
- * mayúsculas. Las de proyecto no se pueden evaluar acá (`ImportableItem` no trae el proyecto).
+ * Same criteria as `suggest_repo` in Rust for label rules: case-insensitive
+ * equality. Project rules can't be evaluated here (`ImportableItem` doesn't carry the project).
  */
 function ruleMatches(link: SourceLink, item: ImportableItem): boolean {
   return link.repoRules.some(

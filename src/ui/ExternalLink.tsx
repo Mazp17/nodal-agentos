@@ -4,10 +4,10 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 export const EXTERNAL = /^(https?:|mailto:)/i;
 
 /**
- * Link externo sin `href` real: así ni el menú contextual nativo de WebKit ("Open Link"),
- * ni arrastrar, ni el clic medio pueden navegar el webview. Se abre en el navegador del
- * sistema con plugin-opener, y sólo si es http(s) o mailto; si no, se muestra como texto.
- * Usar esto en vez de `<a href="http…">` en toda la app.
+ * External link without a real `href`: that way neither WebKit's native context menu
+ * ("Open Link"), nor dragging, nor middle-click can navigate the webview. It opens in the
+ * system browser via plugin-opener, and only if it's http(s) or mailto; otherwise it shows as text.
+ * Use this instead of `<a href="http…">` throughout the app.
  */
 export function ExternalLink({
   url,
@@ -18,7 +18,7 @@ export function ExternalLink({
 }: {
   url: string | undefined | null;
   className?: string;
-  /** aria-label, si el texto visible no alcanza. */
+  /** aria-label, if the visible text isn't enough. */
   label?: string;
   /** Default: console.error. */
   onError?: (err: unknown) => void;

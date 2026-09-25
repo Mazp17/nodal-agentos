@@ -27,7 +27,7 @@ import "./shell.css";
 const isEditable = (t: EventTarget | null) =>
   t instanceof HTMLElement && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName));
 
-/** ⌘1–4, como en el diseño. */
+/** ⌘1–4, as in the design. */
 const SHORTCUT_PAGES: Record<string, ProjectPage> = { "1": "board", "2": "tasks", "3": "runs", "4": "activity" };
 const PROJECT_PAGES: ReadonlySet<Page> = new Set(["board", "tasks", "runs", "activity", "project-settings"]);
 
@@ -51,11 +51,11 @@ export function AppShell() {
 
   const { route } = nav;
   const project = route.projectId ? (ctx.projectById.get(route.projectId) ?? null) : null;
-  // En un run, el sidebar y el breadcrumb muestran de dónde vino.
+  // On a run, the sidebar and breadcrumb show where it came from.
   const visible = route.page === "run" ? nav.runFrom : route;
   const projectRepos = project ? ctx.reposOf(project.id) : [];
 
-  // Proyecto borrado (desde acá o desde otra parte): volver a "All projects".
+  // Project deleted (from here or elsewhere): go back to "All projects".
   const { forgetProject } = nav;
   useEffect(() => {
     if (ctx.loaded && !ctx.error && route.projectId && !ctx.projectById.has(route.projectId)) {
@@ -63,7 +63,7 @@ export function AppShell() {
     }
   }, [ctx.loaded, ctx.error, ctx.projectById, route.projectId, forgetProject]);
 
-  // Badge del Dock: lo que necesita al usuario (sin número si es 0).
+  // Dock badge: what needs the user (no number when 0).
   const needYou = queue.needYou;
   useEffect(() => {
     if (!queue.loaded) return;
@@ -72,17 +72,17 @@ export function AppShell() {
       .catch((e: unknown) => console.error("setBadgeCount", e));
   }, [needYou, queue.loaded]);
 
-  // Último proyecto visitado: destino de ⌘2/⌘4 desde una vista global.
+  // Last visited project: target of ⌘2/⌘4 from a global view.
   const lastProjectId = useRef<string | null>(null);
   useEffect(() => {
     if (route.projectId) lastProjectId.current = route.projectId;
   }, [route.projectId]);
 
-  // Fuentes del proyecto actual con Linear conectado: habilitan "Import".
+  // Current project's sources with Linear connected: they enable "Import".
   const projectId = project?.id ?? null;
   const links = useSourceLinks(projectId);
   const canImport = projectId !== null && provider.connection === "connected" && (links.data?.length ?? 0) > 0;
-  // Sin red: `pendingStateChanges` lo deja el último sync en cada fuente.
+  // No network: `pendingStateChanges` is left by the last sync on each source.
   const allLinks = useSourceLinks(null);
   const mappingDrift = useMemo(
     () => new Set((allLinks.data ?? []).filter((l) => l.pendingStateChanges).map((l) => l.projectId)),
@@ -132,7 +132,7 @@ export function AppShell() {
     go("settings");
   }, [setSettingsSection, go]);
 
-  /** Proyecto para ⌘2/⌘4 desde una vista global: el actual, el último visitado o el primero. */
+  /** Project for ⌘2/⌘4 from a global view: the current one, the last visited, or the first. */
   const fallbackProject = (): Project | null =>
     project ??
     (lastProjectId.current ? ctx.projectById.get(lastProjectId.current) : undefined) ??
@@ -141,12 +141,12 @@ export function AppShell() {
 
   const showOnboarding = ctx.loaded && (ctx.projects.length === 0 || forceOnboarding) && !(ctx.error && ctx.projects.length === 0);
 
-  // El handler cambia en cada render; el listener se registra una vez y llama al último.
+  // The handler changes every render; the listener is registered once and calls the latest.
   const onKeyRef = useRef<(e: KeyboardEvent) => void>(() => {});
   useLayoutEffect(() => {
     onKeyRef.current = (e: KeyboardEvent) => {
       if (e.defaultPrevented || e.isComposing) return;
-      // Fuera del shell (carga, error, onboarding) no hay atajos.
+      // Outside the shell (loading, error, onboarding) there are no shortcuts.
       if (!ctx.loaded || showOnboarding || (ctx.error && ctx.projects.length === 0)) return;
       const mod = e.metaKey || e.ctrlKey;
       if (mod && e.key.toLowerCase() === "k") {
@@ -169,8 +169,8 @@ export function AppShell() {
         go(page, pid);
         return;
       }
-      // Esc en cascada: la paleta y los diálogos lo atrapan antes (useFocusTrap); acá
-      // quedan el drawer de la tarea y el detalle del run.
+      // Cascading Esc: the palette and dialogs catch it first (useFocusTrap); what's left
+      // here is the task drawer and the run detail.
       if (e.key === "Escape") {
         if (taskId) {
           e.preventDefault();
@@ -188,7 +188,7 @@ export function AppShell() {
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
-  // ---- Paleta ----
+  // ---- Palette ----
   const paletteActions = useMemo((): PaletteItem[] => {
     const items: PaletteItem[] = [];
     const canNewTask = project ? projectRepos.length > 0 : ctx.repos.length > 0;
@@ -203,7 +203,7 @@ export function AppShell() {
     for (const p of ctx.projects) {
       items.push({ id: `open-${p.id}`, kind: "Action", label: `Open ${p.name}`, keywords: p.key, run: () => go("board", p.id) });
     }
-    // `needYou` de `work_summary` ya incluye las tareas Blocked (sin contarlas dos veces).
+    // `needYou` from `work_summary` already includes Blocked tasks (without counting them twice).
     if (queue.needYou > 0) {
       items.push({
         id: "need-you",
@@ -251,7 +251,7 @@ export function AppShell() {
     return [...runItems, ...taskItems];
   };
 
-  // ---- Pantallas fuera del shell ----
+  // ---- Screens outside the shell ----
   if (!ctx.loaded) return <div className="loading-screen" aria-busy="true">Loading…</div>;
   if (ctx.error && ctx.projects.length === 0) {
     return (
@@ -287,8 +287,8 @@ export function AppShell() {
     );
   }
 
-  // ---- Contenido ----
-  // El board resuelve su propio estado "sin repos"; Tasks lo delega acá.
+  // ---- Content ----
+  // The board handles its own "no repos" state; Tasks delegates it here.
   const noRepos = project !== null && projectRepos.length === 0 && route.page === "tasks";
   let content: ReactNode;
   if (noRepos && project) {
@@ -387,7 +387,7 @@ export function AppShell() {
         onUpdate={updates.check}
         onGo={(page, pid) => go(page, pid)}
         onToggleProject={(pid) => {
-          // Como en el diseño: elegir otro proyecto lo abre en la misma página; el actual se pliega.
+          // As in the design: picking another project opens it on the same page; the current one collapses.
           if (visible.projectId === pid) {
             nav.toggleProject(pid);
           } else {

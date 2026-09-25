@@ -3,19 +3,19 @@ import { useFocusTrap } from "./useFocusTrap";
 import "./confirm.css";
 
 /*
- * Confirmación modal propia. No usar `window.confirm`/`alert`/`prompt`: en Tauri,
- * tauri-plugin-dialog los reemplaza por versiones async (devuelven una Promise, siempre
- * truthy) y además el comando no está permitido en las capabilities. Ver el script
- * `lint:no-native-dialogs`.
+ * Our own modal confirmation. Don't use `window.confirm`/`alert`/`prompt`: in Tauri,
+ * tauri-plugin-dialog replaces them with async versions (they return a Promise, always
+ * truthy) and the command isn't allowed in the capabilities anyway. See the
+ * `lint:no-native-dialogs` script.
  */
 
 export interface ConfirmOptions {
   title: string;
-  /** Qué se pierde o qué pasa: nombrarlo concretamente. */
+  /** What is lost or what happens: name it concretely. */
   body?: ReactNode;
   confirmLabel: string;
   cancelLabel?: string;
-  /** Botón de confirmar en rojo (default true). */
+  /** Red confirm button (default true). */
   destructive?: boolean;
 }
 
@@ -26,7 +26,7 @@ const ConfirmContext = createContext<Confirm>(() => {
   return Promise.resolve(false);
 });
 
-/** `const ask = useConfirm(); await ask({ title, body, confirmLabel })` → true si el usuario confirmó. */
+/** `const ask = useConfirm(); await ask({ title, body, confirmLabel })` → true if the user confirmed. */
 export function useConfirm(): Confirm {
   return useContext(ConfirmContext);
 }
@@ -44,7 +44,7 @@ export function ConfirmProvider({ children }: { children: ReactNode }) {
   const confirm = useCallback<Confirm>(
     (opts) =>
       new Promise<boolean>((resolve) => {
-        // Uno a la vez: uno nuevo cancela el anterior.
+        // One at a time: a new one cancels the previous.
         current.current?.resolve(false);
         const p = { ...opts, id: ++seq.current, resolve };
         current.current = p;
@@ -60,7 +60,7 @@ export function ConfirmProvider({ children }: { children: ReactNode }) {
     p?.resolve(ok);
   }, []);
 
-  // Si el provider se desmonta con uno abierto, no dejar la Promise colgada.
+  // If the provider unmounts with one open, don't leave the Promise hanging.
   useEffect(() => () => current.current?.resolve(false), []);
 
   return (
@@ -81,8 +81,8 @@ function ConfirmDialog({
 }: ConfirmOptions & { onSettle: (ok: boolean) => void }) {
   const ref = useFocusTrap<HTMLDivElement>(() => onSettle(false));
   const titleId = useId();
-  // Los atajos globales del shell (⌘K, ⌘1…9, ⌘,) ignoran eventos con defaultPrevented:
-  // mientras se confirma no se abre la paleta ni se navega por debajo.
+  // The shell's global shortcuts (⌘K, ⌘1…9, ⌘,) ignore events with defaultPrevented:
+  // while confirming, the palette doesn't open and nothing navigates underneath.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && !/^[acvxz]$/i.test(e.key)) e.preventDefault();
@@ -112,7 +112,7 @@ function ConfirmDialog({
           </div>
         )}
         <div className="confirm-foot">
-          {/* Foco inicial en Cancelar: Enter por reflejo no destruye nada. */}
+          {/* Initial focus on Cancel: a reflexive Enter destroys nothing. */}
           <button type="button" className="btn btn-ghost" data-autofocus onClick={() => onSettle(false)}>
             {cancelLabel}
           </button>

@@ -5,7 +5,7 @@ import type { Executor, Run } from "../../domain/types";
 import { useToast } from "../../ui/Toasts";
 import { executorLabel } from "../executors";
 
-/** Toast según cómo quedó el run recién encolado. */
+/** Toast depending on how the just-queued run ended up. */
 function report(push: ReturnType<typeof useToast>, what: string, name: string, run: Run) {
   if (run.status === "failed") {
     push(`${what} failed`, run.error ?? "The run couldn't be started.", "danger");
@@ -19,8 +19,8 @@ function report(push: ReturnType<typeof useToast>, what: string, name: string, r
 export type LaunchKind = { kind: "run"; input?: LaunchInput } | { kind: "handoff"; executor: Executor; extra: string | null } | { kind: "review" };
 
 /**
- * Lanza, traspasa o revisa una tarea con toasts e invalidación. Devuelve el run o `null` si
- * el backend rechazó (el motivo va al toast).
+ * Launches, hands off or reviews a task with toasts and invalidation. Returns the run, or `null`
+ * if the backend refused (the reason goes to the toast).
  */
 export function useLaunch() {
   const push = useToast();

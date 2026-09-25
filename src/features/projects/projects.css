@@ -1,4 +1,4 @@
-/* Proyectos: New project, repos en borrador, aviso del selector y tarjetas de repo. */
+/* Projects: New project, draft repos, picker notice and repo cards. */
 
 .key-row { display: flex; align-items: center; gap: var(--sp-4); }
 .key-input { width: 96px; text-transform: uppercase; }
@@ -47,7 +47,7 @@
 .inline-field-label { font-size: var(--fs-md); color: var(--text-muted); }
 .provider-mark { width: 9px; height: 9px; flex: none; border-radius: 2.5px; background: var(--text-muted); opacity: 0.75; }
 
-/* Tarjetas de repo */
+/* Repo cards */
 .repo-card { padding: var(--sp-5) var(--sp-6); display: flex; flex-direction: column; gap: var(--sp-3); }
 .repo-card-head { display: flex; align-items: center; gap: var(--sp-4); flex-wrap: wrap; }
 .repo-card-name { font-size: 13.5px; font-weight: var(--fw-semibold); }
