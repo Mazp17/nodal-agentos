@@ -13,4 +13,4 @@
 - [ ] Rust commands/types and `src/domain/api.ts` / `types.ts` are in sync
 - [ ] Database changes are an additive migration with a test
 - [ ] No real data in fixtures, tests or screenshots; no API keys
-- [ ] `CHANGELOG.md` updated under `[Unreleased]` for user-visible changes
+- [ ] The title follows Conventional Commits and reads well as a changelog entry

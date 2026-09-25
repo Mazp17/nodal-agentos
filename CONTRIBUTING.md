@@ -92,9 +92,9 @@ Tests that hit real services or real local data are `#[ignore]`. Linear live tes
 - Short commit messages; the subject line is usually enough (`feat(board): reorder tasks in one call`).
 - Pull request descriptions should be brief: what changed, why, and how you tested it. Long reasoning belongs in code comments or the changelog.
 - Include screenshots for UI changes.
-- Add user-visible changes to [CHANGELOG.md](CHANGELOG.md) under `[Unreleased]`.
+- PR titles follow [Conventional Commits](https://www.conventionalcommits.org/) (`feat:`, `fix:`, `docs:`, `chore:`…). They become the commit on `main` and the [CHANGELOG.md](CHANGELOG.md) entry, and `feat`/`fix` decide the next version. Write them for users when the change is user-visible.
 - `main` is protected: changes land through pull requests that are squash-merged once CI passes, so the PR title becomes the commit message.
-- Releases are cut by the maintainer following [RELEASING.md](RELEASING.md).
+- Releases are cut by the maintainer by merging the release PR, following [RELEASING.md](RELEASING.md).
 
 ## Reporting bugs
 
