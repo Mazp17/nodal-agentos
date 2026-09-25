@@ -14,6 +14,7 @@ All notable changes to Nodal are documented here. The format follows [Keep a Cha
 - Every run is launched with `--append-system-prompt` telling it it's unattended, so it reports and stops instead of ending on a question and leaving the task In Progress.
 - New Nodal logo: app icon and in-app mark.
 - Redesigned New task dialog: repo picker in the header, Write/Preview for the plan, "Done when" criteria with suggestions from the plan, and a collapsible Execution section. Save with ⌘↵.
+- The `plan.md` written for tasks imported from Linear is now in English ("Subtasks", "_No description._" and the footer).
 
 ### Fixed
 
