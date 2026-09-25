@@ -1,0 +1,48 @@
+name: Release Please
+
+# Keeps a release PR open with the next version (from Conventional Commit PR titles) and its
+# CHANGELOG section. Merging it creates a DRAFT release and its tag, then builds the release
+# assets in this same run: a tag created with GITHUB_TOKEN would not trigger release.yml.
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-please
+  cancel-in-progress: false
+
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write # release commits, tags and the draft release
+      pull-requests: write # the release PR
+      actions: write # dispatch CI on the release PR
+    outputs:
+      release_created: ${{ steps.release.outputs.release_created }}
+      tag_name: ${{ steps.release.outputs.tag_name }}
+    steps:
+      - uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
+        id: release
+
+      # Pushes made with GITHUB_TOKEN don't trigger pull_request runs, and main requires CI.
+      # workflow_dispatch is the exception, and its check run lands on the PR head commit.
+      - name: Run CI on the release PR
+        if: steps.release.outputs.prs_created == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run ci.yml --repo "$GITHUB_REPOSITORY" --ref release-please--branches--main
+
+  build:
+    needs: release-please
+    if: needs.release-please.outputs.release_created == 'true'
+    permissions:
+      contents: write # upload assets to the draft release
+    uses: ./.github/workflows/release.yml
+    with:
+      tag: ${{ needs.release-please.outputs.tag_name }}
+    secrets: inherit
