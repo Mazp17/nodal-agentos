@@ -23,13 +23,14 @@ function runningNow(state: RunsState): RunView[] {
   return state.views.filter((v) => isLaunched(v) && v.phase !== "waiting");
 }
 
-/** Sessions waiting on the user, then failed or stopped runs whose task is still Blocked. */
+/** Sessions waiting on the user, then ended runs whose task is still Blocked. */
 function stoppedRuns(state: RunsState): RunView[] {
   const waiting = state.views.filter((v) => isLaunched(v) && v.phase === "waiting");
   const failed = [...state.latestByTask.values()].filter((v) => {
     const task = v.run.taskId ? state.tasks.get(v.run.taskId) : undefined;
-    const stopped = v.phase === "failed" || (v.phase === "canceled" && v.run.outcome === "stopped");
-    return stopped && task?.status === "blocked";
+    // Runs that die mid-session end as `finished` (outcome red/unknown), not `failed`.
+    const ended = v.phase === "failed" || v.phase === "finished" || (v.phase === "canceled" && v.run.outcome === "stopped");
+    return ended && task?.status === "blocked";
   });
   return [...waiting, ...failed];
 }
