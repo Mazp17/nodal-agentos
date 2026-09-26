@@ -9,6 +9,7 @@ import { invalidate } from "../domain/hooks/store";
 import { taskKey, type Project } from "../domain/types";
 import { BoardView } from "../features/board";
 import { ChatView } from "../features/chats";
+import { chatTitle } from "../features/chats/model";
 import { Onboarding } from "../features/onboarding/Onboarding";
 import { CreateProjectDialog } from "../features/projects/CreateProjectDialog";
 import { ProjectSettings } from "../features/projects/ProjectSettings";
@@ -256,12 +257,12 @@ export function AppShell() {
     }));
     const chatItems: PaletteItem[] = q
       ? (allChats.data ?? [])
-          .filter((c) => ctx.projectById.has(c.projectId) && c.title?.toLowerCase().includes(q))
+          .filter((c) => ctx.projectById.has(c.projectId) && (c.title || c.sessionTitle) && chatTitle(c).toLowerCase().includes(q))
           .slice(0, 5)
           .map((c) => ({
             id: `chat-${c.id}`,
             kind: "Chat",
-            label: c.title ?? "",
+            label: chatTitle(c),
             sub: ctx.projectById.get(c.projectId)?.name,
             run: () => {
               setChatFocus(c.id);

@@ -2,7 +2,7 @@
 // turns, the `propose_task` card and the context ring.
 
 import { PROPOSE_TASK_TOOL, type NewTask } from "../../domain/api";
-import type { Executor, Priority, Repo, TaskStatus } from "../../domain/types";
+import type { Chat, Executor, Priority, Repo, TaskStatus } from "../../domain/types";
 import type { TranscriptItem } from "../runs/types";
 
 export type ToolUse = Extract<TranscriptItem, { kind: "toolUse" }>;
@@ -51,6 +51,9 @@ export function effortOptions(configured: string | null | undefined): PillOption
     ...["low", "medium", "high", "xhigh", "max"].map((v) => ({ value: v, label: capitalize(v) })),
   ];
 }
+
+/** What a chat is called: Claude Code's name for the session, else its first message. */
+export const chatTitle = (c: Pick<Chat, "title" | "sessionTitle">): string => c.sessionTitle ?? c.title ?? "New chat";
 
 /** The Repo pill: the whole project (runs in the first repo) or one repo. */
 export function repoOptions(repos: Repo[]): PillOption[] {

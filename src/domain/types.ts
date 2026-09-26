@@ -54,6 +54,8 @@ export interface Chat extends LaunchOptions {
   repoId: string | null;
   /** `null` until the first message names it. */
   title: string | null;
+  /** Claude Code's name for the session (`/rename`, else its AI title); shown over `title`. */
+  sessionTitle: string | null;
   /** Claude Code's session id, known after the first message. */
   sessionId: string | null;
   createdAt: number;

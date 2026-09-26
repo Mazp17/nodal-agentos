@@ -9,7 +9,7 @@ import { useConfirm } from "../../ui/ConfirmDialog";
 import { useToast } from "../../ui/Toasts";
 import { Composer, type ComposerSettings } from "./Composer";
 import { Conversation } from "./Conversation";
-import { effortOptions, modelOptions, modeOptions, repoOptions, shortAgo, toTurns } from "./model";
+import { chatTitle, effortOptions, modelOptions, modeOptions, repoOptions, shortAgo, toTurns } from "./model";
 import { dropOutbox, forgetChat, markInterrupting, pushOutbox, seedChat, useChatStream, useRunStates } from "./stream";
 import "../runs/transcript.css";
 import "./chat.css";
@@ -151,7 +151,7 @@ export function ChatView({ project, repos, onOpenTask, focusChatId, onFocused }:
 
   const remove = async (c: Chat) => {
     const ok = await ask({
-      title: `Delete “${c.title ?? "New chat"}”?`,
+      title: `Delete “${chatTitle(c)}”?`,
       body: "It leaves the sessions list. The Claude Code session stays on disk and can still be resumed with claude --resume.",
       confirmLabel: "Delete chat",
     });
@@ -167,7 +167,7 @@ export function ChatView({ project, repos, onOpenTask, focusChatId, onFocused }:
   };
 
   const ql = q.trim().toLowerCase();
-  const sessions = list.filter((c) => !ql || (c.title ?? "New chat").toLowerCase().includes(ql));
+  const sessions = list.filter((c) => !ql || chatTitle(c).toLowerCase().includes(ql));
   const firstRepo = repos[0]?.name;
   const scopeRepo = repos.find((r) => r.id === settings.repoId)?.name;
   const suggestions = [
@@ -200,11 +200,11 @@ export function ChatView({ project, repos, onOpenTask, focusChatId, onFocused }:
                   title={c.sessionId ? `claude --resume ${c.sessionId}` : undefined}
                   onClick={() => select(c.id)}
                 >
-                  <span className="ellipsis chat-session-title">{c.title ?? "New chat"}</span>
+                  <span className="ellipsis chat-session-title">{chatTitle(c)}</span>
                   {live && <span className="dot dot-sm pulse tone-accent" aria-label="Answering" />}
                   <span className="chat-session-ago num">{shortAgo(c.updatedAt, now)}</span>
                 </button>
-                <button type="button" className="icon-btn chat-session-del" aria-label={`Delete ${c.title ?? "New chat"}`} title="Delete chat" onClick={() => void remove(c)}>
+                <button type="button" className="icon-btn chat-session-del" aria-label={`Delete ${chatTitle(c)}`} title="Delete chat" onClick={() => void remove(c)}>
                   ✕
                 </button>
               </div>
@@ -215,7 +215,7 @@ export function ChatView({ project, repos, onOpenTask, focusChatId, onFocused }:
         </nav>
       </aside>
 
-      <section className="chat-main" aria-label={chat?.title ?? "New chat"}>
+      <section className="chat-main" aria-label={chat ? chatTitle(chat) : "New chat"}>
         {!hasMessages ? (
           <div className="chat-empty">
             {chat && stream && !stream.loaded ? (
