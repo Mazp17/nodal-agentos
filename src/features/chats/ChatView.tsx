@@ -18,6 +18,9 @@ export interface ChatViewProps {
   project: Project;
   repos: Repo[];
   onOpenTask: (taskId: string) => void;
+  /** A chat to select (picked in the command palette); `onFocused` clears it. */
+  focusChatId?: string | null;
+  onFocused?: () => void;
 }
 
 /** Selected chat per project; `null` is "New chat". Not stored: the most recent one. */
@@ -34,7 +37,7 @@ const settingsOf = (c: Chat): ComposerSettings => ({
 });
 
 /** The Chat page: the project's sessions, the selected conversation and the composer. */
-export function ChatView({ project, repos, onOpenTask }: ChatViewProps) {
+export function ChatView({ project, repos, onOpenTask, focusChatId, onFocused }: ChatViewProps) {
   const toast = useToast();
   const ask = useConfirm();
   const chats = useChats(project.id);
@@ -61,6 +64,12 @@ export function ChatView({ project, repos, onOpenTask }: ChatViewProps) {
     setSelection((s) => ({ ...s, [project.id]: id }));
     setMenu(null);
   };
+  useEffect(() => {
+    if (!focusChatId) return;
+    setSelection((s) => ({ ...s, [project.id]: focusChatId }));
+    setMenu(null);
+    onFocused?.();
+  }, [focusChatId, project.id, onFocused]);
 
   const settings = chat ? settingsOf(chat) : draftSettings;
   const busy = !!stream && (stream.state === "busy" || stream.outbox.length > 0);

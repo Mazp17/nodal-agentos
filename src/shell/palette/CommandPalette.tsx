@@ -4,7 +4,7 @@ import "./palette.css";
 
 export interface PaletteItem {
   id: string;
-  kind: "Action" | "Run" | "Task";
+  kind: "Action" | "Run" | "Task" | "Chat";
   label: string;
   sub?: string;
   /** Extra text for the filter (e.g. identifier + title). */

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { launchTask } from "../domain/api";
+import { useAllChats } from "../domain/hooks/chats";
 import { useProjects } from "../domain/hooks/projects";
 import { useProviderStatus, useSourceLinks } from "../domain/hooks/providers";
 import { useQueueSummary } from "../domain/hooks/runs";
@@ -50,6 +51,9 @@ export function AppShell() {
   const [taskId, setTaskId] = useState<string | null>(null);
   const [diffRunId, setDiffRunId] = useState<string | null>(null);
   const [monitorOpen, setMonitorOpen] = useState(false);
+  /** A chat picked in the palette, for the Chat page to select once it's showing. */
+  const [chatFocus, setChatFocus] = useState<string | null>(null);
+  const allChats = useAllChats(paletteOpen);
 
   const { route } = nav;
   const project = route.projectId ? (ctx.projectById.get(route.projectId) ?? null) : null;
@@ -250,7 +254,22 @@ export function AppShell() {
       sub: ctx.projectById.get(t.projectId)?.name,
       run: () => openTask(t.id),
     }));
-    return [...runItems, ...taskItems];
+    const chatItems: PaletteItem[] = q
+      ? (allChats.data ?? [])
+          .filter((c) => ctx.projectById.has(c.projectId) && c.title?.toLowerCase().includes(q))
+          .slice(0, 5)
+          .map((c) => ({
+            id: `chat-${c.id}`,
+            kind: "Chat",
+            label: c.title ?? "",
+            sub: ctx.projectById.get(c.projectId)?.name,
+            run: () => {
+              setChatFocus(c.id);
+              go("chat", c.projectId);
+            },
+          }))
+      : [];
+    return [...runItems, ...taskItems, ...chatItems];
   };
 
   // ---- Screens outside the shell ----
@@ -331,7 +350,16 @@ export function AppShell() {
         );
         break;
       case "chat":
-        content = project && <ChatView key={project.id} project={project} repos={projectRepos} onOpenTask={openTask} />;
+        content = project && (
+          <ChatView
+            key={project.id}
+            project={project}
+            repos={projectRepos}
+            onOpenTask={openTask}
+            focusChatId={chatFocus}
+            onFocused={() => setChatFocus(null)}
+          />
+        );
         break;
       case "tasks":
         content = project && <TasksView projectId={project.id} onOpenTask={openTask} />;
