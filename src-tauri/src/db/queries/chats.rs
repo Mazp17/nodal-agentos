@@ -27,7 +27,7 @@ pub fn insert(conn: &Connection, c: &Chat) -> Result<(), DbError> {
     insert_chat(conn, c)
 }
 
-/// Saves everything except `project_id`, `session_id` and `created_at`.
+/// Saves everything except `project_id`, `session_id`, `session_title` and `created_at`.
 pub fn update(conn: &Connection, c: &Chat) -> Result<(), DbError> {
     let n = conn.execute(
         "UPDATE chats SET repo_id = :repo, title = :title, model = :model, effort = :effort,
@@ -49,6 +49,15 @@ pub fn set_session(conn: &Connection, id: &str, session_id: &str) -> Result<bool
     let n = conn.execute(
         "UPDATE chats SET session_id = ?2 WHERE id = ?1 AND session_id IS NOT ?2",
         [id, session_id],
+    )?;
+    Ok(n > 0)
+}
+
+/// Stores Claude Code's name for the session; `false` if it was already that one.
+pub fn set_session_title(conn: &Connection, id: &str, title: &str) -> Result<bool, DbError> {
+    let n = conn.execute(
+        "UPDATE chats SET session_title = ?2 WHERE id = ?1 AND session_title IS NOT ?2",
+        [id, title],
     )?;
     Ok(n > 0)
 }

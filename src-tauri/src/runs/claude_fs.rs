@@ -1125,6 +1125,42 @@ pub fn parse_transcript(text: &str, limit: usize) -> ParsedTranscript {
     }
 }
 
+/// Characters kept of a session's title.
+const SESSION_TITLE_MAX: usize = 120;
+
+/// Claude Code's name for a session, from its `.jsonl`: the last `custom-title` (set with
+/// `/rename`) or, without one, the last `ai-title`, which it rewrites as the conversation
+/// goes (observed in 2.1.283: `{"type":"ai-title","aiTitle":"…"}`,
+/// `{"type":"custom-title","customTitle":"…"}`).
+/// Streams the file line by line (it's read after every turn), parsing only title lines.
+pub fn session_title(path: &Path) -> Option<String> {
+    use std::io::BufRead;
+    let mut reader = std::io::BufReader::new(fs::File::open(path).ok()?);
+    let (mut custom, mut ai) = (None, None);
+    let mut line = Vec::new();
+    loop {
+        line.clear();
+        match reader.read_until(b'\n', &mut line) {
+            Ok(0) | Err(_) => break,
+            Ok(_) => {}
+        }
+        if !line.windows(7).any(|w| w == b"-title\"") {
+            continue;
+        }
+        let Ok(v) = serde_json::from_slice::<Value>(&line) else { continue };
+        let (slot, key) = match v.get("type").and_then(Value::as_str) {
+            Some("custom-title") => (&mut custom, "customTitle"),
+            Some("ai-title") => (&mut ai, "aiTitle"),
+            _ => continue,
+        };
+        let one_line = v.get(key).and_then(Value::as_str).unwrap_or("").split_whitespace().collect::<Vec<_>>().join(" ");
+        if !one_line.is_empty() {
+            *slot = Some(truncate(&one_line, SESSION_TITLE_MAX));
+        }
+    }
+    custom.or(ai)
+}
+
 /// Reads the whole file, or if it's too large, its head (where the prompt is) and its
 /// tail. Returns `(text, partial, bytes)`.
 fn read_transcript_text(path: &Path) -> std::io::Result<(String, bool, u64)> {
@@ -1390,6 +1426,28 @@ mod tests {
 
     fn fixtures_projects() -> PathBuf {
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src/runs/fixtures/projects")
+    }
+
+    #[test]
+    fn session_title_prefers_the_last_rename_then_the_last_ai_title() {
+        let t = crate::util::paths::tests::TempDir::new("session-title");
+        let f = t.0.join("s.jsonl");
+        let write = |lines: &[&str]| fs::write(&f, lines.join("\n")).unwrap();
+        write(&[r#"{"type":"user","message":{"content":"hi"}}"#]);
+        assert_eq!(session_title(&f), None);
+        write(&[
+            r#"{"type":"ai-title","aiTitle":"Casual chat","sessionId":"s"}"#,
+            r#"{"type":"user","message":{"content":"say \"ai-title\""}}"#,
+            r#"{"type":"ai-title","aiTitle":"  Project   status\n"}"#,
+            r#"{"type":"ai-title","aiTitle":""}"#,
+        ]);
+        assert_eq!(session_title(&f).as_deref(), Some("Project status"));
+        write(&[
+            r#"{"type":"custom-title","customTitle":"okapi spike"}"#,
+            r#"{"type":"ai-title","aiTitle":"Later AI title"}"#,
+        ]);
+        assert_eq!(session_title(&f).as_deref(), Some("okapi spike"));
+        assert_eq!(session_title(&t.0.join("missing.jsonl")), None);
     }
 
     #[test]

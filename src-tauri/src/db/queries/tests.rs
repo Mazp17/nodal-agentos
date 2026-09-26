@@ -139,6 +139,7 @@ fn chats_crud_and_order() {
         project_id: "p1".into(),
         repo_id: None,
         title: None,
+        session_title: None,
         session_id: None,
         launch: LaunchOptions::default(),
         created_at: 1,

@@ -242,7 +242,13 @@ CREATE INDEX chats_project ON chats(project_id, updated_at);
 CREATE INDEX chats_repo ON chats(repo_id);
 "#;
 
-pub const MIGRATIONS: &[&str] = &[V1, V2, V3, V4];
+/// v5: `chats.session_title`, Claude Code's name for the session (`/rename`, else its AI
+/// title), read from the session file; the UI shows it over `title` (the first message).
+const V5: &str = r#"
+ALTER TABLE chats ADD COLUMN session_title TEXT;
+"#;
+
+pub const MIGRATIONS: &[&str] = &[V1, V2, V3, V4, V5];
 
 pub fn user_version(conn: &Connection) -> Result<i64, DbError> {
     Ok(conn.query_row("PRAGMA user_version", [], |r| r.get(0))?)

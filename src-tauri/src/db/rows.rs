@@ -138,6 +138,7 @@ pub fn chat_from_row(row: &Row) -> rusqlite::Result<Chat> {
         project_id: row.get("project_id")?,
         repo_id: row.get("repo_id")?,
         title: row.get("title")?,
+        session_title: row.get("session_title")?,
         session_id: row.get("session_id")?,
         launch: LaunchOptions {
             model: row.get("model")?,
@@ -151,11 +152,11 @@ pub fn chat_from_row(row: &Row) -> rusqlite::Result<Chat> {
 
 pub fn insert_chat(conn: &Connection, c: &Chat) -> Result<(), DbError> {
     conn.execute(
-        "INSERT INTO chats (id, project_id, repo_id, title, session_id, model, effort, permission_mode,
-                            created_at, updated_at)
-         VALUES (:id, :project, :repo, :title, :session, :model, :effort, :perm, :created, :updated)",
+        "INSERT INTO chats (id, project_id, repo_id, title, session_title, session_id, model, effort,
+                            permission_mode, created_at, updated_at)
+         VALUES (:id, :project, :repo, :title, :stitle, :session, :model, :effort, :perm, :created, :updated)",
         named_params! {
-            ":id": c.id, ":project": c.project_id, ":repo": c.repo_id, ":title": c.title,
+            ":id": c.id, ":project": c.project_id, ":repo": c.repo_id, ":title": c.title, ":stitle": c.session_title,
             ":session": c.session_id, ":model": c.launch.model, ":effort": c.launch.effort,
             ":perm": c.launch.permission_mode, ":created": c.created_at, ":updated": c.updated_at,
         },

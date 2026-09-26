@@ -103,6 +103,9 @@ pub struct Chat {
     pub repo_id: Option<String>,
     /// `None` until the first message names it.
     pub title: Option<String>,
+    /// Claude Code's name for the session (`/rename`, else its AI title), shown over `title`.
+    #[serde(default)]
+    pub session_title: Option<String>,
     /// Claude Code's session id, known after the first message.
     pub session_id: Option<String>,
     /// `model`, `effort` and `permissionMode` are flattened in the JSON.

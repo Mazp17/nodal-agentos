@@ -276,7 +276,7 @@ fn migrates_v3_data_to_v4() {
     )
     .unwrap();
     migrate(&mut c).unwrap();
-    assert_eq!(user_version(&c).unwrap(), 4);
+    assert_eq!(user_version(&c).unwrap(), MIGRATIONS.len() as i64);
     assert_eq!(count(&c, "chats"), 0);
     assert_eq!(get_repo(&c, "r1").unwrap().unwrap().name, "web");
 
@@ -285,6 +285,7 @@ fn migrates_v3_data_to_v4() {
         project_id: "p1".into(),
         repo_id: Some("r1".into()),
         title: Some("Plan the login page".into()),
+        session_title: None,
         session_id: Some("00000000-0000-4000-8000-000000000001".into()),
         launch: LaunchOptions { model: Some("opus".into()), effort: Some("high".into()), permission_mode: Some("plan".into()) },
         created_at: 5,
@@ -304,6 +305,7 @@ fn chats_follow_their_project_and_widen_when_their_repo_goes() {
         project_id: "p1".into(),
         repo_id: repo.map(Into::into),
         title: None,
+        session_title: None,
         session_id: None,
         launch: LaunchOptions::default(),
         created_at: 1,

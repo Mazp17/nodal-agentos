@@ -71,6 +71,7 @@ impl Fixture {
                 project_id: "p1".into(),
                 repo_id: None,
                 title: None,
+                session_title: None,
                 session_id: None,
                 launch: LaunchOptions::default(),
                 created_at: 1,
@@ -81,7 +82,7 @@ impl Fixture {
         let events = Arc::new(Mutex::new(Vec::new()));
         let sink = events.clone();
         let emit: Emit = Arc::new(move |e| sink.lock().unwrap().push(e));
-        let chats = Chats::with_program(db.clone(), Events::default(), emit, Some(program));
+        let chats = Chats::with_program(db.clone(), Events::default(), emit, Some(program), None);
         Fixture { chats, db, events, dir }
     }
 

@@ -25,7 +25,7 @@ use tokio::sync::{mpsc, oneshot};
 use crate::db::{queries::chats, Db};
 use crate::events::{Events, Kind};
 use crate::runs::claude_bin;
-use crate::runs::claude_fs::is_valid_session_id;
+use crate::runs::claude_fs::{self, is_valid_session_id};
 use crate::runs::stream_json::{self, PermissionRequest, StreamEvent};
 
 /// Event with every chat's output: `{chatId, event}` (mirror of `ChatEventEnvelope` in `api.ts`).
@@ -136,6 +136,8 @@ struct Shared {
     events: Events,
     /// `None`: the real `claude`. Tests point it at a fake.
     program: Option<PathBuf>,
+    /// Where session files live, to read each session's title (`None` in tests).
+    claude_dir: Option<PathBuf>,
 }
 
 /// The chat processes. Cheap to clone.
@@ -144,10 +146,10 @@ pub struct Chats(Arc<Shared>);
 
 impl Chats {
     pub fn new(db: Db, events: Events, emit: Emit) -> Self {
-        Self::with_program(db, events, emit, None)
+        Self::with_program(db, events, emit, None, claude_fs::claude_config_dir())
     }
 
-    fn with_program(db: Db, events: Events, emit: Emit, program: Option<PathBuf>) -> Self {
+    fn with_program(db: Db, events: Events, emit: Emit, program: Option<PathBuf>, claude_dir: Option<PathBuf>) -> Self {
         Chats(Arc::new(Shared {
             procs: Mutex::default(),
             gens: AtomicU64::new(1),
@@ -155,6 +157,7 @@ impl Chats {
             db,
             events,
             program,
+            claude_dir,
         }))
     }
 
@@ -350,11 +353,13 @@ impl Chats {
         for ev in stream_json::parse_line(line) {
             let mut idle = false;
             let mut session = None;
+            let mut title_from = None;
             if let Some(p) = self.procs().get_mut(chat_id).filter(|p| p.gen == gen) {
                 p.last_active = Instant::now();
                 match &ev {
                     StreamEvent::PermissionRequest(r) => p.pending.push(r.clone()),
                     StreamEvent::TurnEnd { .. } => {
+                        title_from = Some((p.spec.cwd.clone(), p.project_id.clone()));
                         p.turns = p.turns.saturating_sub(1);
                         idle = p.turns == 0;
                         if idle {
@@ -367,6 +372,9 @@ impl Chats {
             }
             if let Some((sid, project_id)) = session {
                 self.save_session(chat_id, sid, project_id);
+            }
+            if let Some((cwd, project_id)) = title_from {
+                self.refresh_title(chat_id, cwd, project_id);
             }
             self.emit(chat_id, ChatEvent::Stream(ev));
             if idle {
@@ -383,6 +391,28 @@ impl Chats {
         tauri::async_runtime::spawn_blocking(move || {
             let conn = db.lock().unwrap_or_else(|p| p.into_inner());
             match chats::set_session(&conn, &chat_id, &session_id) {
+                Ok(true) => events.notify(Kind::Chats, Some(&project_id)),
+                Ok(false) => {}
+                Err(e) => eprintln!("chats: {e}"),
+            }
+        });
+    }
+
+    /// After a turn, stores the name Claude Code gave the session (it writes it to the session
+    /// file, not to the stream).
+    fn refresh_title(&self, chat_id: &str, cwd: PathBuf, project_id: String) {
+        let Some(projects) = self.0.claude_dir.as_ref().map(|d| d.join("projects")) else { return };
+        let (db, events, chat_id) = (self.0.db.clone(), self.0.events.clone(), chat_id.to_string());
+        tauri::async_runtime::spawn_blocking(move || {
+            let sid = {
+                let conn = db.lock().unwrap_or_else(|p| p.into_inner());
+                chats::get(&conn, &chat_id).ok().and_then(|c| c.session_id)
+            };
+            let Some(sid) = sid.filter(|s| is_valid_session_id(s)) else { return };
+            let Some(path) = claude_fs::find_session_jsonl(&projects, &cwd.to_string_lossy(), &sid) else { return };
+            let Some(title) = claude_fs::session_title(&path) else { return };
+            let conn = db.lock().unwrap_or_else(|p| p.into_inner());
+            match chats::set_session_title(&conn, &chat_id, &title) {
                 Ok(true) => events.notify(Kind::Chats, Some(&project_id)),
                 Ok(false) => {}
                 Err(e) => eprintln!("chats: {e}"),

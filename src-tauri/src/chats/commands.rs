@@ -153,12 +153,20 @@ pub async fn get_chat_transcript(state: State<'_, WorkState>, id: String, limit:
     };
     let cwd = chat_repo(&chat, &repos).map(|r| r.path.clone()).unwrap_or_default();
     let limit = limit.unwrap_or(claude_fs::TRANSCRIPT_DEFAULT_LIMIT).clamp(1, claude_fs::TRANSCRIPT_MAX_LIMIT) as usize;
-    blocking(move || {
-        let Some(path) = claude_fs::find_session_jsonl(&claude_dir.join("projects"), &cwd, &sid) else { return Ok(None) };
+    let (chat_id, project_id, known_title) = (chat.id.clone(), chat.project_id.clone(), chat.session_title.clone());
+    let (transcript, title) = blocking(move || {
+        let Some(path) = claude_fs::find_session_jsonl(&claude_dir.join("projects"), &cwd, &sid) else { return Ok((None, None)) };
         let t = claude_fs::read_session_transcript(&path, &chat.id, chat.title.clone(), chat.launch.model.clone(), limit)?;
-        Ok(t.map(with_first_message))
+        Ok((t.map(with_first_message), claude_fs::session_title(&path)))
     })
-    .await
+    .await?;
+    // Chats from before `session_title`, or renamed with `/rename` outside Nodal.
+    if let Some(title) = title.filter(|t| known_title.as_ref() != Some(t)) {
+        if db(&state, move |c| Ok(chats::set_session_title(c, &chat_id, &title)?)).await? {
+            state.0.events.notify(Kind::Chats, Some(&project_id));
+        }
+    }
+    Ok(transcript)
 }
 
 /// The transcript keeps the messages before the first answer apart as `prompt`; in a chat
