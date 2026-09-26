@@ -793,7 +793,13 @@ struct RawTranscriptLine {
     kind: Option<String>,
     #[serde(default)]
     message: Option<Value>,
-    /// Structured result of the line's tool call (for `Edit`/`Write`: `structuredPatch`).
+}
+
+/// Structured result of a line's tool call (for `Edit`/`Write`: `structuredPatch`). Read in a
+/// second pass, only for lines that carry a patch: other results (`Read`, `Task`, the
+/// `originalFile` of edits) can be large and are never shown.
+#[derive(Deserialize)]
+struct RawToolUseResult {
     #[serde(default, rename = "toolUseResult")]
     tool_use_result: Option<Value>,
 }
@@ -872,6 +878,8 @@ pub(crate) fn single_result<'a>(blocks: &[Value], structured: Option<&'a Value>)
 
 /// Diff lines kept per tool change; the counts still cover everything.
 const PATCH_LINES_MAX: usize = 400;
+/// Characters kept per diff line.
+const PATCH_LINE_MAX: usize = 1000;
 
 /// The file change of an `Edit`/`MultiEdit`/`Write` result: `{filePath, structuredPatch:
 /// [{oldStart, oldLines, newStart, newLines, lines: [" ctx", "-old", "+new"]}]}`. A `Write`
@@ -890,11 +898,14 @@ pub(crate) fn tool_patch(r: &Value) -> Option<ToolPatch> {
             (n(h, "oldStart"), n(h, "oldLines"), n(h, "newStart"), n(h, "newLines"), lines)
         })
         .collect();
+    // A created file: every line is an addition. Only the kept lines are copied.
+    let mut created_lines = 0u32;
     if hunks.is_empty() && created {
         let content = r.get("content").and_then(Value::as_str).unwrap_or("");
-        let lines: Vec<String> = content.lines().map(|l| format!("+{l}")).collect();
+        created_lines = u32::try_from(content.lines().count()).unwrap_or(u32::MAX);
+        let lines: Vec<String> = content.lines().take(PATCH_LINES_MAX).map(|l| format!("+{l}")).collect();
         if !lines.is_empty() {
-            hunks.push((0, 0, 1, lines.len() as u32, lines));
+            hunks.push((0, 0, 1, created_lines, lines));
         }
     }
     if hunks.is_empty() {
@@ -936,12 +947,17 @@ pub(crate) fn tool_patch(r: &Value) -> Option<ToolPatch> {
                 continue;
             }
             kept += 1;
-            body.push(DiffLine { kind, text: truncate(text, TEXT_MAX), old_no: o, new_no: nn });
+            let text = text.strip_suffix('\r').unwrap_or(text);
+            body.push(DiffLine { kind, text: truncate(text, PATCH_LINE_MAX), old_no: o, new_no: nn });
         }
         if !body.is_empty() {
             let header = format!("@@ -{old_start},{old_lines} +{new_start},{new_lines} @@");
             out.push(DiffHunk { header, old_start, old_lines, new_start, new_lines, lines: body });
         }
+    }
+    if created_lines as usize > PATCH_LINES_MAX {
+        additions = created_lines;
+        truncated = true;
     }
     let status = if created { DiffFileStatus::Added } else { DiffFileStatus::Modified };
     let file = FileDiff { path, old_path: None, status, additions, deletions, binary: false, hunks: out };
@@ -1026,7 +1042,12 @@ pub fn parse_transcript(text: &str, limit: usize) -> ParsedTranscript {
                     }
                 }
                 Some(Value::Array(blocks)) => {
-                    let structured = single_result(blocks, entry.tool_use_result.as_ref());
+                    let tool_use_result = line
+                        .contains("\"structuredPatch\"")
+                        .then(|| serde_json::from_str::<RawToolUseResult>(line).ok())
+                        .flatten()
+                        .and_then(|r| r.tool_use_result);
+                    let structured = single_result(blocks, tool_use_result.as_ref());
                     for b in blocks {
                         match b.get("type").and_then(Value::as_str) {
                             Some("tool_result") => {

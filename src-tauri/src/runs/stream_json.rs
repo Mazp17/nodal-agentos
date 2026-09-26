@@ -383,6 +383,22 @@ mod tests {
     }
 
     #[test]
+    fn multi_hunk_numbers_crlf_and_big_creates() {
+        let two = r#"{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"t1","content":"ok"}]},"tool_use_result":{"filePath":"/r/a.txt","structuredPatch":[{"oldStart":2,"oldLines":1,"newStart":2,"newLines":2,"lines":[" a\r","+b\r"]},{"oldStart":40,"oldLines":2,"newStart":41,"newLines":1,"lines":["-x"," y"]}]}}"#;
+        let p = patch_of(two).unwrap();
+        let rows: Vec<(&str, Option<u32>, Option<u32>)> =
+            p.file.hunks.iter().flat_map(|h| &h.lines).map(|l| (l.text.as_str(), l.old_no, l.new_no)).collect();
+        assert_eq!(rows, [("a", Some(2), Some(2)), ("b", None, Some(3)), ("x", Some(40), None), ("y", Some(41), Some(41))]);
+
+        let content: String = (0..450).map(|i| format!("l{i}\\n")).collect();
+        let create = format!(
+            r#"{{"type":"user","message":{{"content":[{{"type":"tool_result","tool_use_id":"t2","content":"ok"}}]}},"tool_use_result":{{"type":"create","filePath":"/r/b.txt","content":"{content}","structuredPatch":[]}}}}"#
+        );
+        let p = patch_of(&create).unwrap();
+        assert_eq!((p.file.additions, p.file.hunks[0].lines.len(), p.truncated), (450, 400, true));
+    }
+
+    #[test]
     fn stdin_messages() {
         let v: Value = serde_json::from_str(&user_message("-rf \"quoted\"\nline")).unwrap();
         assert_eq!(v, json!({"type": "user", "message": {"role": "user", "content": "-rf \"quoted\"\nline"}}));
