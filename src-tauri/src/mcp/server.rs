@@ -2,33 +2,81 @@
 
 use std::fs;
 use std::io::{self, BufRead, BufReader, Read, Write};
-use std::os::unix::fs::{DirBuilderExt, FileTypeExt, PermissionsExt};
+use std::os::unix::fs::{DirBuilderExt, FileTypeExt, MetadataExt, PermissionsExt};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::thread;
+use std::time::Duration;
 
 use super::{tools, Reply, Request, MAX_LINE};
 use crate::events::Kind;
 use crate::util::{now_ms, paths};
 use crate::work::Inner;
 
+/// How often the listener checks whether it was asked to stop.
+const POLL: Duration = Duration::from_millis(100);
+
+/// A running listener. Dropping it keeps the thread alive; `stop` closes it.
+#[derive(Debug)]
+pub struct Listening {
+    path: PathBuf,
+    /// `(dev, ino)` of the socket we bound, so `stop` never deletes another instance's.
+    id: (u64, u64),
+    stop: Arc<AtomicBool>,
+    thread: thread::JoinHandle<()>,
+}
+
+impl Listening {
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+
+    /// Stops accepting connections and removes the socket. Requests already being served
+    /// finish on their own threads. Returns within one `POLL`.
+    pub fn stop(self) {
+        self.stop.store(true, Ordering::SeqCst);
+        // Removed while the listener is still open: nobody else can have taken the path yet.
+        if fs::symlink_metadata(&self.path).is_ok_and(|m| (m.dev(), m.ino()) == self.id) {
+            let _ = fs::remove_file(&self.path);
+        }
+        let _ = self.thread.join();
+    }
+}
+
 /// Listens on `<data_dir>/mcp.sock` in a background thread. Fails if another Nodal with the
 /// same data folder is already listening.
-pub fn start(inner: Arc<Inner>) -> Result<PathBuf, String> {
+pub fn start(inner: Arc<Inner>) -> Result<Listening, String> {
     let path = paths::mcp_socket(&inner.env.data_dir);
     let listener = bind_private(&path)?;
-    thread::Builder::new()
+    let fail = |e: io::Error| format!("Couldn't start the MCP server: {e}");
+    let id = fs::symlink_metadata(&path).map(|m| (m.dev(), m.ino())).map_err(fail)?;
+    // Non-blocking, so the thread can notice `stop` without a connection to wake it up.
+    listener.set_nonblocking(true).map_err(fail)?;
+    let stop = Arc::new(AtomicBool::new(false));
+    let stopping = stop.clone();
+    let thread = thread::Builder::new()
         .name("mcp".into())
         .spawn(move || {
-            for stream in listener.incoming() {
-                let stream = match stream {
-                    Ok(s) => s,
+            while !stopping.load(Ordering::SeqCst) {
+                let stream = match listener.accept() {
+                    Ok((s, _)) => s,
+                    Err(e) if e.kind() == io::ErrorKind::WouldBlock => {
+                        thread::sleep(POLL);
+                        continue;
+                    }
                     Err(e) => {
                         eprintln!("mcp: {e}");
+                        thread::sleep(POLL);
                         continue;
                     }
                 };
+                // Accepted sockets inherit non-blocking mode on macOS.
+                if let Err(e) = stream.set_nonblocking(false) {
+                    eprintln!("mcp: {e}");
+                    continue;
+                }
                 let inner = inner.clone();
                 let spawned = thread::Builder::new().name("mcp-conn".into()).spawn(move || {
                     if let Err(e) = handle_conn(stream, |r| respond(&inner, r)) {
@@ -40,8 +88,8 @@ pub fn start(inner: Arc<Inner>) -> Result<PathBuf, String> {
                 }
             }
         })
-        .map_err(|e| format!("Couldn't start the MCP server: {e}"))?;
-    Ok(path)
+        .map_err(fail)?;
+    Ok(Listening { path, id, stop, thread })
 }
 
 /// One request: the same `ops` as the UI with the database locked, then the same
@@ -159,7 +207,8 @@ mod tests {
         let socket = paths::mcp_socket(&inner.env.data_dir);
         assert_eq!(forward(&socket, "list_projects", json!({})).unwrap_err(), OPEN_NODAL);
 
-        assert_eq!(start(inner.clone()).unwrap(), socket);
+        let listening = start(inner.clone()).unwrap();
+        assert_eq!(listening.path(), socket);
         let mode = fs::metadata(&socket).unwrap().permissions().mode();
         assert_eq!(mode & 0o777, 0o600);
         assert!(fs::read_dir(&inner.env.data_dir).unwrap().all(|e| !e.unwrap().file_name().to_string_lossy().starts_with(".mcp-")));
@@ -183,6 +232,20 @@ mod tests {
 
         // A second app with the same data folder does not steal the socket.
         assert!(start(inner.clone()).unwrap_err().contains("already listening"));
+
+        // Stopped: the socket is gone and agents are told to open Nodal; it can start again.
+        listening.stop();
+        assert!(!socket.exists());
+        assert_eq!(forward(&socket, "list_projects", json!({})).unwrap_err(), OPEN_NODAL);
+        let again = start(inner.clone()).unwrap();
+        assert_eq!(forward(&socket, "list_projects", json!({})).unwrap()[0]["key"], "PAY");
+
+        // Someone else's socket at the same path survives our stop.
+        fs::remove_file(&socket).unwrap();
+        let other = UnixListener::bind(&socket).unwrap();
+        again.stop();
+        assert!(socket.exists());
+        drop(other);
     }
 
     #[test]

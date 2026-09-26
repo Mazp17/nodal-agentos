@@ -38,6 +38,7 @@ pub fn run() {
         .on_menu_event(updates::on_menu_event)
         .manage(linear::LinearState::new(secrets.clone()))
         .manage(secrets)
+        .manage(mcp::commands::McpState::default())
         .setup(|app| {
             use tauri::Manager;
             app.manage(events::Events::new(app.handle().clone()));
@@ -55,8 +56,8 @@ pub fn run() {
                     app.manage(db.clone());
                     if let Err(e) = work::init(app.handle(), db) {
                         eprintln!("work: {e}");
-                    } else if let Err(e) = mcp::server::start(app.state::<work::WorkState>().0.clone()) {
-                        eprintln!("mcp: {e}");
+                    } else {
+                        app.state::<mcp::commands::McpState>().start(app.state::<work::WorkState>().0.clone());
                     }
                 }
                 Err(e) => eprintln!("nodal.db: {e}"),
@@ -150,6 +151,9 @@ pub fn run() {
             migrate::import_legacy_data,
             updates::updates_enabled,
             updates::restart_app,
+            mcp::commands::mcp_status,
+            mcp::commands::mcp_restart,
+            mcp::commands::mcp_stop,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

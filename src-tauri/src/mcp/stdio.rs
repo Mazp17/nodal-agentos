@@ -13,7 +13,8 @@ use serde_json::{json, Value};
 use super::{tools, Reply, Request, MAX_LINE};
 use crate::util::paths;
 
-pub const OPEN_NODAL: &str = "Open Nodal first: agents can only reach it while the app is running.";
+pub const OPEN_NODAL: &str =
+    "Open Nodal first: agents can only reach it while the app is running and its MCP server is on (Settings → Diagnostics).";
 const TIMEOUT: Duration = Duration::from_secs(30);
 /// Newest first; an unknown version requested by the client gets the newest.
 const PROTOCOL_VERSIONS: [&str; 4] = ["2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"];

@@ -10,7 +10,7 @@ Nodal is a macOS app that keeps a board of tasks per project and runs each task 
 the board, create and update tasks, and read the result of runs. You cannot launch runs: a person
 launches them from the app.
 
-If the tools fail with "Open Nodal first", the app is not running. Say so and stop; do not retry in
+If the tools fail with "Open Nodal first", the app is not running or its MCP server is off. Say so and stop; do not retry in
 a loop and do not fall back to another tracker unless you are asked to.
 
 ## Vocabulary
