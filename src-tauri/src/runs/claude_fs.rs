@@ -7,6 +7,9 @@
 //! - layout of `~/.claude/projects/<slug>/<sessionId>/` (journal, meta, transcripts,
 //!   final summary `workflows/wf_*.json`, script `workflows/scripts/*-wf_*.js`).
 //!
+//! The `-p` stream-json protocol that chats speak lives in `stream_json`, which reuses the
+//! content-block helpers here.
+//!
 //! Policy: tolerate anything unknown (new fields, unexpected types, lines cut off
 //! mid-write) and degrade to `None` instead of failing.
 
@@ -846,6 +849,63 @@ fn tool_result_text(block: &Value) -> String {
     }
 }
 
+/// A `tool_result` content block as `(tool_use_id, result)`. Session files and stream-json
+/// events share this block shape.
+pub(crate) fn tool_result_info(b: &Value) -> (Option<&str>, ToolResultInfo) {
+    let (text, truncated) = clip(&tool_result_text(b), TOOL_RESULT_MAX);
+    let info = ToolResultInfo { text, is_error: b.get("is_error").and_then(Value::as_bool).unwrap_or(false), truncated };
+    (b.get("tool_use_id").and_then(Value::as_str), info)
+}
+
+/// A content block of an assistant message (`text`, `thinking` or `tool_use`) as a
+/// transcript item; `None` for empty or unknown blocks. Shared with stream-json events.
+pub(crate) fn assistant_item(b: &Value) -> Option<TranscriptItem> {
+    match b.get("type").and_then(Value::as_str) {
+        Some("text") => {
+            let s = b.get("text").and_then(Value::as_str).unwrap_or("").trim();
+            if s.is_empty() {
+                return None;
+            }
+            let (text, truncated) = clip(s, TEXT_MAX);
+            Some(TranscriptItem::Text { text, truncated })
+        }
+        Some("thinking") => {
+            let s = b.get("thinking").and_then(Value::as_str).unwrap_or("").trim();
+            if s.is_empty() {
+                return None;
+            }
+            let (text, truncated) = clip(s, TEXT_MAX);
+            Some(TranscriptItem::Thinking { text, truncated })
+        }
+        Some("tool_use") => {
+            let name = b.get("name").and_then(Value::as_str)?;
+            let input = b.get("input");
+            let pretty = input
+                .filter(|v| v.as_object().is_none_or(|o| !o.is_empty()))
+                .and_then(|v| serde_json::to_string_pretty(v).ok());
+            Some(TranscriptItem::ToolUse {
+                id: b.get("id").and_then(Value::as_str).map(str::to_string),
+                name: name.to_string(),
+                summary: input.and_then(|i| tool_summary_n(i, SUMMARY_MAX)),
+                input: pretty.map(|p| truncate(&p, TOOL_INPUT_MAX)),
+                result: None,
+            })
+        }
+        _ => None,
+    }
+}
+
+/// One line with a tool input's main argument, as transcript tool calls show it.
+pub(crate) fn tool_input_summary(input: &Value) -> Option<String> {
+    tool_summary_n(input, SUMMARY_MAX)
+}
+
+/// A user text as a transcript item, clipped like the rest.
+pub(crate) fn user_item(s: &str) -> TranscriptItem {
+    let (text, truncated) = clip(s, TEXT_MAX);
+    TranscriptItem::User { text, truncated }
+}
+
 /// Parses the lines of an `agent-<id>.jsonl`: initial prompt, conversation with each
 /// `tool_result` attached to its `tool_use`, and final output. Returns at most the last
 /// `limit` items. Tolerates broken lines and unknown types.
@@ -878,13 +938,7 @@ pub fn parse_transcript(text: &str, limit: usize) -> ParsedTranscript {
                     for b in blocks {
                         match b.get("type").and_then(Value::as_str) {
                             Some("tool_result") => {
-                                let id = b.get("tool_use_id").and_then(Value::as_str);
-                                let (text, truncated) = clip(&tool_result_text(b), TOOL_RESULT_MAX);
-                                let info = ToolResultInfo {
-                                    text,
-                                    is_error: b.get("is_error").and_then(Value::as_bool).unwrap_or(false),
-                                    truncated,
-                                };
+                                let (id, info) = tool_result_info(b);
                                 // The tool_use is usually very close: search from the end.
                                 let slot = items.iter_mut().rev().find_map(|it| match it {
                                     TranscriptItem::ToolUse { id: Some(tid), result, .. } if Some(tid.as_str()) == id => {
@@ -915,43 +969,21 @@ pub fn parse_transcript(text: &str, limit: usize) -> ParsedTranscript {
                 seen_assistant = true;
                 let Some(Value::Array(blocks)) = content else { continue };
                 for b in blocks {
-                    match b.get("type").and_then(Value::as_str) {
-                        Some("text") => {
-                            let s = b.get("text").and_then(Value::as_str).unwrap_or("").trim();
-                            if s.is_empty() {
-                                continue;
-                            }
-                            let (text, truncated) = clip(s, TEXT_MAX);
-                            last_text = Some(text.clone());
-                            items.push(TranscriptItem::Text { text, truncated });
-                        }
-                        Some("thinking") => {
-                            let s = b.get("thinking").and_then(Value::as_str).unwrap_or("").trim();
-                            if !s.is_empty() {
-                                let (text, truncated) = clip(s, TEXT_MAX);
-                                items.push(TranscriptItem::Thinking { text, truncated });
-                            }
-                        }
-                        Some("tool_use") => {
-                            let Some(name) = b.get("name").and_then(Value::as_str) else { continue };
-                            let input = b.get("input");
-                            let pretty = input
-                                .filter(|v| v.as_object().is_none_or(|o| !o.is_empty()))
-                                .and_then(|v| serde_json::to_string_pretty(v).ok());
-                            if name == "StructuredOutput" {
-                                structured = pretty.clone();
-                            }
+                    let Some(item) = assistant_item(b) else { continue };
+                    match &item {
+                        TranscriptItem::Text { text, .. } => last_text = Some(text.clone()),
+                        TranscriptItem::ToolUse { name, .. } => {
                             tool_calls += 1;
-                            items.push(TranscriptItem::ToolUse {
-                                id: b.get("id").and_then(Value::as_str).map(str::to_string),
-                                name: name.to_string(),
-                                summary: input.and_then(|i| tool_summary_n(i, SUMMARY_MAX)),
-                                input: pretty.map(|p| truncate(&p, TOOL_INPUT_MAX)),
-                                result: None,
-                            });
+                            if name == "StructuredOutput" {
+                                structured = b
+                                    .get("input")
+                                    .filter(|v| v.as_object().is_none_or(|o| !o.is_empty()))
+                                    .and_then(|v| serde_json::to_string_pretty(v).ok());
+                            }
                         }
                         _ => {}
                     }
+                    items.push(item);
                 }
             }
             _ => {}
