@@ -808,6 +808,8 @@ pub struct ParsedTranscript {
     pub prompt: Option<String>,
     pub items: Vec<TranscriptItem>,
     pub total: usize,
+    /// `tool_use` blocks in what was read, including the ones dropped by `limit`.
+    pub tool_calls: usize,
     pub final_output: Option<String>,
 }
 
@@ -853,6 +855,7 @@ pub fn parse_transcript(text: &str, limit: usize) -> ParsedTranscript {
     let mut seen_assistant = false;
     let mut last_text: Option<String> = None;
     let mut structured: Option<String> = None;
+    let mut tool_calls = 0;
 
     for line in text.lines() {
         // Cheap filter: attachments (skill lists, snapshots) make up most of the file.
@@ -938,6 +941,7 @@ pub fn parse_transcript(text: &str, limit: usize) -> ParsedTranscript {
                             if name == "StructuredOutput" {
                                 structured = pretty.clone();
                             }
+                            tool_calls += 1;
                             items.push(TranscriptItem::ToolUse {
                                 id: b.get("id").and_then(Value::as_str).map(str::to_string),
                                 name: name.to_string(),
@@ -971,6 +975,7 @@ pub fn parse_transcript(text: &str, limit: usize) -> ParsedTranscript {
         prompt,
         items,
         total,
+        tool_calls,
         final_output: structured.or(last_text).map(|s| truncate(&s, TEXT_MAX)),
     }
 }
@@ -1029,6 +1034,7 @@ pub fn read_agent_transcript(
         prompt: parsed.prompt,
         omitted: (parsed.total - parsed.items.len()) as u32,
         total_items: parsed.total as u32,
+        tool_calls: parsed.tool_calls as u32,
         items: parsed.items,
         final_output: parsed.final_output,
         partial,
@@ -1065,6 +1071,7 @@ pub fn read_session_transcript(
         prompt: parsed.prompt,
         omitted: (parsed.total - parsed.items.len()) as u32,
         total_items: parsed.total as u32,
+        tool_calls: parsed.tool_calls as u32,
         items: parsed.items,
         final_output: parsed.final_output,
         partial,
@@ -1485,6 +1492,7 @@ mod tests {
         assert!(!prompt.contains("Workflow harness"));
         // Empty (signed) thinking is skipped: Bash, text, StructuredOutput.
         assert_eq!(t.total_items, 3);
+        assert_eq!(t.tool_calls, 2);
         assert_eq!(t.omitted, 0);
         match &t.items[0] {
             TranscriptItem::ToolUse { name, summary, result, .. } => {
@@ -1527,6 +1535,7 @@ mod tests {
         let p = parse_transcript(&lines.join("\n"), 100);
         assert_eq!(p.prompt.as_deref(), Some("Task without wrapper"));
         assert_eq!(p.total, 5);
+        assert_eq!(p.tool_calls, 2);
         assert!(matches!(&p.items[0], TranscriptItem::Thinking { text, .. } if text == "hmm"));
         assert!(matches!(&p.items[1], TranscriptItem::Text { truncated: true, text } if text.chars().count() == TEXT_MAX + 1));
         match &p.items[2] {
@@ -1621,7 +1630,7 @@ mod tests {
         let t = read_session_transcript(&path, "run-1", Some("Claude".into()), None, 2).unwrap().unwrap();
         assert_eq!(t.agent_id, "run-1");
         assert_eq!(t.prompt.as_deref(), Some("Fix the login bug"));
-        assert_eq!((t.total_items, t.omitted), (3, 1));
+        assert_eq!((t.total_items, t.omitted, t.tool_calls), (3, 1, 1));
         assert_eq!(t.final_output.as_deref(), Some("Done."));
         assert!(!t.items.iter().any(|i| matches!(i, TranscriptItem::Text { text, .. } if text == "subagent")));
         assert!(read_session_transcript(&dir.join("nope.jsonl"), "x", None, None, 10).unwrap().is_none());

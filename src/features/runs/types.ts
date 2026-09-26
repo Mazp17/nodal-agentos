@@ -66,6 +66,8 @@ export interface Transcript {
   totalItems: number;
   /** Older items that weren't returned. */
   omitted: number;
+  /** Tool calls in what was read, including the omitted items. */
+  toolCalls: number;
   finalOutput: string | null;
   /** Very large file: only the head and tail were read. */
   partial: boolean;

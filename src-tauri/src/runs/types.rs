@@ -186,6 +186,8 @@ pub struct Transcript {
     /// Total items in what was read; the first `omitted` aren't returned.
     pub total_items: u32,
     pub omitted: u32,
+    /// Tool calls in what was read (all of them, not only the returned items).
+    pub tool_calls: u32,
     /// Final output: the `StructuredOutput` input or the last assistant text.
     pub final_output: Option<String>,
     /// The file was too large and only its head and tail were read.
