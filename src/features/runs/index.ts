@@ -3,6 +3,7 @@
 export { RunsView, type RunsViewProps } from "./RunsView";
 export { RunDetailView, type RunDetailViewProps } from "./RunDetailView";
 export { RunDiffDrawer, type RunDiffDrawerProps } from "./RunDiffDrawer";
+export { RunMonitor, type RunMonitorProps } from "./RunMonitor";
 export { AgentTranscript } from "./AgentTranscript";
 export { ActivityView, type ActivityViewProps } from "../activity/ActivityView";
 export { LaunchBlockerNotice, launchErrorHint, useLaunchBlocker } from "./LaunchBlockerNotice";

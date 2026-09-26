@@ -1,0 +1,65 @@
+/* Run monitor: right-side drawer opened from the topbar pill. Reuses the queue items and slot bar from runs.css. */
+
+/* Full height and above the task panel (.tp, fixed at z 21), like the diff drawer. */
+.monitor-scrim { position: fixed; inset: 0; z-index: 30; }
+.monitor { position: fixed; top: 0; z-index: 31; width: min(420px, 92%); background: var(--surface-sheet); }
+.monitor:focus { outline: none; }
+
+.monitor-head { display: flex; flex-direction: column; gap: var(--sp-4); padding: var(--sp-5) var(--sp-6); border-bottom: 1px solid var(--border); }
+.monitor-head-row { display: flex; align-items: center; gap: var(--sp-4); }
+.monitor-title { font-size: var(--fs-lg); font-weight: var(--fw-semibold); }
+.monitor-cap { margin-left: auto; font-size: var(--fs-sm); color: var(--text-dim); }
+.monitor-close { width: 24px; height: 24px; font-size: var(--fs-xs); color: var(--text-dim); }
+
+.monitor-body { flex: 1; min-height: 0; overflow: auto; padding: var(--sp-5) var(--sp-6); display: flex; flex-direction: column; gap: var(--sp-7); }
+.monitor-error { white-space: pre-line; }
+.monitor-section { display: flex; flex-direction: column; gap: var(--sp-3); }
+.monitor-section-title { display: flex; align-items: center; gap: var(--sp-2); font-size: var(--fs-sm); font-weight: var(--fw-semibold); color: var(--text-muted); }
+.monitor-count { font-size: var(--fs-xs); font-weight: var(--fw-regular); color: var(--text-dim); }
+.monitor-empty { font-size: var(--fs-md); color: var(--text-dim); line-height: var(--lh-body); }
+
+.monitor-card {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  padding: var(--sp-3) var(--sp-4);
+  border-radius: var(--r-card);
+  background: var(--surface-card);
+  border: 1px solid var(--border);
+  text-align: left;
+  color: var(--text);
+}
+button.monitor-card:hover { background: var(--fill-2); }
+.monitor-card-row { display: flex; align-items: center; gap: var(--sp-3); min-width: 0; }
+.monitor-run-title { flex: 1; min-width: 0; display: flex; align-items: center; gap: var(--sp-2); font-size: var(--fs-md); }
+.monitor-key { flex: none; font-family: var(--font-mono); font-size: var(--fs-xs); color: var(--text-muted); }
+.monitor-time { flex: none; font-size: var(--fs-sm); color: var(--text-dim); }
+.monitor-meta { font-size: var(--fs-sm); color: var(--text-dim); }
+.monitor-exec { flex: 1; min-width: 0; }
+.monitor-kind { margin-right: var(--sp-2); color: var(--text-muted); }
+.monitor-progress { display: inline-flex; align-items: center; gap: 5px; max-width: 60%; color: var(--tone); }
+.monitor-progress .dot { flex: none; }
+
+.monitor-stopped { border-color: color-mix(in oklch, var(--tone) 35%, transparent); }
+.monitor-reason {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+  font-size: var(--fs-sm);
+  line-height: 1.45;
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
+}
+.monitor-actions { display: flex; gap: var(--sp-2); }
+
+.monitor-queue { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--sp-2); }
+.monitor-queue-item { cursor: grab; }
+.monitor-queue-item.dragging { opacity: 0.5; }
+.monitor-queue-item.drop-above { box-shadow: 0 -2px 0 var(--accent); }
+.monitor-queue-item.drop-below { box-shadow: 0 2px 0 var(--accent); }
+
+.monitor-foot { display: flex; align-items: center; gap: var(--sp-4); padding: var(--sp-4) var(--sp-6); border-top: 1px solid var(--border); }
+.monitor-free { flex: 1; min-width: 0; font-size: var(--fs-sm); color: var(--text-dim); }
