@@ -9,7 +9,8 @@ interface Props {
   queued: number;
   showImport: boolean;
   showNewTask: boolean;
-  onOpenRuns: () => void;
+  monitorOpen: boolean;
+  onToggleMonitor: () => void;
   onImport: () => void;
   onNewTask: () => void;
 }
@@ -36,7 +37,14 @@ export function Topbar(p: Props) {
         </h1>
       </nav>
       <span className="spacer" />
-      <button type="button" className="status-pill" onClick={p.onOpenRuns} aria-label={`${pillLabel}. Open runs`}>
+      <button
+        type="button"
+        className="status-pill"
+        onClick={p.onToggleMonitor}
+        aria-label={`${pillLabel}. ${p.monitorOpen ? "Close" : "Open"} run monitor`}
+        aria-expanded={p.monitorOpen}
+        aria-haspopup="dialog"
+      >
         <span className="status-pill-running">
           <span className={`dot dot-sm tone-accent ${p.running ? "pulse" : ""}`} aria-hidden />
           {runningLabel}

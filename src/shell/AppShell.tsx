@@ -11,7 +11,7 @@ import { Onboarding } from "../features/onboarding/Onboarding";
 import { CreateProjectDialog } from "../features/projects/CreateProjectDialog";
 import { ProjectSettings } from "../features/projects/ProjectSettings";
 import { ImportDialog } from "../features/providers";
-import { ActivityView, RunDetailView, RunDiffDrawer, RunsView } from "../features/runs";
+import { ActivityView, RunDetailView, RunDiffDrawer, RunMonitor, RunsView } from "../features/runs";
 import { useLegacyImport } from "../features/settings/legacyImport";
 import { SettingsView } from "../features/settings/SettingsView";
 import { NewTaskDialog, TaskPanel, TasksView } from "../features/tasks";
@@ -48,6 +48,7 @@ export function AppShell() {
   const [importFor, setImportFor] = useState<string | null>(null);
   const [taskId, setTaskId] = useState<string | null>(null);
   const [diffRunId, setDiffRunId] = useState<string | null>(null);
+  const [monitorOpen, setMonitorOpen] = useState(false);
 
   const { route } = nav;
   const project = route.projectId ? (ctx.projectById.get(route.projectId) ?? null) : null;
@@ -409,7 +410,8 @@ export function AppShell() {
             queued={queue.queued}
             showImport={route.page === "board" && canImport}
             showNewTask={showNewTask}
-            onOpenRuns={() => go("runs")}
+            monitorOpen={monitorOpen}
+            onToggleMonitor={() => setMonitorOpen((o) => !o)}
             onImport={() => project && setImportFor(project.id)}
             onNewTask={openNewTask}
           />
@@ -472,6 +474,19 @@ export function AppShell() {
             setImportFor(null);
             nav.setProjectSection("sources");
             go("project-settings", pid);
+          }}
+        />
+      )}
+      {monitorOpen && (
+        <RunMonitor
+          onClose={() => setMonitorOpen(false)}
+          onOpenRun={(id) => {
+            setMonitorOpen(false);
+            openRun(id);
+          }}
+          onGoToRuns={() => {
+            setMonitorOpen(false);
+            go("runs");
           }}
         />
       )}
