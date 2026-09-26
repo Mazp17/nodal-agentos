@@ -12,6 +12,7 @@ pub mod diff;
 pub mod dto;
 pub mod executors;
 pub mod launch;
+pub mod merge;
 pub mod ops;
 pub mod pump;
 pub mod queue;

@@ -71,12 +71,12 @@ pub fn current_base(repo: &Path) -> Result<String, String> {
     Ok(git::ok(repo, &["rev-parse", "HEAD"])?.trim().to_string())
 }
 
-fn branch_exists(repo: &Path, branch: &str) -> Result<bool, String> {
+pub(crate) fn branch_exists(repo: &Path, branch: &str) -> Result<bool, String> {
     Ok(git::run(repo, &["rev-parse", "--verify", "--quiet", &format!("refs/heads/{branch}")])?.ok)
 }
 
 /// Is `dir` a live worktree (its toplevel is itself)?
-fn is_live_worktree(dir: &Path) -> bool {
+pub(crate) fn is_live_worktree(dir: &Path) -> bool {
     dir.is_dir()
         && git::toplevel(dir)
             .ok()
@@ -157,7 +157,7 @@ pub struct WorktreeStatus {
 
 /// `git rev-list --count <args> --`. An error is propagated: counting 0 on error would allow
 /// deleting a branch with unpushed commits.
-fn count(repo: &Path, args: &[&str]) -> Result<u32, String> {
+pub(crate) fn count(repo: &Path, args: &[&str]) -> Result<u32, String> {
     let mut full = vec!["rev-list", "--count"];
     full.extend_from_slice(args);
     full.push("--");
