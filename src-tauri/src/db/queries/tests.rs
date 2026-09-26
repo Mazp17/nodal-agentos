@@ -168,9 +168,12 @@ fn chats_crud_and_order() {
     assert!(chats::set_session(&c, "c1", "s-1").unwrap());
     assert!(!chats::set_session(&c, "c1", "s-1").unwrap(), "same id: no change");
     assert_eq!(chats::get(&c, "c1").unwrap().session_id.as_deref(), Some("s-1"));
-    // `update` doesn't touch the session.
+    assert!(chats::set_session_title(&c, "c1", "Login page plan").unwrap());
+    assert!(!chats::set_session_title(&c, "c1", "Login page plan").unwrap(), "same title: no change");
+    // `update` doesn't touch the session or its title.
     chats::update(&c, &c1).unwrap();
-    assert_eq!(chats::get(&c, "c1").unwrap().session_id.as_deref(), Some("s-1"));
+    let saved = chats::get(&c, "c1").unwrap();
+    assert_eq!((saved.session_id.as_deref(), saved.session_title.as_deref()), (Some("s-1"), Some("Login page plan")));
 
     chats::delete(&c, "c1").unwrap();
     assert!(chats::get(&c, "c1").is_err());
