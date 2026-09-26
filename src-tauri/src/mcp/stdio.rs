@@ -1,6 +1,7 @@
 //! The `nodal-mcp` side: MCP over stdio (newline-delimited JSON-RPC 2.0). It answers the
 //! handshake and `tools/list` itself, so it registers even while the app is closed, and
-//! forwards each `tools/call` to the app's socket.
+//! forwards each `tools/call` to the app's socket. `nodal-mcp --chat` (how Nodal's chats
+//! launch it) also lists `propose_task`.
 
 use std::io::{self, BufRead, BufReader, ErrorKind, Read, Write};
 use std::os::unix::net::UnixStream;
@@ -24,14 +25,18 @@ const INVALID_REQUEST: i64 = -32600;
 const METHOD_NOT_FOUND: i64 = -32601;
 const INVALID_PARAMS: i64 = -32602;
 
+/// Makes `nodal-mcp` serve the chat's tools (`tools::chat_definitions`).
+pub const CHAT_FLAG: &str = "--chat";
+
 /// Entry point of the `nodal-mcp` binary.
 pub fn main() -> ExitCode {
+    let defs = if std::env::args().skip(1).any(|a| a == CHAT_FLAG) { tools::chat_definitions() } else { tools::definitions() };
     let socket = paths::data_dir_standalone().map(|d| paths::mcp_socket(&d));
     let call = |tool: &str, args: Value| match &socket {
         Ok(s) => forward(s, tool, args),
         Err(e) => Err(e.clone()),
     };
-    match serve(io::stdin().lock(), io::stdout().lock(), call) {
+    match serve(io::stdin().lock(), io::stdout().lock(), &defs, call) {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
             eprintln!("nodal-mcp: {e}");
@@ -64,10 +69,11 @@ pub fn forward(socket: &Path, tool: &str, args: Value) -> Result<Value, String> 
     }
 }
 
-/// Reads JSON-RPC messages until stdin closes. `call` runs a tool.
+/// Reads JSON-RPC messages until stdin closes. `defs` are the tools it lists; `call` runs one.
 pub(crate) fn serve(
     input: impl BufRead,
     mut output: impl Write,
+    defs: &Value,
     mut call: impl FnMut(&str, Value) -> Result<Value, String>,
 ) -> io::Result<()> {
     for line in input.lines() {
@@ -76,7 +82,7 @@ pub(crate) fn serve(
             continue;
         }
         let reply = match serde_json::from_str::<Value>(&line) {
-            Ok(msg) => handle(&msg, &mut call),
+            Ok(msg) => handle(&msg, defs, &mut call),
             Err(e) => Some(error(Value::Null, PARSE_ERROR, &format!("Parse error: {e}"))),
         };
         if let Some(r) = reply {
@@ -89,7 +95,7 @@ pub(crate) fn serve(
 }
 
 /// The answer to one message; `None` for notifications and responses.
-fn handle(msg: &Value, call: &mut impl FnMut(&str, Value) -> Result<Value, String>) -> Option<Value> {
+fn handle(msg: &Value, defs: &Value, call: &mut impl FnMut(&str, Value) -> Result<Value, String>) -> Option<Value> {
     let id = msg.get("id").filter(|id| !id.is_null()).cloned();
     let Some(method) = msg.get("method").and_then(Value::as_str) else {
         let is_response = msg.get("result").is_some() || msg.get("error").is_some();
@@ -100,8 +106,8 @@ fn handle(msg: &Value, call: &mut impl FnMut(&str, Value) -> Result<Value, Strin
     let result = match method {
         "initialize" => initialize(&params),
         "ping" => json!({}),
-        "tools/list" => json!({"tools": tools::definitions()}),
-        "tools/call" => match tool_call(&params, call) {
+        "tools/list" => json!({"tools": defs}),
+        "tools/call" => match tool_call(&params, defs, call) {
             Ok(r) => r,
             Err(e) => return Some(error(id, INVALID_PARAMS, &e)),
         },
@@ -123,9 +129,9 @@ fn initialize(params: &Value) -> Value {
 
 /// A failing tool is a result with `isError` (the agent reads it); a malformed call is a
 /// JSON-RPC error.
-fn tool_call(params: &Value, call: &mut impl FnMut(&str, Value) -> Result<Value, String>) -> Result<Value, String> {
+fn tool_call(params: &Value, defs: &Value, call: &mut impl FnMut(&str, Value) -> Result<Value, String>) -> Result<Value, String> {
     let name = params.get("name").and_then(Value::as_str).ok_or("Missing tool name.")?;
-    let known = tools::definitions().as_array().is_some_and(|d| d.iter().any(|t| t["name"] == name));
+    let known = defs.as_array().is_some_and(|d| d.iter().any(|t| t["name"] == name));
     if !known {
         return Err(format!("Unknown tool: {name}."));
     }
@@ -145,9 +151,13 @@ fn error(id: Value, code: i64, message: &str) -> Value {
 mod tests {
     use super::*;
 
-    fn run(input: &str, mut call: impl FnMut(&str, Value) -> Result<Value, String>) -> Vec<Value> {
+    fn run(input: &str, call: impl FnMut(&str, Value) -> Result<Value, String>) -> Vec<Value> {
+        run_with(input, &tools::definitions(), call)
+    }
+
+    fn run_with(input: &str, defs: &Value, mut call: impl FnMut(&str, Value) -> Result<Value, String>) -> Vec<Value> {
         let mut out = Vec::new();
-        serve(input.as_bytes(), &mut out, &mut call).unwrap();
+        serve(input.as_bytes(), &mut out, defs, &mut call).unwrap();
         String::from_utf8(out).unwrap().lines().map(|l| serde_json::from_str(l).unwrap()).collect()
     }
 
@@ -202,6 +212,27 @@ mod tests {
         assert_eq!(out[2]["error"]["code"], INVALID_PARAMS);
         assert_eq!(out[3]["error"]["code"], METHOD_NOT_FOUND);
         assert_eq!((out[4]["error"]["code"].as_i64(), &out[4]["id"]), (Some(PARSE_ERROR), &Value::Null));
+    }
+
+    #[test]
+    fn only_the_chat_server_lists_and_forwards_propose_task() {
+        let input = [
+            r#"{"jsonrpc":"2.0","id":1,"method":"tools/list"}"#,
+            r#"{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"propose_task","arguments":{"title":"x"}}}"#,
+        ]
+        .join("\n");
+        let out = run(&input, |_, _| panic!("propose_task isn't an agent tool"));
+        assert_eq!(out[0]["result"]["tools"], tools::definitions());
+        assert_eq!(out[1]["error"]["code"], INVALID_PARAMS);
+
+        let mut calls = Vec::new();
+        let out = run_with(&input, &tools::chat_definitions(), |tool, args| {
+            calls.push((tool.to_string(), args));
+            Ok(json!({"created": false}))
+        });
+        assert_eq!(out[0]["result"]["tools"], tools::chat_definitions());
+        assert_eq!(out[1]["result"]["isError"], false);
+        assert_eq!(calls, [("propose_task".to_string(), json!({"title": "x"}))]);
     }
 
     #[test]

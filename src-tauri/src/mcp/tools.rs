@@ -12,7 +12,7 @@ use crate::db::queries::{double_option, projects, repos, runs as qruns, tasks};
 use crate::domain::*;
 use crate::util::{is_valid_id, paths};
 use crate::work::dto::{NewTask, PlanInput, TaskPatch};
-use crate::work::{ops, Env};
+use crate::work::{ops, validate, Env};
 
 /// Result of a tool, plus the project whose tasks changed (for `nodal://changed`).
 #[derive(Debug)]
@@ -38,6 +38,7 @@ pub fn call(conn: &mut Connection, env: &Env, name: &str, args: Value, now: i64)
         "create_task" => create_task(conn, env, parse(args)?, now),
         "update_task" => update_task(conn, env, parse(args)?, now),
         "get_run" => get_run(conn, parse(args)?).map(Outcome::read),
+        PROPOSE_TASK => propose_task(conn, parse(args)?).map(Outcome::read),
         _ => Err(format!("Unknown tool: {name}.")),
     }
 }
@@ -242,6 +243,57 @@ fn create_task(conn: &mut Connection, env: &Env, a: CreateTask, now: i64) -> Res
     Ok(Outcome { value: task_value(&t, &key_of(conn, &t)?)?, changed: Some(t.project_id) })
 }
 
+/// Chat-only tool: a task the chat shows as a card for the user to create. Nothing is written.
+pub const PROPOSE_TASK: &str = "propose_task";
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct ProposeTask {
+    repo: String,
+    project: Option<String>,
+    title: String,
+    plan: String,
+    #[serde(default)]
+    acceptance: Vec<String>,
+    priority: Option<Priority>,
+    #[serde(default)]
+    labels: Vec<String>,
+    executor: Option<Executor>,
+    status: Option<TaskStatus>,
+}
+
+/// Validates like `create_task` and returns the `NewTask` the card creates on accept
+/// (mirror of `TaskProposal` in `api.ts`), without touching the board.
+fn propose_task(conn: &Connection, a: ProposeTask) -> Result<Value, String> {
+    let project = a.project.as_deref().map(|p| resolve_project(conn, p)).transpose()?;
+    let repo = resolve_repo(conn, &a.repo, project.as_ref())?;
+    let title = validate::title(&a.title)?;
+    validate::plan_text(&a.plan)?;
+    if let Some(e) = &a.executor {
+        validate::executor(e)?;
+    }
+    let labels = validate::labels(&a.labels)?;
+    let acceptance = validate::acceptance(&a.acceptance)?;
+    let project = projects::get(conn, &repo.project_id)?;
+    Ok(json!({
+        "newTask": {
+            "projectId": project.id,
+            "repoId": repo.id,
+            "title": title,
+            "plan": {"kind": "text", "text": a.plan},
+            "status": a.status.unwrap_or(TaskStatus::Todo),
+            "priority": a.priority.unwrap_or_default(),
+            "labels": labels,
+            "acceptance": acceptance,
+            "assignee": a.executor,
+        },
+        "projectKey": project.key,
+        "repoName": repo.name,
+        "created": false,
+        "note": "Shown to the user as a task card; nothing was created. The user creates it from the card."
+    }))
+}
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct UpdateTask {
@@ -408,6 +460,30 @@ pub fn definitions() -> Value {
             }}
         }
     ])
+}
+
+/// `tools/list` of a Nodal chat (`nodal-mcp --chat`): every tool plus `propose_task`, which
+/// only makes sense where the chat UI renders it.
+pub fn chat_definitions() -> Value {
+    let mut defs = definitions();
+    if let Value::Array(list) = &mut defs {
+        list.push(json!({
+            "name": PROPOSE_TASK,
+            "description": "Propose a task: the user sees it as a task card in this chat and creates it with one click. It does not create anything. Prefer it to create_task unless the user asks you to create the task yourself.",
+            "inputSchema": {"type": "object", "properties": {
+                "repo": {"type": "string", "description": "Repo id, name, or a path at or inside the repo."},
+                "project": {"type": "string", "description": "Project key or id, when several repos share a name."},
+                "title": {"type": "string", "description": "One line, up to 200 characters."},
+                "plan": {"type": "string", "description": "The plan, in markdown."},
+                "acceptance": {"type": "array", "items": {"type": "string"}, "description": "Acceptance criteria the review checks."},
+                "priority": {"type": "string", "enum": PRIORITIES},
+                "labels": {"type": "array", "items": {"type": "string"}},
+                "executor": executor_schema(),
+                "status": {"type": "string", "enum": STATUSES, "description": "Defaults to todo."}
+            }, "required": ["repo", "title", "plan"]}
+        }));
+    }
+    defs
 }
 
 #[cfg(test)]
@@ -590,10 +666,56 @@ mod tests {
     }
 
     #[test]
+    fn propose_task_validates_and_creates_nothing() {
+        let f = fx("mcp-propose");
+        let db = open_in_memory().unwrap();
+        let mut c = db.lock().unwrap();
+        let (p, web, _) = seed(&c, &f);
+
+        let out = call_ok(&mut c, &f, "propose_task", json!({
+            "repo": "web", "title": "  Add a\n logo ", "plan": "# Plan\nDo it",
+            "acceptance": ["The logo shows", " "], "priority": "high", "labels": ["ui"],
+            "executor": {"kind": "claude"}
+        }));
+        assert_eq!(out.changed, None);
+        assert_eq!(out.value["created"], false);
+        assert_eq!((out.value["projectKey"].as_str(), out.value["repoName"].as_str()), (Some("PAY"), Some(web.name.as_str())));
+        let t = &out.value["newTask"];
+        assert_eq!((t["projectId"].as_str(), t["repoId"].as_str()), (Some(p.id.as_str()), Some(web.id.as_str())));
+        assert_eq!((t["title"].as_str(), t["status"].as_str(), t["priority"].as_str()), (Some("Add a logo"), Some("todo"), Some("high")));
+        assert_eq!(t["plan"], json!({"kind": "text", "text": "# Plan\nDo it"}));
+        assert_eq!(t["acceptance"], json!(["The logo shows"]));
+        assert_eq!(t["assignee"], json!({"kind": "claude"}));
+        let input: NewTask = serde_json::from_value(t.clone()).expect("the card creates it as is");
+        assert_eq!(input.plan, PlanInput::Text { text: "# Plan\nDo it".into() });
+
+        assert!(tasks::list(&c, Some(&p.id)).unwrap().is_empty());
+        assert_eq!(projects::get(&c, &p.id).unwrap().next_task_number, 1);
+
+        let err = |c: &mut Connection, args: Value| call(c, &f.env, "propose_task", args, 10).unwrap_err();
+        assert!(err(&mut c, json!({"repo": "web", "title": "x".repeat(201), "plan": "x"})).contains("too long"));
+        assert!(err(&mut c, json!({"repo": "web", "title": "x", "plan": " "})).contains("plan"));
+        assert!(err(&mut c, json!({"repo": "web", "title": "x"})).contains("Invalid arguments"));
+        assert!(err(&mut c, json!({"repo": "nope", "title": "x", "plan": "x"})).contains("No repo matches"));
+        assert!(err(&mut c, json!({"repo": "web", "title": "x", "plan": "x", "planFile": "a.md"})).contains("Invalid arguments"));
+    }
+
+    #[test]
+    fn only_chats_list_propose_task() {
+        let names = |defs: Value| defs.as_array().unwrap().iter().map(|d| d["name"].as_str().unwrap().to_string()).collect::<Vec<_>>();
+        let chat = names(chat_definitions());
+        assert_eq!(chat.last().map(String::as_str), Some(PROPOSE_TASK));
+        assert_eq!(chat[..chat.len() - 1], names(definitions())[..]);
+        assert!(!names(definitions()).iter().any(|n| n == PROPOSE_TASK));
+        let schema = &chat_definitions()[chat.len() - 1]["inputSchema"];
+        assert_eq!(schema["required"], json!(["repo", "title", "plan"]));
+    }
+
+    #[test]
     fn the_skill_describes_every_tool_and_value() {
         let skill = include_str!("../../../skills/nodal-tasks/SKILL.md");
         assert!(skill.starts_with("---\nname: nodal-tasks\ndescription: "));
-        let defs = definitions();
+        let defs = chat_definitions();
         let tools = defs.as_array().unwrap().iter().map(|d| d["name"].as_str().unwrap());
         for word in tools.chain(STATUSES).chain(PRIORITIES).chain(["planFile", "executor", "verdict"]) {
             assert!(skill.contains(&format!("`{word}`")), "SKILL.md does not mention `{word}`");

@@ -568,6 +568,21 @@ export interface ChatEventEnvelope {
   event: ChatEvent;
 }
 
+/** How a chat sees the `propose_task` tool of `nodal-mcp --chat` (`chats::context` in Rust). */
+export const PROPOSE_TASK_TOOL = "mcp__nodal__propose_task";
+
+/**
+ * What `propose_task` returns (its input has the `create_task` MCP fields). Nothing is created:
+ * accepting the card calls `createTask(newTask)`.
+ */
+export interface TaskProposal {
+  newTask: NewTask;
+  projectKey: string;
+  repoName: string;
+  created: false;
+  note: string;
+}
+
 /** Most recently used first. */
 export const listChats = (projectId: string) => invoke<Chat[]>("list_chats", { projectId });
 export const createChat = (projectId: string, input: NewChat = {}) => invoke<Chat>("create_chat", { projectId, input });
