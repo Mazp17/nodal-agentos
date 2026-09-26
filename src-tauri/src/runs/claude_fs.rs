@@ -23,9 +23,10 @@ use serde::{Deserialize, Deserializer};
 use serde_json::Value;
 
 use super::types::{
-    AgentInfo, AgentState, DetailSource, PhaseInfo, RunDetail, RunResult, RunSummary, ToolResultInfo, Transcript,
-    TranscriptItem,
+    AgentInfo, AgentState, DetailSource, PhaseInfo, RunDetail, RunResult, RunSummary, ToolPatch, ToolResultInfo,
+    Transcript, TranscriptItem,
 };
+use crate::work::diff::{DiffFileStatus, DiffHunk, DiffLine, DiffLineKind, FileDiff};
 
 /// Deserializes an optional field without failing if the type isn't the expected one.
 fn lenient<'de, D, T>(d: D) -> Result<Option<T>, D::Error>
@@ -792,6 +793,9 @@ struct RawTranscriptLine {
     kind: Option<String>,
     #[serde(default)]
     message: Option<Value>,
+    /// Structured result of the line's tool call (for `Edit`/`Write`: `structuredPatch`).
+    #[serde(default, rename = "toolUseResult")]
+    tool_use_result: Option<Value>,
 }
 
 #[derive(Deserialize)]
@@ -850,11 +854,98 @@ fn tool_result_text(block: &Value) -> String {
 }
 
 /// A `tool_result` content block as `(tool_use_id, result)`. Session files and stream-json
-/// events share this block shape.
-pub(crate) fn tool_result_info(b: &Value) -> (Option<&str>, ToolResultInfo) {
+/// events share this block shape. `structured` is the message's structured tool result, which
+/// Claude Code records next to the content, not inside the block: pass it only when the message
+/// carries this single `tool_result`, so it can't be attached to the wrong call.
+pub(crate) fn tool_result_info<'a>(b: &'a Value, structured: Option<&Value>) -> (Option<&'a str>, ToolResultInfo) {
     let (text, truncated) = clip(&tool_result_text(b), TOOL_RESULT_MAX);
-    let info = ToolResultInfo { text, is_error: b.get("is_error").and_then(Value::as_bool).unwrap_or(false), truncated };
-    (b.get("tool_use_id").and_then(Value::as_str), info)
+    let is_error = b.get("is_error").and_then(Value::as_bool).unwrap_or(false);
+    let patch = if is_error { None } else { structured.and_then(tool_patch) };
+    (b.get("tool_use_id").and_then(Value::as_str), ToolResultInfo { text, is_error, truncated, patch })
+}
+
+/// The message's structured tool result when it carries exactly one `tool_result` block.
+pub(crate) fn single_result<'a>(blocks: &[Value], structured: Option<&'a Value>) -> Option<&'a Value> {
+    let n = blocks.iter().filter(|b| b.get("type").and_then(Value::as_str) == Some("tool_result")).count();
+    structured.filter(|_| n == 1)
+}
+
+/// Diff lines kept per tool change; the counts still cover everything.
+const PATCH_LINES_MAX: usize = 400;
+
+/// The file change of an `Edit`/`MultiEdit`/`Write` result: `{filePath, structuredPatch:
+/// [{oldStart, oldLines, newStart, newLines, lines: [" ctx", "-old", "+new"]}]}`. A `Write`
+/// that creates a file has an empty patch and the whole `content` (verified with 2.1.283).
+/// `None` for any other result or when nothing changed.
+pub(crate) fn tool_patch(r: &Value) -> Option<ToolPatch> {
+    let path = r.get("filePath").and_then(Value::as_str)?.to_string();
+    let created = r.get("type").and_then(Value::as_str) == Some("create");
+    let raw = r.get("structuredPatch").and_then(Value::as_array)?;
+    let n = |h: &Value, k: &str| h.get(k).and_then(Value::as_u64).and_then(|v| u32::try_from(v).ok()).unwrap_or(0);
+    let mut hunks: Vec<(u32, u32, u32, u32, Vec<String>)> = raw
+        .iter()
+        .map(|h| {
+            let lines = h.get("lines").and_then(Value::as_array).into_iter().flatten();
+            let lines = lines.filter_map(Value::as_str).map(str::to_string).collect();
+            (n(h, "oldStart"), n(h, "oldLines"), n(h, "newStart"), n(h, "newLines"), lines)
+        })
+        .collect();
+    if hunks.is_empty() && created {
+        let content = r.get("content").and_then(Value::as_str).unwrap_or("");
+        let lines: Vec<String> = content.lines().map(|l| format!("+{l}")).collect();
+        if !lines.is_empty() {
+            hunks.push((0, 0, 1, lines.len() as u32, lines));
+        }
+    }
+    if hunks.is_empty() {
+        return None;
+    }
+
+    let (mut additions, mut deletions, mut kept) = (0u32, 0u32, 0usize);
+    let mut truncated = false;
+    let mut out = Vec::new();
+    for (old_start, old_lines, new_start, new_lines, lines) in hunks {
+        let (mut old_no, mut new_no) = (old_start, new_start);
+        let mut body = Vec::new();
+        for l in &lines {
+            let (kind, text) = match l.chars().next() {
+                Some('+') => (DiffLineKind::Add, &l[1..]),
+                Some('-') => (DiffLineKind::Del, &l[1..]),
+                Some(' ') => (DiffLineKind::Context, &l[1..]),
+                // "\ No newline at end of file" and anything unknown.
+                _ => continue,
+            };
+            let (o, nn) = match kind {
+                DiffLineKind::Add => (None, Some(new_no)),
+                DiffLineKind::Del => (Some(old_no), None),
+                DiffLineKind::Context => (Some(old_no), Some(new_no)),
+            };
+            match kind {
+                DiffLineKind::Add => additions += 1,
+                DiffLineKind::Del => deletions += 1,
+                DiffLineKind::Context => {}
+            }
+            if o.is_some() {
+                old_no += 1;
+            }
+            if nn.is_some() {
+                new_no += 1;
+            }
+            if kept >= PATCH_LINES_MAX {
+                truncated = true;
+                continue;
+            }
+            kept += 1;
+            body.push(DiffLine { kind, text: truncate(text, TEXT_MAX), old_no: o, new_no: nn });
+        }
+        if !body.is_empty() {
+            let header = format!("@@ -{old_start},{old_lines} +{new_start},{new_lines} @@");
+            out.push(DiffHunk { header, old_start, old_lines, new_start, new_lines, lines: body });
+        }
+    }
+    let status = if created { DiffFileStatus::Added } else { DiffFileStatus::Modified };
+    let file = FileDiff { path, old_path: None, status, additions, deletions, binary: false, hunks: out };
+    Some(ToolPatch { file, truncated })
 }
 
 /// A content block of an assistant message (`text`, `thinking` or `tool_use`) as a
@@ -935,10 +1026,11 @@ pub fn parse_transcript(text: &str, limit: usize) -> ParsedTranscript {
                     }
                 }
                 Some(Value::Array(blocks)) => {
+                    let structured = single_result(blocks, entry.tool_use_result.as_ref());
                     for b in blocks {
                         match b.get("type").and_then(Value::as_str) {
                             Some("tool_result") => {
-                                let (id, info) = tool_result_info(b);
+                                let (id, info) = tool_result_info(b, structured);
                                 // The tool_use is usually very close: search from the end.
                                 let slot = items.iter_mut().rev().find_map(|it| match it {
                                     TranscriptItem::ToolUse { id: Some(tid), result, .. } if Some(tid.as_str()) == id => {
@@ -1277,6 +1369,22 @@ mod tests {
 
     fn fixtures_projects() -> PathBuf {
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src/runs/fixtures/projects")
+    }
+
+    #[test]
+    fn session_file_edit_results_carry_their_diff() {
+        // Session files record the structured result as `toolUseResult` on the line.
+        let lines = [
+            r#"{"type":"user","message":{"role":"user","content":"edit it"}}"#,
+            r#"{"type":"assistant","message":{"content":[{"type":"tool_use","id":"t1","name":"Edit","input":{"file_path":"/r/README.md"}}]}}"#,
+            r#"{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"t1","content":"The file was updated."}]},"toolUseResult":{"filePath":"/r/README.md","structuredPatch":[{"oldStart":17,"oldLines":1,"newStart":17,"newLines":3,"lines":[" last line","+","+Modificado desde Nodal"]}]}}"#,
+        ];
+        let p = parse_transcript(&lines.join("\n"), 100);
+        let TranscriptItem::ToolUse { result: Some(r), .. } = &p.items[0] else { panic!("{:?}", p.items) };
+        let patch = r.patch.as_ref().expect("patch");
+        assert_eq!((patch.file.path.as_str(), patch.file.additions, patch.file.deletions), ("/r/README.md", 2, 0));
+        let last = patch.file.hunks[0].lines.last().unwrap();
+        assert_eq!((last.text.as_str(), last.new_no), ("Modificado desde Nodal", Some(19)));
     }
 
     #[test]

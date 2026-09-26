@@ -167,20 +167,23 @@ pub fn parse_line(line: &str) -> Vec<StreamEvent> {
                 Some(Value::String(s)) if !s.trim().is_empty() => {
                     vec![StreamEvent::Item { item: claude_fs::user_item(s) }]
                 }
-                Some(Value::Array(blocks)) => blocks
-                    .iter()
-                    .filter_map(|b| match b.get("type").and_then(Value::as_str) {
-                        Some("tool_result") => {
-                            let (id, result) = claude_fs::tool_result_info(b);
-                            Some(StreamEvent::ToolResult { tool_use_id: id?.to_string(), result })
-                        }
-                        Some("text") => {
-                            let s = b.get("text").and_then(Value::as_str).filter(|s| !s.trim().is_empty())?;
-                            Some(StreamEvent::Item { item: claude_fs::user_item(s) })
-                        }
-                        _ => None,
-                    })
-                    .collect(),
+                Some(Value::Array(blocks)) => {
+                    let structured = claude_fs::single_result(blocks, v.get("tool_use_result"));
+                    blocks
+                        .iter()
+                        .filter_map(|b| match b.get("type").and_then(Value::as_str) {
+                            Some("tool_result") => {
+                                let (id, result) = claude_fs::tool_result_info(b, structured);
+                                Some(StreamEvent::ToolResult { tool_use_id: id?.to_string(), result })
+                            }
+                            Some("text") => {
+                                let s = b.get("text").and_then(Value::as_str).filter(|s| !s.trim().is_empty())?;
+                                Some(StreamEvent::Item { item: claude_fs::user_item(s) })
+                            }
+                            _ => None,
+                        })
+                        .collect()
+                }
                 _ => vec![],
             }
         }
@@ -240,6 +243,8 @@ mod tests {
     use std::path::Path;
 
     use super::*;
+    use crate::runs::types::ToolPatch;
+    use crate::work::diff::{DiffFileStatus, DiffLineKind};
 
     fn fixture(name: &str) -> Vec<StreamEvent> {
         let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/runs/fixtures/stream_json").join(name);
@@ -317,6 +322,64 @@ mod tests {
         ] {
             assert!(parse_line(line).is_empty(), "{line}");
         }
+    }
+
+    fn patch_of(line: &str) -> Option<ToolPatch> {
+        match parse_line(line).into_iter().next() {
+            Some(StreamEvent::ToolResult { result, .. }) => result.patch,
+            other => panic!("expected a tool result, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn edit_and_write_results_carry_their_diff() {
+        // Shapes observed with 2.1.283 (`originalFile` and friends trimmed).
+        let edit = r#"{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"t1","content":"ok"}]},"parent_tool_use_id":null,
+            "tool_use_result":{"filePath":"/r/a.txt","oldString":"line two","newString":"line 2","structuredPatch":[{"oldStart":1,"oldLines":3,"newStart":1,"newLines":3,"lines":[" line one","-line two","+line 2"," line three"]}]}}"#;
+        let p = patch_of(&edit.replace('\n', "")).unwrap();
+        assert_eq!((p.file.path.as_str(), p.file.status, p.file.additions, p.file.deletions, p.truncated), ("/r/a.txt", DiffFileStatus::Modified, 1, 1, false));
+        let h = &p.file.hunks[0];
+        assert_eq!(h.header, "@@ -1,3 +1,3 @@");
+        let rows: Vec<(DiffLineKind, &str, Option<u32>, Option<u32>)> = h.lines.iter().map(|l| (l.kind, l.text.as_str(), l.old_no, l.new_no)).collect();
+        assert_eq!(
+            rows,
+            [
+                (DiffLineKind::Context, "line one", Some(1), Some(1)),
+                (DiffLineKind::Del, "line two", Some(2), None),
+                (DiffLineKind::Add, "line 2", None, Some(2)),
+                (DiffLineKind::Context, "line three", Some(3), Some(3)),
+            ]
+        );
+
+        let create = r#"{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"t2","content":"ok"}]},"tool_use_result":{"type":"create","filePath":"/r/b.txt","content":"hi\nthere\n","structuredPatch":[]}}"#;
+        let p = patch_of(create).unwrap();
+        assert_eq!((p.file.status, p.file.additions, p.file.hunks[0].lines.len()), (DiffFileStatus::Added, 2, 2));
+
+        let overwrite = r#"{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"t3","content":"ok"}]},"tool_use_result":{"type":"update","filePath":"/r/a.txt","structuredPatch":[{"oldStart":1,"oldLines":1,"newStart":1,"newLines":1,"lines":["-a","+X","\\ No newline at end of file"]}]}}"#;
+        let p = patch_of(overwrite).unwrap();
+        assert_eq!((p.file.additions, p.file.deletions, p.file.hunks[0].lines.len()), (1, 1, 2));
+    }
+
+    #[test]
+    fn no_diff_for_errors_other_tools_or_several_results() {
+        let tur = r#""tool_use_result":{"filePath":"/r/a.txt","structuredPatch":[{"oldStart":1,"oldLines":1,"newStart":1,"newLines":1,"lines":["-a","+b"]}]}"#;
+        let error = format!(r#"{{"type":"user","message":{{"content":[{{"type":"tool_result","tool_use_id":"t1","content":"boom","is_error":true}}]}},{tur}}}"#);
+        assert_eq!(patch_of(&error), None);
+        let read = r#"{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"t1","content":"x"}]},"tool_use_result":{"type":"text","file":{"filePath":"/r/a.txt"}}}"#;
+        assert_eq!(patch_of(read), None);
+        let two = format!(r#"{{"type":"user","message":{{"content":[{{"type":"tool_result","tool_use_id":"t1","content":"a"}},{{"type":"tool_result","tool_use_id":"t2","content":"b"}}]}},{tur}}}"#);
+        assert!(parse_line(&two).iter().all(|e| matches!(e, StreamEvent::ToolResult { result, .. } if result.patch.is_none())));
+    }
+
+    #[test]
+    fn long_diffs_are_capped_but_counted() {
+        let lines: Vec<String> = (0..500).map(|i| format!("\"+l{i}\"")).collect();
+        let line = format!(
+            r#"{{"type":"user","message":{{"content":[{{"type":"tool_result","tool_use_id":"t1","content":"ok"}}]}},"tool_use_result":{{"filePath":"/r/a.txt","structuredPatch":[{{"oldStart":0,"oldLines":0,"newStart":1,"newLines":500,"lines":[{}]}}]}}}}"#,
+            lines.join(",")
+        );
+        let p = patch_of(&line).unwrap();
+        assert_eq!((p.file.additions, p.file.hunks[0].lines.len(), p.truncated), (500, 400, true));
     }
 
     #[test]
