@@ -88,7 +88,7 @@ export function useRunActions(): RunActions {
 
   const attach = useCallback(
     async (v: RunView) => {
-      const id = v.run.claudeRunId;
+      const id = v.run.claudeRunId ?? v.live?.id;
       if (!id) return;
       const ok = await wrap(() => attachRun(id), "Couldn't attach to the session");
       if (ok) toast("Attached in Terminal", `claude attach ${id}`);
@@ -102,7 +102,8 @@ export function useRunActions(): RunActions {
       if (!taskId) return false;
       setBusy(true);
       try {
-        const run = await launchTask(taskId, { executor: v.run.executor });
+        // A reviewer's executor must not be relaunched as work: fall back to the task's default.
+        const run = await launchTask(taskId, { executor: v.run.kind === "work" ? v.run.executor : undefined });
         void refreshRuns();
         if (run.status === "failed") {
           toast(`Couldn't launch ${name}`, launchErrorHint(run.error, run.cwd), "danger");

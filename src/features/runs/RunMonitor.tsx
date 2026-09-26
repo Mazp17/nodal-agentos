@@ -205,7 +205,8 @@ function stoppedReason(v: RunView): string {
 function StoppedCard({ v, state, actions, onOpen }: { v: RunView; state: RunsState; actions: RunActions; onOpen: () => void }) {
   const { task, name } = runRefOf(v, state);
   const waiting = v.phase === "waiting";
-  const canRetry = !waiting && v.run.taskId != null && v.run.kind === "work";
+  const retryOf = v.run.kind === "review" && v.run.parentRunId ? (state.byId.get(v.run.parentRunId) ?? v) : v;
+  const canRetry = !waiting && v.run.taskId != null;
   return (
     <div className={`monitor-card monitor-stopped tone-${v.tone}`}>
       <span className="monitor-card-row">
@@ -219,7 +220,7 @@ function StoppedCard({ v, state, actions, onOpen }: { v: RunView; state: RunsSta
         <button type="button" className="btn btn-xs" onClick={onOpen}>
           Open run
         </button>
-        {waiting && v.run.claudeRunId && (
+        {waiting && (
           <button type="button" className="btn btn-xs btn-primary" disabled={actions.busy} onClick={() => void actions.attach(v)}>
             Attach
           </button>
@@ -229,7 +230,7 @@ function StoppedCard({ v, state, actions, onOpen }: { v: RunView; state: RunsSta
             type="button"
             className="btn btn-xs btn-primary"
             disabled={actions.busy}
-            onClick={() => void actions.runAgain(v, task, name)}
+            onClick={() => void actions.runAgain(retryOf, task, name)}
           >
             Retry
           </button>
