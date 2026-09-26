@@ -69,11 +69,16 @@ pub async fn update_project(state: State<'_, WorkState>, id: String, patch: Proj
 }
 
 #[tauri::command]
-pub async fn delete_project(state: State<'_, WorkState>, id: String) -> Result<(), String> {
+pub async fn delete_project(
+    state: State<'_, WorkState>,
+    chats: State<'_, crate::chats::ChatState>,
+    id: String,
+) -> Result<(), String> {
     check_id(&id, "project")?;
     let env = state.0.env.clone();
+    chats.0.stop_project(&id);
     let task_ids = db(&state.0, move |c| ops::delete_project(c, &id)).await?;
-    state.0.events.notify_all(&[Kind::Projects, Kind::Tasks, Kind::Runs, Kind::Queue, Kind::Sources], None);
+    state.0.events.notify_all(&[Kind::Projects, Kind::Tasks, Kind::Runs, Kind::Queue, Kind::Sources, Kind::Chats], None);
     blocking(move || {
         for t in task_ids {
             let _ = std::fs::remove_dir_all(env.plan_dir(&t));

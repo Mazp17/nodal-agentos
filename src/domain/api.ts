@@ -16,6 +16,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type {
   AgentSource,
+  Chat,
   ExtKind,
   Executor,
   ExternalState,
@@ -37,7 +38,7 @@ import type {
   TaskRelation,
   TaskStatus,
 } from "./types";
-import type { Transcript } from "../features/runs/types";
+import type { ToolResultInfo, Transcript, TranscriptItem } from "../features/runs/types";
 
 // ---------- DTOs ----------
 
@@ -501,6 +502,90 @@ export const importRule = (linkId: string, ruleId: string) => invoke<ImportResul
 export const resolveMovedTask = (taskId: string, action: MovedAction) =>
   invoke<Task>("resolve_moved_task", { taskId, action });
 
+// ---------- Chats ----------
+
+export interface NewChat extends LaunchOptions {
+  /** The Repo pill; absent → the whole project. */
+  repoId?: string | null;
+  title?: string | null;
+}
+
+export type ChatPatch = { [K in "title" | "repoId" | "model" | "effort" | "permissionMode"]?: string | null };
+
+/** A permission prompt waiting for `respondChatPermission`. */
+export interface PermissionRequest {
+  requestId: string;
+  toolName: string;
+  /** The `toolUse` item it belongs to. */
+  toolUseId: string | null;
+  /** What the tool is about to do, as Claude Code words it. */
+  description: string | null;
+  /** One line: the main argument (path, command…). */
+  summary: string | null;
+  input: unknown;
+}
+
+export type ChatRunState = "stopped" | "idle" | "busy";
+
+export interface ChatLive {
+  state: ChatRunState;
+  /** Oldest first. */
+  pending: PermissionRequest[];
+}
+
+/**
+ * What a chat streams. `textDelta`/`thinkingDelta` preview text that a later `item` carries
+ * in full; `item` also brings back each user message, in order.
+ */
+export type ChatEvent =
+  | { type: "init"; sessionId: string; model: string | null; cwd: string | null; permissionMode: string | null }
+  | { type: "textDelta"; text: string }
+  | { type: "thinkingDelta"; text: string }
+  | { type: "item"; item: TranscriptItem }
+  | { type: "toolResult"; toolUseId: string; result: ToolResultInfo }
+  | ({ type: "permissionRequest" } & PermissionRequest)
+  /** Denied without asking (the permission mode or a rule decided). */
+  | { type: "permissionDenied"; toolName: string; toolUseId: string | null; message: string | null }
+  /** Tokens in the context after the last response. */
+  | { type: "usage"; contextTokens: number }
+  /** `ok` is false for errors and interrupts. */
+  | {
+      type: "turnEnd";
+      ok: boolean;
+      subtype: string;
+      sessionId: string | null;
+      result: string | null;
+      costUsd: number | null;
+      contextWindow: number | null;
+    }
+  | { type: "state"; state: ChatRunState }
+  | { type: "permissionResolved"; requestId: string; allowed: boolean }
+  | { type: "error"; message: string };
+
+/** Payload of `nodal://chat`. */
+export interface ChatEventEnvelope {
+  chatId: string;
+  event: ChatEvent;
+}
+
+/** Most recently used first. */
+export const listChats = (projectId: string) => invoke<Chat[]>("list_chats", { projectId });
+export const createChat = (projectId: string, input: NewChat = {}) => invoke<Chat>("create_chat", { projectId, input });
+/** New settings apply from the next message. */
+export const updateChat = (id: string, patch: ChatPatch) => invoke<Chat>("update_chat", { id, patch });
+export const deleteChat = (id: string) => invoke<void>("delete_chat", { id });
+/** Starts or resumes the chat's `claude` process if needed; the answer streams as `nodal://chat`. */
+export const sendChatMessage = (id: string, text: string) => invoke<Chat>("send_chat_message", { id, text });
+/** `message` is what Claude reads on a denial. */
+export const respondChatPermission = (id: string, requestId: string, allow: boolean, message: string | null = null) =>
+  invoke<void>("respond_chat_permission", { id, requestId, allow, message });
+export const interruptChat = (id: string) => invoke<void>("interrupt_chat", { id });
+export const stopChat = (id: string) => invoke<void>("stop_chat", { id });
+export const getChatLive = (id: string) => invoke<ChatLive>("get_chat_live", { id });
+/** History from the Claude Code session; `null` before the first message. */
+export const getChatTranscript = (id: string, limit?: number) =>
+  invoke<Transcript | null>("get_chat_transcript", { id, limit: limit ?? null });
+
 // ---------- Migration ----------
 
 /** Copies `folder` to `legacy-backup-<ts>/` and imports it in a transaction. Idempotent. */
@@ -535,7 +620,7 @@ export const setSettings = (settings: Settings) => invoke<Settings>("set_setting
 
 // ---------- Events ----------
 
-export type ChangedKind = "tasks" | "runs" | "queue" | "sources" | "projects";
+export type ChangedKind = "tasks" | "runs" | "queue" | "sources" | "projects" | "chats";
 
 /** Payload of `nodal://changed`. Without `projectId`: it may affect any project. */
 export interface ChangedEvent {
@@ -549,6 +634,10 @@ export interface ChangedEvent {
  */
 export const onChanged = (cb: (e: ChangedEvent) => void): Promise<UnlistenFn> =>
   listen<ChangedEvent>("nodal://changed", (ev) => cb(ev.payload));
+
+/** Everything every chat streams, as it happens (not debounced). Returns the unlisten. */
+export const onChatEvent = (cb: (e: ChatEventEnvelope) => void): Promise<UnlistenFn> =>
+  listen<ChatEventEnvelope>("nodal://chat", (ev) => cb(ev.payload));
 
 /** "Check for Updates…" in the app menu (release builds only). Returns the unlisten. */
 export const onCheckForUpdates = (cb: () => void): Promise<UnlistenFn> => listen("nodal://check-updates", () => cb());

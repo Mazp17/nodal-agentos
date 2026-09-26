@@ -25,7 +25,7 @@ import {
 } from "../api";
 import type { Project, Repo, Settings, Task, TaskRelation } from "../types";
 
-export type Resource = "projects" | "repos" | "tasks" | "runs" | "settings" | "sources";
+export type Resource = "projects" | "repos" | "tasks" | "runs" | "settings" | "sources" | "chats";
 
 /**
  * Fallback polling intervals (ms): changes arrive through `nodal://changed`. `live`
@@ -145,6 +145,7 @@ const CHANGED_RESOURCES: Record<ChangedKind, Resource[]> = {
   runs: ["runs"],
   queue: ["runs"],
   sources: ["sources"],
+  chats: ["chats"],
   // Repos and settings also notify as `projects`.
   projects: ["projects", "repos", "settings"],
 };

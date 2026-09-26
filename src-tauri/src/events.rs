@@ -22,6 +22,9 @@ pub enum Kind {
     Queue,
     Sources,
     Projects,
+    /// A project's chat list (created, renamed, used, deleted). What a chat streams goes
+    /// through `nodal://chat` instead.
+    Chats,
 }
 
 /// Payload of `nodal://changed` (mirror of `ChangedEvent` in `api.ts`).
@@ -137,6 +140,8 @@ mod tests {
         assert_eq!(v, serde_json::json!({"kind": "sources", "projectId": "p1"}));
         let v = serde_json::to_value(c(Kind::Queue, None)).unwrap();
         assert_eq!(v, serde_json::json!({"kind": "queue"}));
+        let v = serde_json::to_value(c(Kind::Chats, Some("p1"))).unwrap();
+        assert_eq!(v, serde_json::json!({"kind": "chats", "projectId": "p1"}));
     }
 
     #[test]

@@ -1,4 +1,5 @@
 mod activity;
+mod chats;
 mod db;
 mod domain;
 mod events;
@@ -54,11 +55,20 @@ pub fn run() {
             match db::open(&util::paths::data_dir(app.handle())?.join(db::DB_FILE)) {
                 Ok(db) => {
                     app.manage(db.clone());
-                    if let Err(e) = work::init(app.handle(), db) {
+                    if let Err(e) = work::init(app.handle(), db.clone()) {
                         eprintln!("work: {e}");
                     } else {
                         app.state::<mcp::commands::McpState>().start(app.state::<work::WorkState>().0.clone());
                     }
+                    let handle = app.handle().clone();
+                    let emit: chats::process::Emit = std::sync::Arc::new(move |ev| {
+                        if let Err(e) = tauri::Emitter::emit(&handle, chats::process::EVENT, ev) {
+                            eprintln!("chats: {e}");
+                        }
+                    });
+                    let chats = chats::Chats::new(db, app.state::<events::Events>().inner().clone(), emit);
+                    chats.start_reaper();
+                    app.manage(chats::ChatState(chats));
                 }
                 Err(e) => eprintln!("nodal.db: {e}"),
             }
@@ -155,6 +165,16 @@ pub fn run() {
             mcp::commands::mcp_status,
             mcp::commands::mcp_restart,
             mcp::commands::mcp_stop,
+            chats::commands::list_chats,
+            chats::commands::create_chat,
+            chats::commands::update_chat,
+            chats::commands::delete_chat,
+            chats::commands::send_chat_message,
+            chats::commands::respond_chat_permission,
+            chats::commands::interrupt_chat,
+            chats::commands::stop_chat,
+            chats::commands::get_chat_live,
+            chats::commands::get_chat_transcript,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
