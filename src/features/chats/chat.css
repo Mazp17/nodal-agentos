@@ -131,6 +131,11 @@
 .chat-tool-meta { flex: none; max-width: 40%; color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .chat-tool-meta-err { color: var(--red-text); }
 .chat-tool-body .tr-pre { max-height: 280px; }
+.chat-tool-diff { border-top: 1px solid var(--border); }
+.chat-tool-diff .diff-lines { max-height: 320px; padding: var(--sp-1) 0; }
+.chat-tool-diff .diff-line { grid-template-columns: 34px 34px 14px minmax(0, 1fr); }
+.chat-tool-diff .diff-note { margin: 0; padding: var(--sp-2) var(--sp-4); font-size: var(--fs-xs); color: var(--text-dim); }
+.chat-tool-meta .diff-add, .chat-tool-meta .diff-del { font-family: var(--font-mono); font-size: var(--fs-xs); }
 
 /* ---- Approval card ---- */
 .chat-approval {

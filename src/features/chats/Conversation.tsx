@@ -6,6 +6,7 @@ import { readJsonPref, writePref } from "../../shell/storage";
 import { BrandMark } from "../../ui/BrandMark";
 import { SafeMarkdown } from "../../ui/Markdown";
 import { useToast } from "../../ui/Toasts";
+import { DiffLines } from "../runs/DiffLines";
 import { PriorityBars } from "../tasks/bits";
 import { PRIORITY_LABEL, STATUS_META } from "../tasks/status";
 import { readProposal, resultMeta, toolLabel, type Proposal, type ToolUse, type Turn } from "./model";
@@ -13,11 +14,29 @@ import type { ChatStream } from "./stream";
 
 // ---------- Tool block ----------
 
+/** Diffs up to this many lines start open; longer ones wait for a click. */
+const DIFF_OPEN_MAX = 20;
+
 function ToolRow({ item, first, denied, asking }: { item: ToolUse; first: boolean; denied: string | undefined; asking: boolean }) {
-  const [open, setOpen] = useState(false);
+  const [toggled, setOpen] = useState<boolean | null>(null);
   const r = item.result;
+  const patch = !denied && r?.patch ? r.patch : null;
+  const lines = patch ? patch.file.hunks.reduce((n, h) => n + h.lines.length, 0) : 0;
+  const open = toggled ?? (patch != null && lines <= DIFF_OPEN_MAX);
   const tone = denied || r?.isError ? "danger" : asking ? "warn" : r ? "ok" : "accent";
-  const meta = denied ? "Denied" : asking ? "Needs approval" : r ? (r.isError ? "Error" : resultMeta(r.text)) : "Running…";
+  const meta: ReactNode = denied ? (
+    "Denied"
+  ) : asking ? (
+    "Needs approval"
+  ) : patch ? (
+    <>
+      <span className="diff-add">+{patch.file.additions}</span> <span className="diff-del">−{patch.file.deletions}</span>
+    </>
+  ) : r ? (
+    r.isError ? "Error" : resultMeta(r.text)
+  ) : (
+    "Running…"
+  );
   const expandable = item.input != null || r != null;
   return (
     <div className={`chat-tool ${first ? "" : "chat-tool-sep"}`}>
@@ -33,7 +52,13 @@ function ToolRow({ item, first, denied, asking }: { item: ToolUse; first: boolea
         <span className="chat-tool-arg ellipsis">{item.summary ?? ""}</span>
         <span className={`chat-tool-meta ${tone === "danger" ? "chat-tool-meta-err" : ""}`}>{meta}</span>
       </button>
-      {open && (
+      {open && patch && (
+        <div className="chat-tool-diff">
+          <DiffLines file={patch.file} />
+          {patch.truncated && <p className="diff-note">Showing the first {lines} lines.</p>}
+        </div>
+      )}
+      {open && !patch && (
         <div className="chat-tool-body">
           {item.input && <pre className="tr-pre">{item.input}</pre>}
           {denied && <pre className="tr-pre">{denied}</pre>}
