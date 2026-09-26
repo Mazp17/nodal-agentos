@@ -14,6 +14,7 @@ const SESSION: &str = "00000000-0000-4000-8000-000000000009";
 /// asks for permission first, `slow` waits for an interrupt, `crash` fails.
 const FAKE_CLAUDE: &str = r#"#!/bin/sh
 echo "$@" >> args.txt
+echo "$CLAUDE_CODE_ENTRYPOINT" > entrypoint.txt
 echo '{"type":"system","subtype":"init","session_id":"00000000-0000-4000-8000-000000000009","cwd":"/Users/me/Code/acme"}'
 while IFS= read -r line; do
   case "$line" in
@@ -169,6 +170,7 @@ fn streams_a_turn_saves_the_session_and_resumes_after_idle() {
         assert!(!args[0].contains("--resume"));
         assert!(args[0].starts_with("-p --input-format stream-json --output-format stream-json --verbose"), "{}", args[0]);
         assert!(args[1].ends_with(&format!("--model haiku --resume {SESSION}")), "{}", args[1]);
+        assert_eq!(std::fs::read_to_string(f.dir.join("entrypoint.txt")).unwrap().trim(), "nodal");
     });
 }
 
@@ -280,7 +282,8 @@ fn event_payload_shape() {
     assert_eq!(serde_json::to_value(ev).unwrap(), serde_json::json!({"type": "permissionResolved", "requestId": "r", "allowed": false}));
 }
 
-/// The real `claude` (haiku): a permission prompt answered here, then a resume after a stop.
+/// The real `claude` (haiku): a permission prompt answered here, then a resume after a stop,
+/// on a session the `claude --resume` picker lists.
 /// `cargo test --lib real_chat -- --ignored`.
 #[test]
 #[ignore]
@@ -324,5 +327,12 @@ fn real_chat_asks_then_resumes() {
         let (result, sid) = last.unwrap();
         assert_eq!(sid, session);
         assert!(result.unwrap_or_default().contains("note.txt"));
+
+        let projects = crate::runs::claude_fs::claude_config_dir().unwrap().join("projects");
+        let session = session.unwrap();
+        let jsonl = crate::runs::claude_fs::find_session_jsonl(&projects, &dir.to_string_lossy(), &session).unwrap();
+        let text = std::fs::read_to_string(jsonl).unwrap();
+        assert!(text.contains(r#""entrypoint":"nodal""#), "the `claude --resume` picker hides SDK entrypoints");
+        assert!(!text.contains(r#""entrypoint":"sdk-cli""#));
     });
 }

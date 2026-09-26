@@ -31,6 +31,12 @@ pub const CHAT_ARGS: [&str; 10] = [
     "--replay-user-messages",
 ];
 
+/// Env var set on every chat process so its session is listed by the bare `claude --resume`
+/// picker, which hides `sdk-cli`/`sdk-ts`/`sdk-py` sessions. Without it `-p` records
+/// `sdk-cli`, and `cli` is rewritten to `sdk-cli` under `-p`, so the value must be neither.
+/// Verified with 2.1.283.
+pub const CHAT_ENTRYPOINT: (&str, &str) = ("CLAUDE_CODE_ENTRYPOINT", "nodal");
+
 /// `--resume <session-id>`: keeps the id and the history, also from another cwd (verified
 /// with 2.1.283). The id must already be checked with `claude_fs::is_valid_session_id`.
 pub fn resume_args(session_id: &str) -> [String; 2] {

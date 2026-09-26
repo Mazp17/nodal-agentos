@@ -18,9 +18,10 @@
 //!   `control_response` and ends the turn at once with `result`/`error_during_execution`.
 //!   The process stays alive and takes the next user message in the same session.
 //! - Resume: a new process with `--resume <session_id>` keeps the same id and the history,
-//!   also after an interrupted turn. `claude --resume <id>` opens it interactively, but the
-//!   bare `claude --resume` picker does not list `-p` sessions (their `entrypoint` is
-//!   `sdk-cli`), with or without `--name`.
+//!   also after an interrupted turn. `claude --resume <id>` opens it interactively. The bare
+//!   `claude --resume` picker hides `-p` sessions (their `entrypoint` is `sdk-cli`), with or
+//!   without `--name`, unless `CLAUDE_CODE_ENTRYPOINT` is set to a non-SDK value other than
+//!   `cli` (see `stream_json::CHAT_ENTRYPOINT`).
 
 use std::path::{Path, PathBuf};
 use std::process::Stdio;

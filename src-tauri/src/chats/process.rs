@@ -275,7 +275,8 @@ impl Chats {
             return Err(format!("The chat's folder doesn't exist: {}", spec.cwd.display()));
         }
         let mut cmd = self.command()?;
-        cmd.args(stream_json::CHAT_ARGS).args(&spec.args);
+        let (key, value) = stream_json::CHAT_ENTRYPOINT;
+        cmd.args(stream_json::CHAT_ARGS).args(&spec.args).env(key, value);
         if let Some(sid) = session_id {
             if !is_valid_session_id(sid) {
                 return Err(format!("Invalid session id: \"{sid}\"."));
