@@ -35,6 +35,7 @@ import { useToast } from "../../ui/Toasts";
 import { ExecutorName, ExecutorPicker, executorLabel, resolveExecutor } from "../executors";
 import { SourceTab } from "../providers";
 import { PhaseSegments, RunBadge, useRunActions, useRunView } from "../runs";
+import { MergeDialog } from "./MergeDialog";
 import { NewTaskDialog } from "./NewTaskDialog";
 import { PriorityBars, StatusRing } from "./bits";
 import { FINISH_LABEL, isClosed, ISOLATION_LABEL, PRIORITY_LABEL, providerLabel, STATUS_META } from "./status";
@@ -86,6 +87,7 @@ export function TaskPanel({ taskId, onClose, onOpenRun, onOpenDiff, onOpenTask, 
   const [tab, setTab] = useState<"overview" | "source">("overview");
   const [menu, setMenu] = useState<"status" | "repo" | null>(null);
   const [editing, setEditing] = useState(false);
+  const [merging, setMerging] = useState(false);
   const [launchExec, setLaunchExec] = useState<Executor | null>(null);
   const [extra, setExtra] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
@@ -99,6 +101,7 @@ export function TaskPanel({ taskId, onClose, onOpenRun, onOpenDiff, onOpenTask, 
     setExtra("");
     setMenu(null);
     setCleanupBlocked(null);
+    setMerging(false);
   }, [taskId]);
 
   const closeMenu = useCallback(() => setMenu(null), []);
@@ -141,6 +144,8 @@ export function TaskPanel({ taskId, onClose, onOpenRun, onOpenDiff, onOpenTask, 
   const src = task.source;
   const closed = isClosed(task.status);
   const canLaunch = !!repo && !activeRun && !closed;
+  const finish = task.finish ?? repo?.defaultFinish ?? "pr";
+  const canMerge = !!task.worktree && !!repo && finish !== "pr" && !closed;
   const willQueue = summary.queued > 0 || (summary.capacity > 0 && summary.running >= summary.capacity);
 
   const act = async (label: string, fn: () => Promise<unknown>, okMsg?: [string, string?]) => {
@@ -625,12 +630,60 @@ export function TaskPanel({ taskId, onClose, onOpenRun, onOpenDiff, onOpenTask, 
               Reopen
             </button>
           ) : (
-            <button type="button" className="btn btn-sm" disabled={busy !== null} onClick={() => setStatus("done")}>
+            <button
+              type="button"
+              className="btn btn-sm"
+              disabled={busy !== null}
+              title={canMerge ? "Close without merging the branch" : undefined}
+              onClick={() => setStatus("done")}
+            >
               Mark done
+            </button>
+          )}
+          {canMerge && task.worktree && (
+            <button
+              type="button"
+              className="btn btn-sm btn-primary"
+              disabled={busy !== null || !!activeRun}
+              title={activeRun ? "Cancel the running step first" : `Land ${task.worktree.branch} on ${task.worktree.base}`}
+              onClick={() => setMerging(true)}
+            >
+              {finish === "changes" ? "Commit & merge" : `Merge into ${task.worktree.base} & done`}
             </button>
           )}
         </div>
       </footer>
+
+      {merging && task.worktree && (
+        <MergeDialog
+          taskId={task.id}
+          worktree={task.worktree}
+          message={`${key}: ${task.title}`}
+          commitFirst={finish === "changes"}
+          provider={src ? providerLabel(src.provider) : null}
+          onClose={() => setMerging(false)}
+          onMerged={(r) => {
+            setMerging(false);
+            const base = task.worktree?.base ?? "the base";
+            if (r.outcome.kind === "merged") {
+              const n = r.outcome.commits;
+              push(`${key} merged into ${base}`, `${n} commit${n === 1 ? "" : "s"} → ${base} · Done`, "ok");
+            }
+            if (r.pushedTo) push(`${base} pushed`, r.pushedTo, "ok");
+            if (r.pushError) push(`Couldn't push ${base}`, r.pushError, "danger");
+            setCleanupBlocked(r.cleanupError);
+            void invalidate("tasks", "runs");
+          }}
+          onHandOff={(instructions) => {
+            setMerging(false);
+            void (async () => {
+              setBusy("handoff");
+              await launch(task.id, key, { kind: "handoff", executor: { kind: "claude" }, extra: instructions });
+              setBusy(null);
+            })();
+          }}
+        />
+      )}
 
       {editing && (
         <NewTaskDialog

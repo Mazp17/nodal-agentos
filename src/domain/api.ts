@@ -380,6 +380,36 @@ export const repoTrust = (path: string) => invoke<RepoTrust>("repo_trust", { pat
 export const gitVersion = () => invoke<string>("git_version");
 /** Claude Code activity per repo of the project (a single `claude agents`). */
 export const projectActivity = (projectId: string) => invoke<ProjectActivity>("project_activity", { projectId });
+/** Squash defaults to true in the backend; `push` is opt-in; `cleanup` deletes the worktree and branch after merging. */
+export interface MergeInput {
+  squash: boolean;
+  push: boolean;
+  cleanup: boolean;
+}
+
+/** `commit`: the base's new tip. `moved`: the base had moved and was merged into the worktree first. */
+export type MergeOutcome =
+  | { kind: "merged"; commit: string; commits: number; squashed: boolean; moved: boolean }
+  /** The merge was aborted: nothing is left mid-merge. */
+  | { kind: "conflict"; files: string[] };
+
+export interface MergeReport {
+  outcome: MergeOutcome;
+  /** Done after a merge; unchanged on a conflict. */
+  task: Task;
+  pushedTo: string | null;
+  pushError: string | null;
+  /** The merge went through but the worktree couldn't be cleaned up. */
+  cleanupError: string | null;
+}
+
+/**
+ * "Merge into <base> & done": commits uncommitted changes, lands the task branch on its base
+ * by fast-forward (merging a moved base into the worktree first) and marks the task Done.
+ * Rejects without touching anything if the base is checked out with uncommitted changes.
+ */
+export const mergeWorktree = (taskId: string, input: MergeInput) =>
+  invoke<MergeReport>("merge_worktree", { taskId, input });
 /** Everything zero/false/null if the task has no worktree. */
 export const worktreeStatus = (taskId: string) => invoke<WorktreeStatus>("worktree_status", { taskId });
 
