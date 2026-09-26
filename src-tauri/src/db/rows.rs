@@ -130,6 +130,43 @@ pub fn get_repo(conn: &Connection, id: &str) -> Result<Option<Repo>, DbError> {
     Ok(conn.query_row("SELECT * FROM repos WHERE id = ?1", [id], repo_from_row).optional()?)
 }
 
+// ---------- Chat ----------
+
+pub fn chat_from_row(row: &Row) -> rusqlite::Result<Chat> {
+    Ok(Chat {
+        id: row.get("id")?,
+        project_id: row.get("project_id")?,
+        repo_id: row.get("repo_id")?,
+        title: row.get("title")?,
+        session_id: row.get("session_id")?,
+        launch: LaunchOptions {
+            model: row.get("model")?,
+            effort: row.get("effort")?,
+            permission_mode: row.get("permission_mode")?,
+        },
+        created_at: row.get("created_at")?,
+        updated_at: row.get("updated_at")?,
+    })
+}
+
+pub fn insert_chat(conn: &Connection, c: &Chat) -> Result<(), DbError> {
+    conn.execute(
+        "INSERT INTO chats (id, project_id, repo_id, title, session_id, model, effort, permission_mode,
+                            created_at, updated_at)
+         VALUES (:id, :project, :repo, :title, :session, :model, :effort, :perm, :created, :updated)",
+        named_params! {
+            ":id": c.id, ":project": c.project_id, ":repo": c.repo_id, ":title": c.title,
+            ":session": c.session_id, ":model": c.launch.model, ":effort": c.launch.effort,
+            ":perm": c.launch.permission_mode, ":created": c.created_at, ":updated": c.updated_at,
+        },
+    )?;
+    Ok(())
+}
+
+pub fn get_chat(conn: &Connection, id: &str) -> Result<Option<Chat>, DbError> {
+    Ok(conn.query_row("SELECT * FROM chats WHERE id = ?1", [id], chat_from_row).optional()?)
+}
+
 // ---------- Task ----------
 
 pub fn task_from_row(row: &Row) -> rusqlite::Result<Task> {

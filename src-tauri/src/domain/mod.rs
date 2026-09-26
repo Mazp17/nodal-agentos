@@ -91,6 +91,28 @@ pub struct Repo {
     pub created_at: i64,
 }
 
+// ---------- Chats ----------
+
+/// A chat: a `claude -p` session scoped to a project (or narrowed to one of its repos).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Chat {
+    pub id: String,
+    pub project_id: String,
+    /// The Repo pill. `None` → the whole project; it runs in the project's first repo.
+    pub repo_id: Option<String>,
+    /// `None` until the first message names it.
+    pub title: Option<String>,
+    /// Claude Code's session id, known after the first message.
+    pub session_id: Option<String>,
+    /// `model`, `effort` and `permissionMode` are flattened in the JSON.
+    #[serde(flatten)]
+    pub launch: LaunchOptions,
+    pub created_at: i64,
+    /// Last message sent: the sessions list is ordered by it.
+    pub updated_at: i64,
+}
+
 // ---------- Executors and options ----------
 
 /// Where an agent's definition comes from.

@@ -128,3 +128,46 @@ fn runs_filtered_by_project_and_latest_by_task() {
     assert!(light.get("prompt").is_none() && light.get("extraInstructions").is_none());
     assert_eq!(light["taskId"], "t1");
 }
+
+#[test]
+fn chats_crud_and_order() {
+    let db = open_in_memory().unwrap();
+    let c = db.lock().unwrap();
+    seed(&c);
+    let mk = |id: &str, updated: i64| Chat {
+        id: id.into(),
+        project_id: "p1".into(),
+        repo_id: None,
+        title: None,
+        session_id: None,
+        launch: LaunchOptions::default(),
+        created_at: 1,
+        updated_at: updated,
+    };
+    chats::insert(&c, &mk("c1", 10)).unwrap();
+    chats::insert(&c, &mk("c2", 20)).unwrap();
+    let ids = |v: Vec<Chat>| v.into_iter().map(|c| c.id).collect::<Vec<_>>();
+    assert_eq!(ids(chats::list(&c, "p1").unwrap()), ["c2", "c1"]);
+    assert!(chats::list(&c, "p2").unwrap().is_empty());
+
+    let mut c1 = chats::get(&c, "c1").unwrap();
+    c1.title = Some("Plan the login page".into());
+    c1.repo_id = Some("r1".into());
+    c1.launch.model = Some("sonnet".into());
+    c1.updated_at = 30;
+    chats::update(&c, &c1).unwrap();
+    assert_eq!(chats::get(&c, "c1").unwrap(), c1);
+    assert_eq!(ids(chats::list(&c, "p1").unwrap()), ["c1", "c2"]);
+
+    assert!(chats::set_session(&c, "c1", "s-1").unwrap());
+    assert!(!chats::set_session(&c, "c1", "s-1").unwrap(), "same id: no change");
+    assert_eq!(chats::get(&c, "c1").unwrap().session_id.as_deref(), Some("s-1"));
+    // `update` doesn't touch the session.
+    chats::update(&c, &c1).unwrap();
+    assert_eq!(chats::get(&c, "c1").unwrap().session_id.as_deref(), Some("s-1"));
+
+    chats::delete(&c, "c1").unwrap();
+    assert!(chats::get(&c, "c1").is_err());
+    assert!(chats::delete(&c, "c1").is_err());
+    assert!(chats::update(&c, &c1).is_err());
+}

@@ -2,6 +2,7 @@
 //! `&Transaction`, which derefs to `Connection`): commands run them with `with_db`.
 //! Business validations live in `work`; here there's only SQL and integrity errors.
 
+pub mod chats;
 pub mod projects;
 pub mod relations;
 pub mod repos;
