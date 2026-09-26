@@ -24,7 +24,7 @@ export interface ChatViewProps {
 const SELECTED_PREF = "chatSelected";
 const isSelection = (v: unknown): v is Record<string, string | null> => !!v && typeof v === "object" && !Array.isArray(v);
 
-const NEW_CHAT: ComposerSettings = { permissionMode: null, repoId: null, model: null, effort: null };
+const NEW_CHAT: ComposerSettings = { permissionMode: "acceptEdits", repoId: null, model: null, effort: null };
 
 const settingsOf = (c: Chat): ComposerSettings => ({
   permissionMode: c.permissionMode ?? null,
