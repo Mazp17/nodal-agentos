@@ -486,6 +486,20 @@ export const updatesEnabled = () => invoke<boolean>("updates_enabled");
 /** Relaunch after an update was installed. */
 export const restartApp = () => invoke<void>("restart_app");
 
+/** The app side of `nodal-mcp`: a Unix socket agents reach while Nodal is open. */
+export interface McpStatus {
+  /** `false` without a database: it can't start. */
+  available: boolean;
+  running: boolean;
+  socket: string | null;
+  /** Why it is off, when it didn't stop on request. */
+  error: string | null;
+}
+export const mcpStatus = () => invoke<McpStatus>("mcp_status");
+/** Starts it, or stops and starts it again. */
+export const mcpRestart = () => invoke<McpStatus>("mcp_restart");
+export const mcpStop = () => invoke<McpStatus>("mcp_stop");
+
 export const getSettings = () => invoke<Settings>("get_settings");
 export const setSettings = (settings: Settings) => invoke<Settings>("set_settings", { settings });
 
