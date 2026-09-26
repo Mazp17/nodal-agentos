@@ -36,7 +36,7 @@ const NO_FILTERS: Filters = { q: "", repo: null, source: null, status: null, lab
 
 const DRAG_TYPE = "text/x-nodal-task";
 
-/** Same order as the backend (`position, created_at, id`), so `reorder_tasks` gets what is shown. */
+/** Same order as the backend (`position, created_at, id`). */
 const byPosition = (a: Task, b: Task) =>
   a.position - b.position || a.createdAt - b.createdAt || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
 
@@ -122,7 +122,10 @@ export function BoardView({ projectId, onOpenTask, onOpenRun, onNewProject, onOp
         ...BOARD_COLUMNS,
         ...(showHidden.canceled ? (["canceled"] as TaskStatus[]) : []),
       ];
-  const byColumn = (s: TaskStatus) => visible.filter((t) => t.status === s).sort(byPosition);
+  /** Most recently run first; tasks that never ran go after, in board order. */
+  const lastRunAt = (t: Task) => latest.get(t.id)?.queuedAt ?? -Infinity;
+  const byColumn = (s: TaskStatus) =>
+    visible.filter((t) => t.status === s).sort((a, b) => lastRunAt(b) - lastRunAt(a) || byPosition(a, b));
   const hiddenCounts = HIDDEN_COLUMNS.filter((s) => !filters.status && !showHidden[s]).map((s) => ({
     status: s,
     count: visible.filter((t) => t.status === s).length,
