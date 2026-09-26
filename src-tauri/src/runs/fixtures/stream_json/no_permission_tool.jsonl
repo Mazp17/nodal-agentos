@@ -1,0 +1,4 @@
+{"type":"system","subtype":"init","cwd":"/Users/me/Code/acme","session_id":"00000000-0000-4000-8000-000000000001","tools":["Write"],"mcp_servers":[],"model":"claude-haiku-4-5-20251001","permissionMode":"default"}
+{"type":"system","subtype":"permission_denied","tool_name":"Write","tool_use_id":"toolu_03","message":"Claude requested permissions to write to /Users/me/Code/acme/a.txt, but you haven't granted it yet.","session_id":"00000000-0000-4000-8000-000000000001"}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","content":"Claude requested permissions to write to /Users/me/Code/acme/a.txt, but you haven't granted it yet.","is_error":true,"tool_use_id":"toolu_03"}]},"parent_tool_use_id":null,"session_id":"00000000-0000-4000-8000-000000000001"}
+{"type":"result","subtype":"success","is_error":false,"num_turns":2,"session_id":"00000000-0000-4000-8000-000000000001"}
