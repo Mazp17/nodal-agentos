@@ -3,8 +3,12 @@
 
 pub mod claude_bin;
 pub(crate) mod claude_fs;
+pub mod claude_settings;
 pub mod claude_trust;
 pub mod options;
+pub mod stream_json;
+#[cfg(test)]
+mod stream_json_live;
 pub mod terminal;
 pub mod types;
 pub mod workflows;

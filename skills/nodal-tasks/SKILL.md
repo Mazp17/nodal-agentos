@@ -103,6 +103,16 @@ Only name an agent or a workflow you have seen exist in one of those places: the
 checked when the task is created, and the run fails when it is launched. To go back to the default,
 call `update_task` with `"executor": null`.
 
+## Proposing a task from a Nodal chat
+
+Inside a chat in the Nodal app, the server also has `propose_task`. It takes the same fields as
+`create_task` (`repo`, `project`, `title`, `plan`, `acceptance`, `priority`, `labels`, `executor`,
+`status`; `plan` is required and there is no `planFile`) and validates them the same way, but
+creates nothing: the chat shows the task as a card and the user creates it with one click. It
+returns the task as it would be created (`newTask`), with `created: false`. In a chat, prefer it to
+`create_task` unless the user asks you to create the task yourself. Outside a chat the tool is not
+listed.
+
 ## Updating tasks
 
 `update_task` changes only the fields you pass. Useful moves:

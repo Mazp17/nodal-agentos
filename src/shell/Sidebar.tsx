@@ -4,6 +4,7 @@ import type { ProjectPage, Route } from "./useNav";
 
 const PROJECT_PAGES: { page: ProjectPage; label: string }[] = [
   { page: "board", label: "Board" },
+  { page: "chat", label: "Chat" },
   { page: "tasks", label: "Tasks" },
   { page: "runs", label: "Runs" },
   { page: "activity", label: "Activity" },

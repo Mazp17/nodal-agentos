@@ -44,6 +44,25 @@ export interface Repo extends LaunchOptions {
   createdAt: number;
 }
 
+// ---------- Chats ----------
+
+/** A `claude -p` session scoped to a project, or narrowed to one of its repos. */
+export interface Chat extends LaunchOptions {
+  id: string;
+  projectId: string;
+  /** The Repo pill. `null` → the whole project; it runs in the project's first repo. */
+  repoId: string | null;
+  /** `null` until the first message names it. */
+  title: string | null;
+  /** Claude Code's name for the session (`/rename`, else its AI title); shown over `title`. */
+  sessionTitle: string | null;
+  /** Claude Code's session id, known after the first message. */
+  sessionId: string | null;
+  createdAt: number;
+  /** Last message sent: the sessions list is ordered by it. */
+  updatedAt: number;
+}
+
 // ---------- Executors and options ----------
 
 export type AgentSource = "user" | "repo" | "plugin";

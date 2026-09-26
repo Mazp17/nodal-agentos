@@ -29,6 +29,7 @@ You need [Claude Code](https://docs.claude.com/en/docs/claude-code) installed an
 ## What it does
 
 - **Board of tasks** grouped in projects, each project with one or more local repos. Plans in markdown, acceptance criteria, priority and labels.
+- **Chats per project**: talk to Claude about the whole project or one repo, approve its edits and commands from the app, and turn the conversation into tasks with one click. Sessions show up in `claude --resume`.
 - **Delegate** each task to one of your agents (`~/.claude/agents`, the repo's or a plugin), a workflow, or plain Claude.
 - **Isolated by default**: every task gets its own git worktree and branch, so several run on the same repo at once.
 - **Finish** with uncommitted changes, a commit, or a pull request. Local work merges back into its base branch from the task panel, without touching your checkout.
@@ -52,7 +53,7 @@ claude mcp add nodal -- /Applications/Nodal.app/Contents/MacOS/nodal-mcp
 
 From source, build it with `cargo build --release --bin nodal-mcp` in `src-tauri` (after `pnpm build`) and register `src-tauri/target/release/nodal-mcp` instead.
 
-Tools: `list_projects`, `list_tasks`, `get_task`, `create_task`, `update_task` and `get_run`. Runs are launched from the app. A debug build of `nodal-mcp` talks to a debug build of the app.
+Tools: `list_projects`, `list_tasks`, `get_task`, `create_task`, `update_task` and `get_run`. Runs are launched from the app. Nodal's own chats launch it with `--chat`, which adds `propose_task`: the chat shows a task card and nothing is created until you accept it. A debug build of `nodal-mcp` talks to a debug build of the app.
 
 The [`nodal-tasks` skill](skills/nodal-tasks/SKILL.md) teaches agents when to create a task instead of doing the work, how to write its plan and acceptance criteria, how to pick the repo and the executor, and how to read a run's result. Install it with [skills](https://skills.sh):
 

@@ -7,6 +7,9 @@
 //! - layout of `~/.claude/projects/<slug>/<sessionId>/` (journal, meta, transcripts,
 //!   final summary `workflows/wf_*.json`, script `workflows/scripts/*-wf_*.js`).
 //!
+//! The `-p` stream-json protocol that chats speak lives in `stream_json`, which reuses the
+//! content-block helpers here.
+//!
 //! Policy: tolerate anything unknown (new fields, unexpected types, lines cut off
 //! mid-write) and degrade to `None` instead of failing.
 
@@ -20,9 +23,10 @@ use serde::{Deserialize, Deserializer};
 use serde_json::Value;
 
 use super::types::{
-    AgentInfo, AgentState, DetailSource, PhaseInfo, RunDetail, RunResult, RunSummary, ToolResultInfo, Transcript,
-    TranscriptItem,
+    AgentInfo, AgentState, DetailSource, PhaseInfo, RunDetail, RunResult, RunSummary, ToolPatch, ToolResultInfo,
+    Transcript, TranscriptItem,
 };
+use crate::work::diff::{DiffFileStatus, DiffHunk, DiffLine, DiffLineKind, FileDiff};
 
 /// Deserializes an optional field without failing if the type isn't the expected one.
 fn lenient<'de, D, T>(d: D) -> Result<Option<T>, D::Error>
@@ -791,6 +795,15 @@ struct RawTranscriptLine {
     message: Option<Value>,
 }
 
+/// Structured result of a line's tool call (for `Edit`/`Write`: `structuredPatch`). Read in a
+/// second pass, only for lines that carry a patch: other results (`Read`, `Task`, the
+/// `originalFile` of edits) can be large and are never shown.
+#[derive(Deserialize)]
+struct RawToolUseResult {
+    #[serde(default, rename = "toolUseResult")]
+    tool_use_result: Option<Value>,
+}
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct RawAgentMeta {
@@ -846,6 +859,160 @@ fn tool_result_text(block: &Value) -> String {
     }
 }
 
+/// A `tool_result` content block as `(tool_use_id, result)`. Session files and stream-json
+/// events share this block shape. `structured` is the message's structured tool result, which
+/// Claude Code records next to the content, not inside the block: pass it only when the message
+/// carries this single `tool_result`, so it can't be attached to the wrong call.
+pub(crate) fn tool_result_info<'a>(b: &'a Value, structured: Option<&Value>) -> (Option<&'a str>, ToolResultInfo) {
+    let (text, truncated) = clip(&tool_result_text(b), TOOL_RESULT_MAX);
+    let is_error = b.get("is_error").and_then(Value::as_bool).unwrap_or(false);
+    let patch = if is_error { None } else { structured.and_then(tool_patch) };
+    (b.get("tool_use_id").and_then(Value::as_str), ToolResultInfo { text, is_error, truncated, patch })
+}
+
+/// The message's structured tool result when it carries exactly one `tool_result` block.
+pub(crate) fn single_result<'a>(blocks: &[Value], structured: Option<&'a Value>) -> Option<&'a Value> {
+    let n = blocks.iter().filter(|b| b.get("type").and_then(Value::as_str) == Some("tool_result")).count();
+    structured.filter(|_| n == 1)
+}
+
+/// Diff lines kept per tool change; the counts still cover everything.
+const PATCH_LINES_MAX: usize = 400;
+/// Characters kept per diff line.
+const PATCH_LINE_MAX: usize = 1000;
+
+/// The file change of an `Edit`/`MultiEdit`/`Write` result: `{filePath, structuredPatch:
+/// [{oldStart, oldLines, newStart, newLines, lines: [" ctx", "-old", "+new"]}]}`. A `Write`
+/// that creates a file has an empty patch and the whole `content` (verified with 2.1.283).
+/// `None` for any other result or when nothing changed.
+pub(crate) fn tool_patch(r: &Value) -> Option<ToolPatch> {
+    let path = r.get("filePath").and_then(Value::as_str)?.to_string();
+    let created = r.get("type").and_then(Value::as_str) == Some("create");
+    let raw = r.get("structuredPatch").and_then(Value::as_array)?;
+    let n = |h: &Value, k: &str| h.get(k).and_then(Value::as_u64).and_then(|v| u32::try_from(v).ok()).unwrap_or(0);
+    let mut hunks: Vec<(u32, u32, u32, u32, Vec<String>)> = raw
+        .iter()
+        .map(|h| {
+            let lines = h.get("lines").and_then(Value::as_array).into_iter().flatten();
+            let lines = lines.filter_map(Value::as_str).map(str::to_string).collect();
+            (n(h, "oldStart"), n(h, "oldLines"), n(h, "newStart"), n(h, "newLines"), lines)
+        })
+        .collect();
+    // A created file: every line is an addition. Only the kept lines are copied.
+    let mut created_lines = 0u32;
+    if hunks.is_empty() && created {
+        let content = r.get("content").and_then(Value::as_str).unwrap_or("");
+        created_lines = u32::try_from(content.lines().count()).unwrap_or(u32::MAX);
+        let lines: Vec<String> = content.lines().take(PATCH_LINES_MAX).map(|l| format!("+{l}")).collect();
+        if !lines.is_empty() {
+            hunks.push((0, 0, 1, created_lines, lines));
+        }
+    }
+    if hunks.is_empty() {
+        return None;
+    }
+
+    let (mut additions, mut deletions, mut kept) = (0u32, 0u32, 0usize);
+    let mut truncated = false;
+    let mut out = Vec::new();
+    for (old_start, old_lines, new_start, new_lines, lines) in hunks {
+        let (mut old_no, mut new_no) = (old_start, new_start);
+        let mut body = Vec::new();
+        for l in &lines {
+            let (kind, text) = match l.chars().next() {
+                Some('+') => (DiffLineKind::Add, &l[1..]),
+                Some('-') => (DiffLineKind::Del, &l[1..]),
+                Some(' ') => (DiffLineKind::Context, &l[1..]),
+                // "\ No newline at end of file" and anything unknown.
+                _ => continue,
+            };
+            let (o, nn) = match kind {
+                DiffLineKind::Add => (None, Some(new_no)),
+                DiffLineKind::Del => (Some(old_no), None),
+                DiffLineKind::Context => (Some(old_no), Some(new_no)),
+            };
+            match kind {
+                DiffLineKind::Add => additions += 1,
+                DiffLineKind::Del => deletions += 1,
+                DiffLineKind::Context => {}
+            }
+            if o.is_some() {
+                old_no += 1;
+            }
+            if nn.is_some() {
+                new_no += 1;
+            }
+            if kept >= PATCH_LINES_MAX {
+                truncated = true;
+                continue;
+            }
+            kept += 1;
+            let text = text.strip_suffix('\r').unwrap_or(text);
+            body.push(DiffLine { kind, text: truncate(text, PATCH_LINE_MAX), old_no: o, new_no: nn });
+        }
+        if !body.is_empty() {
+            let header = format!("@@ -{old_start},{old_lines} +{new_start},{new_lines} @@");
+            out.push(DiffHunk { header, old_start, old_lines, new_start, new_lines, lines: body });
+        }
+    }
+    if created_lines as usize > PATCH_LINES_MAX {
+        additions = created_lines;
+        truncated = true;
+    }
+    let status = if created { DiffFileStatus::Added } else { DiffFileStatus::Modified };
+    let file = FileDiff { path, old_path: None, status, additions, deletions, binary: false, hunks: out };
+    Some(ToolPatch { file, truncated })
+}
+
+/// A content block of an assistant message (`text`, `thinking` or `tool_use`) as a
+/// transcript item; `None` for empty or unknown blocks. Shared with stream-json events.
+pub(crate) fn assistant_item(b: &Value) -> Option<TranscriptItem> {
+    match b.get("type").and_then(Value::as_str) {
+        Some("text") => {
+            let s = b.get("text").and_then(Value::as_str).unwrap_or("").trim();
+            if s.is_empty() {
+                return None;
+            }
+            let (text, truncated) = clip(s, TEXT_MAX);
+            Some(TranscriptItem::Text { text, truncated })
+        }
+        Some("thinking") => {
+            let s = b.get("thinking").and_then(Value::as_str).unwrap_or("").trim();
+            if s.is_empty() {
+                return None;
+            }
+            let (text, truncated) = clip(s, TEXT_MAX);
+            Some(TranscriptItem::Thinking { text, truncated })
+        }
+        Some("tool_use") => {
+            let name = b.get("name").and_then(Value::as_str)?;
+            let input = b.get("input");
+            let pretty = input
+                .filter(|v| v.as_object().is_none_or(|o| !o.is_empty()))
+                .and_then(|v| serde_json::to_string_pretty(v).ok());
+            Some(TranscriptItem::ToolUse {
+                id: b.get("id").and_then(Value::as_str).map(str::to_string),
+                name: name.to_string(),
+                summary: input.and_then(|i| tool_summary_n(i, SUMMARY_MAX)),
+                input: pretty.map(|p| truncate(&p, TOOL_INPUT_MAX)),
+                result: None,
+            })
+        }
+        _ => None,
+    }
+}
+
+/// One line with a tool input's main argument, as transcript tool calls show it.
+pub(crate) fn tool_input_summary(input: &Value) -> Option<String> {
+    tool_summary_n(input, SUMMARY_MAX)
+}
+
+/// A user text as a transcript item, clipped like the rest.
+pub(crate) fn user_item(s: &str) -> TranscriptItem {
+    let (text, truncated) = clip(s, TEXT_MAX);
+    TranscriptItem::User { text, truncated }
+}
+
 /// Parses the lines of an `agent-<id>.jsonl`: initial prompt, conversation with each
 /// `tool_result` attached to its `tool_use`, and final output. Returns at most the last
 /// `limit` items. Tolerates broken lines and unknown types.
@@ -875,16 +1042,16 @@ pub fn parse_transcript(text: &str, limit: usize) -> ParsedTranscript {
                     }
                 }
                 Some(Value::Array(blocks)) => {
+                    let tool_use_result = line
+                        .contains("\"structuredPatch\"")
+                        .then(|| serde_json::from_str::<RawToolUseResult>(line).ok())
+                        .flatten()
+                        .and_then(|r| r.tool_use_result);
+                    let structured = single_result(blocks, tool_use_result.as_ref());
                     for b in blocks {
                         match b.get("type").and_then(Value::as_str) {
                             Some("tool_result") => {
-                                let id = b.get("tool_use_id").and_then(Value::as_str);
-                                let (text, truncated) = clip(&tool_result_text(b), TOOL_RESULT_MAX);
-                                let info = ToolResultInfo {
-                                    text,
-                                    is_error: b.get("is_error").and_then(Value::as_bool).unwrap_or(false),
-                                    truncated,
-                                };
+                                let (id, info) = tool_result_info(b, structured);
                                 // The tool_use is usually very close: search from the end.
                                 let slot = items.iter_mut().rev().find_map(|it| match it {
                                     TranscriptItem::ToolUse { id: Some(tid), result, .. } if Some(tid.as_str()) == id => {
@@ -915,43 +1082,21 @@ pub fn parse_transcript(text: &str, limit: usize) -> ParsedTranscript {
                 seen_assistant = true;
                 let Some(Value::Array(blocks)) = content else { continue };
                 for b in blocks {
-                    match b.get("type").and_then(Value::as_str) {
-                        Some("text") => {
-                            let s = b.get("text").and_then(Value::as_str).unwrap_or("").trim();
-                            if s.is_empty() {
-                                continue;
-                            }
-                            let (text, truncated) = clip(s, TEXT_MAX);
-                            last_text = Some(text.clone());
-                            items.push(TranscriptItem::Text { text, truncated });
-                        }
-                        Some("thinking") => {
-                            let s = b.get("thinking").and_then(Value::as_str).unwrap_or("").trim();
-                            if !s.is_empty() {
-                                let (text, truncated) = clip(s, TEXT_MAX);
-                                items.push(TranscriptItem::Thinking { text, truncated });
-                            }
-                        }
-                        Some("tool_use") => {
-                            let Some(name) = b.get("name").and_then(Value::as_str) else { continue };
-                            let input = b.get("input");
-                            let pretty = input
-                                .filter(|v| v.as_object().is_none_or(|o| !o.is_empty()))
-                                .and_then(|v| serde_json::to_string_pretty(v).ok());
-                            if name == "StructuredOutput" {
-                                structured = pretty.clone();
-                            }
+                    let Some(item) = assistant_item(b) else { continue };
+                    match &item {
+                        TranscriptItem::Text { text, .. } => last_text = Some(text.clone()),
+                        TranscriptItem::ToolUse { name, .. } => {
                             tool_calls += 1;
-                            items.push(TranscriptItem::ToolUse {
-                                id: b.get("id").and_then(Value::as_str).map(str::to_string),
-                                name: name.to_string(),
-                                summary: input.and_then(|i| tool_summary_n(i, SUMMARY_MAX)),
-                                input: pretty.map(|p| truncate(&p, TOOL_INPUT_MAX)),
-                                result: None,
-                            });
+                            if name == "StructuredOutput" {
+                                structured = b
+                                    .get("input")
+                                    .filter(|v| v.as_object().is_none_or(|o| !o.is_empty()))
+                                    .and_then(|v| serde_json::to_string_pretty(v).ok());
+                            }
                         }
                         _ => {}
                     }
+                    items.push(item);
                 }
             }
             _ => {}
@@ -978,6 +1123,42 @@ pub fn parse_transcript(text: &str, limit: usize) -> ParsedTranscript {
         tool_calls,
         final_output: structured.or(last_text).map(|s| truncate(&s, TEXT_MAX)),
     }
+}
+
+/// Characters kept of a session's title.
+const SESSION_TITLE_MAX: usize = 120;
+
+/// Claude Code's name for a session, from its `.jsonl`: the last `custom-title` (set with
+/// `/rename`) or, without one, the last `ai-title`, which it rewrites as the conversation
+/// goes (observed in 2.1.283: `{"type":"ai-title","aiTitle":"…"}`,
+/// `{"type":"custom-title","customTitle":"…"}`).
+/// Streams the file line by line (it's read after every turn), parsing only title lines.
+pub fn session_title(path: &Path) -> Option<String> {
+    use std::io::BufRead;
+    let mut reader = std::io::BufReader::new(fs::File::open(path).ok()?);
+    let (mut custom, mut ai) = (None, None);
+    let mut line = Vec::new();
+    loop {
+        line.clear();
+        match reader.read_until(b'\n', &mut line) {
+            Ok(0) | Err(_) => break,
+            Ok(_) => {}
+        }
+        if !line.windows(7).any(|w| w == b"-title\"") {
+            continue;
+        }
+        let Ok(v) = serde_json::from_slice::<Value>(&line) else { continue };
+        let (slot, key) = match v.get("type").and_then(Value::as_str) {
+            Some("custom-title") => (&mut custom, "customTitle"),
+            Some("ai-title") => (&mut ai, "aiTitle"),
+            _ => continue,
+        };
+        let one_line = v.get(key).and_then(Value::as_str).unwrap_or("").split_whitespace().collect::<Vec<_>>().join(" ");
+        if !one_line.is_empty() {
+            *slot = Some(truncate(&one_line, SESSION_TITLE_MAX));
+        }
+    }
+    custom.or(ai)
 }
 
 /// Reads the whole file, or if it's too large, its head (where the prompt is) and its
@@ -1245,6 +1426,44 @@ mod tests {
 
     fn fixtures_projects() -> PathBuf {
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src/runs/fixtures/projects")
+    }
+
+    #[test]
+    fn session_title_prefers_the_last_rename_then_the_last_ai_title() {
+        let t = crate::util::paths::tests::TempDir::new("session-title");
+        let f = t.0.join("s.jsonl");
+        let write = |lines: &[&str]| fs::write(&f, lines.join("\n")).unwrap();
+        write(&[r#"{"type":"user","message":{"content":"hi"}}"#]);
+        assert_eq!(session_title(&f), None);
+        write(&[
+            r#"{"type":"ai-title","aiTitle":"Casual chat","sessionId":"s"}"#,
+            r#"{"type":"user","message":{"content":"say \"ai-title\""}}"#,
+            r#"{"type":"ai-title","aiTitle":"  Project   status\n"}"#,
+            r#"{"type":"ai-title","aiTitle":""}"#,
+        ]);
+        assert_eq!(session_title(&f).as_deref(), Some("Project status"));
+        write(&[
+            r#"{"type":"custom-title","customTitle":"okapi spike"}"#,
+            r#"{"type":"ai-title","aiTitle":"Later AI title"}"#,
+        ]);
+        assert_eq!(session_title(&f).as_deref(), Some("okapi spike"));
+        assert_eq!(session_title(&t.0.join("missing.jsonl")), None);
+    }
+
+    #[test]
+    fn session_file_edit_results_carry_their_diff() {
+        // Session files record the structured result as `toolUseResult` on the line.
+        let lines = [
+            r#"{"type":"user","message":{"role":"user","content":"edit it"}}"#,
+            r#"{"type":"assistant","message":{"content":[{"type":"tool_use","id":"t1","name":"Edit","input":{"file_path":"/r/README.md"}}]}}"#,
+            r#"{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"t1","content":"The file was updated."}]},"toolUseResult":{"filePath":"/r/README.md","structuredPatch":[{"oldStart":17,"oldLines":1,"newStart":17,"newLines":3,"lines":[" last line","+","+Modificado desde Nodal"]}]}}"#,
+        ];
+        let p = parse_transcript(&lines.join("\n"), 100);
+        let TranscriptItem::ToolUse { result: Some(r), .. } = &p.items[0] else { panic!("{:?}", p.items) };
+        let patch = r.patch.as_ref().expect("patch");
+        assert_eq!((patch.file.path.as_str(), patch.file.additions, patch.file.deletions), ("/r/README.md", 2, 0));
+        let last = patch.file.hunks[0].lines.last().unwrap();
+        assert_eq!((last.text.as_str(), last.new_no), ("Modificado desde Nodal", Some(19)));
     }
 
     #[test]

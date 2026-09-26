@@ -171,6 +171,18 @@ pub struct ToolResultInfo {
     pub text: String,
     pub is_error: bool,
     pub truncated: bool,
+    /// The file change of an `Edit`/`Write`/`MultiEdit`, when Claude Code reported it.
+    pub patch: Option<ToolPatch>,
+}
+
+/// A tool's file change as a diff, built from the structured result Claude Code records
+/// next to the `tool_result` (`toolUseResult` in session files, `tool_use_result` in stream-json).
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ToolPatch {
+    pub file: crate::work::diff::FileDiff,
+    /// Lines past the cap were dropped (the counts still cover the whole change).
+    pub truncated: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]

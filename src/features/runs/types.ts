@@ -1,3 +1,5 @@
+import type { FileDiff } from "../../domain/api";
+
 // Mirror of src-tauri/src/runs/types.rs (serde rename_all = camelCase): what Claude Code
 // reports about a background session (`claude agents`), its workflow and its subagents. The
 // Nodal run (`Run`) lives in `src/domain/types.ts`.
@@ -40,6 +42,14 @@ export interface RunResult {
 export interface ToolResultInfo {
   text: string;
   isError: boolean;
+  truncated: boolean;
+  /** The file change of an `Edit`/`Write`/`MultiEdit`, when Claude Code reported it. */
+  patch: ToolPatch | null;
+}
+
+export interface ToolPatch {
+  file: FileDiff;
+  /** Lines past the cap were dropped (the counts still cover the whole change). */
   truncated: boolean;
 }
 

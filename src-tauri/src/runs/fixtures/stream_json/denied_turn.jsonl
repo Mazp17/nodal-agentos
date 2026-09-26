@@ -1,0 +1,4 @@
+{"type":"system","subtype":"init","cwd":"/Users/me/Code/acme","session_id":"00000000-0000-4000-8000-000000000001","tools":["Write"],"mcp_servers":[],"model":"claude-haiku-4-5-20251001","permissionMode":"default"}
+{"type":"control_request","request_id":"4f125994-0000-4000-8000-000000000003","request":{"subtype":"can_use_tool","tool_name":"Write","display_name":"Write","input":{"file_path":"/Users/me/Code/acme/b.txt","content":"x"},"description":"b.txt","permission_suggestions":[],"tool_use_id":"toolu_02"}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","content":"The user denied this in Nodal.","is_error":true,"tool_use_id":"toolu_02"}]},"parent_tool_use_id":null,"session_id":"00000000-0000-4000-8000-000000000001"}
+{"type":"result","subtype":"success","is_error":false,"num_turns":2,"result":"DENIED-OK","session_id":"00000000-0000-4000-8000-000000000001"}

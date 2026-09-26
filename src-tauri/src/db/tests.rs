@@ -235,7 +235,7 @@ fn migrates_v2_data_to_v3() {
     )
     .unwrap();
     migrate(&mut c).unwrap();
-    assert_eq!(user_version(&c).unwrap(), 3);
+    assert_eq!(user_version(&c).unwrap(), MIGRATIONS.len() as i64);
     let src = get_task(&c, "t1").unwrap().unwrap().source.unwrap();
     assert_eq!((src.project, src.rule_id, src.moved), (None, None, None));
     let rules = get_source_link(&c, "l1").unwrap().unwrap().repo_rules;
@@ -260,6 +260,67 @@ fn migrates_v2_data_to_v3() {
     assert_eq!(json["moved"]["fromProject"]["name"], "A");
     assert!(json["moved"]["toProject"].is_null());
     assert_eq!(json["moved"]["suggestedRepoId"], "r1");
+}
+
+#[test]
+fn migrates_v3_data_to_v4() {
+    let mut c = Connection::open_in_memory().unwrap();
+    c.pragma_update(None, "foreign_keys", "ON").unwrap();
+    for sql in &MIGRATIONS[..3] {
+        c.execute_batch(sql).unwrap();
+    }
+    c.pragma_update(None, "user_version", 3).unwrap();
+    c.execute_batch(
+        r#"INSERT INTO projects (id, name, key, color, created_at) VALUES ('p1', 'Pay', 'PAY', '#fff', 1);
+         INSERT INTO repos (id, project_id, path, name, created_at) VALUES ('r1', 'p1', '/r1', 'web', 1);"#,
+    )
+    .unwrap();
+    migrate(&mut c).unwrap();
+    assert_eq!(user_version(&c).unwrap(), MIGRATIONS.len() as i64);
+    assert_eq!(count(&c, "chats"), 0);
+    assert_eq!(get_repo(&c, "r1").unwrap().unwrap().name, "web");
+
+    let chat = Chat {
+        id: "c1".into(),
+        project_id: "p1".into(),
+        repo_id: Some("r1".into()),
+        title: Some("Plan the login page".into()),
+        session_title: None,
+        session_id: Some("00000000-0000-4000-8000-000000000001".into()),
+        launch: LaunchOptions { model: Some("opus".into()), effort: Some("high".into()), permission_mode: Some("plan".into()) },
+        created_at: 5,
+        updated_at: 6,
+    };
+    insert_chat(&c, &chat).unwrap();
+    assert_eq!(get_chat(&c, "c1").unwrap(), Some(chat));
+}
+
+#[test]
+fn chats_follow_their_project_and_widen_when_their_repo_goes() {
+    let db = conn();
+    let c = db.lock().unwrap();
+    seed(&c);
+    let chat = |id: &str, repo: Option<&str>| Chat {
+        id: id.into(),
+        project_id: "p1".into(),
+        repo_id: repo.map(Into::into),
+        title: None,
+        session_title: None,
+        session_id: None,
+        launch: LaunchOptions::default(),
+        created_at: 1,
+        updated_at: 1,
+    };
+    insert_chat(&c, &chat("c1", Some("r1"))).unwrap();
+    insert_chat(&c, &chat("c2", None)).unwrap();
+    assert!(insert_chat(&c, &Chat { project_id: "missing".into(), ..chat("c3", None) }).is_err());
+
+    // A chat doesn't block deleting its repo: it goes back to the whole project.
+    c.execute("DELETE FROM repos WHERE id = 'r1'", []).unwrap();
+    assert_eq!(get_chat(&c, "c1").unwrap().unwrap().repo_id, None);
+
+    c.execute("DELETE FROM projects WHERE id = 'p1'", []).unwrap();
+    assert_eq!(count(&c, "chats"), 0);
 }
 
 #[test]

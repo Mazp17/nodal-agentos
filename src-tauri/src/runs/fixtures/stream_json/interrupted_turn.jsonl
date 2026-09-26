@@ -1,0 +1,4 @@
+{"type":"system","subtype":"init","cwd":"/Users/me/Code/acme","session_id":"00000000-0000-4000-8000-000000000001","tools":[],"mcp_servers":[],"model":"claude-haiku-4-5-20251001","permissionMode":"default"}
+{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Lighthouses"}},"session_id":"00000000-0000-4000-8000-000000000001","parent_tool_use_id":null}
+{"type":"control_response","response":{"subtype":"success","request_id":"interrupt-1","response":{"still_queued":[]}}}
+{"type":"result","subtype":"error_during_execution","is_error":true,"num_turns":2,"stop_reason":null,"session_id":"00000000-0000-4000-8000-000000000001"}

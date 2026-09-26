@@ -218,7 +218,37 @@ ALTER TABLE tasks ADD COLUMN src_rule_id TEXT;
 ALTER TABLE tasks ADD COLUMN src_moved TEXT;
 "#;
 
-pub const MIGRATIONS: &[&str] = &[V1, V2, V3];
+/// v4: per-project chats (`claude -p` stream-json sessions driven from the UI).
+/// - `repo_id`: the Repo pill; NULL = the whole project (it runs in the first repo). Deleting
+///   the repo widens the chat instead of blocking the deletion; that it belongs to the
+///   project is checked by `chats::ops`, since a composite FK can't `SET NULL`;
+/// - `session_id`: Claude Code's, from the first `init`; reopening the chat resumes it;
+/// - `model`/`effort`/`permission_mode`: the chat's own flags, not inherited from the repo
+///   (a repo's `bypassPermissions` would skip the approvals).
+const V4: &str = r#"
+CREATE TABLE chats (
+    id              TEXT PRIMARY KEY,
+    project_id      TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    repo_id         TEXT REFERENCES repos(id) ON DELETE SET NULL,
+    title           TEXT,
+    session_id      TEXT,
+    model           TEXT,
+    effort          TEXT,
+    permission_mode TEXT,
+    created_at      INTEGER NOT NULL,
+    updated_at      INTEGER NOT NULL
+);
+CREATE INDEX chats_project ON chats(project_id, updated_at);
+CREATE INDEX chats_repo ON chats(repo_id);
+"#;
+
+/// v5: `chats.session_title`, Claude Code's name for the session (`/rename`, else its AI
+/// title), read from the session file; the UI shows it over `title` (the first message).
+const V5: &str = r#"
+ALTER TABLE chats ADD COLUMN session_title TEXT;
+"#;
+
+pub const MIGRATIONS: &[&str] = &[V1, V2, V3, V4, V5];
 
 pub fn user_version(conn: &Connection) -> Result<i64, DbError> {
     Ok(conn.query_row("PRAGMA user_version", [], |r| r.get(0))?)

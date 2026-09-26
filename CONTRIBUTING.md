@@ -35,17 +35,18 @@ src-tauri/src/          Rust backend (Tauri commands)
   db/                   SQLite connection, versioned schema (PRAGMA user_version), queries
   work/                 the single run queue: launch, executors, worktrees, review, transitions, diff
   runs/                 talking to the `claude` CLI, reading sessions and transcripts
+  chats/                per-project chats: one `claude -p` stream-json process per active chat, with `nodal-mcp --chat`
   providers/, linear/   task-manager integration (Linear), sync worker, state mapping, import
   activity/             what Claude is doing in each repo
   migrate/              import of data from earlier versions
   secrets.rs            API keys in the macOS Keychain
-  events.rs             `nodal://changed` events for the frontend
+  events.rs             `nodal://changed` events for the frontend (chats stream on `nodal://chat`)
   mcp/                  MCP server for agents: Unix socket in the app, `nodal-mcp` stdio bridge (src/bin)
   updates.rs            in-app updates: "Check for Updates…" menu item, off in debug builds
 src/                    React + TypeScript frontend
   domain/               typed command wrappers (api.ts), shared types, data store and hooks
   shell/                app shell, sidebar, topbar, navigation, command palette
-  features/             board, tasks, executors, runs, activity, projects, providers, settings, onboarding, updates
+  features/             board, chats, tasks, executors, runs, activity, projects, providers, settings, onboarding, updates
   ui/                   shared components (dialogs, markdown, links…)
   styles/               design tokens and base styles
 skills/nodal-tasks/     agent skill for the MCP tools (published on skills.sh)
@@ -79,7 +80,7 @@ Tests that hit real services or real local data are `#[ignore]`. Linear live tes
 ## Guidelines
 
 - **No real data.** Fixtures, examples, screenshots and tests must use made-up names (`acme`, `Jane Doe`, `/Users/me/...`). No company names, real people, real paths or real issue ids.
-- **Claude Code internals.** Nodal reads files that Claude Code writes but does not document. Keep that parsing inside `src-tauri/src/runs/claude_fs.rs` and `src-tauri/src/activity/claude_sessions.rs`, with fixtures, so a format change is fixed in one place.
+- **Claude Code internals.** Nodal reads files that Claude Code writes but does not document. Keep that parsing inside `src-tauri/src/runs/claude_fs.rs`, `src-tauri/src/runs/stream_json.rs` (the `-p` stream-json protocol chats speak) and `src-tauri/src/activity/claude_sessions.rs`, with fixtures, so a format change is fixed in one place.
 - **No shells.** External commands (`claude`, `git`, `gh`, `osascript`) are spawned with argument arrays, never through a shell, and user input is validated before it becomes an argument.
 - **Database changes** are additive migrations: bump `PRAGMA user_version` and add a migration test from the previous version.
 - **Native dialogs don't work under Tauri.** Don't use `window.confirm`, `alert` or `prompt`; use `useConfirm()` from `src/ui/ConfirmDialog.tsx`. `pnpm build` fails if you do.
