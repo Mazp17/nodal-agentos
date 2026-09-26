@@ -12,6 +12,13 @@ pub fn list(conn: &Connection, project_id: &str) -> Result<Vec<Chat>, DbError> {
     Ok(rows.collect::<rusqlite::Result<_>>()?)
 }
 
+/// Every project's chats, most recently used first (for the command palette).
+pub fn list_all(conn: &Connection) -> Result<Vec<Chat>, DbError> {
+    let mut stmt = conn.prepare("SELECT * FROM chats ORDER BY updated_at DESC, id DESC")?;
+    let rows = stmt.query_map([], chat_from_row)?;
+    Ok(rows.collect::<rusqlite::Result<_>>()?)
+}
+
 pub fn get(conn: &Connection, id: &str) -> Result<Chat, DbError> {
     get_chat(conn, id)?.ok_or_else(|| not_found("chat"))
 }

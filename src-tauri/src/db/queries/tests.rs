@@ -149,6 +149,11 @@ fn chats_crud_and_order() {
     let ids = |v: Vec<Chat>| v.into_iter().map(|c| c.id).collect::<Vec<_>>();
     assert_eq!(ids(chats::list(&c, "p1").unwrap()), ["c2", "c1"]);
     assert!(chats::list(&c, "p2").unwrap().is_empty());
+    insert_project(&c, &project_of("p2", "WEB")).unwrap();
+    chats::insert(&c, &Chat { project_id: "p2".into(), ..mk("c3", 15) }).unwrap();
+    assert_eq!(ids(chats::list_all(&c).unwrap()), ["c2", "c3", "c1"]);
+    assert_eq!(ids(chats::list(&c, "p1").unwrap()), ["c2", "c1"]);
+    chats::delete(&c, "c3").unwrap();
 
     let mut c1 = chats::get(&c, "c1").unwrap();
     c1.title = Some("Plan the login page".into());

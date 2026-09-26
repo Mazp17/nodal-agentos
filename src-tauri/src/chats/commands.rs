@@ -23,10 +23,16 @@ where
     Ok(crate::db::with_db(&state.0.db, move |c| f(c).map_err(crate::db::DbError::Invalid)).await?)
 }
 
+/// A project's chats, or every project's with no `project_id`.
 #[tauri::command]
-pub async fn list_chats(state: State<'_, WorkState>, project_id: String) -> Result<Vec<Chat>, String> {
-    check_id(&project_id, "project")?;
-    db(&state, move |c| Ok(chats::list(c, &project_id)?)).await
+pub async fn list_chats(state: State<'_, WorkState>, project_id: Option<String>) -> Result<Vec<Chat>, String> {
+    match project_id {
+        Some(pid) => {
+            check_id(&pid, "project")?;
+            db(&state, move |c| Ok(chats::list(c, &pid)?)).await
+        }
+        None => db(&state, |c| Ok(chats::list_all(c)?)).await,
+    }
 }
 
 #[tauri::command]

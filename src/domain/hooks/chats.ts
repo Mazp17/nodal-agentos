@@ -7,4 +7,8 @@ import { POLL, usePolled, type Loadable } from "./store";
 
 /** Most recently used first. */
 export const useChats = (projectId: string | null): Loadable<Chat[]> =>
-  usePolled<Chat[]>(projectId ? `chats:${projectId}` : null, () => listChats(projectId as string), ["chats"], POLL.slow);
+  usePolled<Chat[]>(projectId ? `chats:${projectId}` : null, () => listChats(projectId), ["chats"], POLL.slow);
+
+/** Every project's chats, most recently used first (for the command palette). */
+export const useAllChats = (enabled: boolean): Loadable<Chat[]> =>
+  usePolled<Chat[]>(enabled ? "chats:*" : null, () => listChats(null), ["chats"], POLL.slow);

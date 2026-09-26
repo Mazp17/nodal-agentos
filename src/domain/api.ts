@@ -584,7 +584,8 @@ export interface TaskProposal {
 }
 
 /** Most recently used first. */
-export const listChats = (projectId: string) => invoke<Chat[]>("list_chats", { projectId });
+/** A project's chats; with `null`, every project's. */
+export const listChats = (projectId: string | null) => invoke<Chat[]>("list_chats", { projectId });
 export const createChat = (projectId: string, input: NewChat = {}) => invoke<Chat>("create_chat", { projectId, input });
 /** New settings apply from the next message. */
 export const updateChat = (id: string, patch: ChatPatch) => invoke<Chat>("update_chat", { id, patch });
