@@ -4,11 +4,13 @@
 //!   and runs each request with the same `ops`/queries as the Tauri commands;
 //! - `stdio`: the `nodal-mcp` binary speaks MCP (JSON-RPC over stdio) and forwards each
 //!   tool call to that socket;
-//! - `tools`: tool schemas and dispatch.
+//! - `tools`: tool schemas and dispatch;
+//! - `commands`: status, stop and restart from Settings → Diagnostics.
 //!
 //! Between `nodal-mcp` and the app, one JSON line each way: `{"tool", "arguments"}` →
 //! `{"result": …}` or `{"error": "…"}`.
 
+pub mod commands;
 pub(crate) mod server;
 pub mod stdio;
 pub(crate) mod tools;

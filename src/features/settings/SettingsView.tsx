@@ -2,9 +2,13 @@ import { useCallback, useEffect, useId, useState, type ReactNode } from "react";
 import {
   claudeVersion,
   gitVersion,
+  mcpRestart,
+  mcpStatus,
+  mcpStop,
   providerStatus,
   repoTrust,
   setSettings,
+  type McpStatus,
   type ProviderStatus,
   type RepoTrust,
 } from "../../domain/api";
@@ -19,7 +23,9 @@ import { CLAUDE } from "../executors/executors";
 import { ExecutorPicker } from "../executors";
 import type { SettingsSection } from "../../shell/useNav";
 import type { Updates } from "../updates/useUpdates";
+import { Play, RotateCw, Square } from "lucide-react";
 import { useToast } from "../../ui/Toasts";
+import { useConfirm } from "../../ui/ConfirmDialog";
 import { summarize, useLegacyImport } from "./legacyImport";
 import "./settings.css";
 
@@ -288,9 +294,32 @@ function DiagnosticsSettings() {
   const { repos } = useProjects();
   const legacy = useLegacyImport();
   const toast = useToast();
+  const ask = useConfirm();
   const [checks, setChecks] = useState<Check[] | null>(null);
   const [trust, setTrust] = useState<{ repo: Repo; trust: RepoTrust | null; error: string | null }[] | null>(null);
   const [busy, setBusy] = useState(false);
+  const [mcp, setMcp] = useState<McpStatus | null>(null);
+  const [mcpBusy, setMcpBusy] = useState(false);
+
+  const mcpAction = async (action: () => Promise<McpStatus>, failed: string) => {
+    setMcpBusy(true);
+    try {
+      setMcp(await action());
+    } catch (e) {
+      toast(failed, String(e), "danger");
+    } finally {
+      setMcpBusy(false);
+    }
+  };
+
+  const stopMcp = async () => {
+    const ok = await ask({
+      title: "Stop the MCP server?",
+      body: "Agents using nodal-mcp can't read or edit this board until you start it again or reopen Nodal.",
+      confirmLabel: "Stop server",
+    });
+    if (ok) await mcpAction(mcpStop, "Couldn't stop the MCP server");
+  };
 
   const run = useCallback(async () => {
     setBusy(true);
@@ -351,8 +380,16 @@ function DiagnosticsSettings() {
             : { name: "Repos", value: `${rs.length} repo${rs.length === 1 ? "" : "s"} · all reachable`, state: "ok" }
       );
     });
-    const [c, gc, [kc, lc], rc, tr] = await Promise.all([cli, git, linear, repoChecks, trustChecks]);
+    const [c, gc, [kc, lc], rc, tr, ms] = await Promise.all([
+      cli,
+      git,
+      linear,
+      repoChecks,
+      trustChecks,
+      mcpStatus().catch((e): McpStatus => ({ available: false, running: false, socket: null, error: String(e) })),
+    ]);
     setChecks([c, kc, gc, rc, lc]);
+    setMcp(ms);
     setTrust(tr);
     setBusy(false);
   }, [repos]);
@@ -396,6 +433,53 @@ function DiagnosticsSettings() {
             <span className="diag-state">{LABEL[d.state]}</span>
           </div>
         ))}
+      </div>
+
+      <SectionHead
+        title="MCP server"
+        text="Lets agents read and edit this board through nodal-mcp. It only listens on a private socket in Nodal's data folder, never on the network."
+      />
+      <div className="panel diag-list" aria-busy={busy || mcpBusy}>
+        {(() => {
+          const state: Check["state"] =
+            busy || mcpBusy || !mcp ? "checking" : mcp.running ? "ok" : mcp.error ? "error" : "na";
+          const detail = !mcp || state === "checking" ? "" : mcp.running ? (mcp.socket ?? "") : (mcp.error ?? "Stopped");
+          return (
+            <div className={`diag-row diag-${state}`}>
+              <span className="diag-mark" aria-hidden>
+                {MARK[state]}
+              </span>
+              <span className="diag-name">
+                {state === "checking" ? LABEL.checking : mcp?.running ? "Running" : "Stopped"}
+              </span>
+              <span className="diag-value mono ellipsis" title={detail}>
+                {detail}
+              </span>
+              <span className="row-actions">
+                {mcp?.running && (
+                  <button
+                    type="button"
+                    className="btn btn-sm btn-danger"
+                    disabled={busy || mcpBusy}
+                    onClick={() => void stopMcp()}
+                  >
+                    <Square size={12} fill="currentColor" aria-hidden />
+                    Stop
+                  </button>
+                )}
+                <button
+                  type="button"
+                  className="btn btn-sm"
+                  disabled={busy || mcpBusy || !mcp?.available}
+                  onClick={() => void mcpAction(mcpRestart, "Couldn't start the MCP server")}
+                >
+                  {mcp?.running ? <RotateCw size={12} aria-hidden /> : <Play size={12} fill="currentColor" aria-hidden />}
+                  {mcp?.running ? "Restart" : "Start"}
+                </button>
+              </span>
+            </div>
+          );
+        })()}
       </div>
 
       <SectionHead
