@@ -21,6 +21,10 @@ export interface ExecutorPickerProps {
   disabled?: boolean;
   /** Prefers opening the menu upwards (e.g. at the foot of a panel). */
   dropUp?: boolean;
+  /** `chip`: compact header chip (`tp-chip`) instead of a form field. */
+  variant?: "field" | "chip";
+  /** Tooltip; set on the wrapper so it also shows while the trigger is disabled. */
+  title?: string;
 }
 
 const MENU_W = 340;
@@ -57,7 +61,18 @@ function matches(info: ExecutorInfo, q: string) {
 }
 
 /** Executor picker: agents, workflows and Claude, each with its source and description. */
-export function ExecutorPicker({ repoId, value, onChange, inherited, label = "Executor", disabled, dropUp }: ExecutorPickerProps) {
+export function ExecutorPicker({
+  repoId,
+  value,
+  onChange,
+  inherited,
+  label = "Executor",
+  disabled,
+  dropUp,
+  variant = "field",
+  title,
+}: ExecutorPickerProps) {
+  const chip = variant === "chip";
   const { data: catalog, error } = useExecutors(repoId);
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
@@ -182,11 +197,11 @@ export function ExecutorPicker({ repoId, value, onChange, inherited, label = "Ex
   };
 
   return (
-    <div className="ex-picker" ref={wrap}>
+    <div className="ex-picker" ref={wrap} title={title}>
       <button
         ref={trigger}
         type="button"
-        className="ex-trigger"
+        className={chip ? "tp-chip tp-chip-btn ex-chip" : "ex-trigger"}
         aria-label={`${label}: ${value ? executorLabel(shown) : `Default (${executorLabel(shown)})`}`}
         aria-haspopup="dialog"
         aria-expanded={open}
@@ -199,9 +214,9 @@ export function ExecutorPicker({ repoId, value, onChange, inherited, label = "Ex
       >
         <ExecutorAvatar executor={shown} />
         <span className="ellipsis">{executorLabel(shown)}</span>
-        {!value && inherited && <span className="ex-default">default</span>}
+        {!value && inherited && !chip && <span className="ex-default">default</span>}
         {!known && <span className="ex-missing" title="Not found in this repo's catalog">not found</span>}
-        <span className="ex-caret" aria-hidden>▼</span>
+        {chip ? <span aria-hidden>▾</span> : <span className="ex-caret" aria-hidden>▼</span>}
       </button>
       {open && pos && createPortal(
         <div
@@ -253,7 +268,11 @@ export function ExecutorPicker({ repoId, value, onChange, inherited, label = "Ex
                     <span className="ex-item-body">
                       <span className="ex-item-head">
                         <span className="ex-item-name ellipsis">
-                          {executor === null ? `Default · ${executorLabel(ex)}` : executorLabel(ex)}
+                          {executor === null
+                            ? chip
+                              ? `Default (${executorLabel(ex)})`
+                              : `Default · ${executorLabel(ex)}`
+                            : executorLabel(ex)}
                         </span>
                         {info?.source && <span className="ex-src">{SOURCE_LABEL[info.source] ?? info.source}</span>}
                         {info?.reviews && <span className="ex-src" title="Reviews its own work: skips the review gate">reviews</span>}
