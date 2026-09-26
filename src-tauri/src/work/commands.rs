@@ -21,6 +21,7 @@ use super::dto::*;
 use super::executors::{self, ExecutorInfo};
 use super::queue::EndSignal;
 use super::transitions::{RunEnd, NOTE_STOPPED};
+use super::merge::{self, MergeOutcome, MergeReport};
 use super::{kick, launch, ops, pump, validate, worktree, Inner, WorkState};
 
 const OPEN_TIMEOUT: Duration = Duration::from_secs(3);
@@ -273,16 +274,79 @@ pub async fn cleanup_worktree(state: State<'_, WorkState>, task_id: String, forc
         worktree::cleanup(repo, &wt)
     })
     .await?;
-    let t = db(&state.0, move |c| {
+    let t = forget_worktree(&state.0, task_id).await?;
+    state.0.events.notify(Kind::Tasks, Some(&t.project_id));
+    Ok(t)
+}
+
+async fn forget_worktree(inner: &Arc<Inner>, task_id: String) -> Result<Task, String> {
+    db(inner, move |c| {
         let mut t = tasks::get(c, &task_id)?;
         t.worktree = None;
         t.updated_at = now_ms();
         tasks::update(c, &t)?;
         Ok(t)
     })
+    .await
+}
+
+/// "Merge into <base> & done": lands the task branch on its base (see `merge::merge`), marks
+/// the task Done (which queues the status for the linked task manager) and, if asked, pushes
+/// the base and cleans up the worktree. A failed push or cleanup doesn't undo the merge: it
+/// comes back in the report. The `cleaning` mark keeps runs out of the worktree meanwhile.
+#[tauri::command]
+pub async fn merge_worktree(state: State<'_, WorkState>, task_id: String, input: MergeInput) -> Result<MergeReport, String> {
+    check_id(&task_id, "task")?;
+    let (id, cleaning) = (task_id.clone(), state.0.cleaning.clone());
+    let (task, repo, message, _guard) = db(&state.0, move |c| {
+        let t = tasks::get(c, &id)?;
+        let guard = cleaning.mark(&id).ok_or("The task's worktree is busy: wait a moment and try again.")?;
+        if !qruns::pending_for_task(c, &id)?.is_empty() {
+            return Err(PENDING_ERR.into());
+        }
+        let r = repos::get(c, &t.repo_id)?;
+        let p = projects::get(c, &t.project_id)?;
+        let message = format!("{}: {}", task_key(&p.key, t.number), t.title);
+        Ok((t, r, message, guard))
+    })
     .await?;
-    state.0.events.notify(Kind::Tasks, Some(&t.project_id));
-    Ok(t)
+    let wt = task.worktree.clone().ok_or("The task has no worktree to merge.")?;
+    let repo_path = PathBuf::from(&repo.path);
+    let (rp, w, squash) = (repo_path.clone(), wt.clone(), input.squash);
+    let outcome = blocking(move || merge::merge(&rp, &w, &message, squash)).await?;
+    if matches!(outcome, MergeOutcome::Conflict { .. }) {
+        return Ok(MergeReport { outcome, task, pushed_to: None, push_error: None, cleanup_error: None });
+    }
+    let (mut pushed_to, mut push_error) = (None, None);
+    if input.push {
+        let (rp, base) = (repo_path.clone(), wt.base.clone());
+        match blocking(move || merge::push_base(&rp, &base)).await {
+            Ok(remote) => pushed_to = Some(remote),
+            Err(e) => push_error = Some(e),
+        }
+    }
+    let (env, id) = (state.0.env.clone(), task_id.clone());
+    let mut task = db(&state.0, move |c| {
+        let done = TaskPatch { status: Some(TaskStatus::Done), ..Default::default() };
+        ops::update_task(c, &env, &id, &done, now_ms())
+    })
+    .await?;
+    let mut cleanup_error = None;
+    if input.cleanup {
+        let cleaned = blocking(move || {
+            if let Some(why) = worktree::cleanup_blocker(&worktree::status(&repo_path, Some(&wt))?) {
+                return Err(why);
+            }
+            worktree::cleanup(&repo_path, &wt)
+        })
+        .await;
+        match cleaned {
+            Ok(()) => task = forget_worktree(&state.0, task_id).await?,
+            Err(e) => cleanup_error = Some(e),
+        }
+    }
+    state.0.events.notify(Kind::Tasks, Some(&task.project_id));
+    Ok(MergeReport { outcome, task, pushed_to, push_error, cleanup_error })
 }
 
 const PENDING_ERR: &str = "The task has a queued or running run: cancel it first.";

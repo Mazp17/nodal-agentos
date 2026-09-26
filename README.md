@@ -31,7 +31,7 @@ You need [Claude Code](https://docs.claude.com/en/docs/claude-code) installed an
 - **Board of tasks** grouped in projects, each project with one or more local repos. Plans in markdown, acceptance criteria, priority and labels.
 - **Delegate** each task to one of your agents (`~/.claude/agents`, the repo's or a plugin), a workflow, or plain Claude.
 - **Isolated by default**: every task gets its own git worktree and branch, so several run on the same repo at once.
-- **Finish** with uncommitted changes, a commit, or a pull request.
+- **Finish** with uncommitted changes, a commit, or a pull request. Local work merges back into its base branch from the task panel, without touching your checkout.
 - **Automatic review** against the acceptance criteria: pass goes to In Review, fail to Blocked with the findings.
 - **One queue** with a global concurrency limit, and a live view of each run: phases, subagents, transcript, tokens and diff.
 - **Linear, optional**: import issues, route them to repos and keep statuses in sync. More task managers are planned.

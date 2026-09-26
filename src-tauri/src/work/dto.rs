@@ -145,6 +145,22 @@ pub struct LaunchInput {
     pub options: Option<LaunchOptions>,
 }
 
+/// "Merge into <base> & done". Squash is on unless it's turned off; pushing is opt-in.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MergeInput {
+    #[serde(default = "yes")]
+    pub squash: bool,
+    #[serde(default)]
+    pub push: bool,
+    #[serde(default)]
+    pub cleanup: bool,
+}
+
+fn yes() -> bool {
+    true
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -176,5 +192,11 @@ mod tests {
         assert!(serde_json::from_value::<PlanInput>(json!({"kind": "url", "path": "x"})).is_err());
         let l: LaunchInput = serde_json::from_value(json!({"extraInstructions": "x", "options": {"effort": "high"}})).unwrap();
         assert_eq!(l.options.unwrap().effort.as_deref(), Some("high"));
+    }
+
+    #[test]
+    fn merge_input_squashes_and_never_pushes_by_default() {
+        let m: MergeInput = serde_json::from_value(json!({})).unwrap();
+        assert!(m.squash && !m.push && !m.cleanup);
     }
 }

@@ -617,3 +617,8 @@ details > summary.tp-step-sub { cursor: pointer; }
 .tv-id { font-size: var(--fs-xs); }
 .tv-ext { font-size: var(--fs-xs); color: var(--text-muted); }
 .tv-run { display: flex; min-width: 0; }
+
+/* Merge into <base> & done (MergeDialog). */
+.tp-merge-summary { font-size: var(--fs-lg); color: var(--text); }
+.tp-merge-opt { display: flex; align-items: center; gap: var(--sp-3); color: var(--text); cursor: pointer; }
+.tp-merge-opt input { width: 16px; height: 16px; margin: 0; accent-color: var(--accent); }

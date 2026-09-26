@@ -107,6 +107,7 @@ pub fn run() {
             work::commands::add_task_relation,
             work::commands::remove_task_relation,
             work::commands::cleanup_worktree,
+            work::commands::merge_worktree,
             work::commands::worktree_status,
             work::commands::list_executors,
             work::commands::list_task_runs,
