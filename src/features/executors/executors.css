@@ -77,3 +77,6 @@
   overflow: hidden;
 }
 .ex-caret { font-size: 8px; opacity: 0.7; flex: none; }
+.ex-chip { color: var(--text); min-width: 0; }
+.ex-chip:disabled { cursor: default; opacity: 0.5; }
+.ex-chip:disabled:hover { background: var(--fill-1); }

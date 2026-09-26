@@ -32,7 +32,7 @@ import { SafeMarkdown } from "../../ui/Markdown";
 import { useConfirm } from "../../ui/ConfirmDialog";
 import { useFocusTrap } from "../../ui/useFocusTrap";
 import { useToast } from "../../ui/Toasts";
-import { ExecutorName, ExecutorPicker, executorLabel, resolveExecutor } from "../executors";
+import { ExecutorName, ExecutorPicker, executorLabel, inheritedExecutor, sameExecutor } from "../executors";
 import { SourceTab } from "../providers";
 import { PhaseSegments, RunBadge, useRunActions, useRunView } from "../runs";
 import { NewTaskDialog } from "./NewTaskDialog";
@@ -136,7 +136,8 @@ export function TaskPanel({ taskId, onClose, onOpenRun, onOpenDiff, onOpenTask, 
   }
 
   const key = project ? taskKey(project.key, task.number) : `#${task.number}`;
-  const assignee = resolveExecutor(task, repo, project, globalExecutor);
+  const inherited = inheritedExecutor(repo, project, globalExecutor);
+  const assignee = task.assignee ?? inherited;
   const runExec = launchExec ?? assignee;
   const src = task.source;
   const closed = isClosed(task.status);
@@ -157,6 +158,19 @@ export function TaskPanel({ taskId, onClose, onOpenRun, onOpenDiff, onOpenTask, 
   };
 
   const patch = (p: TaskPatch, label: string, ok?: [string, string?]) => act(label, () => updateTask(task.id, p), ok);
+
+  const setAssignee = (a: Executor | null) => {
+    if (a === null ? task.assignee === null : sameExecutor(a, task.assignee)) return;
+    void patch({ assignee: a }, "change the executor", [
+      `${key} now assigned to ${executorLabel(a ?? inherited)}`,
+      a ? task.title : "Inherited default",
+    ]);
+  };
+  const assigneeLocked = activeRun
+    ? "Can't change the executor while a run is active"
+    : busy !== null
+      ? "Wait for the current action to finish"
+      : undefined;
 
   const setStatus = (s: TaskStatus) => {
     setMenu(null);
@@ -364,9 +378,16 @@ export function TaskPanel({ taskId, onClose, onOpenRun, onOpenDiff, onOpenTask, 
           ) : (
             <span className="tp-chip tp-local">Local</span>
           )}
-          <span className="tp-chip" title="Assignee">
-            <ExecutorName executor={assignee} />
-          </span>
+          <ExecutorPicker
+            variant="chip"
+            repoId={repo?.id ?? null}
+            value={task.assignee}
+            inherited={inherited}
+            label="Assignee"
+            disabled={!!assigneeLocked}
+            title={assigneeLocked ?? "Assignee"}
+            onChange={setAssignee}
+          />
         </div>
         {src?.syncError && (
           <div className="banner banner-error tp-banner" role="alert">
