@@ -73,7 +73,8 @@ pub async fn send_chat_message(
     check_id(&id, "chat")?;
     let body = text.clone();
     let (chat, project, repos) = db(&state, move |c| ops::prepare_send(c, &id, &body, now_ms())).await?;
-    let spec = spec(&chat, &project, &repos)?;
+    let mcp = super::context::nodal_mcp_bin();
+    let spec = spec(&chat, &project, &repos, mcp.as_deref())?;
     chats_state.0.send(&chat.id, &chat.project_id, chat.session_id.as_deref(), spec, &text)?;
     state.0.events.notify(Kind::Chats, Some(&chat.project_id));
     Ok(chat)

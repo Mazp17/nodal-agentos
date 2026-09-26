@@ -2,13 +2,15 @@
 //! and driven from the UI, with permission prompts answered in the app.
 //!
 //! - `ops`: synchronous CRUD and validation over the database;
+//! - `context`: the Nodal context a chat starts with (MCP, other repos, system prompt);
 //! - `process`: one `claude` process per active chat and its `nodal://chat` events;
 //! - `commands`: the Tauri commands.
 
 pub mod commands;
+pub mod context;
 pub mod process;
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use rusqlite::Connection;
 use serde::Deserialize;
@@ -146,10 +148,12 @@ pub fn chat_repo<'a>(chat: &Chat, repos: &'a [Repo]) -> Result<&'a Repo, String>
 }
 
 /// How the chat's process is launched: in its repo, with its own model, effort and
-/// permission mode.
-pub fn spec(chat: &Chat, _project: &Project, repos: &[Repo]) -> Result<Spec, String> {
+/// permission mode, and the Nodal context (`mcp` is `nodal-mcp`, when found).
+pub fn spec(chat: &Chat, project: &Project, repos: &[Repo], mcp: Option<&Path>) -> Result<Spec, String> {
     let repo = chat_repo(chat, repos)?;
-    Ok(Spec { cwd: PathBuf::from(&repo.path), args: options::to_args(&chat.launch)? })
+    let mut args = options::to_args(&chat.launch)?;
+    args.extend(context::args(chat, project, repos, repo, mcp));
+    Ok(Spec { cwd: PathBuf::from(&repo.path), args })
 }
 
 #[cfg(test)]
@@ -257,18 +261,20 @@ mod tests {
             created_at: 1,
             updated_at: 1,
         };
-        let s = spec(&chat, &project, &repos).unwrap();
+        let s = spec(&chat, &project, &repos, None).unwrap();
         assert_eq!(s.cwd, PathBuf::from("/Users/me/Code/acme-api"));
-        assert_eq!(s.args, ["--model", "haiku", "--effort", "low"]);
+        assert_eq!(s.args[..6], ["--model", "haiku", "--effort", "low", "--add-dir", "/Users/me/Code/acme-web"]);
+        assert_eq!(s.args[6], "--append-system-prompt");
 
         chat.repo_id = Some("r2".into());
-        let s = spec(&chat, &project, &repos).unwrap();
+        let s = spec(&chat, &project, &repos, Some(Path::new("/Users/me/nodal-mcp"))).unwrap();
         assert_eq!(s.cwd, PathBuf::from("/Users/me/Code/acme-web"));
+        assert!(s.args.iter().any(|a| a == "--mcp-config") && !s.args.iter().any(|a| a == "--add-dir"));
         assert!(!s.args.iter().any(|a| a == "--permission-mode"), "the repo's permission mode isn't inherited");
 
         chat.repo_id = Some("gone".into());
-        assert!(spec(&chat, &project, &repos).is_err());
+        assert!(spec(&chat, &project, &repos, None).is_err());
         chat.repo_id = None;
-        assert!(spec(&chat, &project, &[]).unwrap_err().contains("Add a repo"));
+        assert!(spec(&chat, &project, &[], None).unwrap_err().contains("Add a repo"));
     }
 }

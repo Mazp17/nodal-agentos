@@ -35,7 +35,7 @@ src-tauri/src/          Rust backend (Tauri commands)
   db/                   SQLite connection, versioned schema (PRAGMA user_version), queries
   work/                 the single run queue: launch, executors, worktrees, review, transitions, diff
   runs/                 talking to the `claude` CLI, reading sessions and transcripts
-  chats/                per-project chats: one `claude -p` stream-json process per active chat
+  chats/                per-project chats: one `claude -p` stream-json process per active chat, with `nodal-mcp --chat`
   providers/, linear/   task-manager integration (Linear), sync worker, state mapping, import
   activity/             what Claude is doing in each repo
   migrate/              import of data from earlier versions
