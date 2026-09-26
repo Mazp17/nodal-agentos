@@ -583,8 +583,13 @@ export interface TaskProposal {
   note: string;
 }
 
-/** Most recently used first. */
-/** A project's chats; with `null`, every project's. */
+/** What Claude Code uses when a chat leaves model or effort unset, from its settings files. */
+export interface ClaudeDefaults {
+  model: string | null;
+  effort: string | null;
+}
+export const getClaudeDefaults = (repoId: string | null) => invoke<ClaudeDefaults>("get_claude_defaults", { repoId });
+/** A project's chats (with `null`, every project's), most recently used first. */
 export const listChats = (projectId: string | null) => invoke<Chat[]>("list_chats", { projectId });
 export const createChat = (projectId: string, input: NewChat = {}) => invoke<Chat>("create_chat", { projectId, input });
 /** New settings apply from the next message. */

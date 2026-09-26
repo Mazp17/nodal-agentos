@@ -3,6 +3,7 @@
 
 pub mod claude_bin;
 pub(crate) mod claude_fs;
+pub mod claude_settings;
 pub mod claude_trust;
 pub mod options;
 pub mod stream_json;

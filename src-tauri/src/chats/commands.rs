@@ -8,6 +8,7 @@ use crate::db::queries::chats;
 use crate::domain::Chat;
 use crate::events::Kind;
 use crate::runs::claude_fs;
+use crate::runs::claude_settings::{self, ClaudeDefaults};
 use crate::runs::types::Transcript;
 use crate::util::{blocking, check_id, now_ms};
 use crate::work::WorkState;
@@ -119,6 +120,21 @@ pub fn stop_chat(chats_state: State<'_, ChatState>, id: String) -> Result<(), St
 pub fn get_chat_live(chats_state: State<'_, ChatState>, id: String) -> Result<ChatLive, String> {
     check_id(&id, "chat")?;
     Ok(chats_state.0.live(&id))
+}
+
+/// The model and effort Claude Code uses when a chat leaves them unset, as configured in its
+/// settings for `repo_id` (or only the user's settings without one).
+#[tauri::command]
+pub async fn get_claude_defaults(state: State<'_, WorkState>, repo_id: Option<String>) -> Result<ClaudeDefaults, String> {
+    let repo_path = match repo_id {
+        Some(id) => {
+            check_id(&id, "repo")?;
+            Some(db(&state, move |c| Ok(crate::db::queries::repos::get(c, &id)?.path)).await?)
+        }
+        None => None,
+    };
+    let claude = state.0.env.claude_dir.clone();
+    blocking(move || Ok(claude_settings::read(claude.as_deref(), repo_path.as_deref().map(std::path::Path::new)))).await
 }
 
 /// The chat's history, read from its Claude Code session. `None` before the first message.

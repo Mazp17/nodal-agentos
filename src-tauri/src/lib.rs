@@ -166,6 +166,7 @@ pub fn run() {
             mcp::commands::mcp_restart,
             mcp::commands::mcp_stop,
             chats::commands::list_chats,
+            chats::commands::get_claude_defaults,
             chats::commands::create_chat,
             chats::commands::update_chat,
             chats::commands::delete_chat,
