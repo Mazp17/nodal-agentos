@@ -46,7 +46,7 @@ src-tauri/src/          Rust backend (Tauri commands)
 src/                    React + TypeScript frontend
   domain/               typed command wrappers (api.ts), shared types, data store and hooks
   shell/                app shell, sidebar, topbar, navigation, command palette
-  features/             board, tasks, executors, runs, activity, projects, providers, settings, onboarding, updates
+  features/             board, chats, tasks, executors, runs, activity, projects, providers, settings, onboarding, updates
   ui/                   shared components (dialogs, markdown, links…)
   styles/               design tokens and base styles
 skills/nodal-tasks/     agent skill for the MCP tools (published on skills.sh)

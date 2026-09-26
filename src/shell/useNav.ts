@@ -5,7 +5,7 @@ import { useCallback, useEffect, useState } from "react";
 import { readJsonPref, writePref } from "./storage";
 
 /** Project pages (and the global `board`/`runs` with `projectId: null`). */
-export type ProjectPage = "board" | "tasks" | "runs" | "activity" | "project-settings";
+export type ProjectPage = "board" | "chat" | "tasks" | "runs" | "activity" | "project-settings";
 export type Page = ProjectPage | "settings" | "run";
 
 export type SettingsSection = "integrations" | "execution" | "updates" | "diagnostics";
@@ -20,8 +20,8 @@ export interface Route {
 }
 
 /** These pages need a project; without one they fall back to the global `board`. */
-const NEEDS_PROJECT: ReadonlySet<Page> = new Set(["tasks", "activity", "project-settings"]);
-const PAGES: ReadonlySet<string> = new Set(["board", "tasks", "runs", "activity", "project-settings", "settings", "run"]);
+const NEEDS_PROJECT: ReadonlySet<Page> = new Set(["chat", "tasks", "activity", "project-settings"]);
+const PAGES: ReadonlySet<string> = new Set(["board", "chat", "tasks", "runs", "activity", "project-settings", "settings", "run"]);
 const HOME: Route = { projectId: null, page: "board" };
 
 const isRoute = (v: unknown): v is Route => {
@@ -147,6 +147,7 @@ export function useNav(): Nav {
 
 export const PAGE_TITLE: Record<Page, string> = {
   board: "Board",
+  chat: "Chat",
   tasks: "Tasks",
   runs: "Runs",
   activity: "Activity",

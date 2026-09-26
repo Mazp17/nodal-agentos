@@ -7,6 +7,7 @@ import { useQueueSummary } from "../domain/hooks/runs";
 import { invalidate } from "../domain/hooks/store";
 import { taskKey, type Project } from "../domain/types";
 import { BoardView } from "../features/board";
+import { ChatView } from "../features/chats";
 import { Onboarding } from "../features/onboarding/Onboarding";
 import { CreateProjectDialog } from "../features/projects/CreateProjectDialog";
 import { ProjectSettings } from "../features/projects/ProjectSettings";
@@ -29,7 +30,7 @@ const isEditable = (t: EventTarget | null) =>
 
 /** ⌘1–4, as in the design. */
 const SHORTCUT_PAGES: Record<string, ProjectPage> = { "1": "board", "2": "tasks", "3": "runs", "4": "activity" };
-const PROJECT_PAGES: ReadonlySet<Page> = new Set(["board", "tasks", "runs", "activity", "project-settings"]);
+const PROJECT_PAGES: ReadonlySet<Page> = new Set(["board", "chat", "tasks", "runs", "activity", "project-settings"]);
 
 export function AppShell() {
   const ctx = useProjects();
@@ -289,8 +290,8 @@ export function AppShell() {
   }
 
   // ---- Content ----
-  // The board handles its own "no repos" state; Tasks delegates it here.
-  const noRepos = project !== null && projectRepos.length === 0 && route.page === "tasks";
+  // The board handles its own "no repos" state; Tasks and Chat delegate it here.
+  const noRepos = project !== null && projectRepos.length === 0 && (route.page === "tasks" || route.page === "chat");
   let content: ReactNode;
   if (noRepos && project) {
     content = (
@@ -298,7 +299,10 @@ export function AppShell() {
         <div className="center-state-body">
           <div className="state-icon-empty" aria-hidden />
           <div className="center-state-title">No repos in {project.name}</div>
-          <div className="center-state-text">Every task runs in one repo. Add the root of a git checkout to start.</div>
+          <div className="center-state-text">
+            {route.page === "chat" ? "A chat runs inside one of the project's repos." : "Every task runs in one repo."} Add the root
+            of a git checkout to start.
+          </div>
           <div className="center-state-actions">
             <button
               type="button"
@@ -325,6 +329,9 @@ export function AppShell() {
             onOpenProjectSettings={openRepoSettings}
           />
         );
+        break;
+      case "chat":
+        content = project && <ChatView key={project.id} project={project} repos={projectRepos} onOpenTask={openTask} />;
         break;
       case "tasks":
         content = project && <TasksView projectId={project.id} onOpenTask={openTask} />;
