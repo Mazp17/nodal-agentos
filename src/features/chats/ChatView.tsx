@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createChat, deleteChat, interruptChat, sendChatMessage, updateChat, type ChatPatch } from "../../domain/api";
-import { useChats } from "../../domain/hooks/chats";
+import { useChats, useClaudeDefaults } from "../../domain/hooks/chats";
 import { invalidate, setData } from "../../domain/hooks/store";
 import type { Chat, Project, Repo } from "../../domain/types";
 import { readJsonPref, writePref } from "../../shell/storage";
@@ -9,7 +9,7 @@ import { useConfirm } from "../../ui/ConfirmDialog";
 import { useToast } from "../../ui/Toasts";
 import { Composer, type ComposerSettings } from "./Composer";
 import { Conversation } from "./Conversation";
-import { EFFORTS, MODELS, modeOptions, repoOptions, shortAgo, toTurns } from "./model";
+import { effortOptions, modelOptions, modeOptions, repoOptions, shortAgo, toTurns } from "./model";
 import { dropOutbox, forgetChat, markInterrupting, pushOutbox, seedChat, useChatStream, useRunStates } from "./stream";
 import "../runs/transcript.css";
 import "./chat.css";
@@ -72,6 +72,8 @@ export function ChatView({ project, repos, onOpenTask, focusChatId, onFocused }:
   }, [focusChatId, project.id, onFocused]);
 
   const settings = chat ? settingsOf(chat) : draftSettings;
+  // A chat without a repo runs in the project's first one, so its settings apply.
+  const defaults = useClaudeDefaults(settings.repoId ?? repos[0]?.id ?? null).data;
   const busy = !!stream && (stream.state === "busy" || stream.outbox.length > 0);
   const turns = useMemo(() => (stream ? toTurns(stream.items, stream.outbox) : []), [stream]);
   const hasMessages = turns.length > 0 || !!stream?.streaming;
@@ -269,8 +271,8 @@ export function ChatView({ project, repos, onOpenTask, focusChatId, onFocused }:
           settings={settings}
           modes={modeOptions(settings.permissionMode)}
           repoOptions={repoOptions(repos)}
-          models={MODELS}
-          efforts={EFFORTS}
+          models={modelOptions(defaults?.model)}
+          efforts={effortOptions(defaults?.effort)}
           menu={menu}
           busy={busy}
           contextTokens={stream?.contextTokens ?? null}

@@ -30,16 +30,27 @@ export const modeOptions = (current: string | null | undefined): PillOption[] =>
 
 const capitalize = (v: string) => v.charAt(0).toUpperCase() + v.slice(1);
 
-export const MODELS: PillOption[] = [
-  { value: null, label: "Default model", hint: "Claude Code's default" },
-  { value: "haiku", label: "haiku", hint: "Fastest" },
-  { value: "sonnet", label: "sonnet", hint: "Balanced" },
-  { value: "opus", label: "opus", hint: "Deepest reasoning" },
-];
-export const EFFORTS: PillOption[] = [
-  { value: null, label: "Default effort" },
-  ...["low", "medium", "high", "xhigh", "max"].map((v) => ({ value: v, label: capitalize(v) })),
-];
+/** Model options; the unset one names the model Claude Code's settings configure. */
+export function modelOptions(configured: string | null | undefined): PillOption[] {
+  return [
+    configured
+      ? { value: null, label: `${configured} (default)`, hint: "From Claude Code's settings" }
+      : { value: null, label: "Default model", hint: "Claude Code's default" },
+    { value: "haiku", label: "haiku", hint: "Fastest" },
+    { value: "sonnet", label: "sonnet", hint: "Balanced" },
+    { value: "opus", label: "opus", hint: "Deepest reasoning" },
+  ];
+}
+
+/** Effort options; the unset one names the effort Claude Code's settings configure. */
+export function effortOptions(configured: string | null | undefined): PillOption[] {
+  return [
+    configured
+      ? { value: null, label: `${capitalize(configured)} (default)`, hint: "From Claude Code's settings" }
+      : { value: null, label: "Default effort" },
+    ...["low", "medium", "high", "xhigh", "max"].map((v) => ({ value: v, label: capitalize(v) })),
+  ];
+}
 
 /** The Repo pill: the whole project (runs in the first repo) or one repo. */
 export function repoOptions(repos: Repo[]): PillOption[] {
