@@ -13,14 +13,23 @@ export interface PillOption {
   hint?: string;
 }
 
-// Same values as `PERMISSION_MODES`, `MODEL_ALIASES` and `EFFORTS` in `runs/options.rs`
-// (and the repo options in `ProjectSettings.tsx`).
+// Values from `PERMISSION_MODES`, `MODEL_ALIASES` and `EFFORTS` in `runs/options.rs`.
+// Chats don't offer `bypassPermissions` (repos still do, in `ProjectSettings.tsx`).
+// `auto` needs sonnet or opus: with haiku Claude Code silently falls back to asking
+// (verified with 2.1.283).
 export const MODES: PillOption[] = [
-  { value: null, label: "Ask", hint: "Asks before edits and commands" },
+  { value: "auto", label: "Auto", hint: "Runs safe actions, blocks risky ones · sonnet or opus" },
   { value: "acceptEdits", label: "Accept edits", hint: "Edits files, asks before commands" },
+  { value: null, label: "Ask", hint: "Asks before edits and commands" },
   { value: "plan", label: "Plan", hint: "Read-only, proposes a plan" },
-  { value: "bypassPermissions", label: "Bypass", hint: "No prompts at all" },
 ];
+
+/** Modes for a chat's pill; a chat saved before Bypass was dropped keeps showing it. */
+export const modeOptions = (current: string | null | undefined): PillOption[] =>
+  current === "bypassPermissions" ? [...MODES, { value: current, label: "Bypass (legacy)", hint: "No prompts at all" }] : MODES;
+
+const capitalize = (v: string) => v.charAt(0).toUpperCase() + v.slice(1);
+
 export const MODELS: PillOption[] = [
   { value: null, label: "Default model", hint: "Claude Code's default" },
   { value: "haiku", label: "haiku", hint: "Fastest" },
@@ -29,7 +38,7 @@ export const MODELS: PillOption[] = [
 ];
 export const EFFORTS: PillOption[] = [
   { value: null, label: "Default effort" },
-  ...["low", "medium", "high", "xhigh", "max"].map((v) => ({ value: v, label: v.charAt(0).toUpperCase() + v.slice(1) })),
+  ...["low", "medium", "high", "xhigh", "max"].map((v) => ({ value: v, label: capitalize(v) })),
 ];
 
 /** The Repo pill: the whole project (runs in the first repo) or one repo. */

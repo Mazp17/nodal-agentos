@@ -9,7 +9,7 @@ import { useConfirm } from "../../ui/ConfirmDialog";
 import { useToast } from "../../ui/Toasts";
 import { Composer, type ComposerSettings } from "./Composer";
 import { Conversation } from "./Conversation";
-import { EFFORTS, MODELS, MODES, repoOptions, shortAgo, toTurns } from "./model";
+import { EFFORTS, MODELS, modeOptions, repoOptions, shortAgo, toTurns } from "./model";
 import { dropOutbox, forgetChat, markInterrupting, pushOutbox, seedChat, useChatStream, useRunStates } from "./stream";
 import "../runs/transcript.css";
 import "./chat.css";
@@ -27,7 +27,7 @@ export interface ChatViewProps {
 const SELECTED_PREF = "chatSelected";
 const isSelection = (v: unknown): v is Record<string, string | null> => !!v && typeof v === "object" && !Array.isArray(v);
 
-const NEW_CHAT: ComposerSettings = { permissionMode: "acceptEdits", repoId: null, model: null, effort: null };
+const NEW_CHAT: ComposerSettings = { permissionMode: "auto", repoId: null, model: null, effort: null };
 
 const settingsOf = (c: Chat): ComposerSettings => ({
   permissionMode: c.permissionMode ?? null,
@@ -267,7 +267,7 @@ export function ChatView({ project, repos, onOpenTask, focusChatId, onFocused }:
           draft={draft}
           placeholder={`Ask anything about ${project.name}…`}
           settings={settings}
-          modes={MODES}
+          modes={modeOptions(settings.permissionMode)}
           repoOptions={repoOptions(repos)}
           models={MODELS}
           efforts={EFFORTS}

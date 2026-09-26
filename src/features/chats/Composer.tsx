@@ -161,7 +161,7 @@ export function Composer(p: ComposerProps) {
         <div className="chat-composer-bar">
           <Pill
             {...pill("permissionMode", p.modes, "left", "Mode")}
-            tone={p.settings.permissionMode === "bypassPermissions" ? "warn" : undefined}
+            tone={p.settings.permissionMode === "auto" || p.settings.permissionMode === "bypassPermissions" ? "warn" : undefined}
           />
           <Pill {...pill("repoId", p.repoOptions, "left", "Repo")} />
           <span className="spacer" />
