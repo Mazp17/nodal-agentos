@@ -229,6 +229,8 @@ input:focus-visible, textarea:focus-visible, select:focus-visible { outline-offs
   background: color-mix(in oklch, var(--tone) 15%, transparent);
   border: 0;
 }
+.badge > .dot { flex: none; }
+.badge-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .badge-sm { height: 18px; font-size: var(--fs-2xs); border-radius: 9px; }
 button.badge:hover { filter: brightness(1.2); }
 
