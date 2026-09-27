@@ -1,0 +1,25 @@
+.kbd {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  flex: none;
+  height: 20px;
+  min-width: 20px;
+  padding: 0 4px;
+  border-radius: var(--r-sm);
+  background: var(--fill-6);
+  color: var(--text-muted);
+  font-family: var(--font-sans);
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-medium);
+  line-height: 1;
+  pointer-events: none;
+  user-select: none;
+}
+.kbd-group { display: inline-flex; align-items: center; gap: 4px; }
+
+/* Inside a filled button or a tooltip it sits on the surface instead of on the page. */
+.btn-primary .kbd { background: rgb(0 0 0 / 0.14); color: inherit; }
+.tooltip .kbd,
+.palette-item.on .kbd { background: var(--fill-7); }

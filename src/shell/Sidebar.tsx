@@ -1,5 +1,6 @@
 import type { Project } from "../domain/types";
 import { BrandMark } from "../ui/BrandMark";
+import { Kbd } from "../ui/Kbd";
 import type { ProjectPage, Route } from "./useNav";
 
 const PROJECT_PAGES: { page: ProjectPage; label: string }[] = [
@@ -58,7 +59,7 @@ export function Sidebar(p: Props) {
       </div>
       <button type="button" className="side-search" onClick={p.onOpenPalette} aria-keyshortcuts="Meta+K">
         <span>Search or run…</span>
-        <kbd className="kbd">⌘K</kbd>
+        <Kbd aria-hidden>⌘K</Kbd>
       </button>
 
       <nav className="side-nav" aria-label="Main">

@@ -1,5 +1,6 @@
 import { useEffect, useId, useState, type KeyboardEvent } from "react";
 import { useFocusTrap } from "../../ui/useFocusTrap";
+import { Kbd, KbdGroup } from "../../ui/Kbd";
 import "./palette.css";
 
 export interface PaletteItem {
@@ -7,6 +8,8 @@ export interface PaletteItem {
   kind: "Action" | "Run" | "Task" | "Chat";
   label: string;
   sub?: string;
+  /** Keyboard shortcut shown on the right ("⌘,"). */
+  shortcut?: string;
   /** Extra text for the filter (e.g. identifier + title). */
   keywords?: string;
   run: () => void;
@@ -96,14 +99,25 @@ export function CommandPalette({ actions, search, onClose }: Props) {
               <span className={`palette-kind palette-kind-${it.kind.toLowerCase()}`}>{it.kind}</span>
               <span className="palette-label ellipsis">{it.label}</span>
               {it.sub && <span className="palette-sub">{it.sub}</span>}
+              {it.shortcut && <Kbd aria-hidden>{it.shortcut}</Kbd>}
             </div>
           ))}
           {items.length === 0 && <div className="palette-empty">No matches.</div>}
         </div>
         <div className="palette-foot" aria-hidden>
-          <span>↑↓ navigate</span>
-          <span>↵ run</span>
-          <span>esc close</span>
+          <span>
+            <KbdGroup>
+              <Kbd>↑</Kbd>
+              <Kbd>↓</Kbd>
+            </KbdGroup>{" "}
+            navigate
+          </span>
+          <span>
+            <Kbd>↵</Kbd> run
+          </span>
+          <span>
+            <Kbd>esc</Kbd> close
+          </span>
         </div>
       </div>
     </>

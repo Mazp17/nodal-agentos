@@ -205,7 +205,7 @@ export function AppShell() {
       items.push({ id: "import", kind: "Action", label: "Import from Linear", run: () => setImportFor(project.id) });
     }
     items.push({ id: "go-runs", kind: "Action", label: "Go to Runs", run: () => go("runs") });
-    items.push({ id: "settings", kind: "Action", label: "Open Settings", sub: "⌘,", run: () => go("settings") });
+    items.push({ id: "settings", kind: "Action", label: "Open Settings", shortcut: "⌘,", run: () => go("settings") });
     items.push({ id: "onboarding", kind: "Action", label: "Show onboarding", run: () => setForceOnboarding(true) });
     for (const p of ctx.projects) {
       items.push({ id: `open-${p.id}`, kind: "Action", label: `Open ${p.name}`, keywords: p.key, run: () => go("board", p.id) });

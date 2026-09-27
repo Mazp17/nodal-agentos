@@ -53,3 +53,4 @@
   font-size: var(--fs-xs);
   color: var(--text-dim);
 }
+.palette-foot > span { display: inline-flex; align-items: center; gap: var(--sp-2); }

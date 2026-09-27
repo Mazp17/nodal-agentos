@@ -433,9 +433,3 @@ button.badge:hover { filter: brightness(1.2); }
   background: var(--fill-inset);
   border: 1px solid var(--border);
 }
-
-.kbd {
-  font-family: var(--font-mono);
-  font-size: var(--fs-2xs);
-  color: var(--text-dim);
-}

@@ -13,6 +13,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { createTask, getTask, readTaskPlan, updateTask, type NewTask, type PlanInput, type TaskPatch } from "../../domain/api";
 import { invalidate, useProjectList, useRepos, useSettings } from "../../domain/hooks/store";
 import { taskKey, type Executor, type Finish, type Isolation, type Priority, type Task } from "../../domain/types";
+import { Kbd } from "../../ui/Kbd";
 import { SafeMarkdown } from "../../ui/Markdown";
 import { useFocusTrap } from "../../ui/useFocusTrap";
 import { useToast } from "../../ui/Toasts";
@@ -752,8 +753,8 @@ export function NewTaskDialog({ projectId, taskId, defaultRepoId, onClose, onSav
                     placeholder="Observable outcome, e.g. retries stop after 5 attempts"
                     aria-label="New criterion"
                   />
-                  <span className="kbd" aria-hidden>
-                    ↵ add
+                  <span className="nt-crit-hint" aria-hidden>
+                    <Kbd>↵</Kbd> add
                   </span>
                 </div>
               </div>
@@ -867,9 +868,7 @@ export function NewTaskDialog({ projectId, taskId, defaultRepoId, onClose, onSav
           )}
           <button type="submit" className="btn btn-primary nt-save" disabled={saving || !loaded}>
             {original ? "Save" : "Save as to-do"}
-            <span className="nt-kbd" aria-hidden>
-              ⌘↵
-            </span>
+            <Kbd aria-hidden>⌘↵</Kbd>
           </button>
         </footer>
       </form>
