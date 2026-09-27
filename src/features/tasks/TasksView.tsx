@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { useLatestRunByTask } from "../../domain/hooks/runs";
 import { useProjectList, useRepos, useTasks } from "../../domain/hooks/store";
 import { taskKey, type Task } from "../../domain/types";
+import { EmptyState } from "../../ui/EmptyState";
 import { RunBadge } from "../runs";
 import { NewTaskDialog } from "./NewTaskDialog";
 import { StatusRing } from "./bits";
@@ -95,20 +96,13 @@ export function TasksView({ projectId, onOpenTask }: TasksViewProps) {
         ) : loading ? (
           <span className="tk-muted">Loading tasks…</span>
         ) : groups.length === 0 ? (
-          <div className="center-state">
-            <div className="center-state-body">
-              <div className="state-icon-empty" aria-hidden />
-              <div className="center-state-title">No tasks here</div>
-              <div className="center-state-text">Create a task, or import issues from a connected source.</div>
-              {(projects.data?.length ?? 0) > 0 && (
-                <div className="center-state-actions">
-                  <button type="button" className="btn btn-primary" onClick={() => setNewTask(true)}>
-                    New task
-                  </button>
-                </div>
-              )}
-            </div>
-          </div>
+          <EmptyState title="No tasks here" description="Create a task, or import issues from a connected source.">
+            {(projects.data?.length ?? 0) > 0 && (
+              <button type="button" className="btn btn-primary" onClick={() => setNewTask(true)}>
+                New task
+              </button>
+            )}
+          </EmptyState>
         ) : (
           groups.map((g) => (
             <section key={g.id} className="tv-group" aria-label={g.name}>

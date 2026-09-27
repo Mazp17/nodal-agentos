@@ -3,6 +3,7 @@ import { projectActivity, type ProjectActivity } from "../../domain/api";
 import { useAllRuns } from "../../domain/hooks/runs";
 import { POLL, usePolled, useRepos } from "../../domain/hooks/store";
 import type { Repo } from "../../domain/types";
+import { EmptyState } from "../../ui/EmptyState";
 import { repoActivity } from "./api";
 import type { RepoActivity, SessionActivity, SubagentActivity } from "./types";
 import "./activity.css";
@@ -135,12 +136,7 @@ export function ActivityView({ projectId, onOpenRun }: ActivityViewProps) {
   if (reposQ.data && repos.length === 0) {
     return (
       <div className="activity-view">
-        <div className="center-state">
-          <div className="center-state-body">
-            <div className="center-state-title">No repos yet</div>
-            <div className="center-state-text">Add a repo to this project to see what Claude is doing in it.</div>
-          </div>
-        </div>
+        <EmptyState title="No repos yet" description="Add a repo to this project to see what Claude is doing in it." />
       </div>
     );
   }
@@ -200,14 +196,10 @@ export function ActivityView({ projectId, onOpenRun }: ActivityViewProps) {
           </div>
         )}
         {data && groups.length === 0 && (
-          <div className="center-state">
-            <div className="center-state-body">
-              <div className="center-state-title">No Claude activity here yet</div>
-              <div className="center-state-text">
-                Sessions started with claude in this repo show up here, even if Nodal didn't launch them.
-              </div>
-            </div>
-          </div>
+          <EmptyState
+            title="No Claude activity here yet"
+            description="Sessions started with claude in this repo show up here, even if Nodal didn't launch them."
+          />
         )}
         {[
           { name: "Active", list: active, dim: false },
