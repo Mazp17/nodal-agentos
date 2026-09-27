@@ -149,13 +149,13 @@ export function TaskCard({ model, showProject, busy, dragging, onOpen, onAction,
             className="badge badge-sm tone-warn"
             title={`Moved from ${src.moved.fromProject.name} to ${src.moved.toProject?.name ?? "no project"}. Open the task to decide.`}
           >
-            Moved in {providerLabel(src.provider)}
+            <span className="badge-label">Moved in {providerLabel(src.provider)}</span>
           </span>
         )}
         {reviewing ? (
           <span className="badge tone-warn" title="The reviewer is checking the acceptance criteria">
             <span className="dot dot-sm pulse" aria-hidden />
-            Reviewing
+            <span className="badge-label">Reviewing</span>
           </span>
         ) : (
           run && <RunBadge run={run} />

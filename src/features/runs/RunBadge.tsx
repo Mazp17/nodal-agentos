@@ -18,9 +18,9 @@ export function useRunView(run: RunLight | RunView): RunView {
 export function RunBadge({ run, className }: { run: RunLight | RunView; className?: string }) {
   const v = useRunView(run);
   return (
-    <span className={`badge tone-${v.tone} ${className ?? ""}`} title={v.run.error ?? v.label}>
+    <span className={`badge tone-${v.tone} ${className ?? ""}`} title={v.run.error ? `${v.label} · ${v.run.error}` : v.label}>
       <span className={`dot dot-sm ${v.pulse ? "pulse" : ""}`} aria-hidden />
-      {v.label}
+      <span className="badge-label">{v.label}</span>
     </span>
   );
 }
