@@ -16,7 +16,7 @@ import { CreateProjectDialog } from "../features/projects/CreateProjectDialog";
 import { resolveExecutor } from "../features/executors";
 import { ProjectSettings } from "../features/projects/ProjectSettings";
 import { ImportDialog } from "../features/providers";
-import { ActivityView, RunDetailView, RunDiffDrawer, RunMonitor, RunsView } from "../features/runs";
+import { RunDetailView, RunDiffDrawer, RunMonitor, RunsView } from "../features/runs";
 import { useLegacyImport } from "../features/settings/legacyImport";
 import { SettingsView } from "../features/settings/SettingsView";
 import { NewTaskDialog, TaskPanel, TasksView, useAskLaunch, useLaunch } from "../features/tasks";
@@ -33,9 +33,9 @@ import "./shell.css";
 const isEditable = (t: EventTarget | null) =>
   t instanceof HTMLElement && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName));
 
-/** ⌘1–4, as in the design. */
-const SHORTCUT_PAGES: Record<string, ProjectPage> = { "1": "board", "2": "tasks", "3": "runs", "4": "activity" };
-const PROJECT_PAGES: ReadonlySet<Page> = new Set(["board", "chat", "tasks", "runs", "activity", "project-settings"]);
+/** ⌘1–3, as in the design. */
+const SHORTCUT_PAGES: Record<string, ProjectPage> = { "1": "board", "2": "tasks", "3": "runs" };
+const PROJECT_PAGES: ReadonlySet<Page> = new Set(["board", "chat", "tasks", "runs", "project-settings"]);
 
 export function AppShell() {
   const ctx = useProjects();
@@ -97,7 +97,7 @@ export function AppShell() {
       .catch((e: unknown) => console.error("setBadgeCount", e));
   }, [needYou, queue.loaded]);
 
-  // Last visited project: target of ⌘2/⌘4 from a global view.
+  // Last visited project: target of ⌘2 from a global view.
   const lastProjectId = useRef<string | null>(null);
   useEffect(() => {
     if (route.projectId) lastProjectId.current = route.projectId;
@@ -157,7 +157,7 @@ export function AppShell() {
     go("settings");
   }, [setSettingsSection, go]);
 
-  /** Project for ⌘2/⌘4 from a global view: the current one, the last visited, or the first. */
+  /** Project for ⌘2 from a global view: the current one, the last visited, or the first. */
   const fallbackProject = (): Project | null =>
     project ??
     (lastProjectId.current ? ctx.projectById.get(lastProjectId.current) : undefined) ??
@@ -188,7 +188,7 @@ export function AppShell() {
           return;
         }
         const page = SHORTCUT_PAGES[e.key]!;
-        const needsProject = page === "tasks" || page === "activity";
+        const needsProject = page === "tasks";
         const pid = needsProject ? (fallbackProject()?.id ?? null) : (visible.projectId ?? null);
         if (needsProject && !pid) return;
         go(page, pid);
@@ -375,9 +375,6 @@ export function AppShell() {
         break;
       case "runs":
         content = <RunsView projectId={route.projectId} onOpenRun={openRun} onGoToBoard={() => go("board", route.projectId)} />;
-        break;
-      case "activity":
-        content = project && <ActivityView projectId={project.id} onOpenRun={openRun} />;
         break;
       case "project-settings":
         content = project && (

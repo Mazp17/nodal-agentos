@@ -69,23 +69,6 @@ export interface WorkSummary {
   pumpError: string | null;
 }
 
-/** Live sessions working/waiting and active subagents (same criteria as `activity_summary`). */
-export interface RepoActivityCount {
-  repoId: string;
-  repoPath: string;
-  sessions: number;
-  agents: number;
-}
-
-/** Totals without double-counting what falls in nested repos. */
-export interface ProjectActivity {
-  projectId: string;
-  repos: RepoActivityCount[];
-  sessions: number;
-  agents: number;
-  generatedAt: number;
-}
-
 /** `exists`: the folder is a live worktree. `ahead`: commits outside the base; `unpushed`: also outside every remote. */
 export interface WorktreeStatus {
   exists: boolean;
@@ -382,8 +365,6 @@ export const cleanupWorktree = (taskId: string, force = false) =>
 export const repoTrust = (path: string) => invoke<RepoTrust>("repo_trust", { path });
 /** `git version 2.x.y`; rejects if git isn't on the PATH. */
 export const gitVersion = () => invoke<string>("git_version");
-/** Claude Code activity per repo of the project (a single `claude agents`). */
-export const projectActivity = (projectId: string) => invoke<ProjectActivity>("project_activity", { projectId });
 /** Squash defaults to true in the backend; `push` is opt-in; `cleanup` deletes the worktree and branch after merging. */
 export interface MergeInput {
   squash: boolean;
