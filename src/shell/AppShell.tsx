@@ -1,25 +1,24 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { launchTask } from "../domain/api";
 import { useAllChats } from "../domain/hooks/chats";
 import { useProjects } from "../domain/hooks/projects";
 import { useProviderStatus, useSourceLinks } from "../domain/hooks/providers";
 import { useQueueSummary } from "../domain/hooks/runs";
-import { invalidate } from "../domain/hooks/store";
+import { invalidate, useSettings } from "../domain/hooks/store";
 import { taskKey, type Project } from "../domain/types";
 import { BoardView } from "../features/board";
 import { ChatView } from "../features/chats";
 import { chatTitle } from "../features/chats/model";
 import { Onboarding } from "../features/onboarding/Onboarding";
 import { CreateProjectDialog } from "../features/projects/CreateProjectDialog";
+import { resolveExecutor } from "../features/executors";
 import { ProjectSettings } from "../features/projects/ProjectSettings";
 import { ImportDialog } from "../features/providers";
 import { ActivityView, RunDetailView, RunDiffDrawer, RunMonitor, RunsView } from "../features/runs";
 import { useLegacyImport } from "../features/settings/legacyImport";
 import { SettingsView } from "../features/settings/SettingsView";
-import { NewTaskDialog, TaskPanel, TasksView } from "../features/tasks";
+import { NewTaskDialog, TaskPanel, TasksView, useAskLaunch, useLaunch } from "../features/tasks";
 import { useUpdates } from "../features/updates/useUpdates";
-import { useToast } from "../ui/Toasts";
 import { CommandPalette, type PaletteItem } from "./palette/CommandPalette";
 import { Sidebar, type ProviderFoot } from "./Sidebar";
 import { Topbar } from "./Topbar";
@@ -40,9 +39,11 @@ export function AppShell() {
   const nav = useNav();
   const work = useWorkStatus();
   const queue = useQueueSummary();
-  const toast = useToast();
   const legacy = useLegacyImport();
   const updates = useUpdates();
+  const askLaunch = useAskLaunch();
+  const launch = useLaunch();
+  const globalExecutor = useSettings().data?.defaultExecutor ?? null;
 
   const [forceOnboarding, setForceOnboarding] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
@@ -238,13 +239,10 @@ export function AppShell() {
             kind: "Run",
             label: `Run ${keyOf(t.projectId, t.number)} · ${t.title}`,
             run: () => {
-              launchTask(t.id).then(
-                (r) => {
-                  toast(r.status === "queued" ? "Queued" : "Launching", `${keyOf(t.projectId, t.number)} · ${t.title}`, "accent");
-                  void invalidate("runs", "tasks");
-                },
-                (err) => toast("Couldn't launch", String(err), "danger"),
-              );
+              const name = keyOf(t.projectId, t.number);
+              const repo = ctx.repoById.get(t.repoId);
+              const executor = resolveExecutor(t, repo, ctx.projectById.get(t.projectId), globalExecutor);
+              void askLaunch({ name, repo, executor }).then((config) => config && launch(t.id, name, { kind: "run", config }));
             },
           }))
       : [];
