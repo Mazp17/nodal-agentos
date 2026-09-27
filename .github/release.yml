@@ -1,0 +1,7 @@
+# Config for GitHub's generated release notes (used by workflows/release.yml).
+changelog:
+  exclude:
+    # release-please's own release PR.
+    labels:
+      - "autorelease: pending"
+      - "autorelease: tagged"
