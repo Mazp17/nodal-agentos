@@ -22,6 +22,7 @@ fn project(id: &str, key: &str) -> Project {
         reviewer: Some("code-reviewer".into()),
         created_at: 1_700_000_000_000,
         archived_at: None,
+        root_path: None,
         description: None,
     }
 }
@@ -293,6 +294,26 @@ fn migrates_v3_data_to_v4() {
     };
     insert_chat(&c, &chat).unwrap();
     assert_eq!(get_chat(&c, "c1").unwrap(), Some(chat));
+}
+
+#[test]
+fn migrates_v5_data_to_v6() {
+    let mut c = Connection::open_in_memory().unwrap();
+    c.pragma_update(None, "foreign_keys", "ON").unwrap();
+    for sql in &MIGRATIONS[..5] {
+        c.execute_batch(sql).unwrap();
+    }
+    c.pragma_update(None, "user_version", 5).unwrap();
+    c.execute_batch("INSERT INTO projects (id, name, key, color, created_at) VALUES ('p1', 'Pay', 'PAY', '#fff', 1);")
+        .unwrap();
+    migrate(&mut c).unwrap();
+    assert_eq!(user_version(&c).unwrap(), 6);
+    let p = get_project(&c, "p1").unwrap().unwrap();
+    assert_eq!((p.name.as_str(), p.root_path), ("Pay", None));
+
+    let q = Project { root_path: Some("/Users/me/Code/acme".into()), ..project("p2", "ACME") };
+    insert_project(&c, &q).unwrap();
+    assert_eq!(get_project(&c, "p2").unwrap(), Some(q));
 }
 
 #[test]

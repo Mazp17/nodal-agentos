@@ -1,5 +1,6 @@
 //! What a chat knows of Nodal: the `nodal` MCP server in chat mode (with `propose_task`),
-//! the project's other repos (`--add-dir`) and a system prompt with the project's details.
+//! the project's other repos (`--add-dir`, except those under its root folder when the chat
+//! runs there) and a system prompt with the project's details.
 //!
 //! Flags verified with the real CLI (2.1.283): `--mcp-config` takes an inline JSON string and
 //! its `nodal` server replaces a user-registered one with the same name; `--allowedTools`
@@ -16,6 +17,8 @@ use crate::domain::{Chat, Project, Repo};
 use crate::mcp::stdio::CHAT_FLAG;
 use crate::mcp::tools::PROPOSE_TASK;
 use crate::util::clip_chars;
+
+use super::ChatCwd;
 
 /// Key of the MCP server: the chat sees its tools as `mcp__nodal__<tool>` (mirror of
 /// `PROPOSE_TASK_TOOL` in `api.ts`).
@@ -35,9 +38,9 @@ pub fn nodal_mcp_bin() -> Option<PathBuf> {
     Some(exe.parent()?.join("nodal-mcp")).filter(|p| p.is_file())
 }
 
-/// Flags that give the chat its Nodal context, each value its own argument. `cwd` is the
-/// repo it runs in; `mcp` is `nodal-mcp`, when found.
-pub fn args(chat: &Chat, project: &Project, repos: &[Repo], cwd: &Repo, mcp: Option<&Path>) -> Vec<String> {
+/// Flags that give the chat its Nodal context, each value its own argument. `cwd` is where
+/// it runs; `mcp` is `nodal-mcp`, when found.
+pub fn args(chat: &Chat, project: &Project, repos: &[Repo], cwd: ChatCwd, mcp: Option<&Path>) -> Vec<String> {
     let mut out = Vec::new();
     if let Some(bin) = mcp {
         let config = json!({"mcpServers": {MCP_SERVER: {"command": bin.to_string_lossy(), "args": [CHAT_FLAG]}}});
@@ -47,7 +50,7 @@ pub fn args(chat: &Chat, project: &Project, repos: &[Repo], cwd: &Repo, mcp: Opt
         out.push(PRE_ALLOWED.map(tool_name).join(","));
     }
     if chat.repo_id.is_none() {
-        let others: Vec<String> = repos.iter().filter(|r| r.id != cwd.id).map(|r| r.path.clone()).collect();
+        let others: Vec<String> = repos.iter().filter(|r| !cwd.covers(r)).map(|r| r.path.clone()).collect();
         if !others.is_empty() {
             out.push("--add-dir".into());
             out.extend(others);
@@ -59,7 +62,7 @@ pub fn args(chat: &Chat, project: &Project, repos: &[Repo], cwd: &Repo, mcp: Opt
 }
 
 /// The project, its repos and the chat's scope, plus how to turn the conversation into tasks.
-pub fn system_prompt(chat: &Chat, project: &Project, repos: &[Repo], cwd: &Repo, has_mcp: bool) -> String {
+pub fn system_prompt(chat: &Chat, project: &Project, repos: &[Repo], cwd: ChatCwd, has_mcp: bool) -> String {
     let mut s = String::from(
         "You are chatting with the user inside Nodal, a macOS app that keeps a board of tasks per project \
          and runs each task with a Claude Code agent. This chat belongs to one Nodal project. It is mostly \
@@ -70,20 +73,30 @@ pub fn system_prompt(chat: &Chat, project: &Project, repos: &[Repo], cwd: &Repo,
     if let Some(d) = project.description.as_deref().map(str::trim).filter(|d| !d.is_empty()) {
         s.push_str(&format!("Description: {}\n", clip_chars(d, DESCRIPTION_MAX)));
     }
+    if let ChatCwd::Root(root) = cwd {
+        s.push_str(&format!("Project root folder: {root} (this chat runs here)\n"));
+    }
     s.push_str("Repos:\n");
     for r in repos {
-        let here = if r.id == cwd.id { " (this chat runs here)" } else { "" };
+        let here = if matches!(cwd, ChatCwd::Repo(c) if c.id == r.id) { " (this chat runs here)" } else { "" };
         s.push_str(&format!("- {}: {} (id {}){here}\n", one_line(&r.name), r.path, r.id));
     }
+    if repos.is_empty() {
+        s.push_str("- none yet\n");
+    }
     s.push('\n');
-    if chat.repo_id.is_some() {
-        s.push_str(&format!(
+    match cwd {
+        ChatCwd::Repo(r) if chat.repo_id.is_some() => s.push_str(&format!(
             "Scope: only the repo {} ({}). Work in it and leave the project's other repos alone unless the user asks.\n\n",
-            one_line(&cwd.name),
-            cwd.path
-        ));
-    } else {
-        s.push_str("Scope: the whole project: its tasks, its runs and all the repos above.\n\n");
+            one_line(&r.name),
+            r.path
+        )),
+        ChatCwd::Repo(_) => s.push_str("Scope: the whole project: its tasks, its runs and all the repos above.\n\n"),
+        ChatCwd::Root(root) => s.push_str(&format!(
+            "Scope: the whole project: its tasks, its runs, all the repos above and everything else in its root folder \
+             {root}, such as docs and notes. This chat runs at the project root. The root folder itself is not a repo: \
+             tasks and runs always target one of the repos above.\n\n"
+        )),
     }
     if has_mcp {
         s.push_str(&format!(
@@ -154,7 +167,7 @@ mod tests {
     fn a_project_chat_gets_nodal_mcp_every_other_repo_and_the_project() {
         let (project, repos) = fixture();
         let bin = Path::new("/Applications/Nodal.app/Contents/MacOS/nodal-mcp");
-        let args = args(&chat(None), &project, &repos, &repos[0], Some(bin));
+        let args = args(&chat(None), &project, &repos, ChatCwd::Repo(&repos[0]), Some(bin));
 
         let config: serde_json::Value = serde_json::from_str(value_of(&args, "--mcp-config")[0]).unwrap();
         assert_eq!(config, json!({"mcpServers": {"nodal": {"command": "/Applications/Nodal.app/Contents/MacOS/nodal-mcp", "args": ["--chat"]}}}));
@@ -183,7 +196,7 @@ mod tests {
     #[test]
     fn a_repo_chat_is_narrowed_and_works_without_nodal_mcp() {
         let (project, repos) = fixture();
-        let args = args(&chat(Some("r2")), &project, &repos, &repos[1], None);
+        let args = args(&chat(Some("r2")), &project, &repos, ChatCwd::Repo(&repos[1]), None);
         assert_eq!(args.len(), 2, "{args:?}");
         assert_eq!(args[0], "--append-system-prompt");
         let prompt = &args[1];
@@ -196,9 +209,44 @@ mod tests {
     fn a_long_description_is_clipped() {
         let (mut project, repos) = fixture();
         project.description = Some("x".repeat(DESCRIPTION_MAX + 50));
-        let prompt = system_prompt(&chat(None), &project, &repos, &repos[0], true);
+        let prompt = system_prompt(&chat(None), &project, &repos, ChatCwd::Repo(&repos[0]), true);
         let line = prompt.lines().find(|l| l.starts_with("Description: ")).unwrap();
         assert!(line.chars().count() <= "Description: ".len() + DESCRIPTION_MAX, "{}", line.len());
+    }
+
+    #[test]
+    fn a_root_chat_runs_at_the_root_and_adds_only_repos_outside_it() {
+        let (mut project, mut repos) = fixture();
+        project.root_path = Some("/Users/me/Code/acme".into());
+        repos[0].path = "/Users/me/Code/acme/api".into();
+        repos[1].path = "/Users/me/Code/acme-web".into();
+        let args = args(&chat(None), &project, &repos, ChatCwd::Root("/Users/me/Code/acme"), None);
+        assert_eq!(value_of(&args, "--add-dir"), ["/Users/me/Code/acme-web"], "a sibling with a shared prefix is outside");
+
+        let prompt = value_of(&args, "--append-system-prompt")[0];
+        for part in [
+            "Project root folder: /Users/me/Code/acme (this chat runs here)\n",
+            "- acme-api: /Users/me/Code/acme/api (id r1)\n",
+            "- acme-web: /Users/me/Code/acme-web (id r2)\n",
+            "This chat runs at the project root.",
+            "tasks and runs always target one of the repos above",
+        ] {
+            assert!(prompt.contains(part), "missing {part:?} in:\n{prompt}");
+        }
+        assert_eq!(prompt.matches("(this chat runs here)").count(), 1, "{prompt}");
+    }
+
+    #[test]
+    fn a_root_chat_with_every_repo_under_it_adds_none() {
+        let (mut project, mut repos) = fixture();
+        project.root_path = Some("/Users/me/Code/acme".into());
+        repos[0].path = "/Users/me/Code/acme/api".into();
+        repos[1].path = "/Users/me/Code/acme/web/app".into();
+        let root = ChatCwd::Root("/Users/me/Code/acme");
+        assert!(value_of(&args(&chat(None), &project, &repos, root, None), "--add-dir").is_empty());
+
+        let prompt = system_prompt(&chat(None), &project, &[], root, false);
+        assert!(prompt.contains("Repos:\n- none yet\n"), "{prompt}");
     }
 
     /// Needs `cargo build --bin nodal-mcp` first: the test binary has no `nodal-mcp` beside it.
@@ -213,7 +261,7 @@ mod tests {
         let mut project = project_of("p1", "PAY");
         project.name = "Acme".into();
         let repo = repo_of("r1", "p1", &dir.to_string_lossy());
-        let args = args(&chat(None), &project, std::slice::from_ref(&repo), &repo, Some(&bin));
+        let args = args(&chat(None), &project, std::slice::from_ref(&repo), ChatCwd::Repo(&repo), Some(&bin));
         let tools = tauri::async_runtime::block_on(async {
             let mut cmd = crate::runs::claude_bin::claude_command().expect("claude");
             cmd.args(crate::runs::stream_json::CHAT_ARGS)

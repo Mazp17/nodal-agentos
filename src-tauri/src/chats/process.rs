@@ -400,6 +400,8 @@ impl Chats {
 
     /// After a turn, stores the name Claude Code gave the session (it writes it to the session
     /// file, not to the stream).
+    /// `cwd` is the running process's `Spec.cwd` (a repo or the project root), not one
+    /// recomputed from the project, which may have changed since the process started.
     fn refresh_title(&self, chat_id: &str, cwd: PathBuf, project_id: String) {
         let Some(projects) = self.0.claude_dir.as_ref().map(|d| d.join("projects")) else { return };
         let (db, events, chat_id) = (self.0.db.clone(), self.0.events.clone(), chat_id.to_string());

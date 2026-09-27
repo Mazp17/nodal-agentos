@@ -287,6 +287,7 @@ pub mod tests {
                 reviewer: None,
                 created_at: 1,
                 archived_at: None,
+                root_path: None,
                 description: None,
             },
         )
@@ -303,6 +304,7 @@ pub mod tests {
                 reviewer: None,
                 created_at: 1,
                 archived_at: None,
+                root_path: None,
                 description: None,
             },
         )

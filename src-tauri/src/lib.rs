@@ -88,6 +88,7 @@ pub fn run() {
             runs::terminal::stop_run,
             runs::terminal::open_terminal_at,
             util::paths::resolve_git_root,
+            util::paths::scan_git_repos,
             util::git::git_version,
             runs::claude_trust::repo_trust,
             linear::linear_key_status,

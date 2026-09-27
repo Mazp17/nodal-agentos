@@ -25,6 +25,8 @@ export interface ProjectDraft {
   color: string;
   /** Optional; empty = no description. */
   description?: string;
+  /** Optional folder holding the repos; repo-less chats run there. */
+  rootPath?: string | null;
   /** Already-resolved git roots. */
   repos: string[];
   /** Linear team or project to connect, if any. */
@@ -53,7 +55,13 @@ export async function createProjectWithRepos(ctx: ProjectsState, d: ProjectDraft
     try {
       // Straight to the API: reloads only once at the end. Reloading now would make the shell see
       // a project and unmount onboarding with the repos still to be added.
-      project = await createProject({ name: d.name.trim(), key, color: d.color, description: d.description?.trim() || null });
+      project = await createProject({
+        name: d.name.trim(),
+        key,
+        color: d.color,
+        description: d.description?.trim() || null,
+        rootPath: d.rootPath || null,
+      });
       break;
     } catch (e) {
       if (!d.autoKey || !String(e).includes("already used") || tried.length >= 20) throw e;
