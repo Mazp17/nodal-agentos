@@ -296,7 +296,6 @@ button.badge:hover { filter: brightness(1.2); }
 .center-state-text { font-size: var(--fs-base); color: var(--text-muted); line-height: 1.55; white-space: pre-line; }
 .center-state-meta { font-family: var(--font-mono); font-size: var(--fs-xs); color: var(--text-dim); }
 .center-state-actions { display: flex; gap: var(--sp-3); margin-top: var(--sp-1); }
-.state-icon-empty { width: 40px; height: 40px; border-radius: 11px; border: 1px dashed var(--border-strong); }
 .state-icon-error {
   width: 40px;
   height: 40px;
