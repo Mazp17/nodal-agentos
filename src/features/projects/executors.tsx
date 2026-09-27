@@ -41,6 +41,8 @@ export function ExecutorSelect({
   value: Executor | null;
   onChange: (e: Executor | null) => void;
   repoId: string | null;
+  /** The project whose hidden executors apply. */
+  projectId?: string;
   inheritLabel: string;
 }) {
   const { list, error } = useExecutors(repoId);

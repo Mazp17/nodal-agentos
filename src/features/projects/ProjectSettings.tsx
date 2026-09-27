@@ -168,6 +168,7 @@ function GeneralSection({ project, onDeleted }: { project: Project; onDeleted: (
           <ExecutorSelect
             id={execId}
             repoId={null}
+            projectId={project.id}
             value={project.defaultExecutor}
             inheritLabel={`Global default (${globalExecutor ? executorLabel(globalExecutor) : "Claude"})`}
             onChange={(defaultExecutor) => void patch({ defaultExecutor })}
@@ -468,6 +469,7 @@ function RepoCard({
             <ExecutorSelect
               id={execId}
               repoId={repo.id}
+              projectId={repo.projectId}
               value={repo.defaultExecutor}
               inheritLabel="Project default"
               onChange={(defaultExecutor) => void patch({ defaultExecutor })}
