@@ -7,9 +7,11 @@ import "./styles/tokens.css";
 import "./styles/base.css";
 import App from "./App";
 import { migrateLegacyStorage } from "./shell/storage";
+import { installZoomShortcuts } from "./shell/zoom";
 
 // Before the first render: old preferences (`agent-desk.*`) move to `nodal.*`.
 migrateLegacyStorage();
+installZoomShortcuts();
 
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   <React.StrictMode>
