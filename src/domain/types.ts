@@ -72,6 +72,15 @@ export type Executor =
   | { kind: "workflow"; name: string }
   | { kind: "claude" };
 
+/** An agent or workflow a project hides from its pickers; plain Claude can't be hidden. */
+export interface HiddenExecutor {
+  kind: "agent" | "workflow";
+  source: AgentSource;
+  name: string;
+  /** Only for `source: "repo"`: the same repo agent in two repos is two entries. */
+  repoId: string | null;
+}
+
 export type Isolation = "worktree" | "in_place";
 
 /** `changes`: uncommitted · `commit`: commit without push · `pr`: commit, push and PR. */
