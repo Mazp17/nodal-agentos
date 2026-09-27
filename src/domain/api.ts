@@ -106,10 +106,12 @@ export interface NewProject {
   key: string;
   color?: string;
   description?: string | null;
+  /** Must be an existing folder; it's stored canonical. */
+  rootPath?: string | null;
 }
 
 /** Only the present fields change; `null` clears the optional ones. */
-export type ProjectPatch = Partial<Pick<Project, "name" | "key" | "color" | "description" | "defaultExecutor" | "reviewer">> & {
+export type ProjectPatch = Partial<Pick<Project, "name" | "key" | "color" | "description" | "rootPath" | "defaultExecutor" | "reviewer">> & {
   archived?: boolean;
 };
 
@@ -144,9 +146,6 @@ export interface NewTask {
   labels?: string[];
   acceptance?: string[];
   assignee?: Executor | null;
-  isolation?: Isolation | null;
-  finish?: Finish | null;
-  review?: boolean | null;
 }
 
 /**
@@ -342,6 +341,8 @@ export const deleteProject = (id: string) => invoke<void>("delete_project", { id
 
 /** `null`: all projects. */
 export const listRepos = (projectId: string | null) => invoke<Repo[]>("list_repos", { projectId });
+/** Canonical git roots up to 3 levels below `root` (no hidden folders, `node_modules` or nested repos). */
+export const scanGitRepos = (root: string) => invoke<string[]>("scan_git_repos", { root });
 /** Rejects if it's not in a git repo or if it's already in another project. */
 export const addRepo = (projectId: string, input: NewRepo) => invoke<Repo>("add_repo", { projectId, input });
 export const updateRepo = (id: string, patch: RepoPatch) => invoke<Repo>("update_repo", { id, patch });

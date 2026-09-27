@@ -1,12 +1,14 @@
 import { useState, type ReactNode } from "react";
-import { createTask, launchTask, respondChatPermission, type PermissionRequest } from "../../domain/api";
-import { invalidate } from "../../domain/hooks/store";
+import { createTask, respondChatPermission, type PermissionRequest } from "../../domain/api";
+import { invalidate, useProjectList, useSettings } from "../../domain/hooks/store";
 import { taskKey, type Repo } from "../../domain/types";
 import { readJsonPref, writePref } from "../../shell/storage";
 import { BrandMark } from "../../ui/BrandMark";
 import { SafeMarkdown } from "../../ui/Markdown";
 import { useToast } from "../../ui/Toasts";
+import { inheritedExecutor } from "../executors";
 import { DiffLines } from "../runs/DiffLines";
+import { useAskLaunch, useLaunch, type RunConfig } from "../tasks";
 import { PriorityBars } from "../tasks/bits";
 import { PRIORITY_LABEL, STATUS_META } from "../tasks/status";
 import { readProposal, resultMeta, toolLabel, type Proposal, type ToolUse, type Turn } from "./model";
@@ -186,6 +188,10 @@ function ProposalCard({
     item.id ? (readJsonPref<Created>(CREATED_PREF, {}, isCreated)[item.id] ?? null) : null,
   );
   const [busy, setBusy] = useState(false);
+  const askLaunch = useAskLaunch();
+  const launch = useLaunch();
+  const project = useProjectList().data?.find((p) => p.id === projectId) ?? null;
+  const globalExecutor = useSettings().data?.defaultExecutor;
   const st = readProposal(item, projectId, repos);
 
   if (st.status === "pending") {
@@ -213,6 +219,13 @@ function ProposalCard({
   const status = STATUS_META[t.status ?? "todo"].label;
 
   const create = async (run: boolean) => {
+    let config: RunConfig | null = null;
+    if (run) {
+      const repo = repos.find((r) => r.id === t.repoId);
+      const executor = t.assignee ?? inheritedExecutor(repo, project, globalExecutor);
+      config = await askLaunch({ name: t.title, repo, executor });
+      if (!config) return;
+    }
     setBusy(true);
     try {
       const task = await createTask(t);
@@ -220,17 +233,8 @@ function ProposalCard({
       if (item.id) rememberCreated(item.id, task.id, key);
       setCreated({ taskId: task.id, key });
       void invalidate("tasks");
-      if (run) {
-        try {
-          const r = await launchTask(task.id);
-          toast(r.status === "queued" ? "Queued" : "Launching", `${key} · ${task.title}`, "accent");
-          void invalidate("runs", "tasks");
-        } catch (e) {
-          toast(`${key} created, but couldn't launch`, String(e), "danger");
-        }
-      } else {
-        toast("Task created", `${key} · ${task.title}`, "ok");
-      }
+      if (config) void launch(task.id, key, { kind: "run", config });
+      else toast("Task created", `${key} · ${task.title}`, "ok");
     } catch (e) {
       toast("Couldn't create the task", String(e), "danger");
     } finally {

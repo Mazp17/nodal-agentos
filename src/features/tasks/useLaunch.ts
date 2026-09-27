@@ -4,6 +4,7 @@ import { invalidate } from "../../domain/hooks/store";
 import type { Executor, Run } from "../../domain/types";
 import { useToast } from "../../ui/Toasts";
 import { executorLabel } from "../executors";
+import type { RunConfig } from "./LaunchPopover";
 
 /** Toast depending on how the just-queued run ended up. */
 function report(push: ReturnType<typeof useToast>, what: string, name: string, run: Run) {
@@ -16,7 +17,11 @@ function report(push: ReturnType<typeof useToast>, what: string, name: string, r
   }
 }
 
-export type LaunchKind = { kind: "run"; input?: LaunchInput } | { kind: "handoff"; executor: Executor; extra: string | null } | { kind: "review" };
+/** `config` comes from the launch popover (`useAskLaunch`). */
+export type LaunchKind =
+  | { kind: "run"; config: RunConfig; input?: Omit<LaunchInput, keyof RunConfig> }
+  | { kind: "handoff"; executor: Executor; extra: string | null }
+  | { kind: "review" };
 
 /**
  * Launches, hands off or reviews a task with toasts and invalidation. Returns the run, or `null`
@@ -29,7 +34,7 @@ export function useLaunch() {
       try {
         const run =
           how.kind === "run"
-            ? await launchTask(taskId, how.input ?? {})
+            ? await launchTask(taskId, { ...how.input, ...how.config })
             : how.kind === "handoff"
               ? await handOff(taskId, how.executor, how.extra)
               : await reviewNow(taskId, null);

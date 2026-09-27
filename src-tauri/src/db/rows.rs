@@ -60,6 +60,7 @@ pub fn project_from_row(row: &Row) -> rusqlite::Result<Project> {
         next_task_number: row.get("next_task_number")?,
         color: row.get("color")?,
         description: row.get("description")?,
+        root_path: row.get("root_path")?,
         default_executor: get_opt_json(row, "default_executor_json")?,
         reviewer: row.get("reviewer")?,
         created_at: row.get("created_at")?,
@@ -70,12 +71,14 @@ pub fn project_from_row(row: &Row) -> rusqlite::Result<Project> {
 pub fn insert_project(conn: &Connection, p: &Project) -> Result<(), DbError> {
     conn.execute(
         "INSERT INTO projects (id, name, key, next_task_number, color, default_executor_json,
-                               reviewer, created_at, archived_at, description)
-         VALUES (:id, :name, :key, :next, :color, :exec, :reviewer, :created, :archived, :description)",
+                               reviewer, created_at, archived_at, description, root_path)
+         VALUES (:id, :name, :key, :next, :color, :exec, :reviewer, :created, :archived, :description,
+                 :root_path)",
         named_params! {
             ":id": p.id, ":name": p.name, ":key": p.key, ":next": p.next_task_number,
             ":color": p.color, ":exec": opt_json(&p.default_executor)?, ":reviewer": p.reviewer,
             ":created": p.created_at, ":archived": p.archived_at, ":description": p.description,
+            ":root_path": p.root_path,
         },
     )?;
     Ok(())

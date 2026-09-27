@@ -248,11 +248,16 @@ const V5: &str = r#"
 ALTER TABLE chats ADD COLUMN session_title TEXT;
 "#;
 
-/// v6: agents and workflows a project hides from its pickers (`HiddenExecutor`).
+/// v6: `projects.root_path`, the optional folder that holds the project's repos (canonical).
+const V6: &str = r#"
+ALTER TABLE projects ADD COLUMN root_path TEXT;
+"#;
+
+/// v7: agents and workflows a project hides from its pickers (`HiddenExecutor`).
 /// - `repo_id` only for repo-level ones (`source = 'repo'`), and it must be a repo of the
 ///   project; deleting the repo or the project drops its entries;
 /// - the unique index folds the NULL `repo_id` so user/plugin entries can't repeat.
-const V6: &str = r#"
+const V7: &str = r#"
 CREATE TABLE project_hidden_executors (
     project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
     kind       TEXT NOT NULL CHECK (kind IN ('agent', 'workflow')),
@@ -267,7 +272,7 @@ CREATE UNIQUE INDEX project_hidden_executors_key
 CREATE INDEX project_hidden_executors_repo ON project_hidden_executors(repo_id);
 "#;
 
-pub const MIGRATIONS: &[&str] = &[V1, V2, V3, V4, V5, V6];
+pub const MIGRATIONS: &[&str] = &[V1, V2, V3, V4, V5, V6, V7];
 
 pub fn user_version(conn: &Connection) -> Result<i64, DbError> {
     Ok(conn.query_row("PRAGMA user_version", [], |r| r.get(0))?)

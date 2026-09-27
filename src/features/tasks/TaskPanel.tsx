@@ -38,7 +38,8 @@ import { PhaseSegments, RunBadge, useRunActions, useRunView } from "../runs";
 import { MergeDialog } from "./MergeDialog";
 import { NewTaskDialog } from "./NewTaskDialog";
 import { PriorityBars, StatusRing } from "./bits";
-import { FINISH_LABEL, isClosed, ISOLATION_LABEL, PRIORITY_LABEL, providerLabel, STATUS_META } from "./status";
+import { useAskLaunch } from "./LaunchPopover";
+import { isClosed, PRIORITY_LABEL, providerLabel, STATUS_META } from "./status";
 import { useLaunch } from "./useLaunch";
 import "./tasks.css";
 
@@ -73,6 +74,7 @@ export function TaskPanel({ taskId, onClose, onOpenRun, onOpenDiff, onOpenTask, 
   const headingId = useId();
   const push = useToast();
   const launch = useLaunch();
+  const askLaunch = useAskLaunch();
   const ask = useConfirm();
   const runActions = useRunActions();
 
@@ -145,7 +147,7 @@ export function TaskPanel({ taskId, onClose, onOpenRun, onOpenDiff, onOpenTask, 
   const src = task.source;
   const closed = isClosed(task.status);
   const canLaunch = !!repo && !activeRun && !closed;
-  const finish = task.finish ?? repo?.defaultFinish ?? "pr";
+  const finish = lastWork?.finish ?? repo?.defaultFinish ?? "pr";
   const canMerge = !!task.worktree && !!repo && finish !== "pr" && !closed;
   const willQueue = summary.queued > 0 || (summary.capacity > 0 && summary.running >= summary.capacity);
 
@@ -182,18 +184,20 @@ export function TaskPanel({ taskId, onClose, onOpenRun, onOpenDiff, onOpenTask, 
     if (s !== task.status) void patch({ status: s }, "change the status", [`${key} → ${STATUS_META[s].label}`, task.title]);
   };
 
-  const doLaunch = async (how: "run" | "handoff" | "review") => {
+  const doLaunch = async (how: "run" | "handoff" | "review", anchor?: HTMLElement) => {
+    const config = how === "run" ? await askLaunch({ name: key, repo, executor: runExec, anchor }) : null;
+    if (how === "run" && !config) return;
     setBusy(how);
     const extraText = extra.trim() || null;
-    const run =
-      how === "run"
-        ? await launch(task.id, key, {
-            kind: "run",
-            input: { ...(launchExec ? { executor: launchExec } : {}), ...(extraText ? { extraInstructions: extraText } : {}) },
-          })
-        : how === "handoff"
-          ? await launch(task.id, key, { kind: "handoff", executor: runExec, extra: extraText })
-          : await launch(task.id, key, { kind: "review" });
+    const run = config
+      ? await launch(task.id, key, {
+          kind: "run",
+          config,
+          input: { ...(launchExec ? { executor: launchExec } : {}), ...(extraText ? { extraInstructions: extraText } : {}) },
+        })
+      : how === "handoff"
+        ? await launch(task.id, key, { kind: "handoff", executor: runExec, extra: extraText })
+        : await launch(task.id, key, { kind: "review" });
     setBusy(null);
     if (run) {
       setExtra("");
@@ -506,15 +510,7 @@ export function TaskPanel({ taskId, onClose, onOpenRun, onOpenDiff, onOpenTask, 
                   aria-label="Extra instructions for this run"
                 />
                 <div className="tp-launch-actions">
-                  <span className="tk-hint">
-                    {[
-                      runExec.kind === "workflow" ? null : ISOLATION_LABEL[task.isolation ?? repo.defaultIsolation ?? "worktree"],
-                      FINISH_LABEL[task.finish ?? repo.defaultFinish ?? "pr"],
-                      (task.review ?? repo.defaultReview ?? true) ? "review on" : "review off",
-                    ]
-                      .filter(Boolean)
-                      .join(" · ")}
-                  </span>
+                  <span className="tk-hint">Isolation, finish and review are chosen on Run</span>
                   <span className="tp-spacer" />
                   {lastWork && (
                     <button type="button" className="btn btn-sm" disabled={busy !== null} onClick={() => void doLaunch("review")}>
@@ -537,7 +533,7 @@ export function TaskPanel({ taskId, onClose, onOpenRun, onOpenDiff, onOpenTask, 
                   type="button"
                   className="btn btn-primary tp-launch-go"
                   disabled={busy !== null}
-                  onClick={() => void doLaunch("run")}
+                  onClick={(e) => void doLaunch("run", e.currentTarget)}
                 >
                   <span aria-hidden>▶</span>
                   {willQueue ? "Run (will queue)" : current ? "Run again" : "Run"}

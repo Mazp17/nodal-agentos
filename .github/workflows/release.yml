@@ -1,9 +1,9 @@
 name: Release
 
 # Builds a universal, ad-hoc signed (not notarized) .dmg, the signed update bundle and
-# latest.json for the in-app updater, and uploads them to the DRAFT release of a tag, with the
-# notes from CHANGELOG.md. Called by release-please.yml when a release PR is merged; run it by
-# hand to rebuild a tag. Only versions with a suffix (x.y.z-beta.1) are pre-releases: the
+# latest.json for the in-app updater, and uploads them to the DRAFT release of a tag, with
+# GitHub's generated notes (the updater keeps the CHANGELOG.md section). Called by
+# release-please.yml when a release PR is merged; run it by hand to rebuild a tag. Only versions with a suffix (x.y.z-beta.1) are pre-releases: the
 # updater reads releases/latest, which skips them. Publishing is manual.
 on:
   workflow_call:
@@ -37,6 +37,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           ref: ${{ inputs.tag }}
+          fetch-depth: 0 # previous tag, for the generated release notes
           persist-credentials: false
 
       - name: Check tag, version and changelog
@@ -90,6 +91,8 @@ jobs:
         run: pnpm tauri build --target universal-apple-darwin --bundles app,dmg
 
       - name: Checksum, release notes and latest.json
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           bundle="src-tauri/target/universal-apple-darwin/release/bundle"
           update="Nodal_${VERSION}_universal.app.tar.gz"
@@ -98,14 +101,14 @@ jobs:
           cp "$bundle/macos/Nodal.app.tar.gz" "dist-release/$update"
           cp "$bundle/macos/Nodal.app.tar.gz.sig" "dist-release/$update.sig"
           (cd dist-release && shasum -a 256 "Nodal_${VERSION}_universal.dmg" > "Nodal_${VERSION}_universal.dmg.sha256")
-          # Section of CHANGELOG.md for this version, plus the install note for an unsigned app.
+          # Section of CHANGELOG.md for this version, for the in-app updater.
           awk -v v="$VERSION" '
             $0 ~ "^## \\[" v "\\]" { on = 1; next }
             on && /^## \[/ { exit }
             on { print }
-          ' CHANGELOG.md > notes.md
+          ' CHANGELOG.md > changelog.md
           # The in-app updater shows plain notes: drop the PR and commit links.
-          sed -E 's/ \(\[[^]]*\]\([^)]*\)\)//g' notes.md > notes-app.md
+          sed -E 's/ \(\[[^]]*\]\([^)]*\)\)//g' changelog.md > notes-app.md
           # Universal build: both architectures download the same bundle.
           url="https://github.com/$GITHUB_REPOSITORY/releases/download/$TAG/$update"
           jq -n \
@@ -118,6 +121,14 @@ jobs:
               platforms: ($sig | gsub("\\s"; "") as $signature | {"darwin-aarch64": {url: $url, signature: $signature},
                           "darwin-x86_64": {url: $url, signature: $signature}})}' \
             > dist-release/latest.json
+          # The release page gets GitHub's generated notes (PRs, authors, full changelog link),
+          # plus the install note for an unsigned app.
+          # A stable release compares against the previous stable tag, not a beta in between.
+          case "$TAG" in *-*) exclude=() ;; *) exclude=(--exclude '*-*') ;; esac
+          prev=$(git describe --tags --abbrev=0 "${exclude[@]}" "$TAG^" 2>/dev/null || true)
+          gh api "repos/$GITHUB_REPOSITORY/releases/generate-notes" \
+            -f tag_name="$TAG" ${prev:+-f previous_tag_name="$prev"} --jq .body > notes.md
+          printf '\n' >> notes.md
           cat .github/release-install-note.md >> notes.md
 
       # release-please already made the draft; a hand-run for an older tag may need to create it.

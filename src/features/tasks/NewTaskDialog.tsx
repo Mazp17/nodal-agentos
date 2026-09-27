@@ -12,21 +12,15 @@ import {
 import { open } from "@tauri-apps/plugin-dialog";
 import { createTask, getTask, readTaskPlan, updateTask, type NewTask, type PlanInput, type TaskPatch } from "../../domain/api";
 import { invalidate, useProjectList, useRepos, useSettings } from "../../domain/hooks/store";
-import { taskKey, type Executor, type Finish, type Isolation, type Priority, type Task } from "../../domain/types";
+import { taskKey, type Executor, type Priority, type Task } from "../../domain/types";
+import { Kbd } from "../../ui/Kbd";
 import { SafeMarkdown } from "../../ui/Markdown";
 import { useFocusTrap } from "../../ui/useFocusTrap";
 import { useToast } from "../../ui/Toasts";
 import { ExecutorPicker, executorLabel, inheritedExecutor, sameExecutor } from "../executors";
 import { PriorityBars } from "./bits";
-import {
-  FINISH_HINT,
-  FINISH_LABEL,
-  ISOLATION_HINT,
-  ISOLATION_LABEL,
-  PRIORITIES,
-  PRIORITY_LABEL,
-  providerLabel,
-} from "./status";
+import { useAskLaunch, type RunConfig } from "./LaunchPopover";
+import { PRIORITIES, PRIORITY_LABEL, providerLabel } from "./status";
 import { useLaunch } from "./useLaunch";
 import "./tasks.css";
 
@@ -46,9 +40,6 @@ export interface NewTaskDialogProps {
 type PlanKind = PlanInput["kind"];
 type Menu = "repo" | "prio" | null;
 
-const FINISHES: Finish[] = ["changes", "commit", "pr"];
-const ISOLATIONS: Isolation[] = ["worktree", "in_place"];
-const FINISH_OUTCOME: Record<Finish, string> = { changes: "leaves the changes", commit: "commits", pr: "opens a PR" };
 const PLAN_TEMPLATE = "## Goal\n\n\n## Steps\n\n1. \n\n## Acceptance criteria\n\n- ";
 
 const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
@@ -96,6 +87,7 @@ export function NewTaskDialog({ projectId, taskId, defaultRepoId, onClose, onSav
   const titleId = useId();
   const push = useToast();
   const launch = useLaunch();
+  const askLaunch = useAskLaunch();
   const projects = useProjectList();
   const allRepos = useRepos(null);
   const settings = useSettings();
@@ -117,9 +109,6 @@ export function NewTaskDialog({ projectId, taskId, defaultRepoId, onClose, onSav
   const [acceptance, setAcceptance] = useState<string[]>([]);
   const [critDraft, setCritDraft] = useState("");
   const [assignee, setAssignee] = useState<Executor | null>(null);
-  const [isolation, setIsolation] = useState<Isolation | null>(null);
-  const [finish, setFinish] = useState<Finish | null>(null);
-  const [review, setReview] = useState<boolean | null>(null);
   const [execOpen, setExecOpen] = useState(false);
   const [menu, setMenu] = useState<Menu>(null);
   const [tried, setTried] = useState(false);
@@ -151,9 +140,6 @@ export function NewTaskDialog({ projectId, taskId, defaultRepoId, onClose, onSav
         setLabels(t.labels);
         setAcceptance(t.acceptance);
         setAssignee(t.assignee);
-        setIsolation(t.isolation);
-        setFinish(t.finish);
-        setReview(t.review);
         setLoaded(true);
       } catch (e) {
         if (alive) setError(String(e));
@@ -203,11 +189,7 @@ export function NewTaskDialog({ projectId, taskId, defaultRepoId, onClose, onSav
   const imported = !!original?.source;
   const inherited = inheritedExecutor(repo, project, settings.data?.defaultExecutor);
   const effExecutor = assignee ?? inherited;
-  const isWorkflow = effExecutor.kind === "workflow";
-  const effIsolation = isolation ?? repo?.defaultIsolation ?? "worktree";
-  const effFinish = finish ?? repo?.defaultFinish ?? "pr";
-  const effReview = review ?? repo?.defaultReview ?? true;
-  const execCustom = assignee !== null || isolation !== null || finish !== null || review !== null;
+  const execCustom = assignee !== null;
 
   const titleErr = tried && !title.trim();
   const planErr = tried && (kind === "text" ? !text.trim() : !path.trim());
@@ -304,15 +286,17 @@ export function NewTaskDialog({ projectId, taskId, defaultRepoId, onClose, onSav
     setCritDraft("");
   };
 
-  /** `null` = inherit: picking the repo's default goes back to inheriting. */
-  const choose = <T,>(value: T, def: T | undefined, set: (v: T | null) => void) => set(value === def ? null : value);
-
   const planInput = (): PlanInput => (kind === "text" ? { kind: "text", text } : { kind: "file", path: path.trim() });
 
   const submit = async (run: boolean) => {
     setTried(true);
     if (!pid || missing.length) return;
     if (saving || !repo) return;
+    let config: RunConfig | null = null;
+    if (run && !original) {
+      config = await askLaunch({ name: title.trim(), repo, executor: effExecutor });
+      if (!config) return;
+    }
     setSaving(true);
     setError(null);
     const ac = cleanList([...acceptance, stripBullet(critDraft)]);
@@ -334,9 +318,6 @@ export function NewTaskDialog({ projectId, taskId, defaultRepoId, onClose, onSav
         }
         if (!same(ac, original.acceptance)) patch.acceptance = ac;
         if (!same(assignee, original.assignee)) patch.assignee = assignee;
-        if (isolation !== original.isolation) patch.isolation = isolation;
-        if (finish !== original.finish) patch.finish = finish;
-        if (review !== original.review) patch.review = review;
         saved = Object.keys(patch).length ? await updateTask(original.id, patch) : original;
         push("Task updated", saved.title, "ok");
       } else {
@@ -349,13 +330,10 @@ export function NewTaskDialog({ projectId, taskId, defaultRepoId, onClose, onSav
           labels: allLabels,
           acceptance: ac,
           assignee,
-          isolation,
-          finish,
-          review,
         };
         saved = await createTask(input);
         const key = project ? taskKey(project.key, saved.number) : saved.title;
-        if (run) await launch(saved.id, key, { kind: "run" });
+        if (config) await launch(saved.id, key, { kind: "run", config });
         else push("Task created", `${key} · ${saved.title}`, "ok");
       }
       // Wait for the refetch: the panel that opens looks the task up in the shared list.
@@ -393,7 +371,6 @@ export function NewTaskDialog({ projectId, taskId, defaultRepoId, onClose, onSav
   const noRepos = allRepos.data !== undefined && pid !== null && repos.length === 0;
   const lines = text.split("\n").length;
   const planHeight = Math.min(340, Math.max(150, lines * 19 + 24));
-  const repoDefault = (custom: boolean) => (repo ? (custom ? "differs from repo default" : "repo default") : "");
 
   const footNote =
     tried && missing.length
@@ -401,17 +378,8 @@ export function NewTaskDialog({ projectId, taskId, defaultRepoId, onClose, onSav
       : original
         ? "Changes apply to the next run"
         : repo
-          ? `${executorLabel(effExecutor)} runs ${isWorkflow || effIsolation === "worktree" ? "in a worktree" : "in your checkout"} → ${FINISH_OUTCOME[effFinish]}`
+          ? `${executorLabel(effExecutor)} runs it · delivery is chosen on each run`
           : "";
-
-  const execSummary = [
-    executorLabel(effExecutor),
-    isWorkflow ? null : ISOLATION_LABEL[effIsolation],
-    FINISH_LABEL[effFinish],
-    effReview ? "Review" : null,
-  ]
-    .filter(Boolean)
-    .join(" · ");
 
   return (
     <>
@@ -752,8 +720,8 @@ export function NewTaskDialog({ projectId, taskId, defaultRepoId, onClose, onSav
                     placeholder="Observable outcome, e.g. retries stop after 5 attempts"
                     aria-label="New criterion"
                   />
-                  <span className="kbd" aria-hidden>
-                    ↵ add
+                  <span className="nt-crit-hint" aria-hidden>
+                    <Kbd>↵</Kbd> add
                   </span>
                 </div>
               </div>
@@ -772,7 +740,7 @@ export function NewTaskDialog({ projectId, taskId, defaultRepoId, onClose, onSav
                 onClick={() => setExecOpen(!execOpen)}
               >
                 <span className="nt-sec-title">Execution</span>
-                <span className="nt-exec-sum ellipsis">{execSummary}</span>
+                <span className="nt-exec-sum ellipsis">{executorLabel(effExecutor)}</span>
                 {execCustom && <span className="nt-custom">custom</span>}
                 <span className="nt-exec-btn">{execOpen ? "Done" : "Change"}</span>
               </button>
@@ -788,61 +756,6 @@ export function NewTaskDialog({ projectId, taskId, defaultRepoId, onClose, onSav
                       onChange={(v) => setAssignee(v && sameExecutor(v, inherited) ? null : v)}
                       dropUp
                     />
-                  </div>
-
-                  <span className="nt-exec-label">Isolation</span>
-                  <div className="nt-exec-opt">
-                    <Seg
-                      label="Isolation"
-                      options={ISOLATIONS.map((i) => [i, ISOLATION_LABEL[i]])}
-                      value={effIsolation}
-                      disabled={isWorkflow}
-                      onPick={(v) => choose(v, repo?.defaultIsolation, setIsolation)}
-                    />
-                    <Hint custom={!isWorkflow && isolation !== null}>
-                      {isWorkflow
-                        ? "Workflows manage their own worktree."
-                        : [ISOLATION_HINT[effIsolation], repoDefault(isolation !== null)].filter(Boolean).join(" · ")}
-                    </Hint>
-                  </div>
-
-                  <span className="nt-exec-label">Finish</span>
-                  <div className="nt-exec-opt">
-                    <Seg
-                      label="Finish"
-                      options={FINISHES.map((f) => [f, FINISH_LABEL[f]])}
-                      value={effFinish}
-                      onPick={(v) => choose(v, repo?.defaultFinish, setFinish)}
-                    />
-                    <Hint custom={finish !== null}>
-                      {[FINISH_HINT[effFinish], repoDefault(finish !== null)].filter(Boolean).join(" · ")}
-                    </Hint>
-                  </div>
-
-                  <span className="nt-exec-label">Review</span>
-                  <div className="nt-exec-opt">
-                    <button
-                      type="button"
-                      role="switch"
-                      aria-checked={effReview}
-                      className="nt-toggle"
-                      onClick={() => choose(!effReview, repo?.defaultReview, setReview)}
-                    >
-                      <span className={`nt-track ${effReview ? "on" : ""}`} aria-hidden>
-                        <span className="nt-knob" />
-                      </span>
-                      Review before In Review
-                    </button>
-                    <Hint custom={review !== null}>
-                      {[
-                        effReview
-                          ? `${repo?.reviewer ?? project?.reviewer ?? settings.data?.reviewer ?? "code-reviewer"} checks the criteria first, read-only`
-                          : "Goes straight to In Review",
-                        repoDefault(review !== null),
-                      ]
-                        .filter(Boolean)
-                        .join(" · ")}
-                    </Hint>
                   </div>
                 </div>
               )}
@@ -868,48 +781,10 @@ export function NewTaskDialog({ projectId, taskId, defaultRepoId, onClose, onSav
           )}
           <button type="submit" className="btn btn-primary nt-save" disabled={saving || !loaded}>
             {original ? "Save" : "Save as to-do"}
-            <span className="nt-kbd" aria-hidden>
-              ⌘↵
-            </span>
+            <Kbd aria-hidden>⌘↵</Kbd>
           </button>
         </footer>
       </form>
     </>
-  );
-}
-
-function Hint({ custom, children }: { custom: boolean; children: string }) {
-  return <span className={`tk-hint ${custom ? "nt-hint-custom" : ""}`}>{children}</span>;
-}
-
-function Seg<T extends string>({
-  label,
-  options,
-  value,
-  disabled,
-  onPick,
-}: {
-  label: string;
-  options: [T, string][];
-  value: T;
-  disabled?: boolean;
-  onPick: (v: T) => void;
-}) {
-  return (
-    <div className="segmented tk-seg" role="radiogroup" aria-label={label}>
-      {options.map(([v, l]) => (
-        <button
-          key={v}
-          type="button"
-          role="radio"
-          aria-checked={value === v}
-          disabled={disabled}
-          className={`tk-seg-opt ${value === v ? "on" : ""}`}
-          onClick={() => onPick(v)}
-        >
-          {l}
-        </button>
-      ))}
-    </div>
   );
 }

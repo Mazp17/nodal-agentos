@@ -109,16 +109,16 @@
   /* ---- Typography ---- */
   --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", Helvetica, Arial, sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
-  --fs-2xs: 10.5px;
-  --fs-xs: 11px;
-  --fs-sm: 11.5px;
-  --fs-md: 12px;
-  --fs-base: 12.5px;
-  --fs-lg: 13px;
-  --fs-xl: 14px;
-  --fs-2xl: 15px;
-  --fs-3xl: 16px;
-  --fs-4xl: 20px;
+  --fs-2xs: 12.5px;
+  --fs-xs: 13px;
+  --fs-sm: 13.5px;
+  --fs-md: 14px;
+  --fs-base: 14.5px;
+  --fs-lg: 15px;
+  --fs-xl: 16px;
+  --fs-2xl: 17px;
+  --fs-3xl: 18px;
+  --fs-4xl: 22px;
   --fw-regular: 400;
   --fw-medium: 500;
   --fw-semibold: 600;

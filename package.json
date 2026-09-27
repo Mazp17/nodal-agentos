@@ -18,6 +18,7 @@
     "@tauri-apps/plugin-opener": "^2",
     "@tauri-apps/plugin-updater": "^2",
     "lucide-react": "^1.48.0",
+    "radix-ui": "^1.6.7",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
     "react-markdown": "^10.1.0",

@@ -72,6 +72,7 @@ pub fn project_of(id: &str, key: &str) -> Project {
         reviewer: None,
         created_at: 1,
         archived_at: None,
+        root_path: None,
         description: None,
     }
 }

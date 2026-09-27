@@ -8,6 +8,7 @@ import { resolveExecutor } from "../executors";
 import { NewTaskDialog } from "../tasks/NewTaskDialog";
 import { StatusRing } from "../tasks/bits";
 import { BOARD_COLUMNS, HIDDEN_COLUMNS, providerLabel, STATUS_META } from "../tasks/status";
+import { useAskLaunch } from "../tasks/LaunchPopover";
 import { useLaunch } from "../tasks/useLaunch";
 import { FilterMenu } from "./FilterMenu";
 import { TaskCard, type CardAction, type CardModel } from "./TaskCard";
@@ -43,6 +44,7 @@ const byPosition = (a: Task, b: Task) =>
 export function BoardView({ projectId, onOpenTask, onOpenRun, onNewProject, onOpenProjectSettings }: BoardViewProps) {
   const push = useToast();
   const launch = useLaunch();
+  const askLaunch = useAskLaunch();
   const projects = useProjectList();
   const repos = useRepos(projectId);
   const tasks = useTasks(projectId);
@@ -152,9 +154,11 @@ export function BoardView({ projectId, onOpenTask, onOpenRun, onNewProject, onOp
       return;
     }
     const id = m.task.id;
-    setBusy((s) => new Set(s).add(id));
     const name = m.project ? taskKey(m.project.key, m.task.number) : m.task.title;
-    await launch(id, name, { kind: "run" });
+    const config = await askLaunch({ name, repo: m.repo, executor: m.assignee });
+    if (!config) return;
+    setBusy((s) => new Set(s).add(id));
+    await launch(id, name, { kind: "run", config });
     setBusy((s) => {
       const n = new Set(s);
       n.delete(id);

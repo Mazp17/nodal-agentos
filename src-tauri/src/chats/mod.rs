@@ -139,22 +139,52 @@ pub mod ops {
     }
 }
 
-/// Where the chat runs: its repo, or the project's first one.
-pub fn chat_repo<'a>(chat: &Chat, repos: &'a [Repo]) -> Result<&'a Repo, String> {
-    let found = match &chat.repo_id {
-        Some(id) => repos.iter().find(|r| &r.id == id),
-        None => repos.first(),
+/// Where a chat runs.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum ChatCwd<'a> {
+    /// The chat's repo or, in a project without a root folder, its first repo.
+    Repo(&'a Repo),
+    /// The project's root folder, for a repo-less chat: it sees the repos and everything
+    /// else under it. Never a run target.
+    Root(&'a str),
+}
+
+impl<'a> ChatCwd<'a> {
+    pub fn path(&self) -> &'a str {
+        match self {
+            ChatCwd::Repo(r) => &r.path,
+            ChatCwd::Root(p) => p,
+        }
+    }
+
+    /// Whether `repo` is already visible from here without `--add-dir`. Both paths are
+    /// canonical, and `Path::starts_with` compares whole components (`acme` ≠ `acme-web`).
+    pub fn covers(&self, repo: &Repo) -> bool {
+        match self {
+            ChatCwd::Repo(r) => r.id == repo.id,
+            ChatCwd::Root(p) => Path::new(&repo.path).starts_with(p),
+        }
+    }
+}
+
+/// Where the chat runs: its repo, else the project's root folder, else its first repo.
+pub fn chat_cwd<'a>(chat: &Chat, project: &'a Project, repos: &'a [Repo]) -> Result<ChatCwd<'a>, String> {
+    let found = match (&chat.repo_id, project.root_path.as_deref().filter(|p| !p.is_empty())) {
+        (Some(id), _) => repos.iter().find(|r| &r.id == id).map(ChatCwd::Repo),
+        (None, Some(root)) => Some(ChatCwd::Root(root)),
+        (None, None) => repos.first().map(ChatCwd::Repo),
     };
     found.ok_or_else(|| "Add a repo to the project before chatting: the chat runs inside one.".to_string())
 }
 
-/// How the chat's process is launched: in its repo, with its own model, effort and
-/// permission mode, and the Nodal context (`mcp` is `nodal-mcp`, when found).
+/// How the chat's process is launched: in its repo or the project's root folder, with its
+/// own model, effort and permission mode, and the Nodal context (`mcp` is `nodal-mcp`, when
+/// found).
 pub fn spec(chat: &Chat, project: &Project, repos: &[Repo], mcp: Option<&Path>) -> Result<Spec, String> {
-    let repo = chat_repo(chat, repos)?;
+    let cwd = chat_cwd(chat, project, repos)?;
     let mut args = options::to_args(&chat.launch)?;
-    args.extend(context::args(chat, project, repos, repo, mcp));
-    Ok(Spec { cwd: PathBuf::from(&repo.path), args })
+    args.extend(context::args(chat, project, repos, cwd, mcp));
+    Ok(Spec { cwd: PathBuf::from(cwd.path()), args })
 }
 
 #[cfg(test)]
@@ -278,5 +308,44 @@ mod tests {
         assert!(spec(&chat, &project, &repos, None).is_err());
         chat.repo_id = None;
         assert!(spec(&chat, &project, &[], None).unwrap_err().contains("Add a repo"));
+    }
+
+    #[test]
+    fn a_repo_less_chat_runs_at_the_project_root_when_it_has_one() {
+        let mut project = project_of("p1", "PAY");
+        project.root_path = Some("/Users/me/Code/acme".into());
+        let repos = vec![
+            repo_of("r1", "p1", "/Users/me/Code/acme/api"),
+            repo_of("r2", "p1", "/Users/me/Code/acme/web"),
+            repo_of("r3", "p1", "/Users/me/Code/acme-docs"),
+        ];
+        let mut chat = Chat {
+            id: "c1".into(),
+            project_id: "p1".into(),
+            repo_id: None,
+            title: None,
+            session_title: None,
+            session_id: None,
+            launch: LaunchOptions::default(),
+            created_at: 1,
+            updated_at: 1,
+        };
+        let s = spec(&chat, &project, &repos, None).unwrap();
+        assert_eq!(s.cwd, PathBuf::from("/Users/me/Code/acme"));
+        assert_eq!(s.args[..2], ["--add-dir", "/Users/me/Code/acme-docs"], "only the repo outside the root");
+        assert!(s.args.last().unwrap().contains("This chat runs at the project root."));
+        assert_eq!(s.cwd, PathBuf::from(chat_cwd(&chat, &project, &repos).unwrap().path()), "the transcript looks it up here");
+
+        let s = spec(&chat, &project, &[], None).unwrap();
+        assert_eq!(s.cwd, PathBuf::from("/Users/me/Code/acme"), "a root is enough to chat");
+
+        chat.repo_id = Some("r2".into());
+        let s = spec(&chat, &project, &repos, None).unwrap();
+        assert_eq!(s.cwd, PathBuf::from("/Users/me/Code/acme/web"), "a repo chat ignores the root");
+        assert!(!s.args.iter().any(|a| a == "--add-dir"));
+
+        chat.repo_id = None;
+        project.root_path = None;
+        assert_eq!(chat_cwd(&chat, &project, &repos).unwrap(), ChatCwd::Repo(&repos[0]));
     }
 }
