@@ -1,0 +1,39 @@
+/* Tailwind for shadcn/ui components only: utilities, no preflight, and a theme mapped onto
+   Nodal's tokens (`tokens.css`) so utilities never bring their own palette or scale. */
+@layer theme, base, components, utilities;
+/* Only shadcn components and the views using them are scanned, so a class like `table` elsewhere
+   never picks up a Tailwind utility. */
+@import "tailwindcss/utilities.css" layer(utilities) source(none);
+@source "../ui";
+@source "../features/chats";
+@import "shadcn/tailwind.css";
+
+/* Nodal is dark-only. */
+@custom-variant dark (&);
+
+@theme {
+  --*: initial;
+  --spacing: 0.25rem;
+  --text-2xs: var(--fs-2xs);
+  --text-xs: var(--fs-xs);
+  --text-sm: var(--fs-sm);
+  --text-base: var(--fs-base);
+  --text-lg: var(--fs-lg);
+  --radius-sm: var(--r-sm);
+  --radius-md: var(--r-md);
+  --radius-lg: var(--r-lg);
+  --radius-full: 9999px;
+}
+
+@theme inline {
+  --color-foreground: var(--text);
+  --color-muted-foreground: var(--text-muted);
+  --color-border: var(--border);
+  --color-accent: var(--accent);
+  --color-text-2: var(--text-2);
+  --color-text-3: var(--text-3);
+  --color-text-dim: var(--text-dim);
+  --color-green: var(--green);
+  --color-amber: var(--amber);
+  --color-red: var(--red);
+}

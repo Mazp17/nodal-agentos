@@ -5,6 +5,7 @@ import "@fontsource/jetbrains-mono/latin-400.css";
 import "@fontsource/jetbrains-mono/latin-500.css";
 import "./styles/tokens.css";
 import "./styles/base.css";
+import "./styles/tailwind.css";
 import App from "./App";
 import { migrateLegacyStorage } from "./shell/storage";
 import { installZoomShortcuts } from "./shell/zoom";
