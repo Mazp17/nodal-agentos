@@ -153,7 +153,19 @@
 .bd-segs span.on { background: var(--accent); }
 .bd-segs span.current { animation: var(--pulse); }
 .bd-card-foot { display: flex; align-items: center; gap: var(--sp-2); min-height: var(--h-sm); }
-.bd-spacer { flex: 1; }
+.bd-card-foot > * { flex: none; }
+/* Card badges are quieter than elsewhere and shrink with an ellipsis instead of overflowing. */
+.bd-card-foot > .badge {
+  flex: 0 1 auto;
+  min-width: 0;
+  height: 20px;
+  font-size: var(--fs-xs);
+  border-radius: 5px;
+  border: 1px solid var(--border);
+  background: var(--fill-2);
+  font-weight: var(--fw-regular);
+}
+.bd-card-foot > .bd-spacer { flex: 1; min-width: 0; }
 .bd-assignee { display: inline-flex; }
 
 /* ---- Skeleton ---- */

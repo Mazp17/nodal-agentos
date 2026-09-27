@@ -5,7 +5,15 @@ import { useToast } from "../../ui/Toasts";
 import { useFocusTrap } from "../../ui/useFocusTrap";
 import { createdSummary, createProjectWithRepos, PROJECT_COLORS } from "./create";
 import { ColorSwatches, LinearScopeField } from "./fields";
-import { DraftRepoRow, RepoNoticeBar, useRepoPicker } from "./repoPicker";
+import {
+  DraftRepoRow,
+  pickFolder,
+  projectOfRepo,
+  RepoNoticeBar,
+  ScannedRepoList,
+  useRepoPicker,
+  useRepoScan,
+} from "./repoPicker";
 import "./projects.css";
 
 interface Props {
@@ -27,6 +35,7 @@ export function CreateProjectDialog({ onClose, onCreated }: Props) {
   const [key, setKey] = useState("");
   const [keyEdited, setKeyEdited] = useState(false);
   const [color, setColor] = useState<string>(PROJECT_COLORS[ctx.projects.length % PROJECT_COLORS.length]!);
+  const [rootPath, setRootPath] = useState<string | null>(null);
   const [repos, setRepos] = useState<string[]>([]);
   const [connect, setConnect] = useState(false);
   const [scope, setScope] = useState<ScopeRef | null>(null);
@@ -36,14 +45,30 @@ export function CreateProjectDialog({ onClose, onCreated }: Props) {
   const taken = ctx.projects.map((p) => p.key);
   const effectiveKey = keyEdited ? key : suggestProjectKey(name, taken);
 
+  const inOtherProject = (root: string) => projectOfRepo(ctx, root);
+  const scan = useRepoScan(inOtherProject);
   const picker = useRepoPicker({
-    whereAdded: (root) => {
-      if (repos.includes(root)) return "";
-      const r = ctx.repos.find((x) => x.path === root);
-      return r ? (ctx.projectById.get(r.projectId)?.name ?? "another project") : null;
-    },
+    whereAdded: (root) => (repos.includes(root) || scan.selected.includes(root) ? "" : inOtherProject(root)),
     onPicked: (root) => setRepos((rs) => [...rs, root]),
   });
+
+  const chooseFolder = async () => {
+    let path: string | null;
+    try {
+      path = await pickFolder("Choose the project folder");
+    } catch (e) {
+      setError(`Couldn't open the folder picker: ${String(e)}`);
+      return;
+    }
+    if (!path) return;
+    setRootPath(path);
+    void scan.scan(path);
+  };
+
+  const clearFolder = () => {
+    setRootPath(null);
+    scan.clear();
+  };
 
   const create = async () => {
     if (!name.trim()) {
@@ -62,7 +87,8 @@ export function CreateProjectDialog({ onClose, onCreated }: Props) {
         key: effectiveKey,
         color,
         description,
-        repos,
+        rootPath,
+        repos: [...new Set([...scan.selected, ...repos])],
         scope: connect ? scope : null,
       });
       toast("Project created", createdSummary(project.name, reposAdded, sourceConnected), "ok");
@@ -151,7 +177,33 @@ export function CreateProjectDialog({ onClose, onCreated }: Props) {
             </div>
           </div>
           <div className="field">
-            <span className="field-label">Repos</span>
+            <span className="field-label">
+              Project folder <span className="faint">optional</span>
+            </span>
+            {rootPath ? (
+              <div className="root-folder-row">
+                <span className="root-folder-path mono" title={rootPath}>
+                  {rootPath}
+                </span>
+                <button type="button" className="btn btn-sm" disabled={scan.scanning} onClick={() => void chooseFolder()}>
+                  Change…
+                </button>
+                <button type="button" className="btn btn-ghost btn-sm" onClick={clearFolder}>
+                  Clear
+                </button>
+              </div>
+            ) : (
+              <button type="button" className="btn" style={{ alignSelf: "flex-start" }} onClick={() => void chooseFolder()}>
+                Choose folder…
+              </button>
+            )}
+            <span className="field-hint">
+              The folder that holds the repos, docs and notes. Chats without a repo run there.
+            </span>
+            <ScannedRepoList scan={scan} whereAdded={inOtherProject} empty="No git repos found in this folder." />
+          </div>
+          <div className="field">
+            <span className="field-label">{rootPath ? "Other repos" : "Repos"}</span>
             {repos.map((r) => (
               <DraftRepoRow key={r} path={r} onRemove={() => setRepos((rs) => rs.filter((x) => x !== r))} />
             ))}

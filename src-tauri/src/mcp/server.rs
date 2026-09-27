@@ -201,7 +201,7 @@ mod tests {
         fs::create_dir_all(&repo_dir).unwrap();
         {
             let c = inner.db.lock().unwrap();
-            let p = ops::create_project(&c, &NewProject { name: "Pay".into(), key: "PAY".into(), color: None, description: None }, 1).unwrap();
+            let p = ops::create_project(&c, &NewProject { name: "Pay".into(), key: "PAY".into(), color: None, description: None, root_path: None }, 1).unwrap();
             ops::add_repo(&c, &p.id, &NewRepo::default(), &repo_dir, 2).unwrap();
         }
         let socket = paths::mcp_socket(&inner.env.data_dir);

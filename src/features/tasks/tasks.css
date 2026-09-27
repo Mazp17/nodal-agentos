@@ -389,7 +389,7 @@
 .nt-track.on .nt-knob { left: 14px; }
 
 .nt-save { display: flex; align-items: center; gap: var(--sp-3); }
-.nt-kbd { font-family: var(--font-mono); font-size: var(--fs-2xs); font-weight: var(--fw-medium); opacity: 0.65; }
+.nt-crit-hint { display: inline-flex; align-items: center; gap: var(--sp-2); flex: none; font-size: var(--fs-xs); color: var(--text-dim); }
 
 /* ---- Detail (drawer) ---- */
 .tp-scrim { position: fixed; inset: 0; z-index: 20; background: var(--scrim); }

@@ -248,7 +248,12 @@ const V5: &str = r#"
 ALTER TABLE chats ADD COLUMN session_title TEXT;
 "#;
 
-pub const MIGRATIONS: &[&str] = &[V1, V2, V3, V4, V5];
+/// v6: `projects.root_path`, the optional folder that holds the project's repos (canonical).
+const V6: &str = r#"
+ALTER TABLE projects ADD COLUMN root_path TEXT;
+"#;
+
+pub const MIGRATIONS: &[&str] = &[V1, V2, V3, V4, V5, V6];
 
 pub fn user_version(conn: &Connection) -> Result<i64, DbError> {
     Ok(conn.query_row("PRAGMA user_version", [], |r| r.get(0))?)

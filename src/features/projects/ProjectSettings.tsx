@@ -17,7 +17,15 @@ import { useToast } from "../../ui/Toasts";
 import { ExecutorSelect, executorLabel } from "./executors";
 import { useSettings } from "../../domain/hooks/store";
 import { ColorSwatches, Segmented, type SegOption } from "./fields";
-import { RepoNoticeBar, resolveGitRoot, useRepoPicker } from "./repoPicker";
+import {
+  pickFolder,
+  projectOfRepo,
+  RepoNoticeBar,
+  resolveGitRoot,
+  ScannedRepoList,
+  useRepoPicker,
+  useRepoScan,
+} from "./repoPicker";
 import "./projects.css";
 
 const SECTIONS: { id: ProjectSection; label: string }[] = [
@@ -239,10 +247,7 @@ function ReposSection({ project, onOpenSources }: { project: Project; onOpenSour
   const linear: LinearCtx = { links, linearLinks, projects: ruleProjects, connection, repos, onOpenSources };
 
   const picker = useRepoPicker({
-    whereAdded: (root) => {
-      const r = ctx.repos.find((x) => x.path === root);
-      return r ? (ctx.projectById.get(r.projectId)?.name ?? "another project") : null;
-    },
+    whereAdded: (root) => projectOfRepo(ctx, root),
     onPicked: async (root) => {
       try {
         const r = await ctx.addRepo(project.id, { path: root });
@@ -263,6 +268,7 @@ function ReposSection({ project, onOpenSources }: { project: Project; onOpenSour
       {picker.notice && (
         <RepoNoticeBar notice={picker.notice} onUseRoot={() => void picker.useRoot()} onDismiss={picker.dismiss} />
       )}
+      <RootFolderCard project={project} />
       {repos.map((r) => (
         <RepoCard
           key={r.id}
@@ -289,6 +295,109 @@ function ReposSection({ project, onOpenSources }: { project: Project; onOpenSour
         </div>
       )}
     </>
+  );
+}
+
+/** The project folder: shown, changed or cleared here, and scanned on demand (never watched). */
+function RootFolderCard({ project }: { project: Project }) {
+  const ctx = useProjects();
+  const toast = useToast();
+  const inOtherProject = (root: string) => projectOfRepo(ctx, root);
+  const scan = useRepoScan(inOtherProject);
+  const [busy, setBusy] = useState(false);
+  const root = project.rootPath;
+
+  const save = async (rootPath: string | null) => {
+    setBusy(true);
+    scan.clear();
+    try {
+      await ctx.updateProject(project.id, { rootPath });
+    } catch (e) {
+      toast("Couldn't save the project folder", String(e), "danger");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const change = async () => {
+    try {
+      const path = await pickFolder("Choose the project folder");
+      if (path) await save(path);
+    } catch (e) {
+      toast("Couldn't open the folder picker", String(e), "danger");
+    }
+  };
+
+  const addSelected = async () => {
+    setBusy(true);
+    const failures: string[] = [];
+    let added = 0;
+    for (const path of scan.selected) {
+      try {
+        await ctx.addRepo(project.id, { path });
+        added++;
+      } catch (e) {
+        failures.push(`${path}: ${String(e)}`);
+      }
+    }
+    if (added) toast(`${added} repo${added === 1 ? "" : "s"} added`, project.name, "ok");
+    if (failures.length) toast("Some repos weren't added", failures.join("\n"), "danger");
+    scan.clear();
+    setBusy(false);
+  };
+
+  return (
+    <div className="panel settings-card settings-card-pad">
+      <div className="field">
+        <span className="field-label">Project folder</span>
+        <div className="root-folder-row">
+          {root ? (
+            <span className="root-folder-path mono" title={root}>
+              {root}
+            </span>
+          ) : (
+            <span className="root-folder-path">No folder set</span>
+          )}
+          <button type="button" className="btn btn-sm" disabled={busy} onClick={() => void change()}>
+            {root ? "Change…" : "Choose folder…"}
+          </button>
+          {root && (
+            <>
+              <button
+                type="button"
+                className="btn btn-sm"
+                disabled={busy || scan.scanning}
+                onClick={() => void scan.scan(root, ctx.reposOf(project.id).map((r) => r.path))}
+              >
+                Scan for repos
+              </button>
+              <button type="button" className="btn btn-ghost btn-sm" disabled={busy} onClick={() => void save(null)}>
+                Clear
+              </button>
+            </>
+          )}
+        </div>
+        <span className="field-hint">
+          The folder that holds this project's repos, docs and notes. Chats without a repo run there; tasks never do.
+        </span>
+      </div>
+      <ScannedRepoList scan={scan} whereAdded={inOtherProject} empty="Every git repo in this folder is already in the project." />
+      {scan.found && scan.found.length > 0 && (
+        <div className="row-actions scan-actions">
+          <button type="button" className="btn btn-ghost btn-sm" disabled={busy} onClick={scan.clear}>
+            Cancel
+          </button>
+          <button
+            type="button"
+            className="btn btn-primary btn-sm"
+            disabled={busy || scan.selected.length === 0}
+            onClick={() => void addSelected()}
+          >
+            {busy ? "Adding…" : `Add ${scan.selected.length} repo${scan.selected.length === 1 ? "" : "s"}`}
+          </button>
+        </div>
+      )}
+    </div>
   );
 }
 

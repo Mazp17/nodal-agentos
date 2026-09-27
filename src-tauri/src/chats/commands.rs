@@ -14,7 +14,7 @@ use crate::util::{blocking, check_id, now_ms};
 use crate::work::WorkState;
 
 use super::process::ChatLive;
-use super::{chat_repo, ops, spec, ChatPatch, ChatState, NewChat};
+use super::{chat_cwd, ops, spec, ChatPatch, ChatState, NewChat};
 
 async fn db<T, F>(state: &WorkState, f: F) -> Result<T, String>
 where
@@ -141,17 +141,18 @@ pub async fn get_claude_defaults(state: State<'_, WorkState>, repo_id: Option<St
 #[tauri::command]
 pub async fn get_chat_transcript(state: State<'_, WorkState>, id: String, limit: Option<u32>) -> Result<Option<Transcript>, String> {
     check_id(&id, "chat")?;
-    let (chat, repos) = db(&state, move |c| {
+    let (chat, project, repos) = db(&state, move |c| {
         let chat = chats::get(c, &id)?;
+        let project = crate::db::queries::projects::get(c, &chat.project_id)?;
         let repos = crate::db::queries::repos::list(c, Some(&chat.project_id))?;
-        Ok((chat, repos))
+        Ok((chat, project, repos))
     })
     .await?;
     let Some(sid) = chat.session_id.clone().filter(|s| claude_fs::is_valid_session_id(s)) else { return Ok(None) };
     let Some(claude_dir) = state.0.env.claude_dir.clone() else {
         return Err("Couldn't locate the Claude Code folder ($HOME is not set).".into());
     };
-    let cwd = chat_repo(&chat, &repos).map(|r| r.path.clone()).unwrap_or_default();
+    let cwd = chat_cwd(&chat, &project, &repos).map(|c| c.path().to_string()).unwrap_or_default();
     let limit = limit.unwrap_or(claude_fs::TRANSCRIPT_DEFAULT_LIMIT).clamp(1, claude_fs::TRANSCRIPT_MAX_LIMIT) as usize;
     let (chat_id, project_id, known_title) = (chat.id.clone(), chat.project_id.clone(), chat.session_title.clone());
     let (transcript, title) = blocking(move || {

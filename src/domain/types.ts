@@ -13,6 +13,8 @@ export interface Project {
   nextTaskNumber: number;
   color: string;
   description: string | null;
+  /** Canonical folder holding the project's repos. Repo-less chats run there; never a run target. */
+  rootPath: string | null;
   /** `null` → `Settings.defaultExecutor` → Claude. */
   defaultExecutor: Executor | null;
   /** `null` → `code-reviewer`. */
