@@ -3,6 +3,7 @@ import { isRunActive } from "../../domain/hooks/runs";
 import { taskKey, type Executor, type Project, type Repo, type RunLight, type Task } from "../../domain/types";
 import { ExecutorAvatar, executorLabel } from "../executors";
 import { RunBadge } from "../runs";
+import { Tooltip, TooltipContent, TooltipTrigger } from "../../ui/Tooltip";
 import { PriorityBars } from "../tasks/bits";
 import { isClosed, providerLabel } from "../tasks/status";
 import type { PhaseProgress } from "./usePhases";
@@ -145,20 +146,30 @@ export function TaskCard({ model, showProject, busy, dragging, onOpen, onAction,
 
       <div className="bd-card-foot">
         {src?.moved && (
-          <span
-            className="badge badge-sm tone-warn"
-            title={`Moved from ${src.moved.fromProject.name} to ${src.moved.toProject?.name ?? "no project"}. Open the task to decide.`}
-          >
-            <span className="badge-label">Moved in {providerLabel(src.provider)}</span>
-          </span>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <span className="badge badge-sm tone-warn">
+                <span className="badge-label">Moved in {providerLabel(src.provider)}</span>
+              </span>
+            </TooltipTrigger>
+            <TooltipContent>
+              Moved in {providerLabel(src.provider)} · Moved from {src.moved.fromProject.name} to{" "}
+              {src.moved.toProject?.name ?? "no project"}. Open the task to decide.
+            </TooltipContent>
+          </Tooltip>
         )}
         {reviewing ? (
-          <span className="badge tone-warn" title="The reviewer is checking the acceptance criteria">
-            <span className="dot dot-sm pulse" aria-hidden />
-            <span className="badge-label">Reviewing</span>
-          </span>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <span className="badge tone-warn">
+                <span className="dot dot-sm pulse" aria-hidden />
+                <span className="badge-label">Reviewing</span>
+              </span>
+            </TooltipTrigger>
+            <TooltipContent>Reviewing · The reviewer is checking the acceptance criteria</TooltipContent>
+          </Tooltip>
         ) : (
-          run && <RunBadge run={run} />
+          run && <RunBadge run={run} tooltip />
         )}
         <span className="bd-spacer" />
         <span className="bd-assignee" title={`Assignee: ${executorLabel(assignee)}`}>
