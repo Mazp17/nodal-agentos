@@ -1,16 +1,18 @@
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent } from "react";
 import { createPortal } from "react-dom";
 import type { ExecutorInfo } from "../../domain/api";
-import { useExecutors } from "../../domain/hooks/store";
+import { hiddenSetOf, useExecutors, useHiddenExecutors } from "../../domain/hooks/store";
 import type { Executor } from "../../domain/types";
 import { FOCUSABLE } from "../../ui/useFocusTrap";
 import { ExecutorAvatar } from "./ExecutorAvatar";
-import { CLAUDE, executorKey, executorLabel, sameExecutor } from "./executors";
+import { CLAUDE, executorKey, executorLabel, sameExecutor, visibleExecutors } from "./executors";
 import "./executors.css";
 
 export interface ExecutorPickerProps {
   /** Adds the repo's agents and workflows to the global catalog. */
   repoId: string | null;
+  /** Hides what this project turned off (except the current value); unset lists everything. */
+  projectId?: string | null;
   /** `null` = inherits (`inherited`). */
   value: Executor | null;
   onChange: (value: Executor | null) => void;
@@ -63,6 +65,7 @@ function matches(info: ExecutorInfo, q: string) {
 /** Executor picker: agents, workflows and Claude, each with its source and description. */
 export function ExecutorPicker({
   repoId,
+  projectId,
   value,
   onChange,
   inherited,
@@ -74,6 +77,7 @@ export function ExecutorPicker({
 }: ExecutorPickerProps) {
   const chip = variant === "chip";
   const { data: catalog, error } = useExecutors(repoId);
+  const { data: hiddenKeys } = useHiddenExecutors(projectId ?? null);
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
   const wrap = useRef<HTMLDivElement>(null);
@@ -88,7 +92,8 @@ export function ExecutorPicker({
 
   const groups = useMemo<Group[]>(() => {
     const ql = q.trim().toLowerCase();
-    const list = (catalog ?? []).filter((i) => matches(i, ql));
+    const hidden = hiddenSetOf(projectId ? hiddenKeys : undefined);
+    const list = visibleExecutors(catalog ?? [], hidden, repoId, value).filter((i) => matches(i, ql));
     const agents = list.filter((i) => i.executor.kind === "agent");
     const workflows = list.filter((i) => i.executor.kind === "workflow");
     const claudeInfo = list.find((i) => i.executor.kind === "claude") ?? null;
@@ -103,7 +108,7 @@ export function ExecutorPicker({
       out.push({ title: "Claude", items: [{ executor: claudeInfo?.executor ?? CLAUDE, info: claudeInfo }] });
     }
     return out;
-  }, [catalog, q, inherited]);
+  }, [catalog, q, inherited, hiddenKeys, projectId, repoId, value]);
 
   useLayoutEffect(() => {
     if (!open) {

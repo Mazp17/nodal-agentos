@@ -782,6 +782,7 @@ export function NewTaskDialog({ projectId, taskId, defaultRepoId, onClose, onSav
                   <div className="nt-exec-opt">
                     <ExecutorPicker
                       repoId={repo?.id ?? null}
+                      projectId={pid}
                       value={assignee}
                       inherited={inherited}
                       onChange={(v) => setAssignee(v && sameExecutor(v, inherited) ? null : v)}
