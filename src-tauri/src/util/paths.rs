@@ -95,6 +95,45 @@ pub async fn resolve_git_root(path: String) -> Result<Option<String>, String> {
     blocking(move || Ok(git_root_of(&path)?.map(|p| p.to_string_lossy().into_owned()))).await
 }
 
+/// How many levels below the scanned folder a repo can be.
+const SCAN_DEPTH: usize = 3;
+
+/// Canonical git roots at or up to `SCAN_DEPTH` levels below `root`, sorted. Skips
+/// `node_modules`, hidden folders (`.git` included), symlinks and anything inside a repo
+/// already found. Only folders holding a `.git` (folder or file, for worktrees and
+/// submodules) are handed to git, so a large tree doesn't spawn one process per folder.
+pub fn git_repos_under(root: &str) -> Result<Vec<PathBuf>, String> {
+    let root = canonical_dir(root)?;
+    let mut found = Vec::new();
+    let mut pending = vec![(root, 0)];
+    while let Some((dir, depth)) = pending.pop() {
+        if dir.join(".git").exists() && git_root_of(&dir.to_string_lossy())?.as_deref() == Some(dir.as_path()) {
+            found.push(dir);
+            continue;
+        }
+        if depth == SCAN_DEPTH {
+            continue;
+        }
+        let Ok(entries) = std::fs::read_dir(&dir) else { continue };
+        for e in entries.flatten() {
+            let name = e.file_name();
+            let name = name.to_string_lossy();
+            if name.starts_with('.') || name == "node_modules" || !e.file_type().is_ok_and(|t| t.is_dir()) {
+                continue;
+            }
+            pending.push((e.path(), depth + 1));
+        }
+    }
+    found.sort();
+    Ok(found)
+}
+
+/// Git repos inside a project's root folder, to offer them for adding.
+#[tauri::command]
+pub async fn scan_git_repos(root: String) -> Result<Vec<String>, String> {
+    blocking(move || Ok(git_repos_under(&root)?.into_iter().map(|p| p.to_string_lossy().into_owned()).collect())).await
+}
+
 #[cfg(test)]
 pub(crate) mod tests {
     use std::path::Path;
@@ -174,6 +213,37 @@ pub(crate) mod tests {
         assert!(require_git_root(outside.to_str().unwrap()).unwrap_err().contains("not inside a git repository"));
         assert!(tauri::async_runtime::block_on(resolve_git_root("relative".into())).is_err());
         assert!(git_root_of("/no/such/dir").unwrap_err().contains("doesn't exist"));
+    }
+
+    #[test]
+    fn scans_repos_up_to_three_levels_down() {
+        if !git_available() {
+            eprintln!("git not available: skipping");
+            return;
+        }
+        let t = TempDir::new("scan-repos");
+        let root = &t.0;
+        for repo in ["api", "web/app", "a/b/c", "x/y/z/too-deep", "node_modules/pkg", ".hidden/repo", "api/vendor/lib"] {
+            init_repo(&root.join(repo));
+        }
+        std::fs::create_dir_all(root.join("notes/2026")).unwrap();
+        let git = |args: &[&str]| {
+            let out = std::process::Command::new("git").arg("-C").arg(root.join("api")).args(args).output().unwrap();
+            assert!(out.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&out.stderr));
+        };
+        git(&["worktree", "add", "-q", "-b", "wt", "../worktrees/api-wt"]);
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(root.join("web"), root.join("web-link")).unwrap();
+
+        let found = tauri::async_runtime::block_on(scan_git_repos(root.to_string_lossy().into_owned())).unwrap();
+        let expected: Vec<String> =
+            ["a/b/c", "api", "web/app", "worktrees/api-wt"].iter().map(|r| root.join(r).to_string_lossy().into_owned()).collect();
+        assert_eq!(found, expected);
+
+        assert_eq!(git_repos_under(root.join("api").to_str().unwrap()).unwrap(), vec![root.join("api")]);
+        assert_eq!(git_repos_under(root.join("notes").to_str().unwrap()).unwrap(), Vec::<PathBuf>::new());
+        assert!(git_repos_under("/no/such/dir").unwrap_err().contains("doesn't exist"));
+        assert!(git_repos_under("relative").unwrap_err().contains("absolute"));
     }
 
     #[test]
