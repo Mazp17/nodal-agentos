@@ -143,9 +143,6 @@ export interface NewTask {
   labels?: string[];
   acceptance?: string[];
   assignee?: Executor | null;
-  isolation?: Isolation | null;
-  finish?: Finish | null;
-  review?: boolean | null;
 }
 
 /**
