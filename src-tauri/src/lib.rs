@@ -163,6 +163,7 @@ pub fn run() {
             activity::repo_activity,
             activity::activity_summary,
             activity::project_activity,
+            activity::external_sessions,
             migrate::import_legacy_data,
             updates::updates_enabled,
             updates::restart_app,

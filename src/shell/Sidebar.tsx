@@ -8,7 +8,6 @@ const PROJECT_PAGES: { page: ProjectPage; label: string }[] = [
   { page: "chat", label: "Chat" },
   { page: "tasks", label: "Tasks" },
   { page: "runs", label: "Runs" },
-  { page: "activity", label: "Activity" },
   { page: "project-settings", label: "Settings" },
 ];
 

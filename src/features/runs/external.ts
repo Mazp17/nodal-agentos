@@ -1,4 +1,8 @@
-// Mirror of src-tauri/src/activity/mod.rs (serde rename_all = camelCase).
+// Claude Code sessions started outside Nodal, listed on Runs next to Nodal's runs.
+// Types mirror src-tauri/src/activity/mod.rs (serde rename_all = camelCase).
+
+import { invoke } from "@tauri-apps/api/core";
+import { POLL, usePolled } from "../../domain/hooks/store";
 
 export type SessionKind = "interactive" | "background" | "unlisted" | (string & {});
 
@@ -28,29 +32,24 @@ export interface SessionActivity {
 export interface SubagentActivity {
   sessionId: string;
   agentId: string;
-  description: string | null;
-  agentType: string | null;
-  cwd: string | null;
-  worktree: string | null;
-  parentAgentId: string | null;
-  workflowId: string | null;
-  workflowPhase: string | null;
-  model: string | null;
   active: boolean;
-  /** Ended with end_turn. `!active && !finished` = no recent activity. */
-  finished: boolean;
-  lastActivityAt: number | null;
-  lastTool: string | null;
-  lastToolSummary: string | null;
-  sessionName: string | null;
-  sessionKind: SessionKind;
-  sessionCwd: string | null;
-  sessionIsAppRun: boolean;
 }
 
-export interface RepoActivity {
-  repoPath: string;
+/** Each session appears once, in the deepest repo that contains it. */
+export interface RepoSessions {
+  repoId: string;
   sessions: SessionActivity[];
   subagents: SubagentActivity[];
+}
+
+export interface ExternalSessions {
+  repos: RepoSessions[];
   generatedAt: number;
+}
+
+/** Sessions not launched by Nodal in the project's repos (`null`: every project), from a single `claude agents`. */
+export const externalSessions = (projectId: string | null) => invoke<ExternalSessions>("external_sessions", { projectId });
+
+export function useExternalSessions(projectId: string | null) {
+  return usePolled<ExternalSessions>(`external-sessions:${projectId ?? "all"}`, () => externalSessions(projectId), ["repos"], POLL.live);
 }
