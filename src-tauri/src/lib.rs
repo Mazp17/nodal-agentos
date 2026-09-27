@@ -120,6 +120,8 @@ pub fn run() {
             work::commands::merge_worktree,
             work::commands::worktree_status,
             work::commands::list_executors,
+            work::commands::list_hidden_executors,
+            work::commands::set_executor_hidden,
             work::commands::list_task_runs,
             work::commands::list_runs_light,
             work::commands::get_run,

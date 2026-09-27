@@ -143,6 +143,27 @@ pub enum Executor {
     Claude,
 }
 
+/// What a hidden-executor entry points at; plain Claude has no variant, so it can't be hidden.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum HiddenKind {
+    Agent,
+    Workflow,
+}
+str_enum!(HiddenKind { Agent => "agent", Workflow => "workflow" });
+
+/// An agent or workflow a project hides from its pickers (the definition file is untouched).
+/// `repo_id` is set only for `source: repo`: the same repo agent in two repos is two entries.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct HiddenExecutor {
+    pub kind: HiddenKind,
+    pub source: AgentSource,
+    pub name: String,
+    #[serde(default)]
+    pub repo_id: Option<String>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Isolation {

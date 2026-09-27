@@ -8,7 +8,7 @@ use std::time::Duration;
 use rusqlite::Connection;
 use tauri::State;
 
-use crate::db::queries::{projects, relations, repos, runs as qruns, tasks};
+use crate::db::queries::{hidden_executors, projects, relations, repos, runs as qruns, tasks};
 use crate::db::{rows, with_db, DbError};
 use crate::domain::*;
 use crate::events::Kind;
@@ -367,6 +367,35 @@ pub async fn list_executors(state: State<'_, WorkState>, repo_id: Option<String>
     };
     let claude = state.0.env.claude_dir.clone();
     blocking(move || Ok(executors::catalog(claude.as_deref(), repo_path.as_deref().map(Path::new)))).await
+}
+
+/// Agents and workflows the project hides from its pickers. `list_executors` stays unfiltered.
+#[tauri::command]
+pub async fn list_hidden_executors(state: State<'_, WorkState>, project_id: String) -> Result<Vec<HiddenExecutor>, String> {
+    check_id(&project_id, "project")?;
+    db(&state.0, move |c| Ok(hidden_executors::list(c, &project_id)?)).await
+}
+
+/// Hides or shows one agent or workflow in the project; returns the project's new set.
+#[tauri::command]
+pub async fn set_executor_hidden(
+    state: State<'_, WorkState>,
+    project_id: String,
+    key: HiddenExecutor,
+    hidden: bool,
+) -> Result<Vec<HiddenExecutor>, String> {
+    check_id(&project_id, "project")?;
+    if let Some(r) = &key.repo_id {
+        check_id(r, "repo")?;
+    }
+    let pid = project_id.clone();
+    let out = db(&state.0, move |c| {
+        hidden_executors::set(c, &pid, &key, hidden)?;
+        Ok(hidden_executors::list(c, &pid)?)
+    })
+    .await?;
+    state.0.events.notify(Kind::Projects, Some(&project_id));
+    Ok(out)
 }
 
 /// `project_id` (optional) filters by project in addition to task.

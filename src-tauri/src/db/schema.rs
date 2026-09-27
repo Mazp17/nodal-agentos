@@ -248,7 +248,26 @@ const V5: &str = r#"
 ALTER TABLE chats ADD COLUMN session_title TEXT;
 "#;
 
-pub const MIGRATIONS: &[&str] = &[V1, V2, V3, V4, V5];
+/// v6: agents and workflows a project hides from its pickers (`HiddenExecutor`).
+/// - `repo_id` only for repo-level ones (`source = 'repo'`), and it must be a repo of the
+///   project; deleting the repo or the project drops its entries;
+/// - the unique index folds the NULL `repo_id` so user/plugin entries can't repeat.
+const V6: &str = r#"
+CREATE TABLE project_hidden_executors (
+    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    kind       TEXT NOT NULL CHECK (kind IN ('agent', 'workflow')),
+    source     TEXT NOT NULL CHECK (source IN ('user', 'repo', 'plugin')),
+    name       TEXT NOT NULL CHECK (length(name) > 0),
+    repo_id    TEXT,
+    CHECK ((source = 'repo') = (repo_id IS NOT NULL)),
+    FOREIGN KEY (repo_id, project_id) REFERENCES repos(id, project_id) ON DELETE CASCADE
+);
+CREATE UNIQUE INDEX project_hidden_executors_key
+    ON project_hidden_executors(project_id, kind, source, name, ifnull(repo_id, ''));
+CREATE INDEX project_hidden_executors_repo ON project_hidden_executors(repo_id);
+"#;
+
+pub const MIGRATIONS: &[&str] = &[V1, V2, V3, V4, V5, V6];
 
 pub fn user_version(conn: &Connection) -> Result<i64, DbError> {
     Ok(conn.query_row("PRAGMA user_version", [], |r| r.get(0))?)
