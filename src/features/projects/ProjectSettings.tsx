@@ -13,6 +13,7 @@ import {
 import { newProjectRule, useRuleBackfill, type RuleEdit } from "../providers/ruleBackfill";
 import { SectionHead } from "../settings/SettingsView";
 import type { ProjectSection } from "../../shell/useNav";
+import { EmptyState } from "../../ui/EmptyState";
 import { useToast } from "../../ui/Toasts";
 import { AgentsWorkflowsSection } from "./AgentsWorkflowsSection";
 import { ExecutorSelect, executorLabel } from "./executors";
@@ -283,20 +284,14 @@ function ReposSection({ project, onOpenSources }: { project: Project; onOpenSour
         />
       ))}
       {repos.length === 0 && (
-        <div className="center-state">
-          <div className="center-state-body">
-            <div className="state-icon-empty" aria-hidden />
-            <div className="center-state-title">No repos in this project</div>
-            <div className="center-state-text">
-              Add the root of a git checkout. If you pick a subfolder, Nodal offers the repo root.
-            </div>
-            <div className="center-state-actions">
-              <button type="button" className="btn btn-primary" disabled={picker.busy} onClick={() => void picker.pick()}>
-                Add repo…
-              </button>
-            </div>
-          </div>
-        </div>
+        <EmptyState
+          title="No repos in this project"
+          description="Add the root of a git checkout. If you pick a subfolder, Nodal offers the repo root."
+        >
+          <button type="button" className="btn btn-primary" disabled={picker.busy} onClick={() => void picker.pick()}>
+            Add repo…
+          </button>
+        </EmptyState>
       )}
     </>
   );
