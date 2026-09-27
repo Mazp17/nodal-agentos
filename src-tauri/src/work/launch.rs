@@ -26,6 +26,9 @@ use super::{diff, ops, validate, worktree, Cleaning, Env, CLEANING_ERR};
 /// Goes on every run (`--append-system-prompt`): a session that ends by asking a question
 /// stays `idle` + `working` and the task never leaves In Progress.
 pub const UNATTENDED_SYSTEM_PROMPT: &str = "You are running unattended, launched by Nodal. When done, report the result in one short message and stop. Don't ask questions or offer next steps: Nodal decides what happens next.";
+/// Appended for workflow runs: their details (findings, nits) already live in the workflow's
+/// result, so the closing message is just a status line.
+pub const WORKFLOW_CLOSING_PROMPT: &str = "Close with a single status line: the real outcome (green, yellow or red) and PR or branch, e.g. `green · PR #39`. Don't list pending items or nits: they stay in the workflow's result. If the workflow didn't finish, say why in that line.";
 /// Tools the reviewer can't use (`--disallowedTools`).
 pub const REVIEW_DISALLOWED: [&str; 3] = ["Edit", "Write", "NotebookEdit"];
 /// The reviewer's permission mode, whatever the repo's is: `dontAsk` denies without asking
@@ -153,7 +156,10 @@ pub fn extra_flags(run: &Run, tests: &[String]) -> ExtraFlags {
         Executor::Agent { name, .. } => Some(name.clone()),
         _ => None,
     };
-    let append_system_prompt = Some(UNATTENDED_SYSTEM_PROMPT.to_string());
+    let append_system_prompt = Some(match (&run.kind, &run.executor) {
+        (RunKind::Work, Executor::Workflow { .. }) => format!("{UNATTENDED_SYSTEM_PROMPT} {WORKFLOW_CLOSING_PROMPT}"),
+        _ => UNATTENDED_SYSTEM_PROMPT.to_string(),
+    });
     match run.kind {
         RunKind::Work => ExtraFlags { agent, append_system_prompt, ..Default::default() },
         RunKind::Review => ExtraFlags {
@@ -1020,7 +1026,7 @@ mod tests {
         assert_eq!(extra_flags(&run_of(Executor::Claude, RunKind::Work, false), &tests).to_args(), [sp, UNATTENDED_SYSTEM_PROMPT]);
         assert_eq!(
             extra_flags(&run_of(Executor::Workflow { name: "plan-task".into() }, RunKind::Work, false), &[]).to_args(),
-            [sp, UNATTENDED_SYSTEM_PROMPT]
+            [sp.to_string(), format!("{UNATTENDED_SYSTEM_PROMPT} {WORKFLOW_CLOSING_PROMPT}")]
         );
     }
 
