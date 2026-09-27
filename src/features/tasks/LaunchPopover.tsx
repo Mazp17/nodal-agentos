@@ -133,6 +133,7 @@ function LaunchPopover({ name, repo, executor, anchor, onSettle }: AskLaunchOpti
   };
 
   const anchored = anchorRect.current !== null;
+  // Not visibility:hidden: that makes the popover unfocusable and useFocusTrap's autofocus is lost.
 
   return (
     <>
@@ -140,7 +141,7 @@ function LaunchPopover({ name, repo, executor, anchor, onSettle }: AskLaunchOpti
       <div
         ref={ref}
         className={`lp ${anchored ? "lp-anchored" : "lp-centered"}`}
-        style={anchored ? (pos ?? { visibility: "hidden" }) : undefined}
+        style={anchored ? (pos ?? { opacity: 0 }) : undefined}
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
