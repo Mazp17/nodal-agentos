@@ -8,4 +8,5 @@ export {
   inheritedExecutor,
   resolveExecutor,
   sameExecutor,
+  visibleExecutors,
 } from "./executors";

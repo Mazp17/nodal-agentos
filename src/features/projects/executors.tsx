@@ -3,7 +3,9 @@
 
 import { useEffect, useState } from "react";
 import { listExecutors, type ExecutorInfo } from "../../domain/api";
+import { hiddenSetOf, useHiddenExecutors } from "../../domain/hooks/store";
 import type { Executor } from "../../domain/types";
+import { visibleExecutors } from "../executors";
 
 export const executorKey = (e: Executor): string =>
   e.kind === "agent" ? `agent:${e.source}:${e.name}` : e.kind === "workflow" ? `workflow:${e.name}` : "claude";
@@ -35,19 +37,21 @@ export function ExecutorSelect({
   value,
   onChange,
   repoId,
+  projectId,
   inheritLabel,
 }: {
   id?: string;
   value: Executor | null;
   onChange: (e: Executor | null) => void;
   repoId: string | null;
-  /** The project whose hidden executors apply. */
+  /** The project whose hidden executors are left out (except `value`); unset lists everything. */
   projectId?: string;
   inheritLabel: string;
 }) {
   const { list, error } = useExecutors(repoId);
-  const items = list ?? [];
-  const byKey = new Map(items.map((i) => [executorKey(i.executor), i.executor]));
+  const hidden = useHiddenExecutors(projectId ?? null).data;
+  const byKey = new Map((list ?? []).map((i) => [executorKey(i.executor), i.executor]));
+  const items = visibleExecutors(list ?? [], hiddenSetOf(projectId ? hidden : undefined), repoId, value);
   const current = value ? executorKey(value) : "";
   const missing = value && list && !byKey.has(current);
   const agents = items.filter((i) => i.executor.kind === "agent");
