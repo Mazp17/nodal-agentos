@@ -10,7 +10,17 @@ import { useToast } from "../../ui/Toasts";
 import { Composer, type ComposerSettings } from "./Composer";
 import { Conversation } from "./Conversation";
 import { chatTitle, effortOptions, modelOptions, modeOptions, repoOptions, shortAgo, toTurns } from "./model";
-import { dropOutbox, forgetChat, markInterrupting, pushOutbox, seedChat, useChatStream, useRunStates } from "./stream";
+import {
+  dropOutbox,
+  forgetChat,
+  markInterrupting,
+  pushOutbox,
+  seedChat,
+  setViewedChat,
+  useChatStream,
+  useRunStates,
+  useUnreadChats,
+} from "./stream";
 import "../runs/transcript.css";
 import "./chat.css";
 
@@ -60,6 +70,11 @@ export function ChatView({ project, repos, onOpenTask, focusChatId, onFocused }:
   const chat = stored === null ? null : (list.find((c) => c.id === stored) ?? list[0] ?? null);
   const chatId = chat?.id ?? null;
   const stream = useChatStream(chatId);
+  const unread = useUnreadChats();
+  useEffect(() => {
+    setViewedChat(chatId);
+    return () => setViewedChat(null);
+  }, [chatId]);
   const select = (id: string | null) => {
     setSelection((s) => ({ ...s, [project.id]: id }));
     setMenu(null);
@@ -192,7 +207,7 @@ export function ChatView({ project, repos, onOpenTask, focusChatId, onFocused }:
             const on = c.id === chatId;
             const live = runStates.get(c.id) === "busy";
             return (
-              <div key={c.id} className={`chat-session ${on ? "on" : ""}`}>
+              <div key={c.id} className={`chat-session ${on ? "on" : ""} ${unread.has(c.id) ? "unread" : ""}`}>
                 <button
                   type="button"
                   className="chat-session-pick"
@@ -201,7 +216,11 @@ export function ChatView({ project, repos, onOpenTask, focusChatId, onFocused }:
                   onClick={() => select(c.id)}
                 >
                   <span className="ellipsis chat-session-title">{chatTitle(c)}</span>
-                  {live && <span className="dot dot-sm pulse tone-accent" aria-label="Answering" />}
+                  {live ? (
+                    <span className="dot dot-sm pulse tone-accent" aria-label="Answering" />
+                  ) : (
+                    unread.has(c.id) && <span className="chat-session-unread" role="img" aria-label="Unread" title="Unread" />
+                  )}
                   <span className="chat-session-ago num">{shortAgo(c.updatedAt, now)}</span>
                 </button>
                 <button type="button" className="icon-btn chat-session-del" aria-label={`Delete ${chatTitle(c)}`} title="Delete chat" onClick={() => void remove(c)}>

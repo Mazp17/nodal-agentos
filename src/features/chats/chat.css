@@ -38,6 +38,9 @@
 .chat-session.on .chat-session-pick { color: var(--text); }
 .chat-session-title { flex: 1; }
 .chat-session .dot { color: var(--accent); }
+.chat-session.unread .chat-session-pick { color: var(--text); }
+.chat-session.unread .chat-session-title { font-weight: var(--fw-medium); }
+.chat-session-unread { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--accent); }
 .chat-session-ago { flex: none; font-size: var(--fs-2xs); color: var(--text-dim); white-space: nowrap; }
 .chat-session-del { position: absolute; right: 4px; width: var(--h-xs); height: var(--h-xs); font-size: var(--fs-xs); opacity: 0; background: var(--surface-selected); }
 .chat-session:hover .chat-session-del, .chat-session-del:focus-visible { opacity: 1; }
