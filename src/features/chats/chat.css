@@ -50,30 +50,8 @@
 .chat-scroll { flex: 1; min-height: 0; overflow: auto; display: flex; flex-direction: column; align-items: center; padding: var(--sp-10) 24px var(--sp-8); }
 .chat-thread { width: 100%; max-width: 720px; display: flex; flex-direction: column; gap: 20px; }
 
-.chat-empty {
-  flex: 1;
-  min-height: 0;
-  display: grid;
-  place-items: center;
-  padding: 40px 24px;
-  background: radial-gradient(ellipse 45% 38% at 50% 48%, var(--accent-tint-12), transparent 72%);
-}
-.chat-empty-body { display: flex; flex-direction: column; align-items: center; gap: var(--sp-4); max-width: 460px; text-align: center; }
-.chat-empty-body .brand-mark { margin-bottom: var(--sp-1); }
-.chat-empty-title { margin: 0; font-size: 21px; font-weight: var(--fw-semibold); letter-spacing: var(--tracking-display); }
+.chat-empty { flex: 1; min-height: 0; display: grid; place-items: center; padding: 40px 24px; }
 .chat-empty-text { margin: 0; font-size: var(--fs-lg); color: var(--text-muted); line-height: 1.55; text-wrap: pretty; }
-.chat-suggestions { display: flex; flex-wrap: wrap; justify-content: center; gap: var(--sp-2); margin-top: var(--sp-3); }
-.chat-suggestion {
-  height: var(--h-xl);
-  padding: 0 11px;
-  border-radius: 14px;
-  border: 1px solid var(--border-3);
-  background: var(--fill-1);
-  color: var(--text-3);
-  font-size: var(--fs-md);
-  white-space: nowrap;
-}
-.chat-suggestion:hover { background: var(--fill-5); color: var(--text); }
 
 .chat-user { display: flex; justify-content: flex-end; }
 .chat-bubble {

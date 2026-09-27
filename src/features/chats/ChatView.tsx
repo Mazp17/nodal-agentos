@@ -4,8 +4,8 @@ import { useChats, useClaudeDefaults } from "../../domain/hooks/chats";
 import { invalidate, setData } from "../../domain/hooks/store";
 import type { Chat, Project, Repo } from "../../domain/types";
 import { readJsonPref, writePref } from "../../shell/storage";
-import { BrandMark } from "../../ui/BrandMark";
 import { useConfirm } from "../../ui/ConfirmDialog";
+import { EmptyState } from "../../ui/EmptyState";
 import { useToast } from "../../ui/Toasts";
 import { Composer, type ComposerSettings } from "./Composer";
 import { Conversation } from "./Conversation";
@@ -236,31 +236,28 @@ export function ChatView({ project, repos, onOpenTask, focusChatId, onFocused }:
 
       <section className="chat-main" aria-label={chat ? chatTitle(chat) : "New chat"}>
         {!hasMessages ? (
-          <div className="chat-empty">
-            {chat && stream && !stream.loaded ? (
+          chat && stream && !stream.loaded ? (
+            <div className="chat-empty">
               <p className="chat-empty-text">Loading conversation…</p>
-            ) : chat && stream?.loadError ? (
+            </div>
+          ) : chat && stream?.loadError ? (
+            <div className="chat-empty">
               <p className="chat-empty-text tr-error" role="alert">
                 Couldn't load this conversation: {stream.loadError}
               </p>
-            ) : (
-              <div className="chat-empty-body">
-                <BrandMark size={44} />
-                <h2 className="chat-empty-title">New chat in {project.name}</h2>
-                <p className="chat-empty-text">
-                  Ask about the code, plan a change, or turn the conversation into tasks on the board. Claude sees the whole
-                  project; pick a repo below to narrow it.
-                </p>
-                <div className="chat-suggestions">
-                  {suggestions.map((s) => (
-                    <button key={s} type="button" className="chat-suggestion" onClick={() => void send(s)}>
-                      {s}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
+            </div>
+          ) : (
+            <EmptyState
+              title={`New chat in ${project.name}`}
+              description="Ask about the code, plan a change, or turn the conversation into tasks on the board. Claude sees the whole project; pick a repo below to narrow it."
+            >
+              {suggestions.map((s) => (
+                <button key={s} type="button" className="btn" onClick={() => void send(s)}>
+                  {s}
+                </button>
+              ))}
+            </EmptyState>
+          )
         ) : (
           <div
             ref={scroller}
