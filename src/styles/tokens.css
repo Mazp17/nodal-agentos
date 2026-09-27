@@ -193,6 +193,7 @@
 
 /* Tints: `tint(color, %)` without relative color syntax. */
 :root {
+  --accent-tint-7: color-mix(in oklch, var(--accent) 7%, transparent);
   --accent-tint-12: color-mix(in oklch, var(--accent) 12%, transparent);
   --accent-tint-16: color-mix(in oklch, var(--accent) 16%, transparent);
   --accent-tint-22: color-mix(in oklch, var(--accent) 22%, transparent);
