@@ -3,6 +3,7 @@
 //! Business validations live in `work`; here there's only SQL and integrity errors.
 
 pub mod chats;
+pub mod hidden_executors;
 pub mod projects;
 pub mod relations;
 pub mod repos;

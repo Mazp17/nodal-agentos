@@ -307,13 +307,69 @@ fn migrates_v5_data_to_v6() {
     c.execute_batch("INSERT INTO projects (id, name, key, color, created_at) VALUES ('p1', 'Pay', 'PAY', '#fff', 1);")
         .unwrap();
     migrate(&mut c).unwrap();
-    assert_eq!(user_version(&c).unwrap(), 6);
+    assert_eq!(user_version(&c).unwrap(), MIGRATIONS.len() as i64);
     let p = get_project(&c, "p1").unwrap().unwrap();
     assert_eq!((p.name.as_str(), p.root_path), ("Pay", None));
 
     let q = Project { root_path: Some("/Users/me/Code/acme".into()), ..project("p2", "ACME") };
     insert_project(&c, &q).unwrap();
     assert_eq!(get_project(&c, "p2").unwrap(), Some(q));
+}
+
+#[test]
+fn migrates_v6_data_to_v7() {
+    let mut c = Connection::open_in_memory().unwrap();
+    c.pragma_update(None, "foreign_keys", "ON").unwrap();
+    for sql in &MIGRATIONS[..6] {
+        c.execute_batch(sql).unwrap();
+    }
+    c.pragma_update(None, "user_version", 6).unwrap();
+    c.execute_batch(
+        r#"INSERT INTO projects (id, name, key, color, created_at) VALUES ('p1', 'Pay', 'PAY', '#fff', 1);
+         INSERT INTO repos (id, project_id, path, name, created_at) VALUES ('r1', 'p1', '/r1', 'web', 1);"#,
+    )
+    .unwrap();
+    migrate(&mut c).unwrap();
+    assert_eq!(user_version(&c).unwrap(), MIGRATIONS.len() as i64);
+    assert_eq!(count(&c, "project_hidden_executors"), 0);
+    assert_eq!(get_repo(&c, "r1").unwrap().unwrap().name, "web");
+    c.execute(
+        "INSERT INTO project_hidden_executors (project_id, kind, source, name, repo_id)
+         VALUES ('p1', 'agent', 'repo', 'code-reviewer', 'r1')",
+        [],
+    )
+    .unwrap();
+    assert_eq!(count(&c, "project_hidden_executors"), 1);
+}
+
+#[test]
+fn hidden_executors_follow_their_project_and_repo() {
+    let db = conn();
+    let c = db.lock().unwrap();
+    seed(&c);
+    insert_project(&c, &project("p2", "OPS")).unwrap();
+    let ins = |project: &str, kind: &str, source: &str, repo: Option<&str>| {
+        c.execute(
+            "INSERT INTO project_hidden_executors (project_id, kind, source, name, repo_id) VALUES (?1, ?2, ?3, 'x', ?4)",
+            rusqlite::params![project, kind, source, repo],
+        )
+    };
+    ins("p1", "agent", "repo", Some("r1")).unwrap();
+    ins("p1", "agent", "user", None).unwrap();
+    ins("p1", "workflow", "user", None).unwrap();
+    // A NULL repo doesn't let the same entry repeat.
+    assert!(ins("p1", "agent", "user", None).is_err());
+    // The repo must belong to the project, and only repo-level entries carry one.
+    assert!(ins("p2", "agent", "repo", Some("r1")).is_err());
+    assert!(ins("p1", "agent", "user", Some("r1")).is_err());
+    assert!(ins("p1", "agent", "repo", None).is_err());
+    assert!(ins("p1", "claude", "user", None).is_err());
+    assert!(ins("missing", "agent", "user", None).is_err());
+
+    c.execute("DELETE FROM repos WHERE id = 'r1'", []).unwrap();
+    assert_eq!(count(&c, "project_hidden_executors"), 2);
+    c.execute("DELETE FROM projects WHERE id = 'p1'", []).unwrap();
+    assert_eq!(count(&c, "project_hidden_executors"), 0);
 }
 
 #[test]

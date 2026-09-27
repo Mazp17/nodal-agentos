@@ -390,6 +390,7 @@ export function TaskPanel({ taskId, onClose, onOpenRun, onOpenDiff, onOpenTask, 
           <ExecutorPicker
             variant="chip"
             repoId={repo?.id ?? null}
+            projectId={task.projectId}
             value={task.assignee}
             inherited={inherited}
             label="Assignee"
@@ -492,6 +493,7 @@ export function TaskPanel({ taskId, onClose, onOpenRun, onOpenDiff, onOpenTask, 
                   <span className="tk-muted">Executor for this run</span>
                   <ExecutorPicker
                     repoId={repo.id}
+                    projectId={task.projectId}
                     value={launchExec}
                     inherited={assignee}
                     label="Executor for this run"

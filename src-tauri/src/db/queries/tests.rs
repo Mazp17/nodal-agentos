@@ -180,3 +180,54 @@ fn chats_crud_and_order() {
     assert!(chats::delete(&c, "c1").is_err());
     assert!(chats::update(&c, &c1).is_err());
 }
+
+#[test]
+fn hidden_executors_toggle_per_source_and_repo() {
+    let db = open_in_memory().unwrap();
+    let c = db.lock().unwrap();
+    seed(&c);
+    insert_repo(&c, &repo_of("r2", "p1", "/r2")).unwrap();
+    let key = |kind, source, repo: Option<&str>| HiddenExecutor {
+        kind,
+        source,
+        name: "code-reviewer".into(),
+        repo_id: repo.map(Into::into),
+    };
+    let user = key(HiddenKind::Agent, AgentSource::User, None);
+    let r1 = key(HiddenKind::Agent, AgentSource::Repo, Some("r1"));
+    let r2 = key(HiddenKind::Agent, AgentSource::Repo, Some("r2"));
+    let wf = key(HiddenKind::Workflow, AgentSource::User, None);
+
+    hidden_executors::set(&c, "p1", &r1, true).unwrap();
+    hidden_executors::set(&c, "p1", &r1, true).unwrap();
+    assert_eq!(hidden_executors::list(&c, "p1").unwrap(), vec![r1.clone()]);
+    hidden_executors::set(&c, "p1", &user, true).unwrap();
+    hidden_executors::set(&c, "p1", &wf, true).unwrap();
+    hidden_executors::set(&c, "p1", &r2, true).unwrap();
+    assert_eq!(hidden_executors::list(&c, "p1").unwrap(), vec![r1.clone(), r2.clone(), user.clone(), wf.clone()]);
+
+    // Showing one leaves its same-name siblings hidden.
+    hidden_executors::set(&c, "p1", &r1, false).unwrap();
+    hidden_executors::set(&c, "p1", &user, false).unwrap();
+    hidden_executors::set(&c, "p1", &user, false).unwrap();
+    assert_eq!(hidden_executors::list(&c, "p1").unwrap(), vec![r2.clone(), wf.clone()]);
+
+    assert!(hidden_executors::set(&c, "p1", &key(HiddenKind::Agent, AgentSource::Repo, None), true).is_err());
+    assert!(hidden_executors::set(&c, "p1", &key(HiddenKind::Agent, AgentSource::Plugin, Some("r1")), true).is_err());
+    assert!(hidden_executors::set(&c, "p1", &HiddenExecutor { name: " ".into(), ..user.clone() }, true).is_err());
+    assert!(hidden_executors::set(&c, "p1", &HiddenExecutor { name: "x".repeat(201), ..user.clone() }, true).is_err());
+    assert!(hidden_executors::set(&c, "p1", &key(HiddenKind::Agent, AgentSource::Repo, Some("nope")), true).is_err());
+    assert!(hidden_executors::set(&c, "nope", &user, true).is_err());
+    assert!(hidden_executors::list(&c, "nope").unwrap().is_empty());
+}
+
+#[test]
+fn hidden_executor_rejects_claude_and_unknown_fields() {
+    let ok: HiddenExecutor =
+        serde_json::from_str(r#"{"kind":"workflow","source":"repo","name":"plan-task","repoId":"r1"}"#).unwrap();
+    assert_eq!(ok.repo_id.as_deref(), Some("r1"));
+    let bare: HiddenExecutor = serde_json::from_str(r#"{"kind":"agent","source":"plugin","name":"kit:sec"}"#).unwrap();
+    assert_eq!(bare.repo_id, None);
+    assert!(serde_json::from_str::<HiddenExecutor>(r#"{"kind":"claude","source":"user","name":"claude"}"#).is_err());
+    assert!(serde_json::from_str::<HiddenExecutor>(r#"{"kind":"agent","source":"user","name":"a","extra":1}"#).is_err());
+}

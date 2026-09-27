@@ -21,6 +21,7 @@ import type {
   Executor,
   ExternalState,
   Finish,
+  HiddenExecutor,
   Isolation,
   LaunchOptions,
   Priority,
@@ -167,6 +168,7 @@ export interface ExecutorInfo {
   reviews: boolean;
   /** Definition file, for agents and workflows. */
   path: string | null;
+  /** Agents: user/repo/plugin; workflows: user/repo; Claude: `null`. */
   source: AgentSource | null;
 }
 
@@ -419,6 +421,12 @@ export const worktreeStatus = (taskId: string) => invoke<WorktreeStatus>("worktr
 
 /** Agents, workflows and Claude; with `repoId` it adds the repo's own. */
 export const listExecutors = (repoId: string | null) => invoke<ExecutorInfo[]>("list_executors", { repoId });
+/** Agents and workflows the project hides from its pickers (`listExecutors` stays unfiltered). */
+export const listHiddenExecutors = (projectId: string) =>
+  invoke<HiddenExecutor[]>("list_hidden_executors", { projectId });
+/** Hides or shows one agent or workflow in the project; resolves with the project's new set. */
+export const setExecutorHidden = (projectId: string, key: HiddenExecutor, hidden: boolean) =>
+  invoke<HiddenExecutor[]>("set_executor_hidden", { projectId, key, hidden });
 /** The task's runs (or all with `null`), most recent first. */
 export const listTaskRuns = (taskId: string | null, projectId: string | null = null) =>
   invoke<Run[]>("list_task_runs", { taskId, projectId });

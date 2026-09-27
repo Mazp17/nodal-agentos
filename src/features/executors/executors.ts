@@ -1,3 +1,5 @@
+import type { ExecutorInfo } from "../../domain/api";
+import { isExecutorHidden } from "../../domain/hooks/store";
 import type { Executor, Project, Repo, Task } from "../../domain/types";
 
 export const CLAUDE: Executor = { kind: "claude" };
@@ -42,4 +44,18 @@ export function resolveExecutor(
   global: Executor | null | undefined = null,
 ): Executor {
   return task?.assignee ?? inheritedExecutor(repo, project, global);
+}
+
+/**
+ * The catalog minus what the project hides; `keep` (the current value) stays so a hidden
+ * assignment still shows as selected instead of reading as a deleted executor.
+ */
+export function visibleExecutors(
+  catalog: readonly ExecutorInfo[],
+  hidden: ReadonlySet<string>,
+  repoId: string | null,
+  keep: Executor | null | undefined,
+): ExecutorInfo[] {
+  if (hidden.size === 0) return [...catalog];
+  return catalog.filter((i) => sameExecutor(i.executor, keep) || !isExecutorHidden(hidden, i, repoId));
 }

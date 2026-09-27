@@ -13,17 +13,19 @@ import {
   getSettings,
   onChanged,
   listExecutors,
+  listHiddenExecutors,
   listProjects,
   listRepos,
   listTaskRelations,
   listTasks,
   readTaskPlan,
+  setExecutorHidden,
   worktreeStatus,
   type ChangedKind,
   type ExecutorInfo,
   type WorktreeStatus,
 } from "../api";
-import type { Project, Repo, Settings, Task, TaskRelation } from "../types";
+import type { HiddenExecutor, Project, Repo, Settings, Task, TaskRelation } from "../types";
 
 export type Resource = "projects" | "repos" | "tasks" | "runs" | "settings" | "sources" | "chats";
 
@@ -332,3 +334,55 @@ export const useWorktreeStatus = (taskId: string | null) =>
 /** Executor catalog; it reads disk, so it isn't repeated (only on invalidation). */
 export const useExecutors = (repoId: string | null) =>
   usePolled<ExecutorInfo[]>(`executors:${repoId ?? "*"}`, () => listExecutors(repoId), ["repos"], 0);
+
+// ---------- Hidden executors (per project) ----------
+
+const hiddenKey = (projectId: string) => `hiddenExecutors:${projectId}`;
+
+/** What the project hides from its pickers; re-read on any `projects` notice. */
+export const useHiddenExecutors = (projectId: string | null) =>
+  usePolled<HiddenExecutor[]>(
+    projectId ? hiddenKey(projectId) : null,
+    () => listHiddenExecutors(projectId as string),
+    ["projects"],
+    0,
+  );
+
+/**
+ * The entry that hides `info` when its catalog was read with `repoId`; `null` for plain
+ * Claude (never hidden) and for a repo-level one read without a repo.
+ */
+export function hiddenKeyOf(info: ExecutorInfo, repoId: string | null): HiddenExecutor | null {
+  const ex = info.executor;
+  if (ex.kind === "claude") return null;
+  const source = info.source ?? (ex.kind === "agent" ? ex.source : "user");
+  if (source === "repo" && !repoId) return null;
+  return { kind: ex.kind, source, name: ex.name, repoId: source === "repo" ? repoId : null };
+}
+
+/** Stable id of an entry, for `Set` lookups. */
+export const hiddenId = (k: HiddenExecutor) => `${k.kind}:${k.source}:${k.repoId ?? ""}:${k.name}`;
+
+/** Ids of the project's hidden entries, for `isExecutorHidden`. */
+export const hiddenSetOf = (keys: readonly HiddenExecutor[] | undefined): ReadonlySet<string> =>
+  new Set((keys ?? []).map(hiddenId));
+
+export function isExecutorHidden(hidden: ReadonlySet<string>, info: ExecutorInfo, repoId: string | null): boolean {
+  const key = hiddenKeyOf(info, repoId);
+  return key !== null && hidden.has(hiddenId(key));
+}
+
+/** Hides or shows `key` in the project (optimistic; the server's set replaces it). */
+export async function toggleHiddenExecutor(projectId: string, key: HiddenExecutor, hidden: boolean): Promise<void> {
+  const id = hiddenId(key);
+  setData<HiddenExecutor[]>(hiddenKey(projectId), (prev) =>
+    hidden ? (prev.some((k) => hiddenId(k) === id) ? prev : [...prev, key]) : prev.filter((k) => hiddenId(k) !== id),
+  );
+  try {
+    const next = await setExecutorHidden(projectId, key, hidden);
+    setData<HiddenExecutor[]>(hiddenKey(projectId), () => next);
+  } catch (err) {
+    await invalidate("projects");
+    throw err;
+  }
+}

@@ -82,3 +82,53 @@
 .repo-sync-status.tone-warn, .repo-sync-status.tone-danger { color: var(--tone); }
 .executor-select { min-width: 220px; max-width: 100%; }
 .field-textarea { height: auto; min-height: 52px; padding-top: var(--sp-2); padding-bottom: var(--sp-2); resize: vertical; line-height: var(--lh-snug); }
+
+/* Agents & workflows */
+.aw-toolbar { display: flex; align-items: center; gap: var(--sp-4); flex-wrap: wrap; }
+.aw-search { width: 200px; }
+.aw-summary { font-size: var(--fs-sm); color: var(--text-muted); white-space: nowrap; }
+.aw-group-head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-3);
+  padding: var(--sp-4) var(--sp-7);
+  border-bottom: 1px solid var(--border);
+}
+.aw-group-title { font-size: var(--fs-base); font-weight: var(--fw-semibold); }
+.aw-group-hint { font-size: var(--fs-xs); color: var(--text-dim); overflow-wrap: anywhere; }
+.aw-group-count { font-size: var(--fs-sm); color: var(--text-muted); white-space: nowrap; }
+.aw-empty { padding: var(--sp-5) var(--sp-7); font-size: var(--fs-sm); color: var(--text-dim); }
+.aw-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-4);
+  padding: var(--sp-4) var(--sp-7);
+  border-bottom: 1px solid var(--border);
+}
+.aw-row:last-child { border-bottom: 0; }
+.aw-row-off .aw-row-text, .aw-row-off .aw-mark { opacity: 0.55; }
+.aw-mark {
+  width: 18px;
+  height: 18px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  border-radius: var(--r-md);
+  background: var(--fill-5);
+  color: var(--text-muted);
+  font-size: var(--fs-2xs);
+  font-weight: var(--fw-semibold);
+}
+.aw-mark-claude { background: var(--accent); color: #fff; }
+.aw-row-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: var(--sp-0); }
+.aw-row-name { font-size: var(--fs-md); overflow-wrap: anywhere; }
+.aw-row-desc {
+  font-size: var(--fs-sm);
+  color: var(--text-dim);
+  line-height: var(--lh-snug);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.aw-flags { display: flex; gap: var(--sp-2); flex-wrap: wrap; justify-content: flex-end; flex: none; max-width: 40%; }

@@ -16,7 +16,7 @@ use serde::Serialize;
 use serde_json::Value;
 
 use crate::domain::{AgentSource, Executor};
-use crate::runs::workflows::{self, WorkflowInfo};
+use crate::runs::workflows::{self, WorkflowInfo, WorkflowSource};
 use crate::util::clip_chars;
 
 const DESCRIPTION_MAX: usize = 400;
@@ -304,7 +304,10 @@ pub fn workflow_info(w: &WorkflowInfo) -> ExecutorInfo {
         manages_source: w.manages_source.clone(),
         reviews: w.reviews,
         path: Some(w.path.clone()),
-        source: None,
+        source: Some(match w.source {
+            WorkflowSource::User => AgentSource::User,
+            WorkflowSource::Repo => AgentSource::Repo,
+        }),
     }
 }
 
@@ -439,6 +442,7 @@ mod tests {
         let li = &list[4];
         assert_eq!(li.manages_source.as_deref(), Some("linear"));
         assert!(li.reviews);
+        assert_eq!(li.source, Some(AgentSource::User));
         assert!(find_workflow(Some(&claude), Some(&repo), "plan-task").unwrap().reviews);
         assert!(find_workflow(Some(&claude), None, "nope").is_none());
         // No repo: only the user's agents and user-scoped plugins.

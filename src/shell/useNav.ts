@@ -9,7 +9,7 @@ export type ProjectPage = "board" | "chat" | "tasks" | "runs" | "activity" | "pr
 export type Page = ProjectPage | "settings" | "run";
 
 export type SettingsSection = "integrations" | "execution" | "updates" | "diagnostics";
-export type ProjectSection = "general" | "repos" | "sources";
+export type ProjectSection = "general" | "repos" | "sources" | "agents";
 
 export interface Route {
   /** `null`: global view ("All projects", Runs, Settings). */
