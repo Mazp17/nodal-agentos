@@ -3,6 +3,7 @@
 
 import { useCallback, useEffect, useSyncExternalStore } from "react";
 import {
+  listChats,
   getChatLive,
   getChatTranscript,
   onChatEvent,
@@ -10,7 +11,10 @@ import {
   type ChatRunState,
   type PermissionRequest,
 } from "../../domain/api";
+import { readJsonPref, writePref } from "../../shell/storage";
 import type { TranscriptItem } from "../runs/types";
+import { appFocused, notifyChat, preview } from "./alerts";
+import { chatTitle, toolLabel } from "./model";
 
 export interface ChatStream {
   /** `false` while the history loads. */
@@ -81,6 +85,79 @@ function setRunState(chatId: string, state: ChatRunState | null) {
   stateListeners.forEach((l) => l());
 }
 
+// ---------- Unread ----------
+
+/** Chats with an answer or a question the user hasn't seen → their project, kept across launches. */
+const UNREAD_PREF = "chatUnread";
+const isUnread = (v: unknown): v is Record<string, string> =>
+  !!v && typeof v === "object" && !Array.isArray(v) && Object.values(v).every((x) => typeof x === "string");
+let unread: ReadonlyMap<string, string> = new Map(Object.entries(readJsonPref(UNREAD_PREF, {}, isUnread)));
+const unreadListeners = new Set<() => void>();
+/** The chat on the Chat page, or `null` on any other page. */
+let viewed: string | null = null;
+
+/** Marks `chatId` unread in `projectId`, or read with `null`. */
+function setUnread(chatId: string, projectId: string | null) {
+  if ((unread.get(chatId) ?? null) === projectId) return;
+  const next = new Map(unread);
+  if (projectId) next.set(chatId, projectId);
+  else next.delete(chatId);
+  unread = next;
+  writePref(UNREAD_PREF, JSON.stringify(Object.fromEntries(next)));
+  unreadListeners.forEach((l) => l());
+}
+
+/** Drops unread chats of projects that no longer exist (deleted with their chats). */
+export function pruneUnread(projectIds: ReadonlySet<string>) {
+  for (const [chatId, projectId] of unread) if (!projectIds.has(projectId)) setUnread(chatId, null);
+}
+
+/** The Chat page shows `chatId` (`null` when it closes): it's read. */
+export function setViewedChat(chatId: string | null) {
+  viewed = chatId;
+  if (chatId) setUnread(chatId, null);
+}
+
+/** Something in `chatId` needs the user: unread if it isn't the chat open, notified unless on screen. */
+async function flag(chatId: string, body: string) {
+  const chat = await listChats(null).then(
+    (cs) => cs.find((c) => c.id === chatId),
+    () => undefined,
+  );
+  if (chat && viewed !== chatId) setUnread(chatId, chat.projectId);
+  const focused = await appFocused();
+  // On screen: Nodal in front with this chat open.
+  if (!(focused && viewed === chatId)) void notifyChat(chat ? chatTitle(chat) : "Chat", body, focused);
+}
+
+/** Answer text for a notification: the turn's result, else the last text streamed. */
+function answerOf(chatId: string, result: string | null): string {
+  const items = streams.get(chatId)?.items ?? [];
+  const last = [...items].reverse().find((i) => i.kind === "text");
+  return preview(result) || preview(last?.kind === "text" ? last.text : null) || "Claude answered.";
+}
+
+/** The last turn's notice, held until the chat goes idle: messages queued mid-answer notify once. */
+const held = new Map<string, string>();
+
+function alertOn(chatId: string, e: ChatEvent) {
+  if (e.type === "turnEnd") {
+    // A stop the user asked for needs no notice.
+    if (!e.ok && streams.get(chatId)?.interrupting) held.delete(chatId);
+    else held.set(chatId, e.ok ? answerOf(chatId, e.result) : `The answer ended early${e.result ? `: ${preview(e.result)}` : "."}`);
+  } else if (e.type === "error") {
+    // The process died mid-answer: no `turnEnd` follows, only `state: stopped`.
+    held.set(chatId, `The chat stopped: ${preview(e.message)}`);
+  } else if (e.type === "state" && e.state !== "busy") {
+    const body = held.get(chatId);
+    held.delete(chatId);
+    if (body) void flag(chatId, body);
+  } else if (e.type === "permissionRequest") {
+    if (streams.get(chatId)?.pending.some((p) => p.requestId === e.requestId)) return;
+    void flag(chatId, `Needs your approval to use ${toolLabel(e.toolName)}${e.summary ? `: ${preview(e.summary, 100)}` : ""}`);
+  }
+}
+
 const withResult = (items: TranscriptItem[], id: string, apply: (t: Extract<TranscriptItem, { kind: "toolUse" }>) => TranscriptItem) => {
   const i = items.findIndex((it) => it.kind === "toolUse" && it.id === id);
   if (i < 0) return items;
@@ -88,6 +165,15 @@ const withResult = (items: TranscriptItem[], id: string, apply: (t: Extract<Tran
   next[i] = apply(items[i] as Extract<TranscriptItem, { kind: "toolUse" }>);
   return next;
 };
+
+/** Chats with something unread → their project. */
+export function useUnreadChats(): ReadonlyMap<string, string> {
+  const subscribe = useCallback((l: () => void) => {
+    unreadListeners.add(l);
+    return () => unreadListeners.delete(l);
+  }, []);
+  return useSyncExternalStore(subscribe, () => unread);
+}
 
 /** Applies one streamed event (exported for tests of the reducer). */
 export function reduce(s: ChatStream, e: ChatEvent): ChatStream {
@@ -140,14 +226,29 @@ export function reduce(s: ChatStream, e: ChatEvent): ChatStream {
 
 let unlisten: Promise<() => void> | null = null;
 
-function listen() {
+/**
+ * The listener of whichever copy of this module listens. Vite's HMR only disposes the module
+ * that accepts an update (a component importing this one), so an edited copy would otherwise
+ * keep listening next to the new one and every event (and notice) would arrive twice.
+ */
+const HANDLE = "__nodalChatListener";
+const slot = globalThis as { [HANDLE]?: Promise<() => void> };
+
+/** Listens to every chat's events; the app calls it once so answers notify from any page. */
+export function listen() {
   if (unlisten || typeof window === "undefined" || !("__TAURI_INTERNALS__" in window)) return;
+  void slot[HANDLE]?.then(
+    (u) => u(),
+    () => {},
+  );
   unlisten = onChatEvent(({ chatId, event }) => {
     if (event.type === "state") setRunState(chatId, event.state);
+    // Before reducing: `turnEnd` clears `interrupting`.
+    alertOn(chatId, event);
     if (streams.has(chatId)) set(chatId, (s) => reduce(s, event));
   });
+  slot[HANDLE] = unlisten;
   unlisten.catch((err: unknown) => console.error("nodal://chat", err));
-  import.meta.hot?.dispose(() => void unlisten?.then((u) => u(), () => {}));
 }
 
 /** Reads the chat's history and live state. `fresh`: a new chat with nothing to read. */
@@ -190,7 +291,8 @@ export function seedChat(chatId: string) {
 
 /** Before sending: shows the message until Claude echoes it. */
 export function pushOutbox(chatId: string, text: string) {
-  set(chatId, (s) => ({ ...s, outbox: [...s.outbox, text], notice: null }));
+  // A stop that got no answer (the turn had just ended) must not mark the next one as stopped.
+  set(chatId, (s) => ({ ...s, outbox: [...s.outbox, text], notice: null, interrupting: false }));
 }
 
 export function dropOutbox(chatId: string, text: string) {
@@ -206,6 +308,7 @@ export function markInterrupting(chatId: string, on: boolean) {
 
 export function forgetChat(chatId: string) {
   streams.delete(chatId);
+  setUnread(chatId, null);
   setRunState(chatId, null);
   notify(chatId);
 }

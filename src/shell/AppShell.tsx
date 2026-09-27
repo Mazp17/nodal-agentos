@@ -9,6 +9,8 @@ import { taskKey, type Project } from "../domain/types";
 import { BoardView } from "../features/board";
 import { ChatView } from "../features/chats";
 import { chatTitle } from "../features/chats/model";
+import { setInAppNotice } from "../features/chats/alerts";
+import { listen as listenToChats, pruneUnread, useUnreadChats } from "../features/chats/stream";
 import { Onboarding } from "../features/onboarding/Onboarding";
 import { CreateProjectDialog } from "../features/projects/CreateProjectDialog";
 import { resolveExecutor } from "../features/executors";
@@ -21,6 +23,7 @@ import { NewTaskDialog, TaskPanel, TasksView, useAskLaunch, useLaunch } from "..
 import { useUpdates } from "../features/updates/useUpdates";
 import { CommandPalette, type PaletteItem } from "./palette/CommandPalette";
 import { Sidebar, type ProviderFoot } from "./Sidebar";
+import { useToast } from "../ui/Toasts";
 import { Topbar } from "./Topbar";
 import { PAGE_TITLE, useNav, type Page, type ProjectPage } from "./useNav";
 import { useWorkStatus } from "./useWorkStatus";
@@ -37,6 +40,7 @@ export function AppShell() {
   const ctx = useProjects();
   const provider = useProviderStatus("linear");
   const nav = useNav();
+  const toast = useToast();
   const work = useWorkStatus();
   const queue = useQueueSummary();
   const legacy = useLegacyImport();
@@ -62,6 +66,18 @@ export function AppShell() {
   // On a run, the sidebar and breadcrumb show where it came from.
   const visible = route.page === "run" ? nav.runFrom : route;
   const projectRepos = project ? ctx.reposOf(project.id) : [];
+
+  // Chat answers notify from any page, not only once the Chat page has opened.
+  useEffect(listenToChats, []);
+  const unreadChats = useUnreadChats();
+  const unreadProjects = useMemo(() => new Set(unreadChats.values()), [unreadChats]);
+  useEffect(() => {
+    if (ctx.loaded && !ctx.error) pruneUnread(new Set(ctx.projectById.keys()));
+  }, [ctx.loaded, ctx.error, ctx.projectById]);
+  useEffect(() => {
+    setInAppNotice((title, body) => toast(title, body, "info"));
+    return () => setInAppNotice(null);
+  }, [toast]);
 
   // Project deleted (from here or elsewhere): go back to "All projects".
   const { forgetProject } = nav;
@@ -414,6 +430,7 @@ export function AppShell() {
         activeTotal={work.activeTotal}
         activeByProject={work.activeByProject}
         mappingDrift={mappingDrift}
+        unreadChats={unreadProjects}
         provider={foot}
         version={updates.version}
         updateAvailable={updates.available}

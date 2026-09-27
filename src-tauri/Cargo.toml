@@ -31,6 +31,7 @@ keyring = { version = "3", features = ["apple-native"] }
 tauri-plugin-dialog = "2"
 rusqlite = { version = "0.40.2", features = ["bundled"] }
 tauri-plugin-updater = "2"
+tauri-plugin-notification = "~2.4.0"
 
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration

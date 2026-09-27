@@ -4,6 +4,7 @@ import { invalidate, useProjectList, useSettings } from "../../domain/hooks/stor
 import { taskKey, type Repo } from "../../domain/types";
 import { readJsonPref, writePref } from "../../shell/storage";
 import { BrandMark } from "../../ui/BrandMark";
+import { Marker, MarkerContent, MarkerIcon } from "@/ui/marker";
 import { SafeMarkdown } from "../../ui/Markdown";
 import { useToast } from "../../ui/Toasts";
 import { inheritedExecutor } from "../executors";
@@ -11,7 +12,17 @@ import { DiffLines } from "../runs/DiffLines";
 import { useAskLaunch, useLaunch, type RunConfig } from "../tasks";
 import { PriorityBars } from "../tasks/bits";
 import { PRIORITY_LABEL, STATUS_META } from "../tasks/status";
-import { readProposal, resultMeta, toolLabel, type Proposal, type ToolUse, type Turn } from "./model";
+import {
+  readProposal,
+  resultMeta,
+  shortArg,
+  toolLabel,
+  toolVerb,
+  turnChanges,
+  type Proposal,
+  type ToolUse,
+  type Turn,
+} from "./model";
 import type { ChatStream } from "./stream";
 
 // ---------- Tool block ----------
@@ -19,13 +30,37 @@ import type { ChatStream } from "./stream";
 /** Diffs up to this many lines start open; longer ones wait for a click. */
 const DIFF_OPEN_MAX = 20;
 
-function ToolRow({ item, first, denied, asking }: { item: ToolUse; first: boolean; denied: string | undefined; asking: boolean }) {
+type ToolState = "running" | "asking" | "ok" | "error" | "stopped";
+
+/** The badge before a tool row: a check once done, a pulsing dot while it runs. */
+function ToolIcon({ state }: { state: ToolState }) {
+  return (
+    <MarkerIcon className={`chat-mk-icon chat-mk-${state}`}>
+      {state === "ok" ? "✓" : state === "error" ? "✕" : state === "asking" ? "!" : state === "stopped" ? "–" : null}
+    </MarkerIcon>
+  );
+}
+
+function ToolRow({
+  item,
+  repos,
+  denied,
+  asking,
+  live,
+}: {
+  item: ToolUse;
+  repos: Repo[];
+  denied: string | undefined;
+  asking: boolean;
+  live: boolean;
+}) {
   const [toggled, setOpen] = useState<boolean | null>(null);
   const r = item.result;
   const patch = !denied && r?.patch ? r.patch : null;
   const lines = patch ? patch.file.hunks.reduce((n, h) => n + h.lines.length, 0) : 0;
   const open = toggled ?? (patch != null && lines <= DIFF_OPEN_MAX);
-  const tone = denied || r?.isError ? "danger" : asking ? "warn" : r ? "ok" : "accent";
+  // A call without a result after the turn ended was interrupted.
+  const state: ToolState = denied || r?.isError ? "error" : asking ? "asking" : r ? "ok" : live ? "running" : "stopped";
   const meta: ReactNode = denied ? (
     "Denied"
   ) : asking ? (
@@ -36,32 +71,53 @@ function ToolRow({ item, first, denied, asking }: { item: ToolUse; first: boolea
     </>
   ) : r ? (
     r.isError ? "Error" : resultMeta(r.text)
-  ) : (
-    "Running…"
+  ) : state === "stopped" ? (
+    "No result"
+  ) : null;
+  const expandable = item.input != null || r != null || denied != null;
+  const arg = shortArg(item.summary, repos);
+  const label = (
+    <>
+      <ToolIcon state={state} />
+      <MarkerContent className={`chat-mk-text ${state === "running" ? "shimmer" : ""}`}>
+        <span className="chat-mk-verb">{toolVerb(item.name, state === "running")}</span>
+        {arg && <span className="chat-mk-arg">{arg}</span>}
+        {meta && <span className={`chat-mk-meta ${state === "error" ? "chat-mk-meta-err" : ""}`}>{meta}</span>}
+        {expandable && (
+          <span className="chat-mk-chev" aria-hidden>
+            {open ? "▾" : "▸"}
+          </span>
+        )}
+      </MarkerContent>
+    </>
   );
-  const expandable = item.input != null || r != null;
   return (
-    <div className={`chat-tool ${first ? "" : "chat-tool-sep"}`}>
-      <button
-        type="button"
-        className="chat-tool-head"
-        aria-expanded={expandable ? open : undefined}
-        disabled={!expandable}
-        onClick={() => setOpen(!open)}
-      >
-        <span className={`dot dot-sm tone-${tone} ${!r && !denied && !asking ? "pulse" : ""}`} aria-hidden />
-        <span className="chat-tool-name">{toolLabel(item.name)}</span>
-        <span className="chat-tool-arg ellipsis">{item.summary ?? ""}</span>
-        <span className={`chat-tool-meta ${tone === "danger" ? "chat-tool-meta-err" : ""}`}>{meta}</span>
-      </button>
+    <div className="chat-tool">
+      {expandable ? (
+        <Marker asChild className="chat-mk chat-mk-btn">
+          <button type="button" aria-expanded={open} onClick={() => setOpen(!open)}>
+            {label}
+          </button>
+        </Marker>
+      ) : (
+        <Marker className="chat-mk">
+          {label}
+        </Marker>
+      )}
       {open && patch && (
-        <div className="chat-tool-diff">
+        <div className="chat-tool-panel">
+          <div className="chat-tool-panel-head">
+            <span className="chat-tool-panel-path ellipsis">{shortArg(patch.file.path, repos)}</span>
+            <span className="chat-tool-panel-hunks">
+              {patch.file.hunks.length} {patch.file.hunks.length === 1 ? "hunk" : "hunks"}
+            </span>
+          </div>
           <DiffLines file={patch.file} />
           {patch.truncated && <p className="diff-note">Showing the first {lines} lines.</p>}
         </div>
       )}
       {open && !patch && (
-        <div className="chat-tool-body">
+        <div className="chat-tool-panel chat-tool-body">
           {item.input && <pre className="tr-pre">{item.input}</pre>}
           {denied && <pre className="tr-pre">{denied}</pre>}
           {r && (
@@ -76,7 +132,18 @@ function ToolRow({ item, first, denied, asking }: { item: ToolUse; first: boolea
   );
 }
 
-export function ToolBlock({ items, stream }: { items: ToolUse[]; stream: ChatStream }) {
+export function ToolBlock({
+  items,
+  stream,
+  repos,
+  live,
+}: {
+  items: ToolUse[];
+  stream: ChatStream;
+  repos: Repo[];
+  /** The answer is still being written: calls without a result are running. */
+  live: boolean;
+}) {
   const asking = new Set(stream.pending.map((p) => p.toolUseId).filter(Boolean));
   return (
     <div className="chat-tools" role="group" aria-label="Tool calls">
@@ -84,9 +151,10 @@ export function ToolBlock({ items, stream }: { items: ToolUse[]; stream: ChatStr
         <ToolRow
           key={it.id ?? i}
           item={it}
-          first={i === 0}
+          repos={repos}
           denied={it.id ? stream.denied[it.id] : undefined}
           asking={!!it.id && asking.has(it.id)}
+          live={live}
         />
       ))}
     </div>
@@ -312,33 +380,69 @@ function AiTurn({ children }: { children: ReactNode }) {
   );
 }
 
+/** The files an answer changed, under its tool calls. */
+function ChangesMarker({ changes }: { changes: NonNullable<ReturnType<typeof turnChanges>> }) {
+  return (
+    <Marker variant="border" className="chat-mk chat-mk-changes">
+      <MarkerIcon className="chat-mk-icon chat-mk-changed">●</MarkerIcon>
+      <MarkerContent className="chat-mk-text">
+        {changes.files} {changes.files === 1 ? "file" : "files"} changed
+        <span className="chat-mk-meta">
+          <span className="diff-add">+{changes.additions}</span> <span className="diff-del">−{changes.deletions}</span>
+        </span>
+      </MarkerContent>
+    </Marker>
+  );
+}
+
 export function Conversation({ chatId, turns, stream, projectId, projectKey, repos, onOpenTask }: ConversationProps) {
   const busy = stream.state === "busy" || stream.outbox.length > 0;
-  const lastTool = [...stream.items].reverse().find((i): i is ToolUse => i.kind === "toolUse");
+  const last = turns[turns.length - 1];
+  const lastPart = last?.kind === "ai" ? last.parts[last.parts.length - 1] : undefined;
+  const waiting = new Set(stream.pending.map((p) => p.toolUseId).filter(Boolean));
+  // Calls of the answer being written that still run (not waiting for approval nor denied).
+  const running =
+    stream.state === "busy" && !stream.streaming && !stream.thinking && lastPart?.kind === "tools"
+      ? lastPart.items.filter((it) => !it.result && !(it.id && (waiting.has(it.id) || stream.denied[it.id])))
+      : [];
+  // A running tool call shows itself (its row shimmers); this line covers the rest of the turn.
   const working =
     stream.pending.length > 0
       ? "Waiting for your approval"
       : stream.thinking
         ? "Thinking…"
-        : lastTool && !lastTool.result && !stream.streaming
-          ? `Running ${toolLabel(lastTool.name)}…`
+        : stream.streaming
+          ? "Writing…"
           : "Working…";
+  const running0 = running[running.length - 1];
+  const announced = !busy
+    ? ""
+    : running0
+      ? `${toolVerb(running0.name, true)} ${shortArg(running0.summary, repos)}`.trim()
+      : working;
   const lastIsAi = turns[turns.length - 1]?.kind === "ai";
 
   return (
     <div className="chat-thread">
       {stream.omitted > 0 && (
-        <div className="chat-omitted">
-          {stream.omitted} earlier item{stream.omitted === 1 ? "" : "s"} not shown. `claude --resume` in the repo shows the whole
-          session.
-        </div>
+        <Marker variant="separator" className="chat-mk chat-mk-omitted">
+          <MarkerContent>
+            {stream.omitted} earlier item{stream.omitted === 1 ? "" : "s"} not shown · `claude --resume` in the repo shows the
+            whole session
+          </MarkerContent>
+        </Marker>
       )}
-      {turns.map((turn, i) =>
-        turn.kind === "user" ? (
-          <div key={i} className="chat-user">
-            <div className={`chat-bubble ${turn.pending ? "chat-bubble-pending" : ""}`}>{turn.text}</div>
-          </div>
-        ) : (
+      {turns.map((turn, i) => {
+        if (turn.kind === "user") {
+          return (
+            <div key={i} className="chat-user">
+              <div className={`chat-bubble ${turn.pending ? "chat-bubble-pending" : ""}`}>{turn.text}</div>
+            </div>
+          );
+        }
+        const current = i === turns.length - 1;
+        const changes = current && busy ? null : turnChanges(turn.parts);
+        return (
           <AiTurn key={i}>
             {turn.parts.map((p, j) => {
               switch (p.kind) {
@@ -346,13 +450,20 @@ export function Conversation({ chatId, turns, stream, projectId, projectKey, rep
                   return <SafeMarkdown key={j} className="chat-text" text={p.text} breaks />;
                 case "thinking":
                   return (
-                    <details key={j} className="tr-thinking">
-                      <summary>Thinking</summary>
-                      <div>{p.text}</div>
+                    <details key={j} className="chat-thought">
+                      <Marker asChild className="chat-mk chat-mk-btn">
+                        <summary>
+                          <MarkerIcon className="chat-mk-icon chat-mk-stopped">…</MarkerIcon>
+                          <MarkerContent className="chat-mk-text">
+                            <span className="chat-mk-verb">Thought</span>
+                          </MarkerContent>
+                        </summary>
+                      </Marker>
+                      <div className="chat-thought-text">{p.text}</div>
                     </details>
                   );
                 case "tools":
-                  return <ToolBlock key={j} items={p.items} stream={stream} />;
+                  return <ToolBlock key={j} items={p.items} stream={stream} repos={repos} live={current && stream.state === "busy"} />;
                 case "proposal":
                   return (
                     <ProposalCard
@@ -366,10 +477,11 @@ export function Conversation({ chatId, turns, stream, projectId, projectKey, rep
                   );
               }
             })}
-            {i === turns.length - 1 && stream.streaming && <div className="chat-text chat-streaming">{stream.streaming}</div>}
+            {changes && <ChangesMarker changes={changes} />}
+            {current && stream.streaming && <div className="chat-text chat-streaming">{stream.streaming}</div>}
           </AiTurn>
-        ),
-      )}
+        );
+      })}
       {!lastIsAi && stream.streaming && (
         <AiTurn>
           <div className="chat-text chat-streaming">{stream.streaming}</div>
@@ -378,12 +490,17 @@ export function Conversation({ chatId, turns, stream, projectId, projectKey, rep
       {stream.pending.map((req) => (
         <ApprovalCard key={req.requestId} chatId={chatId} req={req} />
       ))}
-      {busy && (
-        <div className="chat-working" role="status">
+      <span className="sr-only" role="status">
+        {announced}
+      </span>
+      {busy && running.length === 0 && (
+        <div className="chat-working" aria-hidden>
           <span className="chat-avatar chat-avatar-pulse">
             <BrandMark size={22} />
           </span>
-          {working}
+          <Marker className="chat-mk chat-mk-working">
+            <MarkerContent className={stream.pending.length > 0 ? "" : "shimmer"}>{working}</MarkerContent>
+          </Marker>
         </div>
       )}
       {stream.notice && !busy && (

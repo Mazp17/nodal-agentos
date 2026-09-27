@@ -111,6 +111,61 @@ export function toTurns(items: TranscriptItem[], outbox: string[] = []): Turn[] 
 /** `mcp__nodal__list_tasks` → `nodal · list_tasks`. */
 export const toolLabel = (name: string) => name.replace(/^mcp__(.+?)__/, "$1 · ");
 
+/** Claude Code's built-in tools as a row reads while running and once done. */
+const VERBS: Record<string, [string, string]> = {
+  Read: ["Reading", "Read"],
+  Edit: ["Editing", "Edited"],
+  MultiEdit: ["Editing", "Edited"],
+  Write: ["Writing", "Wrote"],
+  NotebookEdit: ["Editing", "Edited"],
+  Grep: ["Searching", "Searched"],
+  Glob: ["Listing", "Listed"],
+  LS: ["Listing", "Listed"],
+  Bash: ["Running", "Ran"],
+  WebFetch: ["Fetching", "Fetched"],
+  WebSearch: ["Searching the web for", "Searched the web for"],
+  Task: ["Delegating", "Delegated"],
+  Agent: ["Delegating", "Delegated"],
+  Skill: ["Using skill", "Used skill"],
+  TodoWrite: ["Updating the plan", "Updated the plan"],
+};
+
+/** `Read` → `Reading` / `Read`; other tools keep their label. */
+export const toolVerb = (name: string, running: boolean): string =>
+  VERBS[name]?.[running ? 0 : 1] ?? toolLabel(name);
+
+/** A tool's argument with the repo's own path left out: `/…/core-api/src/a.ts` → `src/a.ts`. */
+export function shortArg(summary: string | null, repos: Repo[]): string {
+  if (!summary) return "";
+  const repo = [...repos].sort((a, b) => b.path.length - a.path.length).find((r) => summary.startsWith(`${r.path}/`));
+  return repo ? summary.slice(repo.path.length + 1) : summary;
+}
+
+/**
+ * Files an answer changed, from the diffs of its edits; `null` when it changed none. Lines add
+ * up per edit, so a line edited twice counts twice.
+ */
+export function turnChanges(parts: Part[]): { files: number; additions: number; deletions: number } | null {
+  const files = new Map<string, { additions: number; deletions: number }>();
+  for (const p of parts) {
+    if (p.kind !== "tools") continue;
+    for (const it of p.items) {
+      const f = it.result && !it.result.isError ? it.result.patch?.file : null;
+      if (!f) continue;
+      const prev = files.get(f.path) ?? { additions: 0, deletions: 0 };
+      files.set(f.path, { additions: prev.additions + f.additions, deletions: prev.deletions + f.deletions });
+    }
+  }
+  if (files.size === 0) return null;
+  let additions = 0;
+  let deletions = 0;
+  for (const f of files.values()) {
+    additions += f.additions;
+    deletions += f.deletions;
+  }
+  return { files: files.size, additions, deletions };
+}
+
 /** Short note next to a finished tool call: its line count or its first line. */
 export function resultMeta(text: string): string {
   const lines = text.split("\n").filter((l) => l.trim());
