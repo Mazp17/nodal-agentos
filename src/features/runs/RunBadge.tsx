@@ -1,6 +1,7 @@
 import type { RunLight } from "../../domain/types";
 import { useRuns } from "../../domain/hooks/runs";
 import { deriveRunView, type RunView } from "./status";
+import { Tooltip, TooltipContent, TooltipTrigger } from "../../ui/Tooltip";
 import "./runs.css";
 
 const EMPTY_CTX = { live: [], details: {}, queuePos: new Map(), reviews: new Map(), now: 0 };
@@ -14,14 +15,25 @@ export function useRunView(run: RunLight | RunView): RunView {
   return byId.get(run.id) ?? deriveRunView(run, { ...EMPTY_CTX, now: Date.now() });
 }
 
-/** Status pill for a run ("Phase 3/9 · Implement", "Needs permission", "PR #12 · Green"). */
-export function RunBadge({ run, className }: { run: RunLight | RunView; className?: string }) {
+/**
+ * Status pill for a run ("Phase 3/9 · Implement", "Needs permission", "PR #12 · Green").
+ * `tooltip` swaps the native title for one that shows the full label on hover, for when the pill is cut off.
+ */
+export function RunBadge({ run, className, tooltip }: { run: RunLight | RunView; className?: string; tooltip?: boolean }) {
   const v = useRunView(run);
-  return (
-    <span className={`badge tone-${v.tone} ${className ?? ""}`} title={v.run.error ?? v.label}>
+  const text = v.run.error ? `${v.label} · ${v.run.error}` : v.label;
+  const badge = (
+    <span className={`badge tone-${v.tone} ${className ?? ""}`} title={tooltip ? undefined : text}>
       <span className={`dot dot-sm ${v.pulse ? "pulse" : ""}`} aria-hidden />
-      {v.label}
+      <span className="badge-label">{v.label}</span>
     </span>
+  );
+  if (!tooltip) return badge;
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>{badge}</TooltipTrigger>
+      <TooltipContent>{text}</TooltipContent>
+    </Tooltip>
   );
 }
 
