@@ -5,7 +5,7 @@
 
 mod claude_sessions;
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -511,6 +511,143 @@ pub async fn project_activity(app: AppHandle, project_id: String) -> Result<Proj
     .map_err(|e| format!("Internal error reading activity: {e}"))?
 }
 
+/// Sessions started outside the app in one repo.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RepoSessions {
+    pub repo_id: String,
+    pub sessions: Vec<SessionActivity>,
+    pub subagents: Vec<SubagentActivity>,
+}
+
+/// Sessions started outside the app, per repo (only repos with something to show).
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExternalSessions {
+    pub repos: Vec<RepoSessions>,
+    pub generated_at: i64,
+}
+
+/// Components of the deepest root that contains one of `paths` (0: none).
+fn match_depth<'a>(roots: &[PathBuf], paths: impl IntoIterator<Item = Option<&'a str>>) -> usize {
+    paths
+        .into_iter()
+        .flatten()
+        .map(Path::new)
+        .filter(|p| p.is_absolute())
+        .flat_map(|p| roots.iter().filter(move |r| p.starts_with(r)).map(|r| r.components().count()))
+        .max()
+        .unwrap_or(0)
+}
+
+/// Sessions (and their subagents) not launched by the app, from a single agent listing.
+/// With nested repos, each one lands only in the deepest repo that contains it: the one
+/// whose root matches its path with the most components (ties: the deepest repo, then
+/// the first in `repos`). `roots` resolves the paths to compare, as in `project_counts`.
+fn external_sessions_of(
+    repos: &[(String, PathBuf)],
+    agents: &[AgentSession],
+    projects: &Path,
+    app: &AppRuns,
+    now: i64,
+    roots: impl Fn(Vec<PathBuf>) -> Vec<PathBuf>,
+) -> ExternalSessions {
+    let per_repo: Vec<(&String, Vec<PathBuf>, RepoActivity)> = repos
+        .iter()
+        .filter_map(|(id, path)| {
+            let roots = roots(vec![path.clone()]);
+            if roots.is_empty() {
+                return None;
+            }
+            let mut act = assemble(&roots, agents, projects, app, now);
+            act.sessions.retain(|s| !s.is_app_run);
+            act.subagents.retain(|s| !s.session_is_app_run);
+            Some((id, roots, act))
+        })
+        .collect();
+
+    // Best repo for each session and subagent: (score, index in `per_repo`). Higher score
+    // wins; on a tie the first repo keeps it.
+    let mut best_session: HashMap<&str, ((usize, usize), usize)> = HashMap::new();
+    type SubScore = ((usize, usize), usize);
+    let mut best_subagent: HashMap<(&str, &str), (SubScore, usize)> = HashMap::new();
+    for (i, (_, roots, act)) in per_repo.iter().enumerate() {
+        let depth = roots.iter().map(|r| r.components().count()).max().unwrap_or(0);
+        for s in &act.sessions {
+            let score = (match_depth(roots, [s.cwd.as_deref()]), depth);
+            let e = best_session.entry(&s.session_id).or_insert((score, i));
+            if score > e.0 {
+                *e = (score, i);
+            }
+        }
+        for s in &act.subagents {
+            // Where it works first; its session's cwd only breaks ties.
+            let own = match_depth(roots, [s.cwd.as_deref(), s.worktree.as_deref()]);
+            let score = ((own, match_depth(roots, [s.session_cwd.as_deref()])), depth);
+            let e = best_subagent.entry((&s.session_id, &s.agent_id)).or_insert((score, i));
+            if score > e.0 {
+                *e = (score, i);
+            }
+        }
+    }
+
+    let repos = per_repo
+        .iter()
+        .enumerate()
+        .map(|(i, (id, _, act))| RepoSessions {
+            repo_id: (*id).clone(),
+            sessions: act.sessions.iter().filter(|s| best_session[s.session_id.as_str()].1 == i).cloned().collect(),
+            subagents: act
+                .subagents
+                .iter()
+                .filter(|s| best_subagent[&(s.session_id.as_str(), s.agent_id.as_str())].1 == i)
+                .cloned()
+                .collect(),
+        })
+        .filter(|r| !r.sessions.is_empty() || !r.subagents.is_empty())
+        .collect();
+    ExternalSessions { repos, generated_at: now }
+}
+
+/// Claude Code sessions started outside the app in the project's repos (`None`: every
+/// project's), with a single `claude agents`.
+#[tauri::command]
+pub async fn external_sessions(app: AppHandle, project_id: Option<String>) -> Result<ExternalSessions, String> {
+    if let Some(id) = &project_id {
+        crate::util::check_id(id, "project")?;
+    }
+    let db = app.try_state::<Db>().ok_or("The database isn't available.")?.inner().clone();
+    let repos: Vec<(String, PathBuf)> = with_db(&db, move |c| {
+        if let Some(pid) = &project_id {
+            crate::db::queries::projects::get(c, pid)?;
+        }
+        // Every project: skip archived ones (their runs don't show on Runs either).
+        let live: Option<std::collections::HashSet<String>> = match project_id {
+            Some(_) => None,
+            None => Some(crate::db::queries::projects::list(c, false)?.into_iter().map(|p| p.id).collect()),
+        };
+        Ok(crate::db::queries::repos::list(c, project_id.as_deref())?
+            .into_iter()
+            .filter(|r| live.as_ref().is_none_or(|l| l.contains(&r.project_id)))
+            .map(|r| (r.id, PathBuf::from(r.path)))
+            .collect())
+    })
+    .await?;
+    if repos.is_empty() {
+        return Ok(ExternalSessions { repos: vec![], generated_at: now_ms() });
+    }
+    let agents = list_agents().await?;
+    let refs = app_run_refs(&app).await;
+    tauri::async_runtime::spawn_blocking(move || {
+        let projects = claude_fs::claude_config_dir()
+            .ok_or("Couldn't locate the Claude Code folder ($HOME is not set).")?
+            .join("projects");
+        Ok(external_sessions_of(&repos, &agents, &projects, &refs, now_ms(), existing_roots))
+    })
+    .await
+    .map_err(|e| format!("Internal error reading activity: {e}"))?
+}
+
 /// Activity summary of several repos in a single pass (one `claude agents` and one scan
 /// of `projects`), for the sidebar indicator. Paths that don't exist are ignored; with
 /// no valid paths it returns zeros.
@@ -690,6 +827,71 @@ mod tests {
         assert_eq!((real.repos[0].sessions, real.repos[0].agents, real.sessions), (0, 0, 0));
         assert!(project_counts("p1", &[], &agents(now), &projects, now, id).repos.is_empty());
         std::fs::remove_dir_all(&projects).unwrap();
+    }
+
+    #[test]
+    fn external_sessions_skip_app_runs_and_land_in_the_deepest_repo() {
+        let (projects, now) = setup("external");
+        let id = |v: Vec<PathBuf>| v;
+        let mut app = AppRuns::default();
+        app.add(Some("99999999".into()), None);
+        let repo = PathBuf::from("/Users/me/Code/repo");
+        let repos = vec![
+            ("r1".to_string(), repo.clone()),
+            ("r2".to_string(), repo.join(".claude/worktrees/feature-x")),
+            ("r3".to_string(), repo.join(".claude/worktrees/agent-alive0000000001")),
+            ("r4".to_string(), PathBuf::from("/Users/me/Code/repo-sandbox")),
+            ("r5".to_string(), PathBuf::from("/Users/me/Code/elsewhere")),
+        ];
+        let ext = external_sessions_of(&repos, &agents(now), &projects, &app, now, id);
+        assert_eq!(ext.generated_at, now);
+        let find = |rid: &str| ext.repos.iter().find(|r| r.repo_id == rid);
+        let sessions = |rid: &str| {
+            let mut v: Vec<&str> = find(rid).map_or(vec![], |r| r.sessions.iter().map(|s| s.session_id.as_str()).collect());
+            v.sort();
+            v
+        };
+        let subagents = |rid: &str| {
+            let mut v: Vec<&str> = find(rid).map_or(vec![], |r| r.subagents.iter().map(|s| s.agent_id.as_str()).collect());
+            v.sort();
+            v
+        };
+
+        // The app's background run (and its workflow agent) is left out; the worktree
+        // session goes to the nested repo, not to the outer one.
+        assert_eq!(sessions("r1"), vec!["43495c2e-056b-4f96-8cab-4dd89a61e005", "88888888-aaaa-bbbb-cccc-000000000001"]);
+        assert_eq!(sessions("r2"), vec!["77777777-0000-0000-0000-000000000003"]);
+        assert!(sessions("r4").contains(&"af5deb85-3fe1-4ea9-b172-00b68389e167"), "{ext:?}");
+        // Subagents in a nested repo's worktree go there; the one that cd'd into the repo stays in r1.
+        assert_eq!(subagents("r1"), vec!["acdrepo00000001"]);
+        assert_eq!(subagents("r3"), vec!["achild000000001", "alive0000000001"]);
+        assert!(ext.repos.iter().all(|r| r.sessions.iter().all(|s| !s.is_app_run)));
+        assert!(ext.repos.iter().all(|r| r.subagents.iter().all(|s| !s.session_is_app_run)));
+        // Repos with nothing to show are omitted.
+        assert!(find("r5").is_none(), "{ext:?}");
+
+        // Each session and subagent appears exactly once.
+        let all_sessions: Vec<&str> = ext.repos.iter().flat_map(|r| r.sessions.iter().map(|s| s.session_id.as_str())).collect();
+        assert_eq!(all_sessions.len(), all_sessions.iter().collect::<HashSet<_>>().len(), "{all_sessions:?}");
+        let all_subs: Vec<(&str, &str)> = ext
+            .repos
+            .iter()
+            .flat_map(|r| r.subagents.iter().map(|s| (s.session_id.as_str(), s.agent_id.as_str())))
+            .collect();
+        assert_eq!(all_subs.len(), all_subs.iter().collect::<HashSet<_>>().len(), "{all_subs:?}");
+
+        // In the app, a missing folder yields nothing; no repos, nothing.
+        assert!(external_sessions_of(&repos, &agents(now), &projects, &app, now, existing_roots).repos.is_empty());
+        assert!(external_sessions_of(&[], &agents(now), &projects, &app, now, id).repos.is_empty());
+        std::fs::remove_dir_all(&projects).unwrap();
+    }
+
+    #[test]
+    fn match_depth_picks_the_deepest_containing_root() {
+        let roots = vec![PathBuf::from("/a"), PathBuf::from("/a/b")];
+        assert_eq!(match_depth(&roots, [Some("/a/b/c")]), 3);
+        assert_eq!(match_depth(&roots, [Some("/a/x"), None]), 2);
+        assert_eq!(match_depth(&roots, [Some("/z"), Some("rel/a")]), 0);
     }
 
     #[test]
