@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { projectIdOf, useQueueSummary, useRuns } from "../../domain/hooks/runs";
 import { formatDuration, formatTokens } from "../../lib/format";
+import { readPref, writePref } from "../../shell/storage";
 import { EmptyState } from "../../ui/EmptyState";
 import { useRunActions } from "./actions";
 import { executorLabel, phaseProgress, runName, runTaskRef, type RunsTab, type RunView } from "./status";
@@ -12,6 +13,8 @@ const TABS: { id: RunsTab; label: string }[] = [
   { id: "finished", label: "Finished" },
   { id: "failed", label: "Failed" },
 ];
+
+const TAB_PREF = "runsTab";
 
 const EMPTY: Record<RunsTab, { title: string; description: string }> = {
   active: { title: "Nothing running", description: "Run a task from the board and it shows up here." },
@@ -31,7 +34,14 @@ export interface RunsViewProps {
 export function RunsView({ projectId, onOpenRun, onGoToBoard }: RunsViewProps) {
   const state = useRuns({ projectId });
   const summary = useQueueSummary();
-  const [tab, setTab] = useState<RunsTab>("active");
+  const [tab, setTabState] = useState<RunsTab>(() => {
+    const saved = readPref(TAB_PREF);
+    return TABS.some((t) => t.id === saved) ? (saved as RunsTab) : "active";
+  });
+  const setTab = (next: RunsTab) => {
+    setTabState(next);
+    writePref(TAB_PREF, next);
+  };
   const counts = Object.fromEntries(TABS.map((t) => [t.id, state.views.filter((v) => v.tab === t.id).length])) as Record<
     RunsTab,
     number
