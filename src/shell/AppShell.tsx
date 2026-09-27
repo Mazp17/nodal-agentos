@@ -23,6 +23,7 @@ import { NewTaskDialog, TaskPanel, TasksView, useAskLaunch, useLaunch } from "..
 import { useUpdates } from "../features/updates/useUpdates";
 import { CommandPalette, type PaletteItem } from "./palette/CommandPalette";
 import { Sidebar, type ProviderFoot } from "./Sidebar";
+import { EmptyState } from "../ui/EmptyState";
 import { useToast } from "../ui/Toasts";
 import { Topbar } from "./Topbar";
 import { PAGE_TITLE, useNav, type Page, type ProjectPage } from "./useNav";
@@ -329,27 +330,20 @@ export function AppShell() {
   let content: ReactNode;
   if (noRepos && project) {
     content = (
-      <div className="center-state">
-        <div className="center-state-body">
-          <div className="state-icon-empty" aria-hidden />
-          <div className="center-state-title">No repos in {project.name}</div>
-          <div className="center-state-text">
-            {route.page === "chat" ? "A chat runs inside one of the project's repos." : "Every task runs in one repo."} Add the root
-            of a git checkout to start.
-          </div>
-          <div className="center-state-actions">
-            <button
-              type="button"
-              className="btn btn-primary"
-              onClick={() => {
-                openRepoSettings(project.id);
-              }}
-            >
-              Add repo…
-            </button>
-          </div>
-        </div>
-      </div>
+      <EmptyState
+        title={`No repos in ${project.name}`}
+        description={`${route.page === "chat" ? "A chat runs inside one of the project's repos." : "Every task runs in one repo."} Add the root of a git checkout to start.`}
+      >
+        <button
+          type="button"
+          className="btn btn-primary"
+          onClick={() => {
+            openRepoSettings(project.id);
+          }}
+        >
+          Add repo…
+        </button>
+      </EmptyState>
     );
   } else {
     switch (route.page) {
