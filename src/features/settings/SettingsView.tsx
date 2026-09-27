@@ -27,6 +27,7 @@ import { Play, RotateCw, Square } from "lucide-react";
 import { useToast } from "../../ui/Toasts";
 import { useConfirm } from "../../ui/ConfirmDialog";
 import { summarize, useLegacyImport } from "./legacyImport";
+import { DebugSettings } from "./DebugSettings";
 import "./settings.css";
 
 const SECTIONS: { id: SettingsSection; label: string }[] = [
@@ -34,6 +35,7 @@ const SECTIONS: { id: SettingsSection; label: string }[] = [
   { id: "execution", label: "Execution" },
   { id: "updates", label: "Updates" },
   { id: "diagnostics", label: "Diagnostics" },
+  ...(import.meta.env.DEV ? [{ id: "debug" as const, label: "Debug" }] : []),
 ];
 
 interface Props {
@@ -70,6 +72,7 @@ export function SettingsView({ section, onSection, updates }: Props) {
           {section === "execution" && <ExecutionSettings onSaved={onSettingsSaved} />}
           {section === "updates" && <UpdatesSettings updates={updates} />}
           {section === "diagnostics" && <DiagnosticsSettings />}
+          {import.meta.env.DEV && section === "debug" && <DebugSettings />}
         </div>
       </div>
     </div>

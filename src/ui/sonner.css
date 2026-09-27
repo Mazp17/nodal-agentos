@@ -1,0 +1,68 @@
+/* Sonner restyled with Nodal's tokens. Selectors carry `.toaster` on top of Sonner's own
+   attributes so they win over the stylesheet it injects at runtime. */
+.toaster[data-sonner-toaster] {
+  font-family: var(--font-sans);
+}
+
+.toaster [data-sonner-toast][data-styled="true"] {
+  align-items: flex-start;
+  gap: var(--sp-4);
+  padding: var(--sp-4) var(--sp-5);
+  padding-right: calc(var(--sp-5) + 24px);
+  box-shadow: var(--shadow-float);
+  --tone: var(--info);
+}
+.toaster [data-sonner-toast][data-type="success"] { --tone: var(--run-done); }
+.toaster [data-sonner-toast][data-type="warning"] { --tone: var(--run-warn); }
+.toaster [data-sonner-toast][data-type="error"] { --tone: var(--run-failed); }
+/* `accent` and `muted` have no Sonner type: `useToast` adds the tone class. */
+.toaster [data-sonner-toast].tone-accent { --tone: var(--run-running); }
+.toaster [data-sonner-toast].tone-muted { --tone: var(--run-queued); }
+
+/* The tone's dot, centered on the title's first line. */
+.toaster [data-sonner-toast][data-styled="true"] [data-icon] {
+  width: auto;
+  height: calc(var(--fs-base) * var(--lh-snug));
+  margin: 0;
+  color: var(--tone);
+}
+
+.toaster [data-sonner-toast][data-styled="true"] [data-content] { gap: var(--sp-0); }
+.toaster [data-sonner-toast][data-styled="true"] [data-title] {
+  font-size: var(--fs-base);
+  font-weight: var(--fw-semibold);
+  line-height: var(--lh-snug);
+}
+.toaster[data-sonner-toaster][data-sonner-theme] [data-description] {
+  font-size: var(--fs-md);
+  color: var(--text-muted);
+  line-height: var(--lh-snug);
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+}
+
+/* Close button inside the card, top right, like the old toasts. */
+.toaster[data-sonner-toaster][data-sonner-theme] [data-sonner-toast] [data-close-button] {
+  left: auto;
+  right: var(--sp-3);
+  top: var(--sp-3);
+  width: 24px;
+  height: 24px;
+  transform: none;
+  border: 0;
+  border-radius: var(--r-md);
+  background: transparent;
+  color: var(--text-dim);
+}
+.toaster[data-sonner-toaster][data-sonner-theme] [data-sonner-toast] [data-close-button]:hover {
+  background: var(--fill-5);
+  color: var(--text);
+}
+.toaster [data-sonner-toast] [data-close-button] svg { width: 12px; height: 12px; }
+/* Only our outline: drop Sonner's gray focus shadow so there's a single ring. */
+.toaster[data-sonner-toaster] [data-sonner-toast][data-styled="true"]:focus-visible,
+.toaster[data-sonner-toaster] [data-sonner-toast][data-styled="true"] [data-close-button]:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+  box-shadow: none;
+}

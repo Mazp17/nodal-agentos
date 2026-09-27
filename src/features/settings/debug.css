@@ -1,0 +1,2 @@
+/* Debug section (dev builds only). */
+.debug-actions { display: flex; flex-wrap: wrap; gap: var(--sp-3); }

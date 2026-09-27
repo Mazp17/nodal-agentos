@@ -8,7 +8,8 @@ import { readJsonPref, writePref } from "./storage";
 export type ProjectPage = "board" | "chat" | "tasks" | "runs" | "activity" | "project-settings";
 export type Page = ProjectPage | "settings" | "run";
 
-export type SettingsSection = "integrations" | "execution" | "updates" | "diagnostics";
+/** `debug` exists only in dev builds. */
+export type SettingsSection = "integrations" | "execution" | "updates" | "diagnostics" | "debug";
 export type ProjectSection = "general" | "repos" | "sources" | "agents";
 
 export interface Route {
@@ -68,6 +69,7 @@ export function useNav(): Nav {
   );
   const [settingsSection, setSettingsSection] = useState<SettingsSection>(() => {
     const s = readJsonPref<string>("settingsSection", "integrations", (v): v is string => typeof v === "string");
+    if (s === "debug") return import.meta.env.DEV ? s : "integrations";
     return s === "execution" || s === "updates" || s === "diagnostics" ? s : "integrations";
   });
   const [projectSection, setProjectSection] = useState<ProjectSection>("general");

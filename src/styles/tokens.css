@@ -220,10 +220,6 @@
   from { transform: translateX(24px); opacity: 0; }
   to { transform: none; opacity: 1; }
 }
-@keyframes rise {
-  from { transform: translateY(10px); opacity: 0; }
-  to { transform: none; opacity: 1; }
-}
 @keyframes drop {
   from { transform: translateY(-6px); opacity: 0; }
   to { transform: none; opacity: 1; }
