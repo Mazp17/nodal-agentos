@@ -14,6 +14,7 @@ import { newProjectRule, useRuleBackfill, type RuleEdit } from "../providers/rul
 import { SectionHead } from "../settings/SettingsView";
 import type { ProjectSection } from "../../shell/useNav";
 import { useToast } from "../../ui/Toasts";
+import { AgentsWorkflowsSection } from "./AgentsWorkflowsSection";
 import { ExecutorSelect, executorLabel } from "./executors";
 import { useSettings } from "../../domain/hooks/store";
 import { ColorSwatches, Segmented, type SegOption } from "./fields";
@@ -24,6 +25,7 @@ const SECTIONS: { id: ProjectSection; label: string }[] = [
   { id: "general", label: "General" },
   { id: "repos", label: "Repos" },
   { id: "sources", label: "Sources" },
+  { id: "agents", label: "Agents & workflows" },
 ];
 
 interface Props {
@@ -56,6 +58,7 @@ export function ProjectSettings({ project, section, onSection, onDeleted, onOpen
           {section === "general" && <GeneralSection key={project.id} project={project} onDeleted={onDeleted} />}
           {section === "repos" && <ReposSection key={project.id} project={project} onOpenSources={() => onSection("sources")} />}
           {section === "sources" && <ProjectSourcesSettings projectId={project.id} onOpenIntegrations={onOpenIntegrations} />}
+          {section === "agents" && <AgentsWorkflowsSection key={project.id} project={project} />}
         </div>
       </div>
     </div>
