@@ -80,6 +80,7 @@
 .runs-result { display: inline-flex; align-items: center; gap: 5px; min-width: 0; font-size: var(--fs-sm); color: var(--tone); }
 .runs-result .dot { flex: none; }
 .runs-empty { padding: 40px var(--sp-7); text-align: center; font-size: var(--fs-base); color: var(--text-dim); }
+.empty-state.runs-empty-state { height: 100%; min-height: 320px; }
 
 /* ---- Queue ---- */
 .queue {

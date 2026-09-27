@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { projectIdOf, useQueueSummary, useRuns } from "../../domain/hooks/runs";
 import { formatDuration, formatTokens } from "../../lib/format";
+import { EmptyState } from "../../ui/EmptyState";
 import { useRunActions } from "./actions";
 import { executorLabel, phaseProgress, runName, runTaskRef, type RunsTab, type RunView } from "./status";
 import "./runs.css";
@@ -12,21 +13,22 @@ const TABS: { id: RunsTab; label: string }[] = [
   { id: "failed", label: "Failed" },
 ];
 
-const EMPTY: Record<RunsTab, string> = {
-  active: "Nothing running. Run a task from the board.",
-  queued: "Nothing queued.",
-  finished: "No finished runs yet.",
-  failed: "No failed runs.",
+const EMPTY: Record<RunsTab, { title: string; description: string }> = {
+  active: { title: "Nothing running", description: "Run a task from the board and it shows up here." },
+  queued: { title: "Nothing queued", description: "Runs wait here while every slot is busy." },
+  finished: { title: "No finished runs yet", description: "Runs land here once they finish." },
+  failed: { title: "No failed runs", description: "Runs that fail show up here." },
 };
 
 export interface RunsViewProps {
   /** `null`: all projects. The queue is always global. */
   projectId: string | null;
   onOpenRun: (runId: string) => void;
+  onGoToBoard: () => void;
 }
 
 /** "Runs" screen: tabs by status, runs table and the global queue with its slots. */
-export function RunsView({ projectId, onOpenRun }: RunsViewProps) {
+export function RunsView({ projectId, onOpenRun, onGoToBoard }: RunsViewProps) {
   const state = useRuns({ projectId });
   const summary = useQueueSummary();
   const [tab, setTab] = useState<RunsTab>("active");
@@ -74,7 +76,16 @@ export function RunsView({ projectId, onOpenRun }: RunsViewProps) {
           {rows.map((v) => (
             <RunRow key={v.run.id} v={v} state={state} onOpen={() => onOpenRun(v.run.id)} />
           ))}
-          {rows.length === 0 && <div className="runs-empty">{state.loaded ? EMPTY[tab] : "Loading runs…"}</div>}
+          {rows.length === 0 &&
+            (state.loaded ? (
+              <EmptyState className="runs-empty-state" title={EMPTY[tab].title} description={EMPTY[tab].description}>
+                <button type="button" className="btn" onClick={onGoToBoard}>
+                  Go to board
+                </button>
+              </EmptyState>
+            ) : (
+              <div className="runs-empty">Loading runs…</div>
+            ))}
         </div>
       </div>
       <QueuePanel state={state} summary={summary} onOpenRun={onOpenRun} />
