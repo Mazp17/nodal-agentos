@@ -3,6 +3,7 @@ import { moveTask, reorderTasks } from "../../domain/api";
 import { useAllRuns, useLatestRunByTask } from "../../domain/hooks/runs";
 import { invalidate, useProjectList, useRepos, useSettings, useTasks } from "../../domain/hooks/store";
 import { taskKey, type Task, type TaskStatus } from "../../domain/types";
+import { EmptyState } from "../../ui/EmptyState";
 import { useToast } from "../../ui/Toasts";
 import { resolveExecutor } from "../executors";
 import { NewTaskDialog } from "../tasks/NewTaskDialog";
@@ -275,31 +276,31 @@ export function BoardView({ projectId, onOpenTask, onOpenRun, onNewProject, onOp
   let body;
   if (noProjects) {
     body = (
-      <CenterState title="No projects yet" text="Projects hold your repos and tasks. Create one to start handing work to Claude.">
+      <EmptyState title="No projects yet" description="Projects hold your repos and tasks. Create one to start handing work to Claude.">
         {onNewProject && (
           <button type="button" className="btn btn-primary" onClick={onNewProject}>
             New project
           </button>
         )}
-      </CenterState>
+      </EmptyState>
     );
   } else if (loadError && (tasks.data === undefined || repos.data === undefined || projects.data === undefined)) {
     body = (
-      <CenterState title="Couldn't load the board" text={loadError}>
+      <ErrorState title="Couldn't load the board" text={loadError}>
         <button type="button" className="btn" onClick={() => invalidate("projects", "repos", "tasks", "runs")}>
           Retry
         </button>
-      </CenterState>
+      </ErrorState>
     );
   } else if (noRepos) {
     body = (
-      <CenterState title="Add a repo to start" text="Every task runs in one repo of this project. Add the root of a git checkout.">
+      <EmptyState title="Add a repo to start" description="Every task runs in one repo of this project. Add the root of a git checkout.">
         {onOpenProjectSettings && projectId && (
           <button type="button" className="btn btn-primary" onClick={() => onOpenProjectSettings(projectId)}>
             Project settings
           </button>
         )}
-      </CenterState>
+      </EmptyState>
     );
   } else if (loading) {
     body = (
@@ -316,9 +317,9 @@ export function BoardView({ projectId, onOpenTask, onOpenRun, onNewProject, onOp
     );
   } else if (visible.length === 0) {
     body = (
-      <CenterState
+      <EmptyState
         title={hasFilters ? "No tasks match" : "No tasks yet"}
-        text={
+        description={
           hasFilters
             ? "Clear filters, or create a task and pick one of this project's repos."
             : "Create a task, or import issues from a connected source."
@@ -332,7 +333,7 @@ export function BoardView({ projectId, onOpenTask, onOpenRun, onNewProject, onOp
         <button type="button" className="btn btn-primary" onClick={() => setNewTask(true)}>
           New task
         </button>
-      </CenterState>
+      </EmptyState>
     );
   } else {
     body = (
@@ -479,11 +480,13 @@ export function BoardView({ projectId, onOpenTask, onOpenRun, onNewProject, onOp
   );
 }
 
-function CenterState({ title, text, children }: { title: string; text: string; children?: ReactNode }) {
+function ErrorState({ title, text, children }: { title: string; text: string; children?: ReactNode }) {
   return (
     <div className="center-state">
       <div className="center-state-body">
-        <div className="state-icon-empty" aria-hidden />
+        <div className="state-icon-error" aria-hidden>
+          !
+        </div>
         <div className="center-state-title">{title}</div>
         <div className="center-state-text">{text}</div>
         {children && <div className="center-state-actions">{children}</div>}
