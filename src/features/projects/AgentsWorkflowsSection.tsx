@@ -104,7 +104,8 @@ function groupExecutors(repos: readonly Repo[], catalogs: readonly ExecutorInfo[
   }
   const plugin: Group = { id: "plugin", title: "Plugin", hint: "Enabled Claude Code plugins", rows: [...plugins.values()] };
 
-  return [...repoGroups, system, plugin];
+  // Busiest sources first; ties keep repo order, then System and Plugin.
+  return [...repoGroups, system, plugin].sort((a, b) => b.rows.length - a.rows.length);
 }
 
 const useCatalogs = (repos: readonly Repo[]) => {
