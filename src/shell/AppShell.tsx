@@ -374,7 +374,7 @@ export function AppShell() {
         content = project && <TasksView projectId={project.id} onOpenTask={openTask} />;
         break;
       case "runs":
-        content = <RunsView projectId={route.projectId} onOpenRun={openRun} onGoToBoard={() => go("board", route.projectId)} />;
+        content = <RunsView key={route.projectId ?? "all"} projectId={route.projectId} onOpenRun={openRun} onGoToBoard={() => go("board", route.projectId)} />;
         break;
       case "project-settings":
         content = project && (
