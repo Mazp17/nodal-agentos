@@ -226,17 +226,29 @@ export function reduce(s: ChatStream, e: ChatEvent): ChatStream {
 
 let unlisten: Promise<() => void> | null = null;
 
+/**
+ * The listener of whichever copy of this module listens. Vite's HMR only disposes the module
+ * that accepts an update (a component importing this one), so an edited copy would otherwise
+ * keep listening next to the new one and every event (and notice) would arrive twice.
+ */
+const HANDLE = "__nodalChatListener";
+const slot = globalThis as { [HANDLE]?: Promise<() => void> };
+
 /** Listens to every chat's events; the app calls it once so answers notify from any page. */
 export function listen() {
   if (unlisten || typeof window === "undefined" || !("__TAURI_INTERNALS__" in window)) return;
+  void slot[HANDLE]?.then(
+    (u) => u(),
+    () => {},
+  );
   unlisten = onChatEvent(({ chatId, event }) => {
     if (event.type === "state") setRunState(chatId, event.state);
     // Before reducing: `turnEnd` clears `interrupting`.
     alertOn(chatId, event);
     if (streams.has(chatId)) set(chatId, (s) => reduce(s, event));
   });
+  slot[HANDLE] = unlisten;
   unlisten.catch((err: unknown) => console.error("nodal://chat", err));
-  import.meta.hot?.dispose(() => void unlisten?.then((u) => u(), () => {}));
 }
 
 /** Reads the chat's history and live state. `fresh`: a new chat with nothing to read. */
