@@ -622,3 +622,29 @@ details > summary.tp-step-sub { cursor: pointer; }
 .tp-merge-summary { font-size: var(--fs-lg); color: var(--text); }
 .tp-merge-opt { display: flex; align-items: center; gap: var(--sp-3); color: var(--text); cursor: pointer; }
 .tp-merge-opt input { width: 16px; height: 16px; margin: 0; accent-color: var(--accent); }
+
+/* ---- Launch popover (useAskLaunch): above drawers and dialogs, like the confirm ---- */
+.lp-scrim { position: fixed; inset: 0; z-index: 80; }
+.lp {
+  position: fixed;
+  z-index: 81;
+  width: 360px;
+  max-width: calc(100vw - 24px);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-5);
+  padding: var(--sp-6);
+  border-radius: var(--r-3xl);
+  background: var(--surface-dialog);
+  border: 1px solid var(--border-3);
+  box-shadow: var(--shadow-dialog);
+  animation: drop 0.12s ease-out;
+}
+.lp-centered { top: 96px; left: 0; right: 0; margin: 0 auto; }
+.lp-head { display: flex; flex-direction: column; gap: 2px; min-width: 0; font-size: var(--fs-sm); }
+.lp-title { font-size: var(--fs-lg); font-weight: var(--fw-semibold); }
+.lp-body { display: grid; grid-template-columns: 64px minmax(0, 1fr); gap: var(--sp-5) var(--sp-4); align-items: start; }
+.lp-label { font-size: var(--fs-md); color: var(--text-muted); line-height: var(--h-sm); }
+.lp-opt { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.lp-foot { display: flex; justify-content: flex-end; gap: var(--sp-3); }
+.lp-run { display: flex; align-items: center; gap: var(--sp-3); }

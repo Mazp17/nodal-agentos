@@ -1,7 +1,7 @@
 import { useCallback, useState } from "react";
-import { cancelRun, confirmRun, launchTask, reorderQueue } from "../../domain/api";
+import { cancelRun, confirmRun, launchTask, reorderQueue, type LaunchInput } from "../../domain/api";
 import { refreshRuns } from "../../domain/hooks/runs";
-import type { Task } from "../../domain/types";
+import type { Run, Task } from "../../domain/types";
 import { useConfirm } from "../../ui/ConfirmDialog";
 import { useToast } from "../../ui/Toasts";
 import { attachRun } from "./api";
@@ -17,10 +17,20 @@ export interface RunActions {
   remove: (v: Pick<RunView, "run">, name: string) => Promise<boolean>;
   confirm: (v: RunView, name: string) => Promise<boolean>;
   attach: (v: RunView) => Promise<void>;
-  /** Queues another run of the task with the same executor. */
+  /** Queues another run of the task with the same executor, isolation, finish and review (no launch popover). */
   runAgain: (v: RunView, task: Task | undefined, name: string) => Promise<boolean>;
   /** New global queue order: ids of every `queued` run. */
   reorder: (ids: string[]) => Promise<void>;
+}
+
+/** The previous work run's choices, reused as they were. */
+export function relaunchInput(run: Pick<Run, "executor" | "isolation" | "finish" | "review">): LaunchInput {
+  return {
+    executor: run.executor,
+    ...(run.isolation ? { isolation: run.isolation } : {}),
+    finish: run.finish,
+    review: run.review,
+  };
 }
 
 export function useRunActions(): RunActions {
@@ -102,8 +112,8 @@ export function useRunActions(): RunActions {
       if (!taskId) return false;
       setBusy(true);
       try {
-        // A reviewer's executor must not be relaunched as work: fall back to the task's default.
-        const run = await launchTask(taskId, { executor: v.run.kind === "work" ? v.run.executor : undefined });
+        // A reviewer's settings must not be relaunched as work: fall back to the defaults.
+        const run = await launchTask(taskId, v.run.kind === "work" ? relaunchInput(v.run) : {});
         void refreshRuns();
         if (run.status === "failed") {
           toast(`Couldn't launch ${name}`, launchErrorHint(run.error, run.cwd), "danger");
