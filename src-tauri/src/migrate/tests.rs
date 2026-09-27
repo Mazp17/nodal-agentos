@@ -299,6 +299,7 @@ fn existing_repo_is_reused_and_keys_do_not_collide() {
                 reviewer: None,
                 created_at: 1,
                 archived_at: None,
+                root_path: None,
                 description: None,
             },
         )

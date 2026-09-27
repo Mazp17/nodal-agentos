@@ -508,7 +508,7 @@ mod tests {
 
     /// Project PAY with repos `web` and `api`.
     fn seed(c: &Connection, f: &Fx) -> (Project, Repo, Repo) {
-        let p = ops::create_project(c, &NewProject { name: "Pay".into(), key: "PAY".into(), color: None, description: None }, 1).unwrap();
+        let p = ops::create_project(c, &NewProject { name: "Pay".into(), key: "PAY".into(), color: None, description: None, root_path: None }, 1).unwrap();
         let add = |name: &str| {
             let dir = f.t.0.join(name);
             std::fs::create_dir_all(dir.join("docs")).unwrap();

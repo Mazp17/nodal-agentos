@@ -105,10 +105,12 @@ export interface NewProject {
   key: string;
   color?: string;
   description?: string | null;
+  /** Must be an existing folder; it's stored canonical. */
+  rootPath?: string | null;
 }
 
 /** Only the present fields change; `null` clears the optional ones. */
-export type ProjectPatch = Partial<Pick<Project, "name" | "key" | "color" | "description" | "defaultExecutor" | "reviewer">> & {
+export type ProjectPatch = Partial<Pick<Project, "name" | "key" | "color" | "description" | "rootPath" | "defaultExecutor" | "reviewer">> & {
   archived?: boolean;
 };
 

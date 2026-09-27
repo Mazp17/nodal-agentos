@@ -48,6 +48,10 @@ pub struct Project {
     /// Free-form description (v2).
     #[serde(default)]
     pub description: Option<String>,
+    /// Canonical folder that holds the project's repos and other material (v6). Repo-less
+    /// chats run there. Never a run target.
+    #[serde(default)]
+    pub root_path: Option<String>,
     /// Default executor if the repo doesn't define one. `None` → the global one in Settings → Claude.
     pub default_executor: Option<Executor>,
     /// Default reviewer if the repo doesn't define one. `None` → `code-reviewer`.

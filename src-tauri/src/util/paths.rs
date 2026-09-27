@@ -68,6 +68,13 @@ fn existing_dir(path: &str) -> Result<PathBuf, String> {
     Ok(dir)
 }
 
+/// Canonical form (symlinks resolved) of an absolute, existing folder. Repo paths are stored
+/// canonical too, so both can be compared with `Path::starts_with`.
+pub fn canonical_dir(path: &str) -> Result<PathBuf, String> {
+    let dir = existing_dir(path)?;
+    dir.canonicalize().map_err(|e| format!("Couldn't resolve {}: {e}", dir.display()))
+}
+
 /// Canonical git root (symlinks resolved) of the repo containing `path`. `Ok(None)` if it's
 /// not inside a git repo.
 pub fn git_root_of(path: &str) -> Result<Option<PathBuf>, String> {
@@ -167,6 +174,20 @@ pub(crate) mod tests {
         assert!(require_git_root(outside.to_str().unwrap()).unwrap_err().contains("not inside a git repository"));
         assert!(tauri::async_runtime::block_on(resolve_git_root("relative".into())).is_err());
         assert!(git_root_of("/no/such/dir").unwrap_err().contains("doesn't exist"));
+    }
+
+    #[test]
+    fn canonical_dir_resolves_symlinks() {
+        let t = TempDir::new("canonical-dir");
+        std::fs::create_dir_all(t.0.join("real")).unwrap();
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink(t.0.join("real"), t.0.join("link")).unwrap();
+            assert_eq!(canonical_dir(t.0.join("link").to_str().unwrap()).unwrap(), t.0.join("real"));
+        }
+        assert_eq!(canonical_dir(&format!("  {}  ", t.0.join("real").display())).unwrap(), t.0.join("real"));
+        std::fs::write(t.0.join("file"), "x").unwrap();
+        assert!(canonical_dir(t.0.join("file").to_str().unwrap()).unwrap_err().contains("doesn't exist"));
     }
 
     #[test]

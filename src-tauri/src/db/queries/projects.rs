@@ -49,12 +49,12 @@ pub fn update(conn: &Connection, p: &Project) -> Result<(), DbError> {
         .execute(
             "UPDATE projects SET name = :name, key = :key, color = :color, default_executor_json = :exec,
                                  reviewer = :reviewer, archived_at = :archived,
-                                 description = :description
+                                 description = :description, root_path = :root_path
              WHERE id = :id",
             named_params! {
                 ":id": p.id, ":name": p.name, ":key": p.key, ":color": p.color,
                 ":exec": opt_json(&p.default_executor)?, ":reviewer": p.reviewer, ":archived": p.archived_at,
-                ":description": p.description,
+                ":description": p.description, ":root_path": p.root_path,
             },
         )
         .map_err(|e| if is_constraint(&e) { key_error(&p.key) } else { e.into() })?;

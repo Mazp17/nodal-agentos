@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 
 use crate::domain::{Executor, MAX_CONCURRENCY};
 use crate::runs::workflows::is_valid_workflow_name;
+use crate::util::paths;
 
 use super::executors::is_valid_agent_name;
 
@@ -208,6 +209,12 @@ pub fn description(s: Option<&str>) -> Result<Option<String>, String> {
         return Err(format!("The description is too long (max {MAX_DESCRIPTION_CHARS} characters)."));
     }
     Ok(Some(t.to_string()))
+}
+
+/// Project root folder: absolute, existing, stored canonical; empty → `None`.
+pub fn root_path(s: Option<&str>) -> Result<Option<String>, String> {
+    let Some(t) = s.map(str::trim).filter(|t| !t.is_empty()) else { return Ok(None) };
+    Ok(Some(paths::canonical_dir(t)?.to_string_lossy().into_owned()))
 }
 
 pub fn extra_instructions(s: Option<&str>) -> Result<Option<String>, String> {

@@ -534,6 +534,7 @@ impl Ctx<'_> {
             reviewer: None,
             created_at: self.now,
             archived_at: None,
+            root_path: None,
             description: None,
         };
         rows::insert_project(self.conn, &p).map_err(sql)?;
