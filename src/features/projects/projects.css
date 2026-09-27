@@ -16,6 +16,15 @@
 .draft-repo-path { font-size: var(--fs-sm); color: var(--text-muted); flex: 1; }
 .draft-repo-remove { margin-left: auto; }
 
+.scan-repos { display: flex; flex-direction: column; gap: var(--sp-2); }
+.scan-repo { cursor: pointer; }
+.scan-repo input[type="checkbox"] { width: 16px; height: 16px; margin: 0; flex: none; accent-color: var(--accent); }
+.scan-repo-taken { cursor: default; opacity: 0.6; }
+.scan-repo-where { flex: none; font-size: var(--fs-sm); color: var(--text-muted); }
+.scan-actions { align-self: flex-end; }
+.root-folder-row { display: flex; align-items: center; gap: var(--sp-3); flex-wrap: wrap; min-width: 0; }
+.root-folder-path { flex: 1; min-width: 0; font-size: var(--fs-sm); color: var(--text-muted); overflow-wrap: anywhere; }
+
 .repo-notice {
   display: flex;
   align-items: center;
