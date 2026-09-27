@@ -10,7 +10,7 @@ import { BoardView } from "../features/board";
 import { ChatView } from "../features/chats";
 import { chatTitle } from "../features/chats/model";
 import { setInAppNotice } from "../features/chats/alerts";
-import { listen as listenToChats } from "../features/chats/stream";
+import { listen as listenToChats, pruneUnread, useUnreadChats } from "../features/chats/stream";
 import { Onboarding } from "../features/onboarding/Onboarding";
 import { CreateProjectDialog } from "../features/projects/CreateProjectDialog";
 import { resolveExecutor } from "../features/executors";
@@ -69,6 +69,11 @@ export function AppShell() {
 
   // Chat answers notify from any page, not only once the Chat page has opened.
   useEffect(listenToChats, []);
+  const unreadChats = useUnreadChats();
+  const unreadProjects = useMemo(() => new Set(unreadChats.values()), [unreadChats]);
+  useEffect(() => {
+    if (ctx.loaded && !ctx.error) pruneUnread(new Set(ctx.projectById.keys()));
+  }, [ctx.loaded, ctx.error, ctx.projectById]);
   useEffect(() => {
     setInAppNotice((title, body) => toast(title, body, "info"));
     return () => setInAppNotice(null);
@@ -425,6 +430,7 @@ export function AppShell() {
         activeTotal={work.activeTotal}
         activeByProject={work.activeByProject}
         mappingDrift={mappingDrift}
+        unreadChats={unreadProjects}
         provider={foot}
         version={updates.version}
         updateAvailable={updates.available}

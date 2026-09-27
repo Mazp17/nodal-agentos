@@ -138,3 +138,5 @@
 .status-pill-queued { color: var(--text-dim); }
 .topbar-btn { height: var(--h-lg); padding: 0 var(--sp-5); font-size: var(--fs-md); }
 .side-sub-dot { margin-left: var(--sp-2); }
+/* Same mark as an unread chat in the Chat page's sessions (`.chat-session-unread`). */
+.side-unread { flex: none; display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--accent); }

@@ -25,6 +25,8 @@ interface Props {
   openTotal: number;
   activeTotal: number;
   activeByProject: Map<string, number>;
+  /** Projects with a chat whose answer the user hasn't seen. */
+  unreadChats: ReadonlySet<string>;
   /** Projects with sources whose states changed in the provider (mapping to review). */
   mappingDrift: ReadonlySet<string>;
   provider: ProviderFoot;
@@ -95,6 +97,7 @@ export function Sidebar(p: Props) {
           const cur = p.current.projectId === proj.id;
           const running = p.activeByProject.get(proj.id) ?? 0;
           const drift = p.mappingDrift.has(proj.id);
+          const unread = p.unreadChats.has(proj.id);
           return (
             <div key={proj.id} className="side-project" role="group" aria-label={proj.name}>
               <button
@@ -105,6 +108,7 @@ export function Sidebar(p: Props) {
               >
                 <span className="project-dot" style={{ ["--project-color" as string]: proj.color }} aria-hidden />
                 <span className="side-item-label ellipsis">{proj.name}</span>
+                {unread && !open && <span className="side-unread" role="img" aria-label="Unread chat" title="Unread chat" />}
                 {drift && (
                   <span
                     className="dot dot-sm tone-warn"
@@ -134,6 +138,9 @@ export function Sidebar(p: Props) {
                       onClick={() => p.onGo(sp.page, proj.id)}
                     >
                       {sp.label}
+                      {sp.page === "chat" && unread && (
+                        <span className="side-unread side-sub-dot" role="img" aria-label="Unread chat" title="Unread chat" />
+                      )}
                       {sp.page === "project-settings" && drift && (
                         <span className="dot dot-sm tone-warn side-sub-dot" aria-label="Mapping to review" />
                       )}

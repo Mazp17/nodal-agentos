@@ -107,6 +107,11 @@ function setUnread(chatId: string, projectId: string | null) {
   unreadListeners.forEach((l) => l());
 }
 
+/** Drops unread chats of projects that no longer exist (deleted with their chats). */
+export function pruneUnread(projectIds: ReadonlySet<string>) {
+  for (const [chatId, projectId] of unread) if (!projectIds.has(projectId)) setUnread(chatId, null);
+}
+
 /** The Chat page shows `chatId` (`null` when it closes): it's read. */
 export function setViewedChat(chatId: string | null) {
   viewed = chatId;
