@@ -18,11 +18,9 @@ use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::time::Duration;
 
-use tauri::State;
 use tokio::io::{AsyncBufReadExt, AsyncRead, BufReader};
 use tokio::sync::mpsc;
 
-use crate::db::{self, Db};
 use types::{LaunchBlocker, LaunchOptions, RunDetail, RunRef, RunSummary, Transcript};
 
 const LAUNCH_TIMEOUT: Duration = Duration::from_secs(30);
@@ -101,7 +99,8 @@ impl From<&str> for LaunchError {
 }
 
 /// Like `launch_bg`, with the error as text.
-pub async fn launch_with(cwd: String, prompt: String, opts: &LaunchOptions, extra: &ExtraFlags) -> Result<RunRef, String> {
+#[cfg(test)]
+async fn launch_with(cwd: String, prompt: String, opts: &LaunchOptions, extra: &ExtraFlags) -> Result<RunRef, String> {
     launch_bg(cwd, prompt, opts, extra).await.map_err(|e| e.message)
 }
 
@@ -191,36 +190,6 @@ pub async fn launch_bg(cwd: String, prompt: String, opts: &LaunchOptions, extra:
             })
         }
     }
-}
-
-/// Options of the repo whose root is `cwd` (also comparing the canonicalized path).
-fn repo_options_for(conn: &rusqlite::Connection, cwd: &str) -> Result<LaunchOptions, db::DbError> {
-    let mut keys = vec![cwd.trim_end_matches('/').to_string()];
-    if let Ok(c) = Path::new(cwd).canonicalize() {
-        keys.push(c.to_string_lossy().into_owned());
-    }
-    for k in keys {
-        if let Some(r) = crate::db::queries::repos::find_by_path(conn, &k)? {
-            return Ok(r.launch);
-        }
-    }
-    Ok(LaunchOptions::default())
-}
-
-/// Manual launch (outside the queue): uses the repo's model/effort/permission mode if
-/// `cwd` is a registered repo.
-#[tauri::command]
-pub async fn launch_run(db: State<'_, Db>, cwd: String, prompt: String) -> Result<RunRef, String> {
-    let key = cwd.clone();
-    // An unreadable database doesn't block a manual launch: it launches without flags.
-    let opts = match db::with_db(&db, move |c| repo_options_for(c, &key)).await {
-        Ok(o) => o,
-        Err(e) => {
-            eprintln!("launch_run: {e}; launching without repo options");
-            LaunchOptions::default()
-        }
-    };
-    launch_with(cwd, prompt, &opts, &ExtraFlags::default()).await
 }
 
 /// Background sessions (`claude agents --json --all`), most recent first.

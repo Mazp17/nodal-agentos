@@ -11,8 +11,6 @@ use client::{http_client, LinearClient};
 use detail::IssueDetail;
 pub use error::LinearError;
 use key::KeyCache;
-use model::{Board, Team, Viewer};
-use serde::Serialize;
 use tauri::State;
 
 pub struct LinearState {
@@ -31,58 +29,6 @@ impl LinearState {
     pub(crate) fn http(&self) -> &reqwest::Client {
         &self.http
     }
-}
-
-#[derive(Serialize)]
-pub struct KeyStatus {
-    configured: bool,
-}
-
-#[tauri::command]
-pub async fn linear_key_status(state: State<'_, LinearState>) -> Result<KeyStatus, LinearError> {
-    Ok(KeyStatus { configured: state.key.load().await?.is_some() })
-}
-
-/// Validates the key against Linear and stores it in the keychain only if it is valid.
-#[tauri::command]
-pub async fn linear_set_api_key(
-    state: State<'_, LinearState>,
-    key: String,
-) -> Result<Viewer, LinearError> {
-    let key = key.trim().to_string();
-    if key.is_empty() {
-        return Err(LinearError::MissingKey);
-    }
-    let viewer = LinearClient::new(&state.http, &key).viewer().await?;
-    state.key.store(key).await?;
-    Ok(viewer)
-}
-
-#[tauri::command]
-pub async fn linear_clear_api_key(state: State<'_, LinearState>) -> Result<(), LinearError> {
-    state.key.clear().await
-}
-
-#[tauri::command]
-pub async fn linear_viewer(state: State<'_, LinearState>) -> Result<Viewer, LinearError> {
-    let key = state.key.require().await?;
-    LinearClient::new(&state.http, &key).viewer().await
-}
-
-#[tauri::command]
-pub async fn linear_teams(state: State<'_, LinearState>) -> Result<Vec<Team>, LinearError> {
-    let key = state.key.require().await?;
-    LinearClient::new(&state.http, &key).teams().await
-}
-
-/// Open issues + issues closed in the last 14 days. Empty or missing `team_ids` = all.
-#[tauri::command]
-pub async fn linear_board(
-    state: State<'_, LinearState>,
-    team_ids: Option<Vec<String>>,
-) -> Result<Board, LinearError> {
-    let key = state.key.require().await?;
-    LinearClient::new(&state.http, &key).board(team_ids.as_deref()).await
 }
 
 /// Full detail of an issue for the side panel. `issue_id` accepts a UUID or an
@@ -121,23 +67,6 @@ mod live_tests {
             let teams = c.teams().await.expect("teams");
             let keys: Vec<_> = teams.iter().map(|t| t.key.as_str()).collect();
             println!("{} teams: {}", teams.len(), keys.join(", "));
-            let board = c.board(None).await.expect("board");
-            println!(
-                "board: {} issues, {} teams with states, truncated={}",
-                board.issues.len(),
-                board.teams.len(),
-                board.truncated
-            );
-            if let Some(first) = board.issues.first() {
-                let d = c.issue_detail(&first.identifier).await.expect("issue detail");
-                println!(
-                    "detail {}: {} children, {} relations, {} comments",
-                    d.identifier,
-                    d.children.len(),
-                    d.relations.len(),
-                    d.comments.len()
-                );
-            }
         });
     }
 

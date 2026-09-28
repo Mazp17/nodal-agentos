@@ -29,13 +29,6 @@ pub async fn stop(run_id: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// Stops a session by its short id. For queue runs, use `cancel_run` (which also saves the
-/// partial patch and applies the transition).
-#[tauri::command]
-pub async fn stop_run(run_id: String) -> Result<(), String> {
-    stop(&run_id).await
-}
-
 /// Shell single quotes: `'...'` with `'` → `'\''`.
 fn shell_quote(s: &str) -> String {
     format!("'{}'", s.replace('\'', r"'\''"))

@@ -59,35 +59,6 @@ impl<'a> LinearClient<'a> {
         Ok(teams)
     }
 
-    pub async fn board(&self, team_ids: Option<&[String]>) -> Result<Board, LinearError> {
-        let states: TeamStatesData = self
-            .query(TEAM_STATES_QUERY, json!({ "filter": team_filter(team_ids) }))
-            .await?;
-
-        let filter = issue_filter(team_ids, RECENT_DONE_DAYS);
-        let mut issues = Vec::new();
-        let mut after: Option<String> = None;
-        let mut truncated = false;
-        for page in 0..MAX_PAGES {
-            let d: IssuesData = self
-                .query(
-                    ISSUES_QUERY,
-                    json!({ "filter": filter, "first": PAGE_SIZE, "after": after }),
-                )
-                .await?;
-            issues.extend(d.issues.nodes);
-            match (d.issues.page_info.has_next_page, d.issues.page_info.end_cursor) {
-                (true, Some(cursor)) => {
-                    after = Some(cursor);
-                    truncated = page + 1 == MAX_PAGES;
-                }
-                _ => break,
-            }
-        }
-
-        Ok(Board { teams: states.into_team_states(), issues, truncated })
-    }
-
     /// Active projects (neither completed nor canceled), by name.
     pub async fn projects(&self) -> Result<Vec<ProjectRef>, LinearError> {
         let d: ProjectsData = self.query(PROJECTS_QUERY, json!({})).await?;

@@ -317,31 +317,6 @@ fn assemble(repo_paths: &[PathBuf], agents: &[AgentSession], projects: &Path, ap
     }
 }
 
-/// How many sessions and subagents are working right now across a set of repos.
-#[derive(Debug, Clone, PartialEq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ActivitySummary {
-    /// Live sessions working or waiting on the user.
-    pub sessions: u32,
-    /// Active subagents.
-    pub agents: u32,
-    pub generated_at: i64,
-}
-
-/// Same criterion as the panel (`sessionState(...).live` in RepoActivityPanel).
-fn summarize(act: &RepoActivity) -> ActivitySummary {
-    let live = |s: &SessionActivity| {
-        s.alive
-            && (matches!(s.state.as_deref(), Some("working" | "blocked"))
-                || matches!(s.status.as_deref(), Some("busy" | "waiting")))
-    };
-    ActivitySummary {
-        sessions: act.sessions.iter().filter(|s| live(s)).count() as u32,
-        agents: act.subagents.iter().filter(|a| a.active).count() as u32,
-        generated_at: act.generated_at,
-    }
-}
-
 /// Runs launched by the app (`runs` table). If the database isn't available, nothing is marked.
 async fn app_run_refs(app: &AppHandle) -> AppRuns {
     let mut refs = AppRuns::default();
@@ -365,38 +340,6 @@ async fn list_agents() -> Result<Vec<AgentSession>, String> {
         return Err(format!("`claude agents` failed: {}", claude_bin::error_text(&out)));
     }
     claude_sessions::parse_agents(&String::from_utf8_lossy(&out.stdout))
-}
-
-/// Claude Code sessions and subagents working in `repo_path` (or its worktrees).
-#[tauri::command]
-pub async fn repo_activity(app: AppHandle, repo_path: String) -> Result<RepoActivity, String> {
-    let raw = PathBuf::from(repo_path.trim());
-    if raw.as_os_str().is_empty() || !raw.is_absolute() {
-        return Err(format!("The repository path must be absolute: {repo_path}"));
-    }
-    let agents = list_agents().await?;
-    let refs = app_run_refs(&app).await;
-    tauri::async_runtime::spawn_blocking(move || {
-        let mut roots = vec![raw.clone()];
-        if let Ok(c) = raw.canonicalize() {
-            if c != raw {
-                roots.push(c);
-            }
-        }
-        if !roots.iter().any(|r| r.is_dir()) {
-            return Err(format!("The repository folder doesn't exist: {}", raw.display()));
-        }
-        let projects = claude_fs::claude_config_dir()
-            .ok_or("Couldn't locate the Claude Code folder ($HOME is not set).")?
-            .join("projects");
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_millis() as i64)
-            .unwrap_or(0);
-        Ok(assemble(&roots, &agents, &projects, &refs, now))
-    })
-    .await
-    .map_err(|e| format!("Internal error reading activity: {e}"))?
 }
 
 /// Existing paths, each one as is and canonicalized, without duplicates.
@@ -423,92 +366,6 @@ fn now_ms() -> i64 {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_millis() as i64)
         .unwrap_or(0)
-}
-
-/// Activity of one of the project's repos (same criterion as `ActivitySummary`).
-#[derive(Debug, Clone, PartialEq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct RepoActivityCount {
-    pub repo_id: String,
-    pub repo_path: String,
-    pub sessions: u32,
-    pub agents: u32,
-}
-
-/// Activity of a project's repos. The totals count only once whatever falls in more
-/// than one repo (nested repos).
-#[derive(Debug, Clone, PartialEq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ProjectActivity {
-    pub project_id: String,
-    pub repos: Vec<RepoActivityCount>,
-    pub sessions: u32,
-    pub agents: u32,
-    pub generated_at: i64,
-}
-
-/// Per-repo counts and totals from a single agent listing. `roots` resolves the paths to
-/// compare (in the app, `existing_roots`: a repo whose folder doesn't exist counts zero).
-fn project_counts(
-    project_id: &str,
-    repos: &[(String, PathBuf)],
-    agents: &[AgentSession],
-    projects: &Path,
-    now: i64,
-    roots: impl Fn(Vec<PathBuf>) -> Vec<PathBuf>,
-) -> ProjectActivity {
-    let none = AppRuns::default();
-    let per_repo = repos
-        .iter()
-        .map(|(id, path)| {
-            let roots = roots(vec![path.clone()]);
-            let (sessions, agents) = if roots.is_empty() {
-                (0, 0)
-            } else {
-                let s = summarize(&assemble(&roots, agents, projects, &none, now));
-                (s.sessions, s.agents)
-            };
-            RepoActivityCount { repo_id: id.clone(), repo_path: path.to_string_lossy().into_owned(), sessions, agents }
-        })
-        .collect();
-    let all = roots(repos.iter().map(|(_, p)| p.clone()).collect());
-    let total = if all.is_empty() {
-        ActivitySummary { sessions: 0, agents: 0, generated_at: now }
-    } else {
-        summarize(&assemble(&all, agents, projects, &none, now))
-    };
-    ProjectActivity {
-        project_id: project_id.to_string(),
-        repos: per_repo,
-        sessions: total.sessions,
-        agents: total.agents,
-        generated_at: now,
-    }
-}
-
-/// Sessions and subagents working in each of the project's repos (a single `claude agents`).
-#[tauri::command]
-pub async fn project_activity(app: AppHandle, project_id: String) -> Result<ProjectActivity, String> {
-    crate::util::check_id(&project_id, "project")?;
-    let db = app.try_state::<Db>().ok_or("The database isn't available.")?.inner().clone();
-    let pid = project_id.clone();
-    let repos: Vec<(String, PathBuf)> = with_db(&db, move |c| {
-        crate::db::queries::projects::get(c, &pid)?;
-        Ok(crate::db::queries::repos::list(c, Some(&pid))?.into_iter().map(|r| (r.id, PathBuf::from(r.path))).collect())
-    })
-    .await?;
-    if repos.is_empty() {
-        return Ok(ProjectActivity { project_id, repos: vec![], sessions: 0, agents: 0, generated_at: now_ms() });
-    }
-    let agents = list_agents().await?;
-    tauri::async_runtime::spawn_blocking(move || {
-        let projects = claude_fs::claude_config_dir()
-            .ok_or("Couldn't locate the Claude Code folder ($HOME is not set).")?
-            .join("projects");
-        Ok(project_counts(&project_id, &repos, &agents, &projects, now_ms(), existing_roots))
-    })
-    .await
-    .map_err(|e| format!("Internal error reading activity: {e}"))?
 }
 
 /// Sessions started outside the app in one repo.
@@ -648,40 +505,6 @@ pub async fn external_sessions(app: AppHandle, project_id: Option<String>) -> Re
     .map_err(|e| format!("Internal error reading activity: {e}"))?
 }
 
-/// Activity summary of several repos in a single pass (one `claude agents` and one scan
-/// of `projects`), for the sidebar indicator. Paths that don't exist are ignored; with
-/// no valid paths it returns zeros.
-#[tauri::command]
-pub async fn activity_summary(repo_paths: Vec<String>) -> Result<ActivitySummary, String> {
-    let raw: Vec<PathBuf> = repo_paths
-        .iter()
-        .map(|p| PathBuf::from(p.trim()))
-        .filter(|p| p.is_absolute())
-        .collect();
-    let now = || {
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_millis() as i64)
-            .unwrap_or(0)
-    };
-    if raw.is_empty() {
-        return Ok(ActivitySummary { sessions: 0, agents: 0, generated_at: now() });
-    }
-    let agents = list_agents().await?;
-    tauri::async_runtime::spawn_blocking(move || {
-        let roots = existing_roots(raw);
-        if roots.is_empty() {
-            return Ok(ActivitySummary { sessions: 0, agents: 0, generated_at: now() });
-        }
-        let projects = claude_fs::claude_config_dir()
-            .ok_or("Couldn't locate the Claude Code folder ($HOME is not set).")?
-            .join("projects");
-        Ok(summarize(&assemble(&roots, &agents, &projects, &AppRuns::default(), now())))
-    })
-    .await
-    .map_err(|e| format!("Internal error reading activity: {e}"))?
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -784,48 +607,6 @@ mod tests {
         assert_eq!(wf.workflow_id.as_deref(), Some("wf_1234"));
         assert!(wf.session_is_app_run);
 
-        std::fs::remove_dir_all(&projects).unwrap();
-    }
-
-    #[test]
-    fn summary_counts_live_sessions_and_active_agents_across_repos() {
-        let (projects, now) = setup("summary");
-        let repo = PathBuf::from("/Users/me/Code/repo");
-        let one = summarize(&assemble(std::slice::from_ref(&repo), &agents(now), &projects, &AppRuns::default(), now));
-        // alive0000000001, acdrepo00000001 and aworkflow000000001.
-        assert_eq!(one.agents, 3, "{one:?}");
-        assert_eq!(one.sessions, 2, "background working + headless: {one:?}");
-        // Adding the sandbox adds (at least) its session blocked waiting for permission.
-        let sandbox = PathBuf::from("/Users/me/Code/repo-sandbox");
-        let both = summarize(&assemble(&[repo, sandbox], &agents(now), &projects, &AppRuns::default(), now));
-        assert!(both.sessions > one.sessions, "{one:?} {both:?}");
-        std::fs::remove_dir_all(&projects).unwrap();
-    }
-
-    #[test]
-    fn project_counts_per_repo_and_total() {
-        let (projects, now) = setup("project");
-        let id = |v: Vec<PathBuf>| v;
-        let repo = PathBuf::from("/Users/me/Code/repo");
-        let sandbox = PathBuf::from("/Users/me/Code/repo-sandbox");
-        let nested = repo.join(".claude/worktrees/agent-alive0000000001");
-        let count = |paths: &[PathBuf]| summarize(&assemble(paths, &agents(now), &projects, &AppRuns::default(), now));
-        let repos = vec![("r1".to_string(), repo.clone()), ("r2".to_string(), sandbox.clone()), ("r3".to_string(), nested)];
-        let act = project_counts("p1", &repos, &agents(now), &projects, now, id);
-        assert_eq!(act.project_id, "p1");
-        let one = count(std::slice::from_ref(&repo));
-        assert_eq!((act.repos[0].repo_id.as_str(), act.repos[0].sessions, act.repos[0].agents), ("r1", one.sessions, one.agents));
-        assert_eq!((one.sessions, one.agents), (2, 3));
-        // The total doesn't double-count the nested repo.
-        let both = count(&[repo, sandbox]);
-        assert_eq!((act.sessions, act.agents), (both.sessions, both.agents));
-        assert!(act.repos[2].agents >= 1, "{act:?}");
-        assert!(act.agents < act.repos.iter().map(|r| r.agents).sum::<u32>(), "{act:?}");
-
-        // In the app, a missing folder counts zero.
-        let real = project_counts("p1", &repos[..1], &agents(now), &projects, now, existing_roots);
-        assert_eq!((real.repos[0].sessions, real.repos[0].agents, real.sessions), (0, 0, 0));
-        assert!(project_counts("p1", &[], &agents(now), &projects, now, id).repos.is_empty());
         std::fs::remove_dir_all(&projects).unwrap();
     }
 

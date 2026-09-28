@@ -6,13 +6,6 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
-/// Completed/canceled issues older than this are not brought to the board.
-pub const RECENT_DONE_DAYS: u32 = 14;
-pub const PAGE_SIZE: u32 = 100;
-/// Page cap per board (100 × 20 = 2000 issues) so the UI does not hang on a huge
-/// workspace; if reached, the board comes back with `truncated: true`.
-pub const MAX_PAGES: usize = 20;
-
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Viewer {
@@ -55,46 +48,6 @@ pub struct ProjectRef {
     pub name: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ParentRef {
-    pub identifier: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct Issue {
-    pub id: String,
-    pub identifier: String,
-    pub title: String,
-    pub url: String,
-    /// 0 = no priority, 1 = urgent … 4 = low.
-    pub priority: f64,
-    pub priority_label: String,
-    pub team: Team,
-    pub state: WorkflowState,
-    pub assignee: Option<UserRef>,
-    pub project: Option<ProjectRef>,
-    pub parent: Option<ParentRef>,
-    pub updated_at: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct TeamStates {
-    pub team: Team,
-    pub states: Vec<WorkflowState>,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct Board {
-    pub teams: Vec<TeamStates>,
-    pub issues: Vec<Issue>,
-    /// true if pagination was cut off at MAX_PAGES.
-    pub truncated: bool,
-}
-
 // ---- Raw GraphQL response shapes ----
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -126,100 +79,11 @@ pub struct TeamsData {
     pub teams: Connection<Team>,
 }
 
-#[derive(Debug, Deserialize)]
-struct RawTeamStates {
-    id: String,
-    key: String,
-    name: String,
-    states: Connection<WorkflowState>,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct TeamStatesData {
-    teams: Connection<RawTeamStates>,
-}
-
-impl TeamStatesData {
-    pub fn into_team_states(self) -> Vec<TeamStates> {
-        let mut out: Vec<TeamStates> = self
-            .teams
-            .nodes
-            .into_iter()
-            .map(|t| {
-                let mut states = t.states.nodes;
-                states.sort_by(|a, b| a.position.total_cmp(&b.position));
-                TeamStates {
-                    team: Team { id: t.id, key: t.key, name: t.name },
-                    states,
-                }
-            })
-            .collect();
-        out.sort_by_key(|t| t.team.name.to_lowercase());
-        out
-    }
-}
-
-#[derive(Debug, Deserialize)]
-pub struct IssuesData {
-    pub issues: PagedConnection<Issue>,
-}
-
 // ---- Queries ----
 
 pub const VIEWER_QUERY: &str = "query Viewer { viewer { name email } }";
 
 pub const TEAMS_QUERY: &str = "query Teams { teams(first: 250) { nodes { id key name } } }";
-
-/// Sizes bounded on purpose: Linear scores complexity by multiplying by `first` in
-/// nested connections (limit 10k per query); 50×50 ≈ 3.8k.
-pub const TEAM_STATES_QUERY: &str = "query TeamStates($filter: TeamFilter) {
-  teams(first: 50, filter: $filter) {
-    nodes { id key name states(first: 50) { nodes { id name type position color } } }
-  }
-}";
-
-pub const ISSUES_QUERY: &str = "query BoardIssues($filter: IssueFilter, $first: Int!, $after: String) {
-  issues(filter: $filter, first: $first, after: $after, orderBy: updatedAt) {
-    nodes {
-      id identifier title url priority priorityLabel updatedAt
-      team { id key name }
-      state { id name type position color }
-      assignee { id name displayName }
-      project { id name }
-      parent { identifier }
-    }
-    pageInfo { hasNextPage endCursor }
-  }
-}";
-
-/// Effective team id list: `None` or empty = all teams.
-fn non_empty(team_ids: Option<&[String]>) -> Option<&[String]> {
-    team_ids.filter(|ids| !ids.is_empty())
-}
-
-/// Issue filter: open (any state other than completed/canceled) or closed
-/// (completedAt/canceledAt, not updatedAt: a comment on an old issue does not bring it
-/// back) less than `recent_days` ago. Linear accepts relative ISO 8601 durations
-/// ("-P14D") in date comparators, so we do not depend on the local clock.
-pub fn issue_filter(team_ids: Option<&[String]>, recent_days: u32) -> Value {
-    let since = format!("-P{recent_days}D");
-    let open_or_recent = json!({ "or": [
-        { "state": { "type": { "nin": ["completed", "canceled"] } } },
-        { "completedAt": { "gt": since } },
-        { "canceledAt": { "gt": since } }
-    ]});
-    match non_empty(team_ids) {
-        Some(ids) => json!({ "and": [{ "team": { "id": { "in": ids } } }, open_or_recent] }),
-        None => open_or_recent,
-    }
-}
-
-pub fn team_filter(team_ids: Option<&[String]>) -> Value {
-    match non_empty(team_ids) {
-        Some(ids) => json!({ "id": { "in": ids } }),
-        None => Value::Null,
-    }
-}
 
 // ---- Sync with Nodal (providers::linear) ----
 //
@@ -629,61 +493,6 @@ pub fn interpret_response<T: DeserializeOwned>(status: u16, body: &str) -> Resul
 mod tests {
     use super::*;
 
-    const ISSUES_PAGE: &str = r##"{
-      "data": { "issues": {
-        "nodes": [
-          {
-            "id": "i1", "identifier": "ACME-8", "title": "Fix login",
-            "url": "https://linear.app/acme/issue/ACME-8/fix-login",
-            "priority": 2, "priorityLabel": "High", "updatedAt": "2026-09-20T10:00:00.000Z",
-            "team": { "id": "t1", "key": "ACME", "name": "Acme" },
-            "state": { "id": "s3", "name": "In Review", "type": "started", "position": 3, "color": "#0f783c" },
-            "assignee": { "id": "u1", "name": "Jane Doe", "displayName": "jane" },
-            "project": { "id": "p1", "name": "Auth" },
-            "parent": { "identifier": "ACME-2" }
-          },
-          {
-            "id": "i2", "identifier": "OPS-1", "title": "Unassigned",
-            "url": "https://linear.app/acme/issue/OPS-1/unassigned",
-            "priority": 0, "priorityLabel": "No priority", "updatedAt": "2026-09-21T10:00:00.000Z",
-            "team": { "id": "t2", "key": "OPS", "name": "Ops" },
-            "state": { "id": "s9", "name": "Backlog", "type": "backlog", "position": 0.5, "color": "#bec2c8" },
-            "assignee": null, "project": null, "parent": null
-          }
-        ],
-        "pageInfo": { "hasNextPage": true, "endCursor": "abc" }
-      } }
-    }"##;
-
-    #[test]
-    fn parses_issue_page_with_optional_fields() {
-        let d: IssuesData = interpret_response(200, ISSUES_PAGE).unwrap();
-        assert_eq!(d.issues.nodes.len(), 2);
-        assert!(d.issues.page_info.has_next_page);
-        assert_eq!(d.issues.page_info.end_cursor.as_deref(), Some("abc"));
-
-        let a = &d.issues.nodes[0];
-        assert_eq!(a.identifier, "ACME-8");
-        assert_eq!(a.state.state_type, "started");
-        assert_eq!(a.assignee.as_ref().unwrap().display_name, "jane");
-        assert_eq!(a.parent.as_ref().unwrap().identifier, "ACME-2");
-        assert_eq!(a.project.as_ref().unwrap().id, "p1");
-
-        let b = &d.issues.nodes[1];
-        assert!(b.assignee.is_none() && b.project.is_none() && b.parent.is_none());
-        assert_eq!(b.state.position, 0.5);
-    }
-
-    #[test]
-    fn serializes_issue_camel_case_for_frontend() {
-        let d: IssuesData = interpret_response(200, ISSUES_PAGE).unwrap();
-        let v = serde_json::to_value(&d.issues.nodes[0]).unwrap();
-        assert_eq!(v["priorityLabel"], "High");
-        assert_eq!(v["updatedAt"], "2026-09-20T10:00:00.000Z");
-        assert_eq!(v["state"]["type"], "started");
-        assert_eq!(v["assignee"]["displayName"], "jane");
-    }
-
     #[test]
     fn parses_viewer_and_teams() {
         let v: ViewerData =
@@ -697,22 +506,6 @@ mod tests {
         )
         .unwrap();
         assert_eq!(t.teams.nodes[0].key, "ACME");
-    }
-
-    #[test]
-    fn team_states_sorted_by_position_and_teams_by_name() {
-        let body = r##"{"data":{"teams":{"nodes":[
-          {"id":"t2","key":"OPS","name":"ops","states":{"nodes":[]}},
-          {"id":"t1","key":"ACME","name":"Acme","states":{"nodes":[
-            {"id":"b","name":"Done","type":"completed","position":4,"color":"#000"},
-            {"id":"a","name":"Todo","type":"unstarted","position":1,"color":"#fff"}
-          ]}}
-        ]}}}"##;
-        let d: TeamStatesData = interpret_response(200, body).unwrap();
-        let ts = d.into_team_states();
-        assert_eq!(ts[0].team.key, "ACME");
-        assert_eq!(ts[1].team.key, "OPS");
-        assert_eq!(ts[0].states[0].name, "Todo");
     }
 
     #[test]
@@ -753,24 +546,5 @@ mod tests {
         let v = serde_json::to_value(LinearError::MissingKey).unwrap();
         assert_eq!(v["kind"], "missingKey");
         assert!(v["message"].as_str().unwrap().contains("API key"));
-    }
-
-    #[test]
-    fn issue_filter_with_and_without_teams() {
-        let all = issue_filter(None, 14);
-        assert!(all.get("and").is_none());
-        assert_eq!(all["or"][0]["state"]["type"]["nin"], json!(["completed", "canceled"]));
-        assert_eq!(all["or"][1]["completedAt"]["gt"], "-P14D");
-        assert_eq!(all["or"][2]["canceledAt"]["gt"], "-P14D");
-
-        assert_eq!(issue_filter(Some(&[]), 14), all, "empty list = all teams");
-
-        let ids = vec!["t1".to_string(), "t2".to_string()];
-        let some = issue_filter(Some(&ids), 14);
-        assert_eq!(some["and"][0]["team"]["id"]["in"], json!(["t1", "t2"]));
-        assert_eq!(some["and"][1], all);
-
-        assert_eq!(team_filter(None), Value::Null);
-        assert_eq!(team_filter(Some(&ids))["id"]["in"], json!(["t1", "t2"]));
     }
 }

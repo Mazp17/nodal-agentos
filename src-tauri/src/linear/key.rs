@@ -23,12 +23,4 @@ impl KeyCache {
     pub async fn require(&self) -> Result<String, LinearError> {
         self.load().await?.ok_or(LinearError::MissingKey)
     }
-
-    pub async fn store(&self, key: String) -> Result<(), LinearError> {
-        self.0.set(PROVIDER, &key).await.map_err(LinearError::Keychain)
-    }
-
-    pub async fn clear(&self) -> Result<(), LinearError> {
-        self.0.delete(PROVIDER).await.map_err(LinearError::Keychain)
-    }
 }
