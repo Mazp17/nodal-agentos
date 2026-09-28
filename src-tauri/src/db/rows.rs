@@ -11,20 +11,38 @@ use crate::domain::*;
 
 // ---------- Column helpers ----------
 
+/// A `domain` enum's TEXT representation (`as_str`/`parse`, from `str_enum!`).
+trait SqlText: Copy {
+    const NAME: &'static str;
+    fn as_str(self) -> &'static str;
+    fn parse(s: &str) -> Option<Self>;
+}
+
+/// `ToSql`/`FromSql` for a `domain` enum, through a local newtype: `domain`'s enums are a
+/// foreign type and `rusqlite`'s traits are foreign traits, so a direct `impl` would violate
+/// the orphan rule. Binds become `SqlEnum(x)` (`&SqlEnum(x)` inside `params!`/`named_params!`);
+/// reads become `row.get::<_, SqlEnum<T>>(..)?.0`.
+pub struct SqlEnum<T>(pub T);
+
+impl<T: SqlText> ToSql for SqlEnum<T> {
+    fn to_sql(&self) -> rusqlite::Result<ToSqlOutput<'_>> {
+        Ok(ToSqlOutput::from(self.0.as_str()))
+    }
+}
+
+impl<T: SqlText> FromSql for SqlEnum<T> {
+    fn column_result(v: ValueRef<'_>) -> FromSqlResult<Self> {
+        let s = v.as_str()?;
+        T::parse(s).map(SqlEnum).ok_or_else(|| FromSqlError::Other(format!("invalid {} \"{s}\"", T::NAME).into()))
+    }
+}
+
 macro_rules! sql_enum {
     ($($ty:ident),+) => {$(
-        impl ToSql for $ty {
-            fn to_sql(&self) -> rusqlite::Result<ToSqlOutput<'_>> {
-                Ok(ToSqlOutput::from(self.as_str()))
-            }
-        }
-        impl FromSql for $ty {
-            fn column_result(v: ValueRef<'_>) -> FromSqlResult<Self> {
-                let s = v.as_str()?;
-                $ty::parse(s).ok_or_else(|| {
-                    FromSqlError::Other(format!("invalid {} \"{s}\"", stringify!($ty)).into())
-                })
-            }
+        impl SqlText for $ty {
+            const NAME: &'static str = stringify!($ty);
+            fn as_str(self) -> &'static str { $ty::as_str(self) }
+            fn parse(s: &str) -> Option<Self> { $ty::parse(s) }
         }
     )+};
 }
@@ -102,8 +120,8 @@ pub fn repo_from_row(row: &Row) -> rusqlite::Result<Repo> {
             permission_mode: row.get("permission_mode")?,
         },
         default_executor: get_opt_json(row, "default_executor_json")?,
-        default_isolation: row.get("default_isolation")?,
-        default_finish: row.get("default_finish")?,
+        default_isolation: row.get::<_, SqlEnum<Isolation>>("default_isolation")?.0,
+        default_finish: row.get::<_, SqlEnum<Finish>>("default_finish")?.0,
         default_review: row.get("default_review")?,
         reviewer: row.get("reviewer")?,
         position: row.get("position")?,
@@ -121,8 +139,8 @@ pub fn insert_repo(conn: &Connection, r: &Repo) -> Result<(), DbError> {
         named_params! {
             ":id": r.id, ":project": r.project_id, ":path": r.path, ":name": r.name,
             ":model": r.launch.model, ":effort": r.launch.effort, ":perm": r.launch.permission_mode,
-            ":exec": opt_json(&r.default_executor)?, ":iso": r.default_isolation,
-            ":finish": r.default_finish, ":review": r.default_review, ":reviewer": r.reviewer,
+            ":exec": opt_json(&r.default_executor)?, ":iso": SqlEnum(r.default_isolation),
+            ":finish": SqlEnum(r.default_finish), ":review": r.default_review, ":reviewer": r.reviewer,
             ":pos": r.position, ":created": r.created_at,
         },
     )?;
@@ -215,16 +233,16 @@ pub fn task_from_row(row: &Row) -> rusqlite::Result<Task> {
         repo_id: row.get("repo_id")?,
         number: row.get("number")?,
         title: row.get("title")?,
-        status: row.get("status")?,
-        priority: row.get("priority")?,
+        status: row.get::<_, SqlEnum<TaskStatus>>("status")?.0,
+        priority: row.get::<_, SqlEnum<Priority>>("priority")?.0,
         labels: get_json(row, "labels_json")?,
         position: row.get("position")?,
         plan,
         plan_overridden: row.get("plan_overridden")?,
         acceptance: get_json(row, "acceptance_json")?,
         assignee: get_opt_json(row, "assignee_json")?,
-        isolation: row.get("isolation")?,
-        finish: row.get("finish")?,
+        isolation: row.get::<_, Option<SqlEnum<Isolation>>>("isolation")?.map(|s| s.0),
+        finish: row.get::<_, Option<SqlEnum<Finish>>>("finish")?.map(|s| s.0),
         review: row.get("review")?,
         worktree,
         source,
@@ -259,11 +277,11 @@ pub fn insert_task(conn: &Connection, t: &Task) -> Result<(), DbError> {
                  :created, :updated, :closed)",
         named_params! {
             ":id": t.id, ":project": t.project_id, ":repo": t.repo_id, ":number": t.number,
-            ":title": t.title, ":status": t.status, ":priority": t.priority,
+            ":title": t.title, ":status": SqlEnum(t.status), ":priority": SqlEnum(t.priority),
             ":labels": to_json(&t.labels)?, ":position": t.position,
             ":plan_kind": plan_kind, ":plan_path": plan_path, ":plan_overridden": t.plan_overridden,
             ":acceptance": to_json(&t.acceptance)?, ":assignee": opt_json(&t.assignee)?,
-            ":isolation": t.isolation, ":finish": t.finish, ":review": t.review,
+            ":isolation": t.isolation.map(SqlEnum), ":finish": t.finish.map(SqlEnum), ":review": t.review,
             ":wt_path": wt.map(|w| &w.path), ":wt_branch": wt.map(|w| &w.branch),
             ":wt_base": wt.map(|w| &w.base),
             ":src_provider": src.map(|s| &s.provider), ":src_link": src.and_then(|s| s.link_id.as_ref()),
@@ -290,7 +308,11 @@ pub fn get_task(conn: &Connection, id: &str) -> Result<Option<Task>, DbError> {
 // ---------- TaskRelation ----------
 
 pub fn relation_from_row(row: &Row) -> rusqlite::Result<TaskRelation> {
-    Ok(TaskRelation { task_id: row.get("task_id")?, other_id: row.get("other_id")?, kind: row.get("kind")? })
+    Ok(TaskRelation {
+        task_id: row.get("task_id")?,
+        other_id: row.get("other_id")?,
+        kind: row.get::<_, SqlEnum<RelationKind>>("kind")?.0,
+    })
 }
 
 /// `Related` is symmetric: stored with the ids ordered (a CHECK requires it).
@@ -301,7 +323,7 @@ pub fn insert_relation(conn: &Connection, r: &TaskRelation) -> Result<(), DbErro
     };
     conn.execute(
         "INSERT INTO task_relations (task_id, other_id, kind) VALUES (?1, ?2, ?3)",
-        rusqlite::params![a, b, r.kind],
+        rusqlite::params![a, b, SqlEnum(r.kind)],
     )?;
     Ok(())
 }
@@ -324,23 +346,23 @@ pub fn run_from_row(row: &Row) -> rusqlite::Result<Run> {
         repo_id: row.get("repo_id")?,
         cwd: row.get("cwd")?,
         executor: get_json(row, "executor_json")?,
-        kind: row.get("kind")?,
+        kind: row.get::<_, SqlEnum<RunKind>>("kind")?.0,
         parent_run_id: row.get("parent_run_id")?,
         prompt: row.get("prompt")?,
         extra_instructions: row.get("extra_instructions")?,
         options: get_json(row, "options_json")?,
-        finish: row.get("finish")?,
-        isolation: row.get("isolation")?,
+        finish: row.get::<_, SqlEnum<Finish>>("finish")?.0,
+        isolation: row.get::<_, Option<SqlEnum<Isolation>>>("isolation")?.map(|s| s.0),
         review: row.get("review")?,
         verdict: get_opt_json(row, "verdict_json")?,
-        status: row.get("status")?,
+        status: row.get::<_, SqlEnum<RunStatus>>("status")?.0,
         queue_position: row.get("queue_position")?,
         claude_run_id: row.get("claude_run_id")?,
         session_id: row.get("session_id")?,
         queued_at: row.get("queued_at")?,
         launched_at: row.get("launched_at")?,
         finished_at: row.get("finished_at")?,
-        outcome: row.get("outcome")?,
+        outcome: row.get::<_, Option<SqlEnum<RunOutcome>>>("outcome")?.map(|s| s.0),
         summary: row.get("summary")?,
         pr_url: row.get("pr_url")?,
         branch: row.get("branch")?,
@@ -362,13 +384,13 @@ pub fn insert_run(conn: &Connection, r: &Run) -> Result<(), DbError> {
                  :finished, :outcome, :summary, :pr, :branch, :error, :legacy, :tokens)",
         named_params! {
             ":id": r.id, ":task": r.task_id, ":repo": r.repo_id, ":cwd": r.cwd,
-            ":exec": to_json(&r.executor)?, ":kind": r.kind, ":parent": r.parent_run_id,
+            ":exec": to_json(&r.executor)?, ":kind": SqlEnum(r.kind), ":parent": r.parent_run_id,
             ":prompt": r.prompt, ":extra": r.extra_instructions, ":options": to_json(&r.options)?,
-            ":finish": r.finish, ":isolation": r.isolation, ":review": r.review,
-            ":verdict": opt_json(&r.verdict)?, ":status": r.status,
+            ":finish": SqlEnum(r.finish), ":isolation": r.isolation.map(SqlEnum), ":review": r.review,
+            ":verdict": opt_json(&r.verdict)?, ":status": SqlEnum(r.status),
             ":qpos": r.queue_position, ":claude_id": r.claude_run_id, ":session": r.session_id,
             ":queued": r.queued_at, ":launched": r.launched_at, ":finished": r.finished_at,
-            ":outcome": r.outcome, ":summary": r.summary, ":pr": r.pr_url, ":branch": r.branch,
+            ":outcome": r.outcome.map(SqlEnum), ":summary": r.summary, ":pr": r.pr_url, ":branch": r.branch,
             ":error": r.error, ":legacy": r.legacy_label, ":tokens": r.tokens,
         },
     )?;

@@ -437,7 +437,7 @@ pub fn reorder_tasks(conn: &mut Connection, status: TaskStatus, ids: &[String], 
             .prepare("SELECT id, position FROM tasks WHERE project_id = ?1 AND status = ?2 ORDER BY position, created_at, id")
             .map_err(|e| e.to_string())?;
         let rows = stmt
-            .query_map(rusqlite::params![project_id, status], |r| Ok((r.get::<_, String>(0)?, r.get::<_, f64>(1)?)))
+            .query_map(rusqlite::params![project_id, rows::SqlEnum(status)], |r| Ok((r.get::<_, String>(0)?, r.get::<_, f64>(1)?)))
             .map_err(|e| e.to_string())?;
         rows.collect::<rusqlite::Result<Vec<_>>>().map_err(|e| e.to_string())?
     };

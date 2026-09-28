@@ -1,7 +1,7 @@
 use rusqlite::{named_params, Connection};
 
 use super::{not_found, opt_json, to_json};
-use crate::db::rows::{get_task, insert_task, task_from_row};
+use crate::db::rows::{get_task, insert_task, task_from_row, SqlEnum};
 use crate::db::DbError;
 use crate::domain::{PlanRef, Task, TaskStatus};
 
@@ -47,11 +47,11 @@ pub fn update(conn: &Connection, t: &Task) -> Result<(), DbError> {
                           wt_base = :wt_base, updated_at = :updated, closed_at = :closed
          WHERE id = :id",
         named_params! {
-            ":id": t.id, ":repo": t.repo_id, ":title": t.title, ":status": t.status, ":priority": t.priority,
+            ":id": t.id, ":repo": t.repo_id, ":title": t.title, ":status": SqlEnum(t.status), ":priority": SqlEnum(t.priority),
             ":labels": to_json(&t.labels)?, ":position": t.position, ":plan_kind": plan_kind,
             ":plan_path": plan_path, ":plan_overridden": t.plan_overridden,
             ":acceptance": to_json(&t.acceptance)?, ":assignee": opt_json(&t.assignee)?,
-            ":isolation": t.isolation, ":finish": t.finish, ":review": t.review,
+            ":isolation": t.isolation.map(SqlEnum), ":finish": t.finish.map(SqlEnum), ":review": t.review,
             ":wt_path": wt.map(|w| &w.path), ":wt_branch": wt.map(|w| &w.branch), ":wt_base": wt.map(|w| &w.base),
             ":updated": t.updated_at, ":closed": t.closed_at,
         },
@@ -69,7 +69,7 @@ pub fn set_status(conn: &Connection, id: &str, status: TaskStatus, now: i64) -> 
         "UPDATE tasks SET status = ?2, updated_at = ?3,
                           closed_at = CASE WHEN ?4 THEN COALESCE(closed_at, ?3) ELSE NULL END
          WHERE id = ?1",
-        rusqlite::params![id, status, now, closed],
+        rusqlite::params![id, SqlEnum(status), now, closed],
     )?;
     if n == 0 {
         return Err(not_found("task"));
@@ -88,7 +88,7 @@ pub fn delete(conn: &Connection, id: &str) -> Result<(), DbError> {
 pub fn next_position(conn: &Connection, project_id: &str, status: TaskStatus) -> Result<f64, DbError> {
     Ok(conn.query_row(
         "SELECT COALESCE(MAX(position), 0) + 1 FROM tasks WHERE project_id = ?1 AND status = ?2",
-        rusqlite::params![project_id, status],
+        rusqlite::params![project_id, SqlEnum(status)],
         |r| r.get(0),
     )?)
 }

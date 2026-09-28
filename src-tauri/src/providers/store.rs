@@ -4,7 +4,7 @@
 
 use rusqlite::{params, Connection, OptionalExtension};
 
-use crate::db::rows::{self, outbox_from_row, source_link_from_row, task_from_row};
+use crate::db::rows::{self, outbox_from_row, source_link_from_row, task_from_row, SqlEnum};
 use crate::db::DbError;
 use crate::domain::{
     ExtProject, ExternalState, MovedInfo, OutboxItem, OutboxPayload, PlanRef, SourceLink, StateChanges, Task,
@@ -181,7 +181,7 @@ pub fn insert_imported(conn: &Connection, n: NewImported) -> Result<Task, DbErro
         .ok_or_else(|| DbError::Invalid("Project not found.".into()))?;
     let position: f64 = conn.query_row(
         "SELECT COALESCE(MAX(position), 0) + 1 FROM tasks WHERE project_id = ?1 AND status = ?2",
-        params![n.project_id, n.status],
+        params![n.project_id, SqlEnum(n.status)],
         |r| r.get(0),
     )?;
     let closed = matches!(n.status, TaskStatus::Done | TaskStatus::Canceled).then_some(n.now);
@@ -256,7 +256,7 @@ pub fn apply_pull(conn: &Connection, u: &PullUpdate) -> Result<(), DbError> {
         params![
             u.task_id,
             u.title,
-            u.status,
+            u.status.map(SqlEnum),
             u.external_state.map(json).transpose()?,
             u.sync_error,
             u.now,

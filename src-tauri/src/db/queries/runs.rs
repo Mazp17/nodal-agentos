@@ -1,7 +1,7 @@
 use rusqlite::{named_params, Connection, OptionalExtension};
 
 use super::{not_found, opt_json, to_json};
-use crate::db::rows::{get_run, insert_run, run_from_row};
+use crate::db::rows::{get_run, insert_run, run_from_row, SqlEnum};
 use crate::db::DbError;
 use crate::domain::{Run, RunStatus};
 
@@ -140,9 +140,9 @@ pub fn update(conn: &Connection, r: &Run) -> Result<(), DbError> {
                          options_json = :options, tokens = :tokens
          WHERE id = :id",
         named_params! {
-            ":id": r.id, ":cwd": r.cwd, ":status": r.status, ":qpos": r.queue_position,
+            ":id": r.id, ":cwd": r.cwd, ":status": SqlEnum(r.status), ":qpos": r.queue_position,
             ":verdict": opt_json(&r.verdict)?, ":claude_id": r.claude_run_id, ":session": r.session_id,
-            ":launched": r.launched_at, ":finished": r.finished_at, ":outcome": r.outcome,
+            ":launched": r.launched_at, ":finished": r.finished_at, ":outcome": r.outcome.map(SqlEnum),
             ":summary": r.summary, ":pr": r.pr_url, ":branch": r.branch, ":error": r.error,
             ":legacy": r.legacy_label, ":prompt": r.prompt, ":options": to_json(&r.options)?, ":tokens": r.tokens,
         },
@@ -155,7 +155,7 @@ pub fn update(conn: &Connection, r: &Run) -> Result<(), DbError> {
 
 /// Moves from `from` to `to` only if still in `from` (compare-and-set). Returns whether it changed.
 pub fn transition(conn: &Connection, id: &str, from: RunStatus, to: RunStatus) -> Result<bool, DbError> {
-    Ok(conn.execute("UPDATE runs SET status = ?3 WHERE id = ?1 AND status = ?2", rusqlite::params![id, from, to])? > 0)
+    Ok(conn.execute("UPDATE runs SET status = ?3 WHERE id = ?1 AND status = ?2", rusqlite::params![id, SqlEnum(from), SqlEnum(to)])? > 0)
 }
 
 /// `launching` runs. Only the queue pass (holding its turn) sets them so and clears them in

@@ -1,7 +1,7 @@
 use rusqlite::Connection;
 
 use super::is_constraint;
-use crate::db::rows::{insert_relation, relations_of};
+use crate::db::rows::{insert_relation, relations_of, SqlEnum};
 use crate::db::DbError;
 use crate::domain::{RelationKind, TaskRelation};
 
@@ -40,7 +40,7 @@ pub fn remove(conn: &Connection, r: &TaskRelation) -> Result<(), DbError> {
     };
     conn.execute(
         "DELETE FROM task_relations WHERE task_id = ?1 AND other_id = ?2 AND kind = ?3",
-        rusqlite::params![a, b, r.kind],
+        rusqlite::params![a, b, SqlEnum(r.kind)],
     )?;
     Ok(())
 }
