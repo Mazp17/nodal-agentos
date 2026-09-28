@@ -29,6 +29,8 @@ export function installZoomShortcuts() {
 
   window.addEventListener("keydown", (e) => {
     if (!(e.metaKey || e.ctrlKey) || e.altKey || e.isComposing) return;
+    // Inside an embedded terminal Ctrl+-/=/0 are keystrokes for the program; ⌘ still zooms.
+    if (e.ctrlKey && !e.metaKey && e.target instanceof Element && e.target.closest(".xterm")) return;
     let next: number;
     if (e.key === "+" || e.key === "=" || e.code === "NumpadAdd") next = Math.min(level + 1, LEVELS.length - 1);
     else if (e.key === "-" || e.code === "NumpadSubtract") next = Math.max(level - 1, 0);

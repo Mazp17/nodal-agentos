@@ -3,6 +3,8 @@
 export { RunsView, type RunsViewProps } from "./RunsView";
 export { RunDetailView, type RunDetailViewProps } from "./RunDetailView";
 export { RunDiffDrawer, type RunDiffDrawerProps } from "./RunDiffDrawer";
+// `AttachedSessionDrawer` is not re-exported: the shell lazy-loads it (xterm is heavy).
+export { closeAttachedSession, useAttachTarget, type AttachTarget } from "./attachStore";
 export { RunMonitor, type RunMonitorProps } from "./RunMonitor";
 export { AgentTranscript } from "./AgentTranscript";
 export { LaunchBlockerNotice, launchErrorHint, useLaunchBlocker } from "./LaunchBlockerNotice";

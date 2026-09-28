@@ -1,0 +1,88 @@
+/* "Attached session" drawer: `claude attach` in an embedded terminal. */
+
+/* Full height and above the task panel (.tp, fixed at z 21), like the diff drawer. */
+.as-scrim { position: fixed; inset: 0; z-index: 30; }
+.as-panel {
+  position: fixed;
+  top: 0;
+  z-index: 31;
+  width: min(640px, 94%);
+  background: var(--surface-sheet);
+}
+
+.as-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-5);
+  padding: var(--sp-5) var(--sp-7);
+  border-bottom: 1px solid var(--border);
+}
+.as-head-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.as-title-row { display: flex; align-items: center; gap: var(--sp-3); min-width: 0; }
+.as-status {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: var(--fs-2xs);
+  font-weight: var(--fw-medium);
+  color: var(--tone);
+}
+.as-key { flex: none; font-family: var(--font-mono); font-size: var(--fs-sm); color: var(--text-muted); }
+.as-title { min-width: 0; font-size: var(--fs-lg); font-weight: var(--fw-semibold); color: var(--text); }
+.as-sub { display: flex; align-items: center; gap: var(--sp-2); min-width: 0; font-size: var(--fs-2xs); color: var(--text-dim); }
+.as-mono { font-family: var(--font-mono); }
+
+.as-term {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  background: var(--bg-deep);
+  padding: var(--sp-6) var(--sp-7) var(--sp-3);
+}
+.as-term:focus { outline: none; }
+/* FitAddon sizes the grid from this box; the padding lives on the parent. */
+.as-xterm { flex: 1; min-width: 0; min-height: 0; }
+.as-xterm .xterm { height: 100%; }
+.as-xterm .xterm:focus, .as-xterm .xterm-helper-textarea:focus { outline: none; }
+
+.as-connecting {
+  position: absolute;
+  top: var(--sp-6);
+  left: var(--sp-7);
+  font-family: var(--font-mono);
+  font-size: var(--fs-2xs);
+  color: var(--text-dim);
+}
+/* In the flow below the terminal (not over it): the grid shrinks and refits, so the last
+   lines `claude attach` printed stay visible. */
+.as-banner {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-5);
+  padding: var(--sp-3) var(--sp-3) var(--sp-3) var(--sp-6);
+  border: 1px solid var(--border-3);
+  border-radius: var(--r-xl);
+  background: var(--surface-float);
+}
+.as-banner-error { border-color: var(--red-tint-35); }
+.as-banner-text { flex: 1; min-width: 0; font-size: var(--fs-sm); color: var(--text-2); overflow-wrap: anywhere; }
+.as-banner-error .as-banner-text { color: var(--red-text); }
+
+.as-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-5);
+  padding: var(--sp-2) var(--sp-7);
+  border-top: 1px solid var(--border);
+  background: var(--bg-deep);
+  font-family: var(--font-mono);
+  font-size: var(--fs-2xs);
+  color: var(--text-dim);
+}
+.as-foot-size { flex: none; }
