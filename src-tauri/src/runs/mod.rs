@@ -1,5 +1,9 @@
 //! Claude Code background runs: launch them (`claude --bg`), list them
 //! (`claude agents`) and follow the workflow they run by reading their session files.
+//!
+//! `launch_bg`, `list_runs`'s body, `read_session`, `session_tokens` and `projects_dir`
+//! moved to `nodal_host::claude::{cli, fs}`; re-exported (or called) here so current uses
+//! don't break.
 
 pub mod claude_bin;
 pub(crate) mod claude_fs;
@@ -8,37 +12,19 @@ pub mod claude_trust;
 pub mod options;
 pub mod pty;
 pub mod stream_json;
-#[cfg(test)]
-mod stream_json_live;
 pub mod terminal;
 pub mod types;
 pub mod workflows;
-
-use std::path::{Path, PathBuf};
-use std::process::Stdio;
-use std::time::Duration;
-
-use tokio::io::{AsyncBufReadExt, AsyncRead, BufReader};
-use tokio::sync::mpsc;
 
 use types::{LaunchBlocker, LaunchOptions, RunDetail, RunRef, RunSummary, Transcript};
 
 /// Moved to `nodal_domain::model::claude`; re-exported so current uses don't break.
 pub use nodal_domain::model::claude::{ExtraFlags, LaunchError, SessionReadout};
 
-const LAUNCH_TIMEOUT: Duration = Duration::from_secs(30);
-const LIST_TIMEOUT: Duration = Duration::from_secs(15);
+pub use nodal_host::claude::fs::readout::{projects_dir, read_session, session_tokens};
 
-/// Forwards each line of a child stream to the channel.
-fn forward_lines<R: AsyncRead + Unpin + Send + 'static>(stream: R, tx: mpsc::UnboundedSender<String>) {
-    tauri::async_runtime::spawn(async move {
-        let mut lines = BufReader::new(stream).lines();
-        // Drain until EOF even if nobody listens anymore: closing the pipe would give EPIPE to
-        // `claude` (or to the background session, if it inherited the pipe).
-        while let Ok(Some(line)) = lines.next_line().await {
-            let _ = tx.send(line);
-        }
-    });
+fn runtime_handle() -> tokio::runtime::Handle {
+    tauri::async_runtime::handle().inner().clone()
 }
 
 /// Like `launch_bg`, with the error as text.
@@ -48,132 +34,15 @@ async fn launch_with(cwd: String, prompt: String, opts: &LaunchOptions, extra: &
 }
 
 /// Launches `claude --bg [flags] -- <prompt>` in `cwd` and returns the session's short id.
-/// Everything goes as separate arguments (no shell), so there's nothing to escape; the
-/// flags are validated against the allowed lists in `options`. The `--` ends the variadic
-/// options before the prompt.
+/// Moved to `nodal_host::claude::cli::launch_bg`.
 pub async fn launch_bg(cwd: String, prompt: String, opts: &LaunchOptions, extra: &ExtraFlags) -> Result<RunRef, LaunchError> {
-    let dir = Path::new(&cwd);
-    if !dir.is_absolute() {
-        return Err(format!("The folder must be an absolute path: {cwd}").into());
-    }
-    if !dir.is_dir() {
-        return Err(format!("The folder doesn't exist or isn't a directory: {cwd}").into());
-    }
-    if prompt.trim().is_empty() {
-        return Err("The prompt is empty.".into());
-    }
-    // `claude` would read it as an option, not as the prompt.
-    if prompt.trim_start().starts_with('-') {
-        return Err("The prompt can't start with \"-\".".into());
-    }
-    let flags = options::to_args(opts)?;
-
-    let mut cmd = claude_bin::claude_command()?;
-    cmd.arg("--bg")
-        .args(&flags)
-        .args(extra.to_args())
-        .arg("--")
-        .arg(&prompt)
-        .current_dir(dir)
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
-    let mut child = cmd.spawn().map_err(|e| format!("Couldn't run `claude --bg`: {e}"))?;
-
-    // Don't wait for EOF: seeing the `backgrounded · <id>` line on either stream is enough
-    // (there's no guarantee the background session releases the pipes).
-    let (tx, mut rx) = mpsc::unbounded_channel();
-    if let Some(out) = child.stdout.take() {
-        forward_lines(out, tx.clone());
-    }
-    if let Some(err) = child.stderr.take() {
-        forward_lines(err, tx);
-    }
-    let found = tokio::time::timeout(LAUNCH_TIMEOUT, async {
-        let mut seen = String::new();
-        while let Some(line) = rx.recv().await {
-            if let Some(id) = claude_fs::parse_bg_line(&line) {
-                return Ok(id);
-            }
-            seen.push_str(&line);
-            seen.push('\n');
-        }
-        Err(seen)
-    })
-    .await;
-
-    match found {
-        Ok(Ok(id)) => {
-            // Reap the process when it exits, without blocking the response.
-            tauri::async_runtime::spawn(async move {
-                let _ = child.wait().await;
-            });
-            Ok(RunRef { id, cwd })
-        }
-        Ok(Err(seen)) => {
-            let status = tokio::time::timeout(Duration::from_secs(5), child.wait()).await;
-            if let Some(id) = claude_fs::parse_bare_id(&seen) {
-                return Ok(RunRef { id, cwd });
-            }
-            let _ = child.start_kill();
-            let code = match status {
-                Ok(Ok(s)) => s.code().map(|c| format!(" (exit code {c})")).unwrap_or_default(),
-                _ => String::new(),
-            };
-            let seen: String = seen.trim().chars().take(500).collect();
-            Err(format!("`claude --bg` exited without returning the session id{code}: {seen}").into())
-        }
-        Err(_) => {
-            let _ = child.start_kill();
-            Err(LaunchError {
-                message: format!(
-                    "`claude --bg` didn't return the session id within {} s. It may have launched anyway: check the runs list before retrying.",
-                    LAUNCH_TIMEOUT.as_secs()
-                ),
-                timed_out: true,
-            })
-        }
-    }
+    nodal_host::claude::cli::launch_bg(cwd, prompt, opts, extra, &runtime_handle()).await
 }
 
 /// Background sessions (`claude agents --json --all`), most recent first.
 #[tauri::command]
 pub async fn list_runs() -> Result<Vec<RunSummary>, String> {
-    let mut cmd = claude_bin::claude_command()?;
-    cmd.args(["agents", "--json", "--all"]);
-    let out = claude_bin::output_with_timeout(cmd, LIST_TIMEOUT, "`claude agents`").await?;
-    if !out.status.success() {
-        return Err(format!("`claude agents` failed: {}", claude_bin::error_text(&out)));
-    }
-    claude_fs::parse_agents_json(&String::from_utf8_lossy(&out.stdout))
-}
-
-fn projects_dir() -> Result<PathBuf, String> {
-    Ok(claude_fs::claude_config_dir()
-        .ok_or("Couldn't locate the Claude Code folder ($HOME is not set).")?
-        .join("projects"))
-}
-
-pub fn read_session(session_id: &str, cwd: &str) -> SessionReadout {
-    if !claude_fs::is_valid_session_id(session_id) {
-        return SessionReadout::default();
-    }
-    let Ok(projects) = projects_dir() else { return SessionReadout::default() };
-    let detail = claude_fs::find_session_dir(&projects, cwd, session_id).and_then(|d| claude_fs::read_run_detail(&d));
-    let jsonl = claude_fs::find_session_jsonl(&projects, cwd, session_id);
-    SessionReadout {
-        detail,
-        last_message: jsonl.as_deref().and_then(claude_fs::read_last_assistant_text),
-        blocker: jsonl.as_deref().and_then(claude_fs::read_workflow_review_denial),
-    }
-}
-
-/// Tokens of the session's main transcript (blocking). `None` if there's no file or usage.
-pub fn session_tokens(session_id: &str, cwd: &str) -> Option<i64> {
-    if !claude_fs::is_valid_session_id(session_id) {
-        return None;
-    }
-    let projects = projects_dir().ok()?;
-    claude_fs::read_usage_tokens(&claude_fs::find_session_jsonl(&projects, cwd, session_id)?)
+    nodal_host::claude::cli::list_runs().await
 }
 
 /// Detail of the session's most recent workflow. `None` if the session has no folder on
