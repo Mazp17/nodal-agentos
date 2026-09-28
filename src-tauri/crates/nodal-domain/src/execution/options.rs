@@ -1,0 +1,101 @@
+//! Validation of the per-repo launch flags (`--model`, `--effort`,
+//! `--permission-mode`) and their translation into `claude` arguments.
+//! Values verified against `claude --help` (v2.1.281).
+
+use crate::model::LaunchOptions;
+
+pub const EFFORTS: [&str; 5] = ["low", "medium", "high", "xhigh", "max"];
+/// `claude --help` lists all but `default`, which is also accepted (verified: alias of `manual`).
+pub const PERMISSION_MODES: [&str; 7] = [
+    "default",
+    "manual",
+    "acceptEdits",
+    "auto",
+    "dontAsk",
+    "plan",
+    "bypassPermissions",
+];
+/// "Latest model" aliases that `--model` accepts.
+pub const MODEL_ALIASES: [&str; 4] = ["fable", "opus", "sonnet", "haiku"];
+
+/// A known alias, or a full `claude-...` name (with an optional `[1m]` suffix).
+pub fn is_valid_model(m: &str) -> bool {
+    let base = m.strip_suffix("[1m]").unwrap_or(m);
+    if MODEL_ALIASES.contains(&base) {
+        return true;
+    }
+    base.len() <= 64
+        && base.len() > "claude-".len()
+        && base.starts_with("claude-")
+        && base
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-' || c == '.')
+}
+
+fn clean(v: &Option<String>) -> Option<String> {
+    v.as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(String::from)
+}
+
+/// Normalizes (trim, empty → `None`) and validates against the allowed lists.
+pub fn normalize(opts: &LaunchOptions) -> Result<LaunchOptions, Vec<String>> {
+    let out = LaunchOptions {
+        model: clean(&opts.model),
+        effort: clean(&opts.effort),
+        permission_mode: clean(&opts.permission_mode),
+    };
+    let mut errors = Vec::new();
+    if let Some(m) = &out.model {
+        if !is_valid_model(m) {
+            errors.push(format!(
+                "Invalid model \"{m}\": use {} or a full name like claude-sonnet-5.",
+                MODEL_ALIASES.join(", ")
+            ));
+        }
+    }
+    if let Some(e) = &out.effort {
+        if !EFFORTS.contains(&e.as_str()) {
+            errors.push(format!(
+                "Invalid effort \"{e}\": use {}.",
+                EFFORTS.join(", ")
+            ));
+        }
+    }
+    if let Some(p) = &out.permission_mode {
+        if !PERMISSION_MODES.contains(&p.as_str()) {
+            errors.push(format!(
+                "Invalid permission mode \"{p}\": use {}.",
+                PERMISSION_MODES.join(", ")
+            ));
+        }
+    }
+    if errors.is_empty() {
+        Ok(out)
+    } else {
+        Err(errors)
+    }
+}
+
+/// Arguments (each one separate, no shell) for `claude --bg`.
+pub fn to_args(opts: &LaunchOptions) -> Result<Vec<String>, String> {
+    let opts = normalize(opts).map_err(|e| e.join("\n"))?;
+    let mut args = Vec::new();
+    if let Some(m) = opts.model {
+        args.push("--model".into());
+        args.push(m);
+    }
+    if let Some(e) = opts.effort {
+        args.push("--effort".into());
+        args.push(e);
+    }
+    if let Some(p) = opts.permission_mode {
+        args.push("--permission-mode".into());
+        args.push(p);
+    }
+    Ok(args)
+}
+
+#[cfg(test)]
+mod tests;

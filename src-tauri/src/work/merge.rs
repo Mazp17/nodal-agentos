@@ -5,35 +5,13 @@
 
 use std::path::{Path, PathBuf};
 
-use serde::Serialize;
-
 use crate::domain::WorktreeRef;
 use crate::util::git;
 
 use super::worktree::{branch_exists, count, is_live_worktree};
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-#[serde(tag = "kind", rename_all = "snake_case")]
-pub enum MergeOutcome {
-    /// `commit`: the base's new tip. `commits`: task commits that landed. `moved`: the base had
-    /// moved and was merged into the worktree first.
-    Merged { commit: String, commits: u32, squashed: bool, moved: bool },
-    /// Merging the base into the worktree conflicted in `files`; the merge was aborted.
-    Conflict { files: Vec<String> },
-}
-
-/// What `merge_worktree` did. `task` is the task after it (Done unless it conflicted).
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct MergeReport {
-    pub outcome: MergeOutcome,
-    pub task: crate::domain::Task,
-    /// Remote the base was pushed to (only when asked).
-    pub pushed_to: Option<String>,
-    pub push_error: Option<String>,
-    /// Why the worktree couldn't be cleaned up; the merge itself went through.
-    pub cleanup_error: Option<String>,
-}
+/// Moved to `nodal_domain::execution::worktree`; re-exported so current uses don't break.
+pub use nodal_domain::execution::worktree::{MergeOutcome, MergeReport};
 
 /// Worktree that has `branch` checked out (the main repo included), if any.
 fn checkout_of(repo: &Path, branch: &str) -> Result<Option<PathBuf>, String> {

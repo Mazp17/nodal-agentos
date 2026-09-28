@@ -10,10 +10,8 @@ use super::claude_bin;
 const STOP_TIMEOUT: Duration = Duration::from_secs(20);
 const OSASCRIPT_TIMEOUT: Duration = Duration::from_secs(15);
 
-/// Short id of a run (`claude --bg` prints hex). It goes into a command and into AppleScript.
-pub fn is_valid_run_id(id: &str) -> bool {
-    (4..=64).contains(&id.len()) && !id.starts_with('-') && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
-}
+/// Moved to `nodal_domain::execution::worktree`; re-exported so current uses don't break.
+pub use nodal_domain::execution::worktree::is_valid_run_id;
 
 /// `claude stop <id>`.
 pub async fn stop(run_id: &str) -> Result<(), String> {

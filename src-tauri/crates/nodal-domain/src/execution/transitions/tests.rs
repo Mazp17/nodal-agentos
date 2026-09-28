@@ -1,7 +1,7 @@
 use super::*;
-use crate::domain::*;
-use crate::runs::types::{DetailSource, RunDetail, RunResult};
-use crate::work::testutil::{run_of, task_of};
+use crate::model::claude::{DetailSource, RunDetail, RunResult};
+use crate::model::*;
+use crate::testutil::{run_of, task_of};
 
 fn readout(msg: &str) -> SessionReadout {
     SessionReadout {

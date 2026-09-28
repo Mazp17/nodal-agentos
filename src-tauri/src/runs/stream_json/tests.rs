@@ -1,7 +1,7 @@
 use std::path::Path;
 
 use super::*;
-use crate::runs::types::ToolPatch;
+use crate::runs::types::{ToolPatch, TranscriptItem};
 use crate::work::diff::{DiffFileStatus, DiffLineKind};
 
 fn fixture(name: &str) -> Vec<StreamEvent> {

@@ -1,17 +1,6 @@
 use super::*;
 
 #[test]
-fn run_id_validation() {
-    assert!(is_valid_run_id("ddb91222"));
-    assert!(is_valid_run_id("abc-123"));
-    assert!(!is_valid_run_id("-rf"));
-    assert!(!is_valid_run_id("ab"));
-    assert!(!is_valid_run_id("abcd\"; rm -rf ~"));
-    assert!(!is_valid_run_id("abcd efgh"));
-    assert!(!is_valid_run_id("abcd'"));
-}
-
-#[test]
 fn attach_script_quotes_path() {
     let lines = attach_script(Path::new("/Users/a b/it's \"x\"/claude"), "ddb91222");
     assert_eq!(lines[0], "tell application \"Terminal\"");

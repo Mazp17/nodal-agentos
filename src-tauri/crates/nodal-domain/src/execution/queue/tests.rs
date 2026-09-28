@@ -1,5 +1,5 @@
 use super::*;
-use crate::domain::{Executor, Finish, LaunchOptions, RunKind};
+use crate::model::{Executor, Finish, LaunchOptions, RunKind};
 
 const NOW: i64 = 10_000_000;
 
