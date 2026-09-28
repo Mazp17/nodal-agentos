@@ -8,11 +8,10 @@ pub mod paths;
 
 pub use nodal_domain::util::*;
 
+/// Moved to `nodal_host::adapters::SystemClock`; re-exported so current uses don't break.
 pub fn now_ms() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_millis() as i64)
-        .unwrap_or(0)
+    use nodal_domain::ports::Clock;
+    nodal_host::adapters::SystemClock.now_ms()
 }
 
 /// Runs `f` on a blocking thread (disk, git) without stalling the runtime.
@@ -20,12 +19,5 @@ pub async fn blocking<T: Send + 'static>(f: impl FnOnce() -> Result<T, String> +
     tauri::async_runtime::spawn_blocking(f).await.map_err(|e| format!("Internal error: {e}"))?
 }
 
-/// Atomic write: temp file + rename (creates any missing folders).
-pub fn write_atomic(path: &std::path::Path, contents: &[u8]) -> Result<(), String> {
-    if let Some(dir) = path.parent() {
-        std::fs::create_dir_all(dir).map_err(|e| format!("Couldn't create {}: {e}", dir.display()))?;
-    }
-    let tmp = path.with_extension(format!("{}.tmp", std::process::id()));
-    std::fs::write(&tmp, contents).map_err(|e| format!("Couldn't write {}: {e}", tmp.display()))?;
-    std::fs::rename(&tmp, path).map_err(|e| format!("Couldn't save {}: {e}", path.display()))
-}
+/// Moved to `nodal_host::plans::write_atomic`; re-exported so current uses don't break.
+pub use nodal_host::plans::write_atomic;
