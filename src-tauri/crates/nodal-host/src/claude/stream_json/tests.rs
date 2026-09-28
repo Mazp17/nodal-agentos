@@ -1,12 +1,12 @@
 use std::path::Path;
 
 use super::*;
-use crate::runs::types::{ToolPatch, TranscriptItem};
-use crate::work::diff::{DiffFileStatus, DiffLineKind};
+use nodal_domain::diff::{DiffFileStatus, DiffLineKind};
+use nodal_domain::model::claude::{ToolPatch, TranscriptItem};
 
 fn fixture(name: &str) -> Vec<StreamEvent> {
     let path = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("src/runs/fixtures/stream_json")
+        .join("src/claude/fixtures/stream_json")
         .join(name);
     std::fs::read_to_string(path)
         .unwrap()

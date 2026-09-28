@@ -31,12 +31,13 @@ use serde_json::{json, Value};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, Lines};
 use tokio::process::{Child, ChildStdin, ChildStdout};
 
-use crate::runs::claude_bin;
+use crate::claude::bin as claude_bin;
+use crate::testutil::block_on;
 
 const TURN_TIMEOUT: Duration = Duration::from_secs(120);
 
 fn fixture(name: &str) -> Vec<Value> {
-    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/runs/fixtures/stream_json").join(name);
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/claude/fixtures/stream_json").join(name);
     std::fs::read_to_string(&path)
         .unwrap_or_else(|e| panic!("{}: {e}", path.display()))
         .lines()
@@ -172,7 +173,7 @@ fn is_permission_request(ev: &Value) -> bool {
 #[ignore]
 fn real_permission_prompts_reach_the_host() {
     let dir = scratch();
-    tauri::async_runtime::block_on(async {
+    block_on(async {
         for (file, allow) in [("allowed.txt", true), ("denied.txt", false)] {
             let mut chat = Chat::start(&dir, &[]);
             chat.say(&format!("Use the Write tool to create {file} containing 'x'. Then reply DONE.")).await;
@@ -197,7 +198,7 @@ fn real_permission_prompts_reach_the_host() {
 #[ignore]
 fn real_interrupt_then_resume() {
     let dir = scratch();
-    tauri::async_runtime::block_on(async {
+    block_on(async {
         let mut chat = Chat::start(&dir, &[]);
         chat.say("Write a 600-word essay about lighthouses. Use no tools.").await;
         let mut sent = false;
