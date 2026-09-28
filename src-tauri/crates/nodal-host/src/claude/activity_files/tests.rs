@@ -1,7 +1,10 @@
+use std::fs;
+use std::path::PathBuf;
+
 use super::*;
 
 fn fixtures() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src/activity/fixtures")
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src/claude/fixtures/activity")
 }
 
 #[test]

@@ -1,7 +1,14 @@
+use std::collections::HashSet;
+use std::path::{Path, PathBuf};
+use std::time::Duration;
+
 use super::*;
+use crate::claude::activity_files;
+use crate::testutil::block_on;
+use nodal_domain::model::activity::AgentSession;
 
 fn fixtures() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src/activity/fixtures")
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src/claude/fixtures/activity")
 }
 
 const COORD: &str = "11111111-2222-3333-4444-555555555555";
@@ -21,10 +28,9 @@ fn setup(name: &str) -> (PathBuf, i64) {
         .open(dst.join(rel))
         .unwrap();
     f.set_modified(old).unwrap();
-    let now =
-        claude_sessions::mtime_ms(&dst.join("-Users-me-Code-repo").join(format!("{BG}.jsonl")))
-            .unwrap()
-            + 1_000;
+    let now = activity_files::mtime_ms(&dst.join("-Users-me-Code-repo").join(format!("{BG}.jsonl")))
+        .unwrap()
+        + 1_000;
     (dst, now)
 }
 
@@ -46,7 +52,7 @@ fn copy_dir(src: &Path, dst: &Path) {
 
 /// `startedAt` relative to `now`: the repo's finished one is from 1 h ago (recent).
 fn agents(now: i64) -> Vec<AgentSession> {
-    let mut a = claude_sessions::parse_agents(
+    let mut a = activity_files::parse_agents(
         &std::fs::read_to_string(fixtures().join("agents.json")).unwrap(),
     )
     .unwrap();
@@ -318,8 +324,8 @@ fn repo_prefix_is_not_containment() {
 #[test]
 #[ignore]
 fn real_repo_activity() {
-    let agents = tauri::async_runtime::block_on(list_agents()).expect("claude agents");
-    let projects = claude_fs::claude_config_dir().unwrap().join("projects");
+    let agents = block_on(list_agents()).expect("claude agents");
+    let projects = crate::paths::claude_config_dir().unwrap().join("projects");
     let repo = std::env::var("ACTIVITY_REPO").expect("ACTIVITY_REPO=<path to a repo>");
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
