@@ -5,7 +5,7 @@
 
 use serde::Deserialize;
 
-use crate::domain::LaunchOptions;
+use nodal_domain::model::LaunchOptions;
 
 pub const CONFIG_FILE: &str = "config.json";
 pub const TASKS_FILE: &str = "tasks.json";

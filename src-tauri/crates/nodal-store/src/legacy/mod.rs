@@ -28,6 +28,9 @@
 //! - `concurrency` → settings (only the first time, and never overwrites one already set);
 //! - a corrupt JSON (file or record) is skipped with a warning in `skipped`.
 
+// `legacy::legacy` mirrors the previous version's own module name (`config`/`tasks`/`issue_runs`
+// formats copied verbatim); keeping it avoids a drive-by rename.
+#[allow(clippy::module_inception)]
 pub mod legacy;
 #[cfg(test)]
 mod tests;
@@ -36,13 +39,14 @@ use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use rusqlite::{params, Connection, OptionalExtension};
+use rusqlite::{params, OptionalExtension};
 use serde::Serialize;
 use serde_json::Value;
-use tauri::{AppHandle, State};
 
-use crate::db::{self, rows, Db, DbError};
-use crate::domain::*;
+use crate::rows;
+use crate::Conn as Connection;
+use crate::DbError;
+use nodal_domain::model::*;
 
 pub const BACKUP_PREFIX: &str = "legacy-backup-";
 pub const LOCAL_PROJECT: &str = "Local";
@@ -75,30 +79,8 @@ pub struct LegacyImportReport {
     pub skipped: Vec<String>,
 }
 
-#[tauri::command]
-pub async fn import_legacy_data(
-    app: AppHandle,
-    db: State<'_, Db>,
-    folder: String,
-) -> Result<LegacyImportReport, String> {
-    let data_dir = crate::util::paths::data_dir(&app)?;
-    let now = crate::util::now_ms();
-    let src = PathBuf::from(folder.trim());
-    let dd = data_dir.clone();
-    // The copy doesn't take the database lock.
-    let (backup_dir, skipped) = tauri::async_runtime::spawn_blocking(move || backup(&src, &dd, now))
-        .await
-        .map_err(|e| format!("Backup task failed: {e}"))??;
-    let db = db.inner().clone();
-    let mut report = db::with_db(&db, move |conn| {
-        import_backup(conn, &backup_dir, &data_dir, now).map_err(DbError::Invalid)
-    })
-    .await?;
-    report.skipped.splice(0..0, skipped);
-    Ok(report)
-}
-
-/// Copy + import (what the command does, on a single thread). For tests.
+/// Copy + import (what the shell's `import_legacy_data` command does, on a single thread). For
+/// tests.
 #[cfg(test)]
 pub fn import_folder(conn: &mut Connection, src: &Path, data_dir: &Path, now: i64) -> Result<LegacyImportReport, String> {
     let (backup_dir, skipped) = backup(src, data_dir, now)?;
@@ -582,7 +564,7 @@ impl Ctx<'_> {
         match rows::insert_repo(self.conn, &r) {
             Ok(()) => {}
             // Only uniqueness clashes (path or id taken); any other constraint is a bug.
-            Err(DbError::Sqlite(rusqlite::Error::SqliteFailure(f, m)))
+            Err(DbError::Sqlite(crate::SqliteError(rusqlite::Error::SqliteFailure(f, m))))
                 if matches!(
                     f.extended_code,
                     rusqlite::ffi::SQLITE_CONSTRAINT_UNIQUE | rusqlite::ffi::SQLITE_CONSTRAINT_PRIMARYKEY

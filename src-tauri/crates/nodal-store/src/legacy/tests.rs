@@ -1,15 +1,14 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-use rusqlite::Connection;
-
 use super::*;
-use crate::db::{open_in_memory, rows};
+use crate::Db;
+use nodal_domain::execution::queue::awaiting_confirmation;
 
 const T0: i64 = 1_800_000_000_000;
 
 fn fixture(name: &str) -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("src/migrate/fixtures").join(name)
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("src/legacy/fixtures").join(name)
 }
 
 /// The test's own temporary folder; deleted when dropped.
@@ -82,7 +81,7 @@ fn repo_id_of(conn: &Connection, path: &str) -> String {
 #[test]
 fn legacy_import_is_idempotent_and_maps_everything() {
     let data = TempDir::new("data");
-    let db = open_in_memory().unwrap();
+    let db = Db::open_in_memory().unwrap();
     let mut conn = db.lock().unwrap();
 
     let r1 = import_folder(&mut conn, &fixture("legacy"), &data.0, T0).unwrap();
@@ -167,7 +166,7 @@ fn legacy_import_is_idempotent_and_maps_everything() {
 
     let q = run_by_label(&conn, "Limpiar scripts de deploy");
     assert_eq!((q.status, q.error.as_deref()), (RunStatus::Queued, None));
-    assert!(crate::work::queue::awaiting_confirmation(&q), "not launched without confirmation");
+    assert!(awaiting_confirmation(&q), "not launched without confirmation");
 
     let orphan = run_by_label(&conn, "t09zzzzzzzz");
     assert_eq!(orphan.task_id, None);
@@ -192,7 +191,7 @@ fn legacy_import_is_idempotent_and_maps_everything() {
         .query_row("SELECT COUNT(*) FROM runs WHERE status = 'queued' AND legacy_label IS NULL", [], |r| r.get(0))
         .unwrap();
     assert_eq!(unconfirmed, 0);
-    assert!(crate::work::queue::awaiting_confirmation(&eng2));
+    assert!(awaiting_confirmation(&eng2));
 
     assert_eq!(rows::load_settings(&conn).unwrap().concurrency, 5);
 }
@@ -211,7 +210,7 @@ fn source_folder_stays_intact_and_backup_is_a_full_copy() {
     };
     let mtimes_before = mtimes(&src.0);
 
-    let db = open_in_memory().unwrap();
+    let db = Db::open_in_memory().unwrap();
     let report = import_folder(&mut db.lock().unwrap(), &src.0, &data.0, T0).unwrap();
 
     assert_eq!(snapshot(&src.0), before, "the source is unchanged byte for byte");
@@ -230,7 +229,7 @@ fn importing_the_data_folder_itself_skips_backups_and_db() {
     fs::create_dir(data.0.join("legacy-backup-1")).unwrap();
     fs::write(data.0.join("legacy-backup-1/old.json"), b"{}").unwrap();
 
-    let db = open_in_memory().unwrap();
+    let db = Db::open_in_memory().unwrap();
     let report = import_folder(&mut db.lock().unwrap(), &data.0, &data.0, T0).unwrap();
     let copied = snapshot(Path::new(&report.backup_dir));
     assert!(copied.contains_key("tasks.json"));
@@ -241,7 +240,7 @@ fn importing_the_data_folder_itself_skips_backups_and_db() {
 #[test]
 fn corrupt_files_are_skipped_without_aborting() {
     let data = TempDir::new("corrupt");
-    let db = open_in_memory().unwrap();
+    let db = Db::open_in_memory().unwrap();
     let mut conn = db.lock().unwrap();
     let r = import_folder(&mut conn, &fixture("corrupt"), &data.0, T0).unwrap();
     assert_eq!((r.projects, r.repos, r.tasks, r.runs), (1, 1, 0, 1), "{r:#?}");
@@ -255,7 +254,7 @@ fn corrupt_files_are_skipped_without_aborting() {
 #[test]
 fn current_config_format_with_links() {
     let data = TempDir::new("current");
-    let db = open_in_memory().unwrap();
+    let db = Db::open_in_memory().unwrap();
     let mut conn = db.lock().unwrap();
     let r = import_folder(&mut conn, &fixture("current"), &data.0, T0).unwrap();
     assert_eq!((r.projects, r.repos), (1, 1));
@@ -283,7 +282,7 @@ fn current_config_format_with_links() {
 #[test]
 fn existing_repo_is_reused_and_keys_do_not_collide() {
     let data = TempDir::new("existing");
-    let db = open_in_memory().unwrap();
+    let db = Db::open_in_memory().unwrap();
     let mut conn = db.lock().unwrap();
     // The user already created a project with the web repo and another using the key "AA".
     for (id, key) in [("mine", "WEB"), ("other", "AA")] {
@@ -373,7 +372,7 @@ fn reimport_after_state_changes_and_duplicate_entries() {
         "cwd":"/Users/me/Code/acme-one","queuedAt":10,"status":"queued"}]}"#;
     fs::write(src.0.join("issue-runs.json"), queued).unwrap();
 
-    let db = open_in_memory().unwrap();
+    let db = Db::open_in_memory().unwrap();
     let mut conn = db.lock().unwrap();
     let r1 = import_folder(&mut conn, &src.0, &data.0, T0).unwrap();
     assert_eq!((r1.projects, r1.repos, r1.runs, r1.already_imported), (1, 1, 1, 0), "{r1:#?}");
@@ -398,7 +397,7 @@ fn reimport_reuses_a_repo_whose_path_changed() {
     fs::write(src.0.join("tasks.json"), format!(r#"{{"tasks":[{}]}}"#, task("ta1", 1))).unwrap();
     fs::create_dir_all(src.0.join("tasks/ta1")).unwrap();
     fs::write(src.0.join("tasks/ta1/plan.md"), "plan").unwrap();
-    let db = open_in_memory().unwrap();
+    let db = Db::open_in_memory().unwrap();
     let mut conn = db.lock().unwrap();
     import_folder(&mut conn, &src.0, &data.0, T0).unwrap();
     let repo = repo_id_of(&conn, "/Users/me/Code/acme-tools");
@@ -415,7 +414,7 @@ fn reimport_reuses_a_repo_whose_path_changed() {
 #[test]
 fn first_import_keeps_a_configured_concurrency() {
     let data = TempDir::new("conc");
-    let db = open_in_memory().unwrap();
+    let db = Db::open_in_memory().unwrap();
     let mut conn = db.lock().unwrap();
     conn.execute("INSERT INTO settings (key, value_json) VALUES ('concurrency', '1')", []).unwrap();
     import_folder(&mut conn, &fixture("legacy"), &data.0, T0).unwrap();
@@ -430,7 +429,7 @@ fn folder_without_legacy_files_is_rejected_and_nothing_is_copied() {
     fs::create_dir_all(src.0.join("Code/app/data")).unwrap();
     fs::write(src.0.join("Code/app/data/tasks.json"), b"{\"tasks\":[]}").unwrap();
     fs::write(src.0.join("notes.txt"), b"hello").unwrap();
-    let db = open_in_memory().unwrap();
+    let db = Db::open_in_memory().unwrap();
     let e = import_folder(&mut db.lock().unwrap(), &src.0, &data.0, T0).unwrap_err();
     assert!(e.contains("doesn't look like a data folder") && e.contains("Nothing was copied"), "{e}");
     assert_eq!(fs::read_dir(&data.0).unwrap().count(), 0, "no backup folder");
@@ -448,7 +447,7 @@ fn only_known_files_are_copied() {
     fs::write(src.0.join("tasks/t1/notes.txt"), b"x").unwrap();
     fs::create_dir_all(src.0.join("legacy-backup-1")).unwrap();
     fs::write(src.0.join("legacy-backup-1/tasks.json"), b"{}").unwrap();
-    let db = open_in_memory().unwrap();
+    let db = Db::open_in_memory().unwrap();
     let r = import_folder(&mut db.lock().unwrap(), &src.0, &data.0, T0).unwrap();
     let copied = snapshot(Path::new(&r.backup_dir));
     assert_eq!(copied.keys().collect::<Vec<_>>(), ["tasks.json", "tasks/t1/plan.md"]);
