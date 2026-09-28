@@ -4,7 +4,7 @@ import { refreshRuns } from "../../domain/hooks/runs";
 import type { Run, Task } from "../../domain/types";
 import { useConfirm } from "../../ui/ConfirmDialog";
 import { useToast } from "../../ui/Toasts";
-import { attachRun } from "./api";
+import { openAttachedSession } from "./attachStore";
 import { launchErrorHint } from "./LaunchBlockerNotice";
 import type { RunView } from "./status";
 
@@ -16,6 +16,7 @@ export interface RunActions {
   /** Removes a `queued` run from the queue (light confirmation). Only uses `v.run`. */
   remove: (v: Pick<RunView, "run">, name: string) => Promise<boolean>;
   confirm: (v: RunView, name: string) => Promise<boolean>;
+  /** Opens the "Attached session" drawer (`claude attach` in an embedded terminal). */
   attach: (v: RunView) => Promise<void>;
   /** Queues another run of the task with the same executor, isolation, finish and review (no launch popover). */
   runAgain: (v: RunView, task: Task | undefined, name: string) => Promise<boolean>;
@@ -96,15 +97,11 @@ export function useRunActions(): RunActions {
     [wrap, toast],
   );
 
-  const attach = useCallback(
-    async (v: RunView) => {
-      const id = v.run.claudeRunId ?? v.live?.id;
-      if (!id) return;
-      const ok = await wrap(() => attachRun(id), "Couldn't attach to the session");
-      if (ok) toast("Attached in Terminal", `claude attach ${id}`);
-    },
-    [wrap, toast],
-  );
+  const attach = useCallback(async (v: RunView) => {
+    const id = v.run.claudeRunId ?? v.live?.id;
+    if (!id) return;
+    openAttachedSession({ runId: v.run.id, claudeId: id, cwd: v.live?.cwd ?? v.run.cwd });
+  }, []);
 
   const runAgain = useCallback(
     async (v: RunView, task: Task | undefined, name: string) => {

@@ -1,7 +1,7 @@
 // `runs/**` commands that read Claude Code's state (not Nodal's database). The queue and
 // database ones (`list_task_runs`, `cancel_run`, `run_diff`...) are in `src/domain/api.ts`.
 
-import { invoke } from "@tauri-apps/api/core";
+import { invoke, type Channel } from "@tauri-apps/api/core";
 import type { LaunchBlocker, RunDetail, RunSummary, Transcript } from "./types";
 
 /** Background sessions from `claude agents` (ours and others'). */
@@ -27,6 +27,29 @@ export const openTerminalAt = (path: string, runClaude = false) => invoke<void>(
 
 /** Opens Terminal.app with `claude attach <id>` (`Run.claudeRunId`). */
 export const attachRun = (claudeRunId: string) => invoke<void>("attach_run", { runId: claudeRunId });
+
+/**
+ * Starts `claude attach <runId>` in a pseudo-terminal of `cols`×`rows` and returns its session
+ * id. The PTY's raw output arrives on `onData`; `onExit` fires once, with the exit code (or
+ * `null`), when the attach process ends. Closing only detaches: the run keeps going.
+ */
+export const ptyAttach = (
+  runId: string,
+  cwd: string | null,
+  cols: number,
+  rows: number,
+  onData: Channel<ArrayBuffer>,
+  onExit: Channel<number | null>,
+) => invoke<number>("pty_attach", { runId, cwd, cols, rows, onData, onExit });
+
+/** Writes raw bytes (keystrokes, pastes, mouse reports) to the PTY. */
+export const ptyWrite = (session: number, data: Uint8Array) => invoke<void>("pty_write", { session, data: Array.from(data) });
+
+/** Resizes the PTY; the TUI redraws for the new size. */
+export const ptyResize = (session: number, cols: number, rows: number) => invoke<void>("pty_resize", { session, cols, rows });
+
+/** Detaches (kills `claude attach`, not the run). Idempotent. */
+export const ptyClose = (session: number) => invoke<void>("pty_close", { session });
 
 /** Root of the git repo containing `path`; `null` if it isn't in a repo. */
 export const resolveGitRoot = (path: string) => invoke<string | null>("resolve_git_root", { path });

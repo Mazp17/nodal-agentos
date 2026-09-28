@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useAllChats } from "../domain/hooks/chats";
 import { useProjects } from "../domain/hooks/projects";
@@ -16,7 +16,14 @@ import { CreateProjectDialog } from "../features/projects/CreateProjectDialog";
 import { resolveExecutor } from "../features/executors";
 import { ProjectSettings } from "../features/projects/ProjectSettings";
 import { ImportDialog } from "../features/providers";
-import { RunDetailView, RunDiffDrawer, RunMonitor, RunsView } from "../features/runs";
+import {
+  closeAttachedSession,
+  RunDetailView,
+  RunDiffDrawer,
+  RunMonitor,
+  RunsView,
+  useAttachTarget,
+} from "../features/runs";
 import { useLegacyImport } from "../features/settings/legacyImport";
 import { SettingsView } from "../features/settings/SettingsView";
 import { NewTaskDialog, TaskPanel, TasksView, useAskLaunch, useLaunch } from "../features/tasks";
@@ -29,6 +36,11 @@ import { Topbar } from "./Topbar";
 import { PAGE_TITLE, useNav, type Page, type ProjectPage } from "./useNav";
 import { useWorkStatus } from "./useWorkStatus";
 import "./shell.css";
+
+// xterm and its WebGL renderer load only when a session is attached.
+const AttachedSessionDrawer = lazy(() =>
+  import("../features/runs/AttachedSessionDrawer").then((m) => ({ default: m.AttachedSessionDrawer })),
+);
 
 const isEditable = (t: EventTarget | null) =>
   t instanceof HTMLElement && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName));
@@ -57,6 +69,8 @@ export function AppShell() {
   const [importFor, setImportFor] = useState<string | null>(null);
   const [taskId, setTaskId] = useState<string | null>(null);
   const [diffRunId, setDiffRunId] = useState<string | null>(null);
+  /** Run shown in the "Attached session" drawer (opened by `useRunActions().attach`). */
+  const attachTarget = useAttachTarget();
   const [monitorOpen, setMonitorOpen] = useState(false);
   /** A chat picked in the palette, for the Chat page to select once it's showing. */
   const [chatFocus, setChatFocus] = useState<string | null>(null);
@@ -114,7 +128,7 @@ export function AppShell() {
     [allLinks.data],
   );
 
-  const overlayOpen = paletteOpen || createProject || newTask !== null || importFor !== null || diffRunId !== null;
+  const overlayOpen = paletteOpen || createProject || newTask !== null || importFor !== null || diffRunId !== null || attachTarget !== null;
 
   const openTask = useCallback((id: string) => {
     setPaletteOpen(false);
@@ -125,6 +139,7 @@ export function AppShell() {
     (id: string) => {
       setTaskId(null);
       setDiffRunId(null);
+      closeAttachedSession();
       setPaletteOpen(false);
       navOpenRun(id);
     },
@@ -134,6 +149,7 @@ export function AppShell() {
     (page: Page, pid: string | null = null) => {
       setTaskId(null);
       setDiffRunId(null);
+      closeAttachedSession();
       setPaletteOpen(false);
       navGo(page, pid);
     },
@@ -176,7 +192,7 @@ export function AppShell() {
       const mod = e.metaKey || e.ctrlKey;
       if (mod && e.key.toLowerCase() === "k") {
         e.preventDefault();
-        if (createProject || newTask || importFor || diffRunId) return;
+        if (createProject || newTask || importFor || diffRunId || attachTarget) return;
         setPaletteOpen((o) => !o);
         return;
       }
@@ -533,6 +549,11 @@ export function AppShell() {
         />
       )}
       {diffRunId && <RunDiffDrawer key={diffRunId} runId={diffRunId} onClose={() => setDiffRunId(null)} />}
+      {attachTarget && (
+        <Suspense fallback={null}>
+          <AttachedSessionDrawer key={attachTarget.claudeId} target={attachTarget} onClose={closeAttachedSession} />
+        </Suspense>
+      )}
       {createProject && (
         <CreateProjectDialog
           onClose={() => setCreateProject(false)}
