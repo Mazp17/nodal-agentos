@@ -1,5 +1,5 @@
 use super::*;
-use crate::util::paths::tests::TempDir;
+use crate::testutil::TempDir;
 
 /// Two sibling folders: `repo` and `outside`.
 fn setup(name: &str) -> (TempDir, PathBuf, PathBuf) {
