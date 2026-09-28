@@ -38,9 +38,22 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .menu(updates::menu)
         .on_menu_event(updates::on_menu_event)
+        .on_page_load(|webview, payload| {
+            // A full reload doesn't tell the frontend's terminals to close: without this, any
+            // `claude attach` started before the reload would keep running with nobody reading
+            // its output. This only fires on a full page load, not on Vite's HMR in dev (which
+            // patches modules in place), so it doesn't help with that case.
+            if let tauri::webview::PageLoadEvent::Started = payload.event() {
+                use tauri::Manager;
+                if let Some(sessions) = webview.try_state::<runs::pty::PtySessions>() {
+                    sessions.close_owned_by(webview.label());
+                }
+            }
+        })
         .manage(linear::LinearState::new(secrets.clone()))
         .manage(secrets)
         .manage(mcp::commands::McpState::default())
+        .manage(runs::pty::PtySessions::default())
         .setup(|app| {
             use tauri::Manager;
             app.manage(events::Events::new(app.handle().clone()));
@@ -88,6 +101,10 @@ pub fn run() {
             runs::terminal::attach_run,
             runs::terminal::stop_run,
             runs::terminal::open_terminal_at,
+            runs::pty::pty_attach,
+            runs::pty::pty_write,
+            runs::pty::pty_resize,
+            runs::pty::pty_close,
             util::paths::resolve_git_root,
             util::paths::scan_git_repos,
             util::git::git_version,
@@ -182,6 +199,16 @@ pub fn run() {
             chats::commands::get_chat_live,
             chats::commands::get_chat_transcript,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while running tauri application")
+        .run(|app_handle, event| {
+            // Nothing else reaps embedded terminals on exit: without this, `claude attach`
+            // child processes would outlive the app.
+            if let tauri::RunEvent::Exit = event {
+                use tauri::Manager;
+                if let Some(sessions) = app_handle.try_state::<runs::pty::PtySessions>() {
+                    sessions.close_all();
+                }
+            }
+        });
 }

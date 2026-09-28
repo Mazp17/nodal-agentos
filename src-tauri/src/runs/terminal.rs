@@ -1,5 +1,6 @@
 //! Actions on background sessions that don't go through the queue: stop (`claude stop`),
-//! open in Terminal (`claude attach`) and open Terminal in a folder.
+//! open in Terminal (`claude attach`) and open Terminal in a folder. The other way to attach,
+//! a `claude attach` in an in-app pty for the drawer's embedded terminal, lives in `pty.rs`.
 
 use std::path::Path;
 use std::time::Duration;
