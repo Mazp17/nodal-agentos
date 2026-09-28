@@ -10,7 +10,7 @@ pub mod repos;
 pub mod runs;
 pub mod tasks;
 
-use serde::{Deserialize, Deserializer, Serialize};
+use serde::Serialize;
 
 use super::DbError;
 
@@ -27,15 +27,8 @@ pub(crate) fn not_found(what: &str) -> DbError {
     DbError::Invalid(format!("That {what} no longer exists."))
 }
 
-/// For patches: tells "missing field" (`None`) apart from `null` (`Some(None)`).
-/// Usage: `#[serde(default, deserialize_with = "double_option")] x: Option<Option<T>>`.
-pub fn double_option<'de, T, D>(d: D) -> Result<Option<Option<T>>, D::Error>
-where
-    T: Deserialize<'de>,
-    D: Deserializer<'de>,
-{
-    Option::<T>::deserialize(d).map(Some)
-}
+/// Moved to `nodal_domain::serde_util`; re-exported so current uses don't break.
+pub use nodal_domain::serde_util::double_option;
 
 /// Is the error a UNIQUE/FK violation? Used to turn it into our own message.
 pub(crate) fn is_constraint(e: &rusqlite::Error) -> bool {
