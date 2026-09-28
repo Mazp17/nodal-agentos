@@ -1,5 +1,6 @@
 use super::*;
-use crate::util::paths::tests::{git_available, init_repo, TempDir};
+use crate::testutil::{git_available, init_repo, TempDir};
+use nodal_domain::execution::worktree::{cleanup_blocker, dir_for};
 
 #[test]
 fn create_reuse_and_cleanup() {
@@ -55,8 +56,8 @@ fn create_reuse_and_cleanup() {
     assert!(cleanup_blocker(&st)
         .unwrap()
         .contains("uncommitted changes"));
-    git::ok(wtp, &["add", "."]).unwrap();
-    git::ok(wtp, &["commit", "-q", "-m", "wip"]).unwrap();
+    ok(wtp, &["add", "."]).unwrap();
+    ok(wtp, &["commit", "-q", "-m", "wip"]).unwrap();
     let st = status(&repo, Some(&recreated)).unwrap();
     assert!(!st.dirty);
     assert_eq!((st.ahead, st.unpushed), (1, 1));
@@ -68,13 +69,13 @@ fn create_reuse_and_cleanup() {
 
     // With the branch pushed to a remote there's nothing left to lose.
     let remote = t.0.join("remote.git");
-    git::ok(&t.0, &["init", "-q", "--bare", remote.to_str().unwrap()]).unwrap();
-    git::ok(
+    ok(&t.0, &["init", "-q", "--bare", remote.to_str().unwrap()]).unwrap();
+    ok(
         &repo,
         &["remote", "add", "origin", remote.to_str().unwrap()],
     )
     .unwrap();
-    git::ok(&repo, &["push", "-q", "origin", "nodal/pay-1-logo"]).unwrap();
+    ok(&repo, &["push", "-q", "origin", "nodal/pay-1-logo"]).unwrap();
     let st = status(&repo, Some(&recreated)).unwrap();
     assert_eq!((st.ahead, st.unpushed), (1, 0));
     assert_eq!(cleanup_blocker(&st), None);

@@ -1,6 +1,7 @@
 use super::*;
-use crate::util::paths::tests::{git_available, init_repo, TempDir};
-use crate::work::worktree::{self, cleanup, cleanup_blocker, dir_for, ensure, status};
+use crate::git::worktree::{self, cleanup, ensure, status};
+use crate::testutil::{git_available, init_repo, TempDir};
+use nodal_domain::execution::worktree::{cleanup_blocker, dir_for};
 
 const MSG: &str = "PLA-2: tarea 2";
 
@@ -24,8 +25,8 @@ fn setup(name: &str) -> Option<(TempDir, PathBuf, WorktreeRef)> {
 
 fn commit(dir: &Path, file: &str, body: &str, msg: &str) {
     std::fs::write(dir.join(file), body).unwrap();
-    git::ok(dir, &["add", "."]).unwrap();
-    git::ok(dir, &["commit", "-q", "-m", msg]).unwrap();
+    ok(dir, &["add", "."]).unwrap();
+    ok(dir, &["commit", "-q", "-m", msg]).unwrap();
 }
 
 fn tip(dir: &Path, r: &str) -> String {
@@ -33,7 +34,7 @@ fn tip(dir: &Path, r: &str) -> String {
 }
 
 fn subject(dir: &Path, r: &str) -> String {
-    git::ok(dir, &["log", "-1", "--format=%s", r])
+    ok(dir, &["log", "-1", "--format=%s", r])
         .unwrap()
         .trim()
         .to_string()
@@ -45,7 +46,7 @@ fn fast_forwards_an_unmoved_base_without_touching_its_checkout() {
         return;
     };
     // The main folder sits on another branch: merging must not switch it.
-    git::ok(&repo, &["checkout", "-q", "-b", "other"]).unwrap();
+    ok(&repo, &["checkout", "-q", "-b", "other"]).unwrap();
     let w = Path::new(&wt.path);
     commit(w, "a.txt", "a", "first");
     commit(w, "b.txt", "b", "second");
@@ -136,7 +137,7 @@ fn merges_a_moved_base_into_the_worktree_first() {
     assert_eq!(tip(w, "HEAD"), commit);
     assert_eq!(tip(&repo, "main"), commit);
     assert!(
-        git::run(&repo, &["merge-base", "--is-ancestor", &base_tip, "main"])
+        run(&repo, &["merge-base", "--is-ancestor", &base_tip, "main"])
             .unwrap()
             .ok
     );
@@ -189,7 +190,7 @@ fn stops_when_the_checked_out_base_has_uncommitted_changes() {
         "# edited by hand\n"
     );
     // Untracked files alone don't block it.
-    git::ok(&repo, &["checkout", "--", "README.md"]).unwrap();
+    ok(&repo, &["checkout", "--", "README.md"]).unwrap();
     std::fs::write(repo.join("scratch.txt"), "x").unwrap();
     assert!(matches!(
         merge(&repo, &wt, MSG, true).unwrap(),
@@ -218,11 +219,11 @@ fn aborts_on_conflict_and_leaves_everything_as_it_was() {
     assert_eq!(tip(&repo, "main"), base_tip);
     assert_eq!(tip(w, "HEAD"), head);
     assert!(
-        !git::run(w, &["rev-parse", "--verify", "--quiet", "MERGE_HEAD"])
+        !run(w, &["rev-parse", "--verify", "--quiet", "MERGE_HEAD"])
             .unwrap()
             .ok
     );
-    assert!(git::ok(w, &["status", "--porcelain"])
+    assert!(ok(w, &["status", "--porcelain"])
         .unwrap()
         .trim()
         .is_empty());
@@ -251,13 +252,13 @@ fn pushes_the_base_to_its_remote_only_when_asked() {
         return;
     };
     let remote = t.0.join("remote.git");
-    git::ok(&t.0, &["init", "-q", "--bare", remote.to_str().unwrap()]).unwrap();
-    git::ok(
+    ok(&t.0, &["init", "-q", "--bare", remote.to_str().unwrap()]).unwrap();
+    ok(
         &repo,
         &["remote", "add", "origin", remote.to_str().unwrap()],
     )
     .unwrap();
-    git::ok(&repo, &["push", "-q", "-u", "origin", "main"]).unwrap();
+    ok(&repo, &["push", "-q", "-u", "origin", "main"]).unwrap();
     let pushed_before = tip(&remote, "refs/heads/main");
     commit(Path::new(&wt.path), "a.txt", "a", "first");
 

@@ -1,5 +1,6 @@
 use super::*;
-use crate::util::paths::tests::{git_available, init_repo, TempDir};
+use crate::testutil::{git_available, init_repo, TempDir};
+use nodal_domain::diff::{parse, DiffFileStatus};
 
 #[test]
 fn diff_of_a_worktree_branch_includes_uncommitted_and_untracked() {
