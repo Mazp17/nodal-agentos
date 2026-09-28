@@ -8,6 +8,7 @@
 
 pub mod commands;
 pub mod context;
+mod hooks;
 pub mod process;
 
 use std::path::{Path, PathBuf};

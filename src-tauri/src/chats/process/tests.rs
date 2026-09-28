@@ -4,6 +4,7 @@ use std::path::Path;
 
 use super::*;
 use crate::db::open_in_memory;
+use crate::db::queries::chats;
 use crate::db::rows::{insert_chat, insert_project};
 use crate::domain::{Chat, LaunchOptions};
 use crate::work::testutil::project_of;
@@ -122,7 +123,7 @@ impl Fixture {
 
 impl Drop for Fixture {
     fn drop(&mut self) {
-        self.chats.procs().clear();
+        self.chats.clear();
         let _ = std::fs::remove_dir_all(&self.dir);
     }
 }
