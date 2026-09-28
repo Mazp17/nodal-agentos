@@ -288,7 +288,8 @@ fn live_provider_read_only() {
         return;
     };
     block_on(async {
-        let p = LinearProvider::new(crate::client::http_client(), key.trim().to_string());
+        let ua = concat!("nodal-linear-tests/", env!("CARGO_PKG_VERSION"));
+        let p = LinearProvider::new(crate::client::http_client(ua), key.trim().to_string());
         println!("viewer: {}", p.status().await.expect("status"));
         let scopes = p.scopes().await.expect("scopes");
         println!("{} scopes", scopes.len());

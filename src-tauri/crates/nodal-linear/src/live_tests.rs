@@ -17,6 +17,8 @@ fn env_key() -> Option<String> {
         .filter(|k| !k.trim().is_empty())
 }
 
+const UA: &str = concat!("nodal-linear-tests/", env!("CARGO_PKG_VERSION"));
+
 #[test]
 #[ignore]
 fn live_viewer_teams_board() {
@@ -25,7 +27,7 @@ fn live_viewer_teams_board() {
         return;
     };
     block_on(async {
-        let http = http_client();
+        let http = http_client(UA);
         let c = LinearClient::new(&http, key.trim());
         let v = c.viewer().await.expect("viewer");
         println!("viewer: {}", v.name);
@@ -41,7 +43,7 @@ fn live_viewer_teams_board() {
 #[ignore]
 fn live_bogus_key_is_invalid() {
     block_on(async {
-        let http = http_client();
+        let http = http_client(UA);
         let err = LinearClient::new(&http, "lin_api_fake_key_for_test")
             .viewer()
             .await;

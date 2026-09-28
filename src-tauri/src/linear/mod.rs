@@ -20,7 +20,8 @@ impl LinearState {
     /// `secrets` is the shared instance (`State<Secrets>`): a key saved from `linear_*`
     /// or from `provider_*` is visible on both sides.
     pub fn new(secrets: crate::secrets::Secrets) -> Self {
-        Self { http: http_client(), key: KeyCache::new(secrets) }
+        let ua = concat!("nodal/", env!("CARGO_PKG_VERSION"));
+        Self { http: http_client(ua), key: KeyCache::new(secrets) }
     }
 
     /// For `providers::resolve_with_key`/`provider_set_key`: same HTTP client.

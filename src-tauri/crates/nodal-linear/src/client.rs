@@ -10,11 +10,11 @@ use std::time::Duration;
 
 const ENDPOINT: &str = "https://api.linear.app/graphql";
 
-pub fn http_client() -> reqwest::Client {
+pub fn http_client(user_agent: &str) -> reqwest::Client {
     reqwest::Client::builder()
         .connect_timeout(Duration::from_secs(10))
         .timeout(Duration::from_secs(30))
-        .user_agent(concat!("nodal/", env!("CARGO_PKG_VERSION")))
+        .user_agent(user_agent.to_string())
         .build()
         .expect("valid reqwest config")
 }
