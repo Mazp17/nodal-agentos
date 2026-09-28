@@ -14,7 +14,7 @@
 //! same transaction as the transition, and `plan::closing_comment` builds the comment.
 
 pub mod commands;
-mod import;
+pub(crate) mod import;
 pub mod plan;
 pub mod state_map;
 pub mod store;

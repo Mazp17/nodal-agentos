@@ -18,7 +18,7 @@ fn provider_status_shape() {
         has_key: true,
         viewer: Some("Ana".into()),
         error: None,
-        key_hint: super::super::key_hint("lin_api_0000000000abcd"),
+        key_hint: crate::providers::key_hint("lin_api_0000000000abcd"),
         paused_until: Some(5),
         pause_reason: None,
     };
@@ -80,7 +80,7 @@ fn prepare_rules_assigns_ids_and_keeps_created_at() {
 
 #[test]
 fn key_hint_never_reveals_the_key() {
-    use super::super::key_hint;
+    use crate::providers::key_hint;
     assert_eq!(
         key_hint("  lin_api_0123456789wxyz \n").as_deref(),
         Some("wxyz")
