@@ -1,0 +1,1 @@
+{"agentType":"workflow-subagent","description":"escribir:erupciones","workflowPhase":"Escribir","spawnDepth":1,"requestShape":"foreground","requestNonInteractive":false,"model":"claude-sonnet-5"}

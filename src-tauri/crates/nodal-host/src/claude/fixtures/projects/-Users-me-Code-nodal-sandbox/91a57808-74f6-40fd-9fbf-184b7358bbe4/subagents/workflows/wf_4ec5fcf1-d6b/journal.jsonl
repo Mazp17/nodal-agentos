@@ -1,0 +1,7 @@
+{"type":"launched"}
+{"type":"started","key":"v2:16867778c2769ce4fd011cab73efdfc9dbb5c68f7c54bd5be941991755a96952","agentId":"a73190f700ef06ba2","label":"idear:volcanes","phase":"Idear"}
+{"type":"result","key":"v2:16867778c2769ce4fd011cab73efdfc9dbb5c68f7c54bd5be941991755a96952","agentId":"a73190f700ef06ba2","result":{"subtemas":[{"slug":"formacion-volcanica","titulo":"Formación volcánica"},{"slug":"tipos-de-volcanes","titulo":"Tipos de volcanes"},{"slug":"erupciones-volcanicas","titulo":"Erupciones volcánicas"},{"slug":"volcanes-y-el-planeta","titulo":"Volcanes y el planeta"}]}}
+{"type":"started","key":"v2:8574366d658cb5ea8d3e0027db40a63882bb7827895b0571ed4798dceb9d2f01","agentId":"a204de0691b99d8a7","label":"escribir:formacion-volcanica","phase":"Escribir"}
+{"type":"started","key":"v2:94962a4b6741eb41b62e55bf2fea26cb3b130f88517fba4abb5edf10f0646517","agentId":"ad316568312820f05","label":"escribir:tipos-de-volcanes","phase":"Escribir"}
+{"type":"started","key":"v2:ab1c52f87cc9195d1e1fcedcea34656b3a76d4792c57ef9c04ec3d7e2351f936","agentId":"af65dd4ea1ec244d5","label":"escribir:erupciones-volcanicas","phase":"Escribir"}
+{"type":"started","key":"v2:0cb506ba906145e62b68c643644154972daecb22bcfb6c8506dfde49c68997dd","agentId":"a93f2191686055be3","label":"escribir:volcanes-y-el-planeta","phase":"Escribir"}
