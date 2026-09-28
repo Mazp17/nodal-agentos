@@ -1,0 +1,237 @@
+//! Input validation (projects, repos, tasks, executors, settings). `plan_file` and
+//! `root_path`, which touch disk, live in nodal-host / nodal-app.
+
+use crate::model::executors::{is_valid_agent_name, is_valid_workflow_name};
+use crate::model::{Executor, MAX_CONCURRENCY};
+
+pub const MAX_TITLE_CHARS: usize = 200;
+pub const MAX_NAME_CHARS: usize = 80;
+/// Cap for text plans and for reading a plan (file or text).
+pub const MAX_PLAN_BYTES: u64 = 512 * 1024;
+const MAX_LABELS: usize = 20;
+const MAX_LABEL_CHARS: usize = 40;
+const MAX_CRITERIA: usize = 50;
+const MAX_CRITERION_CHARS: usize = 1000;
+const MAX_EXTRA_CHARS: usize = 8000;
+
+/// Editors allowed for "Open in editor" (binary looked up in PATH).
+pub const EDITORS: [&str; 9] = [
+    "code",
+    "code-insiders",
+    "cursor",
+    "windsurf",
+    "zed",
+    "subl",
+    "idea",
+    "webstorm",
+    "fleet",
+];
+
+/// Default project palette (when no color is sent).
+pub const PALETTE: [&str; 8] = [
+    "oklch(0.74 0.15 55)",
+    "oklch(0.72 0.13 250)",
+    "oklch(0.74 0.12 150)",
+    "oklch(0.70 0.15 320)",
+    "oklch(0.78 0.13 88)",
+    "oklch(0.68 0.16 25)",
+    "oklch(0.72 0.10 200)",
+    "oklch(0.70 0.12 290)",
+];
+
+fn one_line(s: &str) -> String {
+    s.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+pub fn title(title: &str) -> Result<String, String> {
+    let t = one_line(title);
+    if t.is_empty() {
+        return Err("The title is empty.".into());
+    }
+    if t.chars().count() > MAX_TITLE_CHARS {
+        return Err(format!(
+            "The title is too long (max {MAX_TITLE_CHARS} characters)."
+        ));
+    }
+    Ok(t)
+}
+
+pub fn name(name: &str, what: &str) -> Result<String, String> {
+    let t = one_line(name);
+    if t.is_empty() {
+        return Err(format!("The {what} name is empty."));
+    }
+    if t.chars().count() > MAX_NAME_CHARS {
+        return Err(format!(
+            "The {what} name is too long (max {MAX_NAME_CHARS} characters)."
+        ));
+    }
+    Ok(t)
+}
+
+/// 2 to 6 uppercase letters or digits, starting with a letter (`PAY`, `WEB2`). Uppercased.
+pub fn project_key(key: &str) -> Result<String, String> {
+    let k = key.trim().to_ascii_uppercase();
+    let ok = (2..=6).contains(&k.len())
+        && k.starts_with(|c: char| c.is_ascii_uppercase())
+        && k.chars()
+            .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit());
+    if ok {
+        Ok(k)
+    } else {
+        Err(format!(
+            "Invalid key \"{}\": use 2-6 letters or digits, starting with a letter.",
+            key.trim()
+        ))
+    }
+}
+
+/// `#rgb`/`#rrggbb` or `oklch(...)` with numbers.
+pub fn color(c: &str) -> Result<String, String> {
+    let c = c.trim();
+    let hex = c
+        .strip_prefix('#')
+        .is_some_and(|h| matches!(h.len(), 3 | 6) && h.chars().all(|x| x.is_ascii_hexdigit()));
+    let oklch = c
+        .strip_prefix("oklch(")
+        .and_then(|r| r.strip_suffix(')'))
+        .is_some_and(|inner| {
+            !inner.trim().is_empty()
+                && inner.len() <= 40
+                && inner
+                    .chars()
+                    .all(|x| x.is_ascii_digit() || matches!(x, '.' | ' ' | '%' | '/'))
+        });
+    if hex || oklch {
+        Ok(c.to_string())
+    } else {
+        Err(format!("Invalid color \"{c}\": use #rrggbb or oklch(...)."))
+    }
+}
+
+pub fn plan_text(text: &str) -> Result<(), String> {
+    if text.trim().is_empty() {
+        return Err("The plan is empty.".into());
+    }
+    if text.len() as u64 > MAX_PLAN_BYTES {
+        return Err(format!(
+            "The plan is too large (max {} KB).",
+            MAX_PLAN_BYTES / 1024
+        ));
+    }
+    Ok(())
+}
+
+/// No empty or repeated ones (case-insensitive), each on a single line.
+pub fn labels(labels: &[String]) -> Result<Vec<String>, String> {
+    let mut out: Vec<String> = Vec::new();
+    for l in labels {
+        let l = one_line(l);
+        if l.is_empty() || out.iter().any(|x| x.eq_ignore_ascii_case(&l)) {
+            continue;
+        }
+        if l.chars().count() > MAX_LABEL_CHARS {
+            return Err(format!(
+                "The label \"{l}\" is too long (max {MAX_LABEL_CHARS} characters)."
+            ));
+        }
+        out.push(l);
+    }
+    if out.len() > MAX_LABELS {
+        return Err(format!("Too many labels (max {MAX_LABELS})."));
+    }
+    Ok(out)
+}
+
+/// Acceptance criteria: no empty ones, with line breaks collapsed.
+pub fn acceptance(items: &[String]) -> Result<Vec<String>, String> {
+    let out: Vec<String> = items
+        .iter()
+        .map(|s| one_line(s))
+        .filter(|s| !s.is_empty())
+        .collect();
+    if out.len() > MAX_CRITERIA {
+        return Err(format!(
+            "Too many acceptance criteria (max {MAX_CRITERIA})."
+        ));
+    }
+    if out.iter().any(|s| s.chars().count() > MAX_CRITERION_CHARS) {
+        return Err(format!(
+            "An acceptance criterion is too long (max {MAX_CRITERION_CHARS} characters)."
+        ));
+    }
+    Ok(out)
+}
+
+pub fn executor(e: &Executor) -> Result<(), String> {
+    match e {
+        Executor::Agent { name, .. } if !is_valid_agent_name(name) => {
+            Err(format!("Invalid agent name \"{name}\"."))
+        }
+        Executor::Workflow { name } if !is_valid_workflow_name(name) => {
+            Err(format!("Invalid workflow name \"{name}\"."))
+        }
+        _ => Ok(()),
+    }
+}
+
+pub fn reviewer(name: &str) -> Result<String, String> {
+    let n = name.trim();
+    if is_valid_agent_name(n) {
+        Ok(n.to_string())
+    } else {
+        Err(format!("Invalid reviewer agent name \"{n}\"."))
+    }
+}
+
+pub fn editor(e: &str) -> Result<String, String> {
+    let e = e.trim();
+    if EDITORS.contains(&e) {
+        Ok(e.to_string())
+    } else {
+        Err(format!(
+            "Unknown editor \"{e}\": use one of {}.",
+            EDITORS.join(", ")
+        ))
+    }
+}
+
+pub fn concurrency(n: u32) -> Result<u32, String> {
+    if (1..=MAX_CONCURRENCY).contains(&n) {
+        Ok(n)
+    } else {
+        Err(format!(
+            "Concurrency must be between 1 and {MAX_CONCURRENCY}."
+        ))
+    }
+}
+
+const MAX_DESCRIPTION_CHARS: usize = 2000;
+
+/// Project description: trimmed; empty → `None`.
+pub fn description(s: Option<&str>) -> Result<Option<String>, String> {
+    let Some(t) = s.map(str::trim).filter(|t| !t.is_empty()) else {
+        return Ok(None);
+    };
+    if t.chars().count() > MAX_DESCRIPTION_CHARS {
+        return Err(format!(
+            "The description is too long (max {MAX_DESCRIPTION_CHARS} characters)."
+        ));
+    }
+    Ok(Some(t.to_string()))
+}
+
+pub fn extra_instructions(s: Option<&str>) -> Result<Option<String>, String> {
+    let Some(t) = s.map(str::trim).filter(|t| !t.is_empty()) else {
+        return Ok(None);
+    };
+    if t.chars().count() > MAX_EXTRA_CHARS {
+        return Err(format!(
+            "The extra instructions are too long (max {MAX_EXTRA_CHARS} characters)."
+        ));
+    }
+    Ok(Some(t.to_string()))
+}
+
+#[cfg(test)]
+mod tests;

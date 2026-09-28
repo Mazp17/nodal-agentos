@@ -10,6 +10,9 @@ use std::path::{Path, PathBuf};
 use super::claude_fs::js_string_prop;
 
 /// Moved to `nodal_domain::model::executors`; re-exported so current uses don't break.
+/// `is_valid_workflow_name` has no callers left through this path (`board::validate` now
+/// imports it straight from `nodal_domain`), but stays reachable here until W4.
+#[allow(unused_imports)]
 pub use nodal_domain::model::executors::{is_valid_workflow_name, WorkflowInfo, WorkflowSource};
 
 #[derive(Debug, Default, PartialEq)]
