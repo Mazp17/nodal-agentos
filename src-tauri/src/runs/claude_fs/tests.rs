@@ -460,15 +460,6 @@ fn transcript_tolerates_errors_arrays_and_long_text() {
 }
 
 #[test]
-fn path_ids() {
-    assert!(is_valid_path_id("wf_2450b7a8-254"));
-    assert!(is_valid_path_id("a1007a0f03db17270"));
-    for bad in ["", "..", "a/b", "a\\b", "-rf", "wf_x.json", "a b"] {
-        assert!(!is_valid_path_id(bad), "{bad}");
-    }
-}
-
-#[test]
 fn session_without_workflows_has_no_detail() {
     let tmp = std::env::temp_dir().join(format!("nodal-runs-test-{}", std::process::id()));
     fs::create_dir_all(&tmp).unwrap();

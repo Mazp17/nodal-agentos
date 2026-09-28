@@ -162,10 +162,8 @@ pub fn project_slug(cwd: &str) -> String {
     cwd.chars().map(|c| if c.is_ascii_alphanumeric() { c } else { '-' }).collect()
 }
 
-/// A sessionId comes from the frontend and ends up in a path: only `[A-Za-z0-9-]`.
-pub fn is_valid_session_id(id: &str) -> bool {
-    !id.is_empty() && id.len() <= 128 && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
-}
+/// Moved to `nodal_domain::sessions::transcript`; re-exported so current uses don't break.
+pub use nodal_domain::sessions::transcript::is_valid_session_id;
 
 /// `<projects>/<slug>/<sessionId>`. If the slug doesn't match (long paths or changed
 /// rules), looks for the session in any project.
@@ -702,17 +700,8 @@ fn truncate(s: &str, max: usize) -> String {
     clip(s, max).0
 }
 
-/// Clips to `max` characters (with `…`) and reports whether it clipped.
-fn clip(s: &str, max: usize) -> (String, bool) {
-    match s.char_indices().nth(max) {
-        None => (s.to_string(), false),
-        Some((cut, _)) => {
-            let mut out = s[..cut].to_string();
-            out.push('…');
-            (out, true)
-        }
-    }
-}
+/// Moved to `nodal_domain::sessions::transcript`; re-exported so current uses don't break.
+pub use nodal_domain::sessions::transcript::clip;
 
 // --- Workflow result ----------------------------------------------------------
 
@@ -772,20 +761,12 @@ pub fn parse_result(result: Option<&Value>) -> Option<RunResult> {
 const TRANSCRIPT_MAX_READ: u64 = 16 * 1024 * 1024;
 const TRANSCRIPT_HEAD: u64 = 1024 * 1024;
 const PROMPT_MAX: usize = 8000;
-const TEXT_MAX: usize = 4000;
 const TOOL_INPUT_MAX: usize = 2000;
 const TOOL_RESULT_MAX: usize = 1500;
 const SUMMARY_MAX: usize = 160;
-pub const TRANSCRIPT_DEFAULT_LIMIT: u32 = 200;
-pub const TRANSCRIPT_MAX_LIMIT: u32 = 2000;
 
-/// Ids that end up in a path (`wf_...`, agent id): only `[A-Za-z0-9_-]`.
-pub fn is_valid_path_id(id: &str) -> bool {
-    !id.is_empty()
-        && id.len() <= 128
-        && !id.starts_with('-')
-        && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
-}
+/// Moved to `nodal_domain::sessions::transcript`; re-exported so current uses don't break.
+pub use nodal_domain::sessions::transcript::{is_valid_path_id, TEXT_MAX, TRANSCRIPT_DEFAULT_LIMIT, TRANSCRIPT_MAX_LIMIT};
 
 #[derive(Deserialize)]
 struct RawTranscriptLine {
@@ -1007,11 +988,8 @@ pub(crate) fn tool_input_summary(input: &Value) -> Option<String> {
     tool_summary_n(input, SUMMARY_MAX)
 }
 
-/// A user text as a transcript item, clipped like the rest.
-pub(crate) fn user_item(s: &str) -> TranscriptItem {
-    let (text, truncated) = clip(s, TEXT_MAX);
-    TranscriptItem::User { text, truncated }
-}
+/// Moved to `nodal_domain::sessions::transcript`; re-exported so current uses don't break.
+pub(crate) use nodal_domain::sessions::transcript::user_item;
 
 /// Parses the lines of an `agent-<id>.jsonl`: initial prompt, conversation with each
 /// `tool_result` attached to its `tool_use`, and final output. Returns at most the last
