@@ -7,31 +7,10 @@
 
 use std::path::{Path, PathBuf};
 
-use serde::Serialize;
-
 use super::claude_fs::js_string_prop;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "lowercase")]
-pub enum WorkflowSource {
-    User,
-    Repo,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct WorkflowInfo {
-    pub name: String,
-    pub description: Option<String>,
-    pub when_to_use: Option<String>,
-    /// Provider the workflow syncs on its own (`"linear"`): the app doesn't push status to it
-    /// or comment.
-    pub manages_source: Option<String>,
-    /// The workflow already reviews (its result is the verdict): Nodal's gate is skipped.
-    pub reviews: bool,
-    pub source: WorkflowSource,
-    pub path: String,
-}
+/// Moved to `nodal_domain::model::executors`; re-exported so current uses don't break.
+pub use nodal_domain::model::executors::{is_valid_workflow_name, WorkflowInfo, WorkflowSource};
 
 #[derive(Debug, Default, PartialEq)]
 pub struct Meta {
@@ -217,14 +196,6 @@ pub fn list_from(user_dir: Option<&Path>, repo: Option<&Path>) -> Vec<WorkflowIn
     }
     out.sort_by(|a, b| a.name.cmp(&b.name));
     out
-}
-
-/// Name usable in `/<workflow> ...`: no spaces or anything `claude` would read as an option.
-pub fn is_valid_workflow_name(name: &str) -> bool {
-    !name.is_empty()
-        && name.len() <= 80
-        && !name.starts_with('-')
-        && name.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | ':' | '.'))
 }
 
 #[cfg(test)]

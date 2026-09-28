@@ -98,12 +98,3 @@ fn real_user_catalog() {
         .any(|w| w.name == "linear-issue" && w.description.is_some()));
     assert!(list.iter().all(|w| !w.path.contains(".bak")));
 }
-
-#[test]
-fn workflow_names() {
-    assert!(is_valid_workflow_name("linear-issue"));
-    assert!(is_valid_workflow_name("plugin:flow_2"));
-    assert!(!is_valid_workflow_name("-x"));
-    assert!(!is_valid_workflow_name("a b"));
-    assert!(!is_valid_workflow_name(""));
-}

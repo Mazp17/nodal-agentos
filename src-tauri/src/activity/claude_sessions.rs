@@ -29,57 +29,19 @@ use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
 
-use serde::de::DeserializeOwned;
-use serde::{Deserialize, Deserializer};
+use serde::Deserialize;
 use serde_json::Value;
 
 use crate::runs::claude_fs;
 
-fn lenient<'de, D, T>(d: D) -> Result<Option<T>, D::Error>
-where
-    D: Deserializer<'de>,
-    T: DeserializeOwned,
-{
-    let v = Value::deserialize(d)?;
-    Ok(serde_json::from_value(v).ok())
-}
+/// Moved to `nodal_domain::model::activity`; re-exported so current uses don't break.
+pub use nodal_domain::model::activity::AgentSession;
+/// `SubagentMeta` below still derives with it.
+use nodal_domain::model::activity::lenient;
 
 // ---------------------------------------------------------------------------
 // `claude agents --json --all`
 // ---------------------------------------------------------------------------
-
-/// A session as reported by `claude agents` (interactive or background).
-#[derive(Debug, Clone, PartialEq, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct AgentSession {
-    #[serde(default, deserialize_with = "lenient")]
-    pub id: Option<String>,
-    #[serde(default, deserialize_with = "lenient")]
-    pub session_id: Option<String>,
-    #[serde(default, deserialize_with = "lenient")]
-    pub kind: Option<String>,
-    #[serde(default, deserialize_with = "lenient")]
-    pub cwd: Option<String>,
-    #[serde(default, deserialize_with = "lenient")]
-    pub name: Option<String>,
-    #[serde(default, deserialize_with = "lenient")]
-    pub pid: Option<u32>,
-    #[serde(default, deserialize_with = "lenient")]
-    pub status: Option<String>,
-    #[serde(default, deserialize_with = "lenient")]
-    pub state: Option<String>,
-    #[serde(default, deserialize_with = "lenient")]
-    pub waiting_for: Option<String>,
-    #[serde(default, deserialize_with = "lenient")]
-    pub started_at: Option<f64>,
-}
-
-impl AgentSession {
-    /// Live process (`pid`), or a background session that `claude agents` reports as active.
-    pub fn alive(&self) -> bool {
-        self.pid.is_some() || matches!(self.state.as_deref(), Some("working") | Some("blocked"))
-    }
-}
 
 /// All sessions with a valid `sessionId`; odd entries are dropped.
 pub fn parse_agents(text: &str) -> Result<Vec<AgentSession>, String> {

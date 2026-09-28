@@ -17,7 +17,6 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use std::task::Poll;
 use std::time::{Duration, Instant};
 
-use serde::Serialize;
 use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWriteExt, BufReader};
 use tokio::process::{Child, Command};
 use tokio::sync::{mpsc, oneshot};
@@ -28,8 +27,10 @@ use crate::runs::claude_bin;
 use crate::runs::claude_fs::{self, is_valid_session_id};
 use crate::runs::stream_json::{self, PermissionRequest, StreamEvent};
 
-/// Event with every chat's output: `{chatId, event}` (mirror of `ChatEventEnvelope` in `api.ts`).
-pub const EVENT: &str = "nodal://chat";
+/// Moved to `nodal_domain::model::chat`; re-exported so current uses don't break.
+pub use nodal_domain::model::chat::CHAT_EVENT as EVENT;
+pub use nodal_domain::model::chat::{ChatEnvelope, ChatEvent, ChatLive, ChatSpec as Spec, HostEvent, RunState};
+
 /// A process with no turn running and nothing to approve is stopped after this long.
 pub const IDLE_TIMEOUT: Duration = Duration::from_secs(10 * 60);
 const REAP_EVERY: Duration = Duration::from_secs(30);
@@ -39,64 +40,6 @@ const EXIT_GRACE: Duration = Duration::from_secs(3);
 pub const DENY_MESSAGE: &str = "The user denied this in Nodal.";
 const DENY_MESSAGE_MAX: usize = 2000;
 const STDERR_TAIL: usize = 2000;
-
-/// How a chat's process is launched. A running process whose spec no longer matches is
-/// restarted on the next message.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Spec {
-    pub cwd: PathBuf,
-    /// Flags on top of `stream_json::CHAT_ARGS`, each one its own argument.
-    pub args: Vec<String>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum RunState {
-    /// No process: the next message starts one.
-    Stopped,
-    /// Waiting for a message.
-    Idle,
-    /// A turn is running.
-    Busy,
-}
-
-/// Events that come from Nodal rather than from `claude`.
-#[derive(Debug, Clone, PartialEq, Serialize)]
-#[serde(tag = "type", rename_all = "camelCase")]
-pub enum HostEvent {
-    #[serde(rename_all = "camelCase")]
-    State { state: RunState },
-    /// A permission request was answered (here or in another window) or dropped by an interrupt.
-    #[serde(rename_all = "camelCase")]
-    PermissionResolved { request_id: String, allowed: bool },
-    /// The process failed or exited in the middle of a turn.
-    #[serde(rename_all = "camelCase")]
-    Error { message: String },
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize)]
-#[serde(untagged)]
-pub enum ChatEvent {
-    Stream(StreamEvent),
-    Host(HostEvent),
-}
-
-/// Payload of `nodal://chat`.
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ChatEnvelope {
-    pub chat_id: String,
-    pub event: ChatEvent,
-}
-
-/// What a chat's process is doing now, for a UI that (re)opens the chat.
-#[derive(Debug, Clone, PartialEq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ChatLive {
-    pub state: RunState,
-    /// Permission requests waiting for an answer, oldest first.
-    pub pending: Vec<PermissionRequest>,
-}
 
 pub type Emit = Arc<dyn Fn(ChatEnvelope) + Send + Sync>;
 

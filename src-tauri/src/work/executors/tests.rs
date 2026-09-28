@@ -34,15 +34,6 @@ fn frontmatter_real_shapes() {
     );
 }
 
-#[test]
-fn agent_names() {
-    assert!(is_valid_agent_name("code-reviewer"));
-    assert!(is_valid_agent_name("pr-review-toolkit:code-reviewer"));
-    assert!(!is_valid_agent_name("-x"));
-    assert!(!is_valid_agent_name("a b"));
-    assert!(!is_valid_agent_name(""));
-}
-
 fn write(p: &Path, s: &str) {
     std::fs::create_dir_all(p.parent().unwrap()).unwrap();
     std::fs::write(p, s).unwrap();

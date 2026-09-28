@@ -23,6 +23,9 @@ use tokio::sync::mpsc;
 
 use types::{LaunchBlocker, LaunchOptions, RunDetail, RunRef, RunSummary, Transcript};
 
+/// Moved to `nodal_domain::model::claude`; re-exported so current uses don't break.
+pub use nodal_domain::model::claude::{ExtraFlags, LaunchError, SessionReadout};
+
 const LAUNCH_TIMEOUT: Duration = Duration::from_secs(30);
 const LIST_TIMEOUT: Duration = Duration::from_secs(15);
 
@@ -36,66 +39,6 @@ fn forward_lines<R: AsyncRead + Unpin + Send + 'static>(stream: R, tx: mpsc::Unb
             let _ = tx.send(line);
         }
     });
-}
-
-/// Executor flags (`--agent`, `--disallowedTools`, …) passed on top of the options.
-/// Each value separate; the ones built here are already validated.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct ExtraFlags {
-    /// `--agent <name>`.
-    pub agent: Option<String>,
-    /// `--allowedTools A B C`: each rule as its own argument, as the permissions docs say
-    /// (`Bash(npm test:*)` contains a space); the `--` before the prompt ends the list.
-    pub allowed_tools: Vec<String>,
-    /// `--disallowedTools A,B,C` (comma-separated: the option is variadic and, with
-    /// spaces, swallows the prompt; verified in the spike with 2.1.281).
-    pub disallowed_tools: Vec<String>,
-    /// `--append-system-prompt <text>`: a single argument, unescaped (there's no shell);
-    /// verified with 2.1.282, also with `--agent` (`real_launch_with_append_system_prompt`).
-    pub append_system_prompt: Option<String>,
-}
-
-impl ExtraFlags {
-    pub fn to_args(&self) -> Vec<String> {
-        let mut out = Vec::new();
-        if let Some(a) = &self.agent {
-            out.push("--agent".into());
-            out.push(a.clone());
-        }
-        if !self.allowed_tools.is_empty() {
-            out.push("--allowedTools".into());
-            out.extend(self.allowed_tools.iter().cloned());
-        }
-        if !self.disallowed_tools.is_empty() {
-            out.push("--disallowedTools".into());
-            out.push(self.disallowed_tools.join(","));
-        }
-        if let Some(p) = &self.append_system_prompt {
-            out.push("--append-system-prompt".into());
-            out.push(p.clone());
-        }
-        out
-    }
-}
-
-/// Why a `claude --bg` failed.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct LaunchError {
-    pub message: String,
-    /// It didn't return the id in time: the session may have started anyway.
-    pub timed_out: bool,
-}
-
-impl From<String> for LaunchError {
-    fn from(message: String) -> Self {
-        LaunchError { message, timed_out: false }
-    }
-}
-
-impl From<&str> for LaunchError {
-    fn from(message: &str) -> Self {
-        message.to_string().into()
-    }
 }
 
 /// Like `launch_bg`, with the error as text.
@@ -208,17 +151,6 @@ fn projects_dir() -> Result<PathBuf, String> {
     Ok(claude_fs::claude_config_dir()
         .ok_or("Couldn't locate the Claude Code folder ($HOME is not set).")?
         .join("projects"))
-}
-
-/// What a finished session left behind, read from disk (blocking). For the queue.
-#[derive(Debug, Default, Clone)]
-pub struct SessionReadout {
-    /// Detail of the most recent workflow (only if the session ran one).
-    pub detail: Option<RunDetail>,
-    /// Last assistant message in the main transcript.
-    pub last_message: Option<String>,
-    /// Workflow name if Claude Code asked to approve it and it never ran.
-    pub blocker: Option<Option<String>>,
 }
 
 pub fn read_session(session_id: &str, cwd: &str) -> SessionReadout {

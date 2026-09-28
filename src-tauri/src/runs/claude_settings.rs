@@ -6,16 +6,10 @@
 use std::fs;
 use std::path::Path;
 
-use serde::Serialize;
 use serde_json::Value;
 
-#[derive(Debug, Clone, Default, PartialEq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ClaudeDefaults {
-    /// As written in the settings (`opus`, `opus[1m]`, a full model id…); `None` if unset.
-    pub model: Option<String>,
-    pub effort: Option<String>,
-}
+/// Moved to `nodal_domain::model::chat`; re-exported so current uses don't break.
+pub use nodal_domain::model::chat::ClaudeDefaults;
 
 fn non_empty(v: &Value, key: &str) -> Option<String> {
     v.get(key).and_then(Value::as_str).map(str::trim).filter(|s| !s.is_empty()).map(str::to_string)

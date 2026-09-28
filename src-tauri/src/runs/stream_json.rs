@@ -7,11 +7,12 @@
 //!
 //! Policy: tolerate anything unknown and skip it instead of failing.
 
-use serde::Serialize;
 use serde_json::{json, Value};
 
 use super::claude_fs;
-use super::types::{ToolResultInfo, TranscriptItem};
+
+/// Moved to `nodal_domain::model::chat`; re-exported so current uses don't break.
+pub use nodal_domain::model::chat::{PermissionRequest, StreamEvent};
 
 /// Flags every chat process starts with, each one its own argument. `--output-format
 /// stream-json` with `-p` requires `--verbose`; `--permission-prompt-tool stdio` makes
@@ -41,58 +42,6 @@ pub const CHAT_ENTRYPOINT: (&str, &str) = ("CLAUDE_CODE_ENTRYPOINT", "nodal");
 /// with 2.1.283). The id must already be checked with `claude_fs::is_valid_session_id`.
 pub fn resume_args(session_id: &str) -> [String; 2] {
     ["--resume".into(), session_id.into()]
-}
-
-/// A permission prompt the host must answer (`control_request` / `can_use_tool`).
-#[derive(Debug, Clone, PartialEq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct PermissionRequest {
-    pub request_id: String,
-    pub tool_name: String,
-    /// The `tool_use` block it belongs to (`ToolUse.id` in the transcript).
-    pub tool_use_id: Option<String>,
-    /// What the tool is about to do, as Claude Code words it (a path, a command…).
-    pub description: Option<String>,
-    /// One line: the main argument, like transcript tool calls.
-    pub summary: Option<String>,
-    /// The tool's input as sent by Claude Code; allowing sends it back unchanged.
-    pub input: Value,
-}
-
-/// What a chat process reports, ready for the UI. `TextDelta`/`ThinkingDelta` preview text
-/// that a later `Item` carries in full.
-#[derive(Debug, Clone, PartialEq, Serialize)]
-#[serde(tag = "type", rename_all = "camelCase")]
-pub enum StreamEvent {
-    #[serde(rename_all = "camelCase")]
-    Init { session_id: String, model: Option<String>, cwd: Option<String>, permission_mode: Option<String> },
-    #[serde(rename_all = "camelCase")]
-    TextDelta { text: String },
-    #[serde(rename_all = "camelCase")]
-    ThinkingDelta { text: String },
-    /// A complete text, thinking, tool call or (replayed) user message.
-    #[serde(rename_all = "camelCase")]
-    Item { item: TranscriptItem },
-    #[serde(rename_all = "camelCase")]
-    ToolResult { tool_use_id: String, result: ToolResultInfo },
-    PermissionRequest(PermissionRequest),
-    /// A tool was denied without asking (the permission mode or a rule decided).
-    #[serde(rename_all = "camelCase")]
-    PermissionDenied { tool_name: String, tool_use_id: Option<String>, message: Option<String> },
-    /// Tokens in the context after the last model response: input + cache reads + cache writes.
-    #[serde(rename_all = "camelCase")]
-    Usage { context_tokens: i64 },
-    /// The turn is over: `ok` is false for errors and interrupts (`subtype`
-    /// `error_during_execution`, `error_max_turns`…).
-    #[serde(rename_all = "camelCase")]
-    TurnEnd {
-        ok: bool,
-        subtype: String,
-        session_id: Option<String>,
-        result: Option<String>,
-        cost_usd: Option<f64>,
-        context_window: Option<i64>,
-    },
 }
 
 fn str_of(v: &Value, key: &str) -> Option<String> {
