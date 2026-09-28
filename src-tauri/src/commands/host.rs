@@ -2,9 +2,8 @@
 //! with no database involved.
 
 use std::path::{Path, PathBuf};
-use std::time::Duration;
 
-use crate::runs::{claude_bin, claude_trust::repo_trust_blocking};
+use crate::runs::claude_trust::repo_trust_blocking;
 use crate::util::blocking;
 use crate::util::paths::{git_repos_under, git_root_of};
 
@@ -12,13 +11,7 @@ use crate::util::paths::{git_repos_under, git_root_of};
 /// Uses the same resolver as runs, so it also works when opened from Finder.
 #[tauri::command]
 pub async fn claude_version() -> Result<String, String> {
-    let mut cmd = claude_bin::claude_command()?;
-    cmd.arg("--version");
-    let out = claude_bin::output_with_timeout(cmd, Duration::from_secs(10), "claude --version").await?;
-    if !out.status.success() {
-        return Err(claude_bin::error_text(&out));
-    }
-    Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
+    nodal_host::claude::cli::version().await
 }
 
 /// `git` version (`git version 2.x`), using the same resolver as the rest of the app.
