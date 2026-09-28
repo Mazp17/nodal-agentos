@@ -12,7 +12,9 @@
 
 pub mod commands;
 pub(crate) mod server;
-pub mod stdio;
 pub(crate) mod tools;
+
+/// Moved to `nodal_mcp_proto::stdio` (W1); still `nodal_lib::mcp::stdio` for the rest of the crate.
+pub use nodal_mcp_proto::stdio;
 
 pub(crate) use nodal_mcp_proto::protocol::{Reply, Request, MAX_LINE};
