@@ -3,7 +3,7 @@
 
 use std::path::{Path, PathBuf};
 
-use rusqlite::Connection;
+use crate::db::Connection;
 
 use crate::db::queries::{projects, relations, repos, runs as qruns, tasks};
 use crate::db::rows;
@@ -95,11 +95,7 @@ pub fn delete_project(conn: &mut Connection, id: &str) -> Result<Vec<String>, St
     let task_ids: Vec<String> = all.into_iter().map(|t| t.id).collect();
     // Unlink the tasks from their sources before the cascade (the `src_link_id` FK doesn't
     // allow deleting a link with tasks pointing to it, and the cascade order isn't guaranteed).
-    tx.execute(
-        "UPDATE tasks SET src_link_id = NULL WHERE project_id = ?1 AND src_link_id IS NOT NULL",
-        [id],
-    )
-    .map_err(|e| e.to_string())?;
+    tasks::unlink_project_sources(&tx, id).map_err(|e| e.to_string())?;
     projects::delete(&tx, id)?;
     tx.commit().map_err(|e| e.to_string())?;
     Ok(task_ids)
@@ -432,15 +428,7 @@ pub fn reorder_tasks(conn: &mut Connection, status: TaskStatus, ids: &[String], 
         }
     }
     let Some(project_id) = project else { return Ok(None) };
-    let column: Vec<(String, f64)> = {
-        let mut stmt = tx
-            .prepare("SELECT id, position FROM tasks WHERE project_id = ?1 AND status = ?2 ORDER BY position, created_at, id")
-            .map_err(|e| e.to_string())?;
-        let rows = stmt
-            .query_map(rusqlite::params![project_id, rows::SqlEnum(status)], |r| Ok((r.get::<_, String>(0)?, r.get::<_, f64>(1)?)))
-            .map_err(|e| e.to_string())?;
-        rows.collect::<rusqlite::Result<Vec<_>>>().map_err(|e| e.to_string())?
-    };
+    let column: Vec<(String, f64)> = tasks::column_positions(&tx, &project_id, status).map_err(|e| e.to_string())?;
     let old: std::collections::HashMap<&str, f64> = column.iter().map(|(id, p)| (id.as_str(), *p)).collect();
     let order = ids.iter().map(String::as_str).chain(column.iter().map(|(id, _)| id.as_str()).filter(|id| !seen.contains(id)));
     // Only the ones that change position are touched (and get a new `updated_at`).
@@ -449,8 +437,7 @@ pub fn reorder_tasks(conn: &mut Connection, status: TaskStatus, ids: &[String], 
         if old.get(id) == Some(&pos) {
             continue;
         }
-        tx.execute("UPDATE tasks SET position = ?1, updated_at = ?2 WHERE id = ?3", rusqlite::params![pos, now, id])
-            .map_err(|e| e.to_string())?;
+        tasks::set_position(&tx, id, pos, now).map_err(|e| e.to_string())?;
     }
     tx.commit().map_err(|e| e.to_string())?;
     Ok(Some(project_id))

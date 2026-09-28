@@ -5,7 +5,7 @@
 use std::path::Path;
 use std::sync::Arc;
 
-use rusqlite::Connection;
+use crate::db::Connection;
 
 use crate::db::queries::{repos, runs as qruns};
 use crate::db::{rows, with_db, Db};
@@ -336,10 +336,7 @@ async fn pump_pass(inner: &Arc<Inner>, touched: &mut bool) -> Result<(), String>
         *touched = true;
         with_db(&inner.db, move |c| {
             for r in &changed {
-                c.execute(
-                    "UPDATE runs SET session_id = ?2 WHERE id = ?1 AND session_id IS NULL",
-                    rusqlite::params![r.id, r.session_id],
-                )?;
+                qruns::set_session_id_if_null(c, &r.id, r.session_id.as_deref())?;
             }
             Ok(())
         })

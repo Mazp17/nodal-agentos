@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
-use rusqlite::Connection;
+use crate::db::Connection;
 use tauri::State;
 
 use crate::db::queries::{hidden_executors, projects, relations, repos, runs as qruns, tasks};
@@ -572,8 +572,7 @@ async fn cancel_run_inner(inner: &Arc<Inner>, run_id: String) -> Result<Run, Str
                 if !qruns::transition(&tx, &id, RunStatus::Queued, RunStatus::Canceled)? {
                     return Err("The run is no longer queued.".into());
                 }
-                tx.execute("UPDATE runs SET finished_at = ?2 WHERE id = ?1", rusqlite::params![id, now])
-                    .map_err(|e| e.to_string())?;
+                qruns::set_finished_at(&tx, &id, now).map_err(|e| e.to_string())?;
                 // With no other pending runs, the task doesn't stay In Progress: back to Todo if
                 // it was work, or to Blocked if it was the reviewer (the gate didn't pass).
                 if let Some(t) = task {
