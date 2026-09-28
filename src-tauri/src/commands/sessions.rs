@@ -10,6 +10,7 @@ use std::sync::Arc;
 use tauri::{AppHandle, Manager, State};
 
 use nodal_app::sessions::SessionReader;
+use nodal_app::sources::SourcesHub;
 use nodal_app::App;
 use nodal_domain::model::activity::ExternalSessions;
 use nodal_domain::model::claude::{LaunchBlocker, RunDetail, RunSummary, Transcript};
@@ -82,6 +83,18 @@ pub async fn get_run_transcript(
 /// project's), with a single `claude agents`.
 #[tauri::command]
 pub async fn external_sessions(app: AppHandle, project_id: Option<String>) -> Result<ExternalSessions, CommandError> {
-    let app = app.try_state::<Arc<App>>().ok_or_else(|| "The database isn't available.".to_string())?;
-    Ok(app.sessions.external_sessions(project_id).await?)
+    if let Some(id) = &project_id {
+        nodal_domain::util::check_id(id, "project")?;
+    }
+    let Some(state) = app.try_state::<Arc<App>>() else {
+        // `App` also needs `$HOME`: with the database open, keep today's message for that case.
+        let db_open = app.try_state::<Arc<SourcesHub>>().is_some_and(|hub| hub.db.is_some());
+        return Err(if db_open {
+            "Couldn't locate the Claude Code folder ($HOME is not set).".to_string()
+        } else {
+            "The database isn't available.".to_string()
+        }
+        .into());
+    };
+    Ok(state.sessions.external_sessions(project_id).await?)
 }
