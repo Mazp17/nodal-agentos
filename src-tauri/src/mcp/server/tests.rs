@@ -3,17 +3,13 @@ use crate::db::open_in_memory;
 use crate::db::queries::projects;
 use crate::mcp::stdio::{forward, OPEN_NODAL};
 use crate::work::dto::{NewProject, NewRepo};
-use crate::work::{ops, Cleaning, Env};
+use crate::work::{ops, Cleaning};
 use serde_json::json;
 use std::sync::Mutex;
 
 /// Short names: a socket path is limited to 104 bytes on macOS.
 fn inner(root: &Path) -> Arc<Inner> {
-    let env = Env {
-        data_dir: root.join("d"),
-        worktrees_root: root.join("w"),
-        claude_dir: None,
-    };
+    let env = crate::work::test_env(root.join("d"), root.join("w"), None);
     Arc::new(Inner {
         db: open_in_memory().unwrap(),
         env,
@@ -34,6 +30,7 @@ fn socket_is_private_and_serves_the_same_ops_as_the_ui() {
         let c = inner.db.lock().unwrap();
         let p = ops::create_project(
             &c,
+            &inner.env,
             &NewProject {
                 name: "Pay".into(),
                 key: "PAY".into(),

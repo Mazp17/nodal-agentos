@@ -18,7 +18,9 @@ use super::{validate, Env};
 
 // ---------- Projects ----------
 
-pub fn create_project(conn: &Connection, input: &NewProject, now: i64) -> Result<Project, String> {
+// `_env` is unused today; the frozen `nodal_app::board::ops` signature (wave 3a) takes it
+// because `validate::root_path` will move to `env.fs.canonical_dir` then.
+pub fn create_project(conn: &Connection, _env: &Env, input: &NewProject, now: i64) -> Result<Project, String> {
     let name = validate::name(&input.name, "project")?;
     let key = validate::project_key(&input.key)?;
     let color = match input.color.as_deref().map(str::trim).filter(|c| !c.is_empty()) {
@@ -42,7 +44,7 @@ pub fn create_project(conn: &Connection, input: &NewProject, now: i64) -> Result
     Ok(p)
 }
 
-pub fn update_project(conn: &Connection, id: &str, patch: &ProjectPatch, now: i64) -> Result<Project, String> {
+pub fn update_project(conn: &Connection, _env: &Env, id: &str, patch: &ProjectPatch, now: i64) -> Result<Project, String> {
     let mut p = projects::get(conn, id)?;
     if let Some(n) = &patch.name {
         p.name = validate::name(n, "project")?;
@@ -197,7 +199,7 @@ pub fn plan_path(env: &Env, task: &Task, repo: &Repo) -> Result<PathBuf, String>
     }
 }
 
-pub fn read_plan(path: &Path) -> Result<String, String> {
+pub fn read_plan(_env: &Env, path: &Path) -> Result<String, String> {
     use std::io::Read;
     let file = std::fs::File::open(path).map_err(|e| format!("Couldn't read the plan: {e}"))?;
     let mut bytes = Vec::new();
@@ -488,7 +490,7 @@ pub fn delete_task(conn: &Connection, env: &Env, id: &str) -> Result<(), String>
 pub fn read_task_plan(conn: &Connection, env: &Env, id: &str) -> Result<String, String> {
     let t = tasks::get(conn, id)?;
     let repo = repos::get(conn, &t.repo_id)?;
-    read_plan(&plan_path(env, &t, &repo)?)
+    read_plan(env, &plan_path(env, &t, &repo)?)
 }
 
 // ---------- Relations ----------

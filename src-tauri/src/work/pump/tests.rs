@@ -24,16 +24,13 @@ fn fx(name: &str) -> Fx {
         "---\nname: code-reviewer\ntools: Read\n---\n",
     )
     .unwrap();
-    let env = Env {
-        data_dir: t.0.join("data"),
-        worktrees_root: t.0.join("wt"),
-        claude_dir: Some(t.0.join("claude")),
-    };
+    let env = crate::work::test_env(t.0.join("data"), t.0.join("wt"), Some(t.0.join("claude")));
     let db = open_in_memory().unwrap();
     let task = {
         let mut c = db.lock().unwrap();
         let p = ops::create_project(
             &c,
+            &env,
             &NewProject {
                 name: "Pay".into(),
                 key: "PAY".into(),

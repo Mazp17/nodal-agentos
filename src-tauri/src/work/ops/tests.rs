@@ -14,11 +14,7 @@ fn fx(name: &str) -> Fx {
     let repo_dir = t.0.join("web");
     std::fs::create_dir_all(repo_dir.join("docs")).unwrap();
     std::fs::write(repo_dir.join("docs/plan.md"), "# Repo plan").unwrap();
-    let env = Env {
-        data_dir: t.0.join("data"),
-        worktrees_root: t.0.join("wt"),
-        claude_dir: None,
-    };
+    let env = crate::work::test_env(t.0.join("data"), t.0.join("wt"), None);
     Fx {
         _t: t,
         env,
@@ -37,10 +33,13 @@ fn new_task(project: &Project, repo: &Repo, title: &str) -> NewTask {
 
 #[test]
 fn projects_crud_and_unique_keys() {
+    let t = TempDir::new("ops-projects-crud");
+    let env = crate::work::test_env(t.0.join("data"), t.0.join("wt"), None);
     let db = open_in_memory().unwrap();
     let mut c = db.lock().unwrap();
     let p = create_project(
         &c,
+        &env,
         &NewProject {
             name: "Payments".into(),
             key: "pay".into(),
@@ -55,6 +54,7 @@ fn projects_crud_and_unique_keys() {
     assert_eq!(p.color, validate::PALETTE[0]);
     let err = create_project(
         &c,
+        &env,
         &NewProject {
             name: "Other".into(),
             key: "PAY".into(),
@@ -68,6 +68,7 @@ fn projects_crud_and_unique_keys() {
     assert!(err.contains("already used"), "{err}");
     let q = create_project(
         &c,
+        &env,
         &NewProject {
             name: "Web".into(),
             key: "WEB".into(),
@@ -80,6 +81,7 @@ fn projects_crud_and_unique_keys() {
     .unwrap();
     let err = update_project(
         &c,
+        &env,
         &q.id,
         &ProjectPatch {
             key: Some("pay".into()),
@@ -93,19 +95,19 @@ fn projects_crud_and_unique_keys() {
         json!({"name": "Web 2", "reviewer": "code-reviewer", "archived": true}),
     )
     .unwrap();
-    let q = update_project(&c, &q.id, &patch, 14).unwrap();
+    let q = update_project(&c, &env, &q.id, &patch, 14).unwrap();
     assert_eq!(
         (q.name.as_str(), q.reviewer.as_deref(), q.archived_at),
         ("Web 2", Some("code-reviewer"), Some(14))
     );
     let patch: ProjectPatch =
         serde_json::from_value(json!({"reviewer": null, "archived": false})).unwrap();
-    let q = update_project(&c, &q.id, &patch, 15).unwrap();
+    let q = update_project(&c, &env, &q.id, &patch, 15).unwrap();
     assert_eq!((q.reviewer, q.archived_at), (None, None));
     let patch: ProjectPatch =
         serde_json::from_value(json!({"description": "  Payments and billing  "})).unwrap();
     assert_eq!(
-        update_project(&c, &q.id, &patch, 15)
+        update_project(&c, &env, &q.id, &patch, 15)
             .unwrap()
             .description
             .as_deref(),
@@ -113,7 +115,7 @@ fn projects_crud_and_unique_keys() {
     );
     let patch: ProjectPatch = serde_json::from_value(json!({"description": null})).unwrap();
     assert_eq!(
-        update_project(&c, &q.id, &patch, 15).unwrap().description,
+        update_project(&c, &env, &q.id, &patch, 15).unwrap().description,
         None
     );
     let d = NewProject {
@@ -124,12 +126,12 @@ fn projects_crud_and_unique_keys() {
         root_path: None,
     };
     assert_eq!(
-        create_project(&c, &d, 15).unwrap().description.as_deref(),
+        create_project(&c, &env, &d, 15).unwrap().description.as_deref(),
         Some("Backend")
     );
     assert_eq!(projects::list(&c, false).unwrap().len(), 3);
     assert!(delete_project(&mut c, &q.id).unwrap().is_empty());
-    assert!(update_project(&c, &q.id, &ProjectPatch::default(), 16)
+    assert!(update_project(&c, &env, &q.id, &ProjectPatch::default(), 16)
         .unwrap_err()
         .contains("no longer exists"));
 }
@@ -140,6 +142,7 @@ fn project_root_path_is_an_existing_canonical_folder_and_clearable() {
     let root = t.0.join("acme");
     std::fs::create_dir_all(root.join("docs")).unwrap();
     std::fs::write(t.0.join("notes.md"), "# Notes").unwrap();
+    let env = crate::work::test_env(t.0.join("data"), t.0.join("wt"), None);
     let db = open_in_memory().unwrap();
     let c = db.lock().unwrap();
     let input = |root_path: Option<String>| NewProject {
@@ -150,24 +153,24 @@ fn project_root_path_is_an_existing_canonical_folder_and_clearable() {
         root_path,
     };
     let messy = format!("  {}/docs/..  ", root.display());
-    let p = create_project(&c, &input(Some(messy)), 1).unwrap();
+    let p = create_project(&c, &env, &input(Some(messy)), 1).unwrap();
     let canonical = root.to_string_lossy().into_owned();
     assert_eq!(p.root_path.as_deref(), Some(canonical.as_str()));
     assert_eq!(
         projects::get(&c, &p.id).unwrap().root_path.as_deref(),
         Some(canonical.as_str())
     );
-    let err = create_project(&c, &input(Some("/no/such/acme".into())), 2).unwrap_err();
+    let err = create_project(&c, &env, &input(Some("/no/such/acme".into())), 2).unwrap_err();
     assert!(err.contains("doesn't exist"), "{err}");
 
     let patch = |v: serde_json::Value| -> ProjectPatch {
         serde_json::from_value(json!({ "rootPath": v })).unwrap()
     };
     let file = t.0.join("notes.md").to_string_lossy().into_owned();
-    assert!(update_project(&c, &p.id, &patch(json!(file)), 3)
+    assert!(update_project(&c, &env, &p.id, &patch(json!(file)), 3)
         .unwrap_err()
         .contains("doesn't exist"));
-    assert!(update_project(&c, &p.id, &patch(json!("relative/acme")), 3)
+    assert!(update_project(&c, &env, &p.id, &patch(json!("relative/acme")), 3)
         .unwrap_err()
         .contains("absolute"));
     assert_eq!(
@@ -176,6 +179,7 @@ fn project_root_path_is_an_existing_canonical_folder_and_clearable() {
     );
     let untouched = update_project(
         &c,
+        &env,
         &p.id,
         &ProjectPatch {
             name: Some("Acme 2".into()),
@@ -186,7 +190,7 @@ fn project_root_path_is_an_existing_canonical_folder_and_clearable() {
     .unwrap();
     assert_eq!(untouched.root_path.as_deref(), Some(canonical.as_str()));
     assert_eq!(
-        update_project(&c, &p.id, &patch(json!(null)), 5)
+        update_project(&c, &env, &p.id, &patch(json!(null)), 5)
             .unwrap()
             .root_path,
         None
@@ -194,14 +198,14 @@ fn project_root_path_is_an_existing_canonical_folder_and_clearable() {
     assert_eq!(projects::get(&c, &p.id).unwrap().root_path, None);
     let docs = root.join("docs").to_string_lossy().into_owned();
     assert_eq!(
-        update_project(&c, &p.id, &patch(json!(docs)), 6)
+        update_project(&c, &env, &p.id, &patch(json!(docs)), 6)
             .unwrap()
             .root_path
             .as_deref(),
         Some(docs.as_str())
     );
     assert_eq!(
-        update_project(&c, &p.id, &patch(json!("  ")), 7)
+        update_project(&c, &env, &p.id, &patch(json!("  ")), 7)
             .unwrap()
             .root_path,
         None
@@ -215,6 +219,7 @@ fn repos_unique_path_options_and_delete_guard() {
     let mut c = db.lock().unwrap();
     let p = create_project(
         &c,
+        &f.env,
         &NewProject {
             name: "Pay".into(),
             key: "PAY".into(),
@@ -227,6 +232,7 @@ fn repos_unique_path_options_and_delete_guard() {
     .unwrap();
     let q = create_project(
         &c,
+        &f.env,
         &NewProject {
             name: "Web".into(),
             key: "WEB".into(),
@@ -300,6 +306,7 @@ fn tasks_numbering_plan_move_and_patch() {
     let mut c = db.lock().unwrap();
     let p = create_project(
         &c,
+        &f.env,
         &NewProject {
             name: "Pay".into(),
             key: "PAY".into(),
@@ -455,6 +462,7 @@ fn imported_tasks_are_read_only_and_manual_moves_push_state() {
     let mut c = db.lock().unwrap();
     let p = create_project(
         &c,
+        &f.env,
         &NewProject {
             name: "Pay".into(),
             key: "PAY".into(),

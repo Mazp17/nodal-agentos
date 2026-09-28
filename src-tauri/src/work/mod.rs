@@ -25,6 +25,7 @@ pub mod worktree;
 pub(crate) mod testutil;
 
 use std::collections::HashSet;
+#[cfg(test)]
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -35,26 +36,22 @@ use crate::db::Db;
 
 const TICK: Duration = Duration::from_secs(5);
 
-/// Paths the work depends on (injectable in tests).
-#[derive(Debug, Clone)]
-pub struct Env {
-    /// `app_data_dir`: plans in `tasks/<id>/plan.md`, patches of stopped runs.
-    pub data_dir: PathBuf,
-    /// `~/.nodal/worktrees`.
-    pub worktrees_root: PathBuf,
-    /// `~/.claude` (or `$CLAUDE_CONFIG_DIR`): agents, workflows and plugins.
-    pub claude_dir: Option<PathBuf>,
-}
+/// Moved to `nodal_app::Env` (same field names and methods, plus the ports the old code
+/// reached directly); re-exported so current uses don't break.
+pub use nodal_app::Env;
 
-impl Env {
-    pub fn plan_dir(&self, task_id: &str) -> PathBuf {
-        self.data_dir.join("tasks").join(task_id)
-    }
-    pub fn text_plan_path(&self, task_id: &str) -> PathBuf {
-        self.plan_dir(task_id).join("plan.md")
-    }
-    pub fn stopped_patch_path(&self, run_id: &str) -> PathBuf {
-        self.data_dir.join("runs").join(run_id).join("stopped.patch")
+/// `Env` for tests: real (blocking, synchronous) host adapters rooted at `data_dir`/
+/// `worktrees_root`, so callers keep their own `TempDir` and path names.
+#[cfg(test)]
+pub(crate) fn test_env(data_dir: PathBuf, worktrees_root: PathBuf, claude_dir: Option<PathBuf>) -> Env {
+    Env {
+        data_dir,
+        worktrees_root,
+        claude_dir,
+        plans: Arc::new(nodal_host::adapters::HostPlanFiles),
+        fs: Arc::new(nodal_host::adapters::HostLocalFs),
+        git: Arc::new(nodal_host::adapters::HostGit),
+        claude_config: Arc::new(nodal_host::adapters::HostClaudeConfig),
     }
 }
 
@@ -114,6 +111,10 @@ pub fn init(app: &AppHandle, db: Db) -> Result<(), String> {
         data_dir,
         worktrees_root: crate::util::paths::nodal_home()?.join("worktrees"),
         claude_dir: crate::runs::claude_fs::claude_config_dir(),
+        plans: Arc::new(nodal_host::adapters::HostPlanFiles),
+        fs: Arc::new(nodal_host::adapters::HostLocalFs),
+        git: Arc::new(nodal_host::adapters::HostGit),
+        claude_config: Arc::new(nodal_host::adapters::HostClaudeConfig),
     };
     // A `launching` from a previous session may or may not have actually launched.
     if let Ok(mut conn) = db.lock() {

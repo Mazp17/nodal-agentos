@@ -38,7 +38,7 @@ pub fn task_context(
     worktree: Option<&WorktreeRef>,
 ) -> Result<TaskContext, String> {
     let plan_abs = ops::plan_path(env, task, repo)?;
-    let plan_text = ops::read_plan(&plan_abs)?;
+    let plan_text = ops::read_plan(env, &plan_abs)?;
     // A repo plan is read from the cwd (in a worktree, the branch's copy).
     let plan_path = match plan_abs.strip_prefix(&repo.path) {
         // If the plan isn't committed, it doesn't exist in the worktree: use the repo path.

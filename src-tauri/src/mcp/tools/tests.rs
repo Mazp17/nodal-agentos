@@ -12,11 +12,7 @@ struct Fx {
 
 fn fx(name: &str) -> Fx {
     let t = TempDir::new(name);
-    let env = Env {
-        data_dir: t.0.join("data"),
-        worktrees_root: t.0.join("wt"),
-        claude_dir: None,
-    };
+    let env = crate::work::test_env(t.0.join("data"), t.0.join("wt"), None);
     Fx { t, env }
 }
 
@@ -24,6 +20,7 @@ fn fx(name: &str) -> Fx {
 fn seed(c: &Connection, f: &Fx) -> (Project, Repo, Repo) {
     let p = ops::create_project(
         c,
+        &f.env,
         &NewProject {
             name: "Pay".into(),
             key: "PAY".into(),
