@@ -1,0 +1,30 @@
+# App (use-case) code reaches the outside world only through nodal_domain::ports
+# (Arc<dyn ...>), never directly. Not enforced yet (no `-D clippy::disallowed-methods`
+# CI step): W4 makes it blocking once nodal-app holds real code (see plan §5.1 W4).
+disallowed-methods = [
+    "std::process::Command::new",
+    "tokio::process::Command::new",
+    "std::fs::read",
+    "std::fs::read_to_string",
+    "std::fs::write",
+    "std::fs::create_dir_all",
+    "std::fs::remove_file",
+    "std::fs::remove_dir_all",
+    "std::fs::rename",
+    "std::fs::metadata",
+    "std::fs::read_dir",
+    "std::fs::copy",
+    "std::fs::canonicalize",
+    "std::fs::File::open",
+    "std::fs::File::create",
+    "std::path::Path::exists",
+    "std::path::Path::is_file",
+    "std::path::Path::is_dir",
+    "std::path::Path::canonicalize",
+    "std::path::Path::metadata",
+    "std::path::Path::read_dir",
+    "std::time::SystemTime::now",
+    "std::env::var",
+    "std::env::var_os",
+    "std::env::current_exe",
+]
