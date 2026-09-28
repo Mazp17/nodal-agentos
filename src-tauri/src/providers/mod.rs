@@ -1,7 +1,7 @@
 //! Task providers (Linear today; Asana, Azure DevOps later) and their sync with Nodal.
 //!
-//! - `TaskProvider`: generic provider interface. Static dispatch through the `Provider`
-//!   enum (no `dyn`); each adapter lives in its own file (`linear.rs`).
+//! - `TaskProvider`/`ProviderFactory`: ports (`nodal_domain::ports`), object-safe. `Provider`
+//!   is `Arc<dyn TaskProvider>`; each adapter lives in its own crate (Linear: `nodal-linear`).
 //! - `state_map`: state mapping proposal (pure).
 //! - `plan`: `plan.md` materialization, criteria extraction and the closing comment.
 //! - `import`: importing items as tasks.
@@ -27,107 +27,24 @@ use std::path::PathBuf;
 
 use tauri::{AppHandle, Manager};
 
-use crate::domain::{ExternalState, ScopeRef};
-
 pub use store::{enqueue_comment, enqueue_status};
 
 /// Tauri commands reject with a display-ready string (in English).
 pub type PResult<T> = Result<T, String>;
 
 /// Moved to `nodal_domain::model::providers`; re-exported so current uses don't break.
-pub use nodal_domain::model::providers::{
-    ChildItem, ErrorKind, ExternalItem, ImportQuery, ItemRef, Page, ProviderError, ProviderResult, OPEN_KINDS,
-};
+/// `ChildItem`, `ItemRef` and `Page` moved with the Linear adapter to `nodal-linear`;
+/// `#[cfg(test)] fake.rs` now reaches `Page` there directly.
+pub use nodal_domain::model::providers::{ErrorKind, ExternalItem, ImportQuery, ProviderError, ProviderResult, OPEN_KINDS};
 
 /// Providers Nodal knows about (the rest are rejected with "Unknown provider").
 pub const KNOWN_PROVIDERS: &[&str] = &["linear"];
 
-/// Task provider interface. Adapters normalize their states to `ExtKind` so the mapping
-/// heuristic (`state_map`) works for all of them.
-// Private crate: the `async fn` in public traits lint (due to `Send` bounds) doesn't apply;
-// dispatch is through a concrete enum, so futures are `Send` when needed.
-#[allow(async_fn_in_trait)]
-pub trait TaskProvider {
-    /// Provider name (`"linear"`), same as `TaskSource.provider`.
-    fn name(&self) -> &'static str;
-    /// Validates the key; returns the user's name.
-    async fn status(&self) -> ProviderResult<String>;
-    /// Linkable scopes (in Linear: teams and active projects).
-    async fn scopes(&self) -> ProviderResult<Vec<ScopeRef>>;
-    /// Current states of the scope, in provider order.
-    async fn states(&self, scope: &ScopeRef) -> ProviderResult<Vec<ExternalState>>;
-    /// Provider projects that can be a rule of a link with this scope (in Linear: the team's
-    /// active projects; for a link to a project, that project).
-    async fn rule_projects(&self, scope: &ScopeRef) -> ProviderResult<Vec<ScopeRef>>;
-    async fn list_importable(&self, query: &ImportQuery) -> ProviderResult<Page>;
-    /// Full items by id. Those that no longer exist (or the key can't see) are not returned.
-    async fn pull(&self, external_ids: &[String]) -> ProviderResult<Vec<ExternalItem>>;
-    #[allow(dead_code)] // For the detail view (today `linear_issue_detail`) and future providers.
-    async fn fetch(&self, external_id: &str) -> ProviderResult<Option<ExternalItem>> {
-        Ok(self.pull(&[external_id.to_string()]).await?.into_iter().next())
-    }
-    /// Changes the item's state. `state_id` comes from the mapping; if it belongs to a different
-    /// state group than the item's (Linear project with several teams), the adapter uses the
-    /// equivalent by name/type in the item's group. Returns the resulting state.
-    async fn set_state(&self, external_id: &str, state_id: &str) -> ProviderResult<ExternalState>;
-    async fn comment(&self, external_id: &str, body: &str) -> ProviderResult<()>;
-    /// Whether the item already has a comment containing `marker` (the outbox uses it to avoid
-    /// reposting a comment that went out but wasn't marked as sent).
-    async fn has_comment_with(&self, external_id: &str, marker: &str) -> ProviderResult<bool>;
-}
+/// Was a local `#[allow(async_fn_in_trait)]` trait with static dispatch through a `Provider`
+/// enum. Now the frozen, object-safe port; `Provider` is `Arc<dyn TaskProvider>`.
+pub use nodal_domain::ports::{ProviderFactory, TaskProvider};
 
-/// Static provider dispatch.
-pub enum Provider {
-    Linear(linear::LinearProvider),
-    #[cfg(test)]
-    Fake(fake::FakeProvider),
-}
-
-macro_rules! dispatch {
-    ($self:ident, $p:ident => $e:expr) => {
-        match $self {
-            Provider::Linear($p) => $e,
-            #[cfg(test)]
-            Provider::Fake($p) => $e,
-        }
-    };
-}
-
-impl TaskProvider for Provider {
-    fn name(&self) -> &'static str {
-        dispatch!(self, p => p.name())
-    }
-    async fn status(&self) -> ProviderResult<String> {
-        dispatch!(self, p => p.status().await)
-    }
-    async fn scopes(&self) -> ProviderResult<Vec<ScopeRef>> {
-        dispatch!(self, p => p.scopes().await)
-    }
-    async fn states(&self, scope: &ScopeRef) -> ProviderResult<Vec<ExternalState>> {
-        dispatch!(self, p => p.states(scope).await)
-    }
-    async fn rule_projects(&self, scope: &ScopeRef) -> ProviderResult<Vec<ScopeRef>> {
-        dispatch!(self, p => p.rule_projects(scope).await)
-    }
-    async fn list_importable(&self, query: &ImportQuery) -> ProviderResult<Page> {
-        dispatch!(self, p => p.list_importable(query).await)
-    }
-    async fn pull(&self, external_ids: &[String]) -> ProviderResult<Vec<ExternalItem>> {
-        dispatch!(self, p => p.pull(external_ids).await)
-    }
-    async fn fetch(&self, external_id: &str) -> ProviderResult<Option<ExternalItem>> {
-        dispatch!(self, p => p.fetch(external_id).await)
-    }
-    async fn set_state(&self, external_id: &str, state_id: &str) -> ProviderResult<ExternalState> {
-        dispatch!(self, p => p.set_state(external_id, state_id).await)
-    }
-    async fn comment(&self, external_id: &str, body: &str) -> ProviderResult<()> {
-        dispatch!(self, p => p.comment(external_id, body).await)
-    }
-    async fn has_comment_with(&self, external_id: &str, marker: &str) -> ProviderResult<bool> {
-        dispatch!(self, p => p.has_comment_with(external_id, marker).await)
-    }
-}
+pub type Provider = std::sync::Arc<dyn TaskProvider>;
 
 pub fn check_provider(name: &str) -> PResult<()> {
     if KNOWN_PROVIDERS.contains(&name) {
@@ -150,7 +67,8 @@ pub async fn resolve_with_key(app: &AppHandle, name: &str) -> PResult<Option<(Pr
     match name {
         "linear" => {
             let http = app.state::<crate::linear::LinearState>().http().clone();
-            Ok(Some((Provider::Linear(linear::LinearProvider::new(http, key.clone())), key)))
+            let provider = nodal_linear::LinearFactory::new(http).build(key.clone());
+            Ok(Some((provider, key)))
         }
         other => Err(format!("Unknown provider \"{other}\".")),
     }

@@ -39,7 +39,7 @@ use super::plan::{plan_path, render_plan, write_plan};
 use super::state_map::diff_known;
 use super::{
     resolve, store, ErrorKind, ExternalItem, ImportQuery, PResult, Provider, ProviderError, ProviderResult,
-    ProvidersState, TaskProvider,
+    ProvidersState,
 };
 
 /// Moved to `nodal_domain::sources::decisions`; re-exported so current uses don't break.

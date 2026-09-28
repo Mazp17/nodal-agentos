@@ -35,7 +35,7 @@ impl Env {
         Env {
             db,
             dir: tmp_dir(),
-            providers: vec![Provider::Fake(fake.clone())],
+            providers: vec![std::sync::Arc::new(fake.clone())],
             fake,
             link,
             memo: Default::default(),

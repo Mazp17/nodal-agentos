@@ -19,7 +19,7 @@ use super::sync::{run_for_app, SyncReport};
 use crate::events::{notify, Kind};
 use crate::secrets::Secrets;
 use crate::util::{new_id, now_ms};
-use super::{check_provider, require, resolve, store, ImportQuery, PResult, Provider, ProvidersState, TaskProvider};
+use super::{check_provider, require, resolve, store, ImportQuery, PResult, Provider, ProviderFactory, ProvidersState};
 
 /// Cap on the importable listing per call (pages of 25).
 const LIST_MAX_PAGES: usize = 4;
@@ -101,7 +101,7 @@ pub async fn provider_set_key(app: AppHandle, provider: String, key: Option<Stri
         return Err("The API key is empty.".into());
     }
     let linear = app.state::<LinearState>();
-    let p = Provider::Linear(super::linear::LinearProvider::new(linear.http().clone(), key.clone()));
+    let p: Provider = nodal_linear::LinearFactory::new(linear.http().clone()).build(key.clone());
     let viewer = p.status().await?;
     app.state::<Secrets>().set(&provider, &key).await?;
     clear_pause(&app, &provider);
