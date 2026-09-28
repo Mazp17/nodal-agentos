@@ -3,10 +3,17 @@
 use std::sync::{Arc, Mutex};
 
 use serde::Serialize;
-use tauri::State;
+use tauri::{AppHandle, Manager, State};
 
-use super::server::{self, Listening};
-use crate::work::Inner;
+use crate::mcp::server::{self, Listening};
+use crate::work::{Inner, WorkState};
+
+/// Starts the MCP socket over the legacy `WorkState` (today's `McpState.start(WorkState.0)`,
+/// called once `work::init` succeeded). `app` isn't used yet; wave 3c switches this to
+/// `Arc<App>`.
+pub fn setup(h: &AppHandle, _app: &Arc<nodal_app::App>) {
+    h.state::<McpState>().start(h.state::<WorkState>().0.clone());
+}
 
 const NO_DB: &str = "Nodal's database didn't open, so there is nothing to serve.";
 

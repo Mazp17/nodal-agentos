@@ -10,7 +10,6 @@
 //! Between `nodal-mcp` and the app, one JSON line each way: `{"tool", "arguments"}` →
 //! `{"result": …}` or `{"error": "…"}`.
 
-pub mod commands;
 pub(crate) mod server;
 pub(crate) mod tools;
 
@@ -18,3 +17,8 @@ pub(crate) mod tools;
 pub use nodal_mcp_proto::stdio;
 
 pub(crate) use nodal_mcp_proto::protocol::{Reply, Request, MAX_LINE};
+
+/// Moved to `SRC/commands/mcp.rs`; re-exported so current uses don't break.
+pub mod commands {
+    pub use crate::commands::mcp::{mcp_restart, mcp_status, mcp_stop, McpState, McpStatus};
+}
