@@ -42,3 +42,6 @@ impl From<String> for CommandError {
         CommandError(e)
     }
 }
+
+#[cfg(test)]
+mod tests;
