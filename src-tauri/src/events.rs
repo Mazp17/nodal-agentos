@@ -8,33 +8,13 @@ use std::collections::BTreeSet;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager};
 
-pub const CHANGED: &str = "nodal://changed";
+/// Moved to `nodal_domain::model::events` (`Kind` renamed `ChangeKind`); re-exported so
+/// current uses don't break.
+pub use nodal_domain::model::events::{Changed, ChangeKind as Kind, CHANGED};
+
 const DEBOUNCE: Duration = Duration::from_millis(150);
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
-#[serde(rename_all = "lowercase")]
-pub enum Kind {
-    Tasks,
-    Runs,
-    Queue,
-    Sources,
-    Projects,
-    /// A project's chat list (created, renamed, used, deleted). What a chat streams goes
-    /// through `nodal://chat` instead.
-    Chats,
-}
-
-/// Payload of `nodal://changed` (mirror of `ChangedEvent` in `api.ts`).
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct Changed {
-    pub kind: Kind,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub project_id: Option<String>,
-}
 
 /// Notices accumulated between emissions.
 #[derive(Debug, Default)]
