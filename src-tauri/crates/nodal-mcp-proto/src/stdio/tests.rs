@@ -1,4 +1,23 @@
+use std::path::PathBuf;
+
 use super::*;
+
+/// Private temp folder, deleted on drop. Copied from `nodal_lib::util::paths::tests::TempDir`
+/// so this crate doesn't depend on the shell crate's test helpers.
+struct TempDir(PathBuf);
+impl TempDir {
+    fn new(name: &str) -> Self {
+        let d = std::env::temp_dir().join(format!("nodal-test-{}-{name}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        TempDir(d.canonicalize().unwrap())
+    }
+}
+impl Drop for TempDir {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
 
 fn run(input: &str, call: impl FnMut(&str, Value) -> Result<Value, String>) -> Vec<Value> {
     run_with(input, &tools::definitions(), call)
@@ -10,7 +29,7 @@ fn run_with(
     mut call: impl FnMut(&str, Value) -> Result<Value, String>,
 ) -> Vec<Value> {
     let mut out = Vec::new();
-    serve(input.as_bytes(), &mut out, defs, &mut call).unwrap();
+    serve(input.as_bytes(), &mut out, defs, "0.0.0-test", &mut call).unwrap();
     String::from_utf8(out)
         .unwrap()
         .lines()
@@ -104,7 +123,7 @@ fn only_the_chat_server_lists_and_forwards_propose_task() {
 
 #[test]
 fn a_closed_app_means_open_nodal_first() {
-    let t = crate::util::paths::tests::TempDir::new("mcpcl");
+    let t = TempDir::new("mcpcl");
     let missing = t.0.join("mcp.sock");
     assert_eq!(
         forward(&missing, "list_projects", json!({})).unwrap_err(),
