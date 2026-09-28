@@ -1,10 +1,11 @@
-use super::*;
-use crate::db::open_in_memory;
-use crate::db::rows::{insert_project, insert_repo, insert_task};
-use crate::domain::*;
-use crate::work::testutil::{project_of, repo_of, run_of, task_of};
+use crate::board::{hidden_executors, projects, repos, tasks};
+use crate::execution::runs;
+use crate::rows::{insert_project, insert_repo, insert_task};
+use crate::{chats, Db};
+use nodal_domain::model::*;
+use nodal_domain::testutil::{project_of, repo_of, run_of, task_of};
 
-fn seed(c: &rusqlite::Connection) {
+fn seed(c: &crate::Conn) {
     insert_project(c, &project_of("p1", "PAY")).unwrap();
     insert_repo(c, &repo_of("r1", "p1", "/r1")).unwrap();
     insert_task(c, &task_of("t1")).unwrap();
@@ -23,7 +24,7 @@ fn queued(id: &str, pos: f64) -> Run {
 
 #[test]
 fn queue_order_reorder_and_pending() {
-    let db = open_in_memory().unwrap();
+    let db = Db::open_in_memory().unwrap();
     let mut c = db.lock().unwrap();
     seed(&c);
     assert_eq!(runs::next_queue_position(&c).unwrap(), 1.0);
@@ -67,7 +68,7 @@ fn queue_order_reorder_and_pending() {
 
 #[test]
 fn task_number_counter_and_status() {
-    let db = open_in_memory().unwrap();
+    let db = Db::open_in_memory().unwrap();
     let c = db.lock().unwrap();
     seed(&c);
     assert_eq!(projects::take_task_number(&c, "p1").unwrap(), 1);
@@ -85,7 +86,7 @@ fn task_number_counter_and_status() {
 
 #[test]
 fn runs_filtered_by_project_and_latest_by_task() {
-    let db = open_in_memory().unwrap();
+    let db = Db::open_in_memory().unwrap();
     let c = db.lock().unwrap();
     seed(&c);
     insert_project(&c, &project_of("p2", "WEB")).unwrap();
@@ -131,7 +132,7 @@ fn runs_filtered_by_project_and_latest_by_task() {
 
 #[test]
 fn chats_crud_and_order() {
-    let db = open_in_memory().unwrap();
+    let db = Db::open_in_memory().unwrap();
     let c = db.lock().unwrap();
     seed(&c);
     let mk = |id: &str, updated: i64| Chat {
@@ -183,7 +184,7 @@ fn chats_crud_and_order() {
 
 #[test]
 fn hidden_executors_toggle_per_source_and_repo() {
-    let db = open_in_memory().unwrap();
+    let db = Db::open_in_memory().unwrap();
     let c = db.lock().unwrap();
     seed(&c);
     insert_repo(&c, &repo_of("r2", "p1", "/r2")).unwrap();

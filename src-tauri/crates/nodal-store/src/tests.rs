@@ -1,14 +1,21 @@
 use std::collections::BTreeMap;
 
-use rusqlite::Connection;
+use crate::rows::*;
+use crate::schema::{migrate, user_version, MIGRATIONS};
+use crate::Conn as Connection;
+use crate::*;
+use nodal_domain::model::*;
 
-use super::rows::*;
-use super::schema::{migrate, user_version, MIGRATIONS};
-use super::*;
-use crate::domain::*;
+/// A static multi-thread tokio runtime, reused across tests (only `with_db_runs_off_the_async_thread`
+/// needs it).
+fn block_on<F: std::future::Future>(fut: F) -> F::Output {
+    use std::sync::OnceLock;
+    static RT: OnceLock<tokio::runtime::Runtime> = OnceLock::new();
+    RT.get_or_init(|| tokio::runtime::Runtime::new().unwrap()).block_on(fut)
+}
 
 fn conn() -> Db {
-    open_in_memory().unwrap()
+    Db::open_in_memory().unwrap()
 }
 
 fn project(id: &str, key: &str) -> Project {
@@ -142,13 +149,13 @@ fn file_db_uses_wal() {
     let dir = std::env::temp_dir().join(format!("nodal-db-test-{}", std::process::id()));
     let path = dir.join("sub").join(DB_FILE);
     {
-        let db = open(&path).unwrap();
+        let db = Db::open(&path).unwrap();
         let c = db.lock().unwrap();
         let mode: String = c.query_row("PRAGMA journal_mode", [], |r| r.get(0)).unwrap();
         assert_eq!(mode, "wal");
     }
     // Reopening neither re-applies anything nor fails.
-    let db = open(&path).unwrap();
+    let db = Db::open(&path).unwrap();
     assert_eq!(user_version(&db.lock().unwrap()).unwrap(), MIGRATIONS.len() as i64);
     drop(db);
     let _ = std::fs::remove_dir_all(dir);
@@ -171,12 +178,12 @@ fn migrate_is_idempotent_and_rejects_newer_schema() {
 
 #[test]
 fn migrates_v1_data_to_v2() {
-    let mut c = Connection::open_in_memory().unwrap();
-    c.pragma_update(None, "foreign_keys", "ON").unwrap();
+    let mut raw = rusqlite::Connection::open_in_memory().unwrap();
+    raw.pragma_update(None, "foreign_keys", "ON").unwrap();
     // v1 database with data, written by hand (the v2 columns don't exist yet).
-    c.execute_batch(MIGRATIONS[0]).unwrap();
-    c.pragma_update(None, "user_version", 1).unwrap();
-    c.execute_batch(
+    raw.execute_batch(MIGRATIONS[0]).unwrap();
+    raw.pragma_update(None, "user_version", 1).unwrap();
+    raw.execute_batch(
         r#"INSERT INTO projects (id, name, key, color, created_at) VALUES ('p1', 'Pay', 'PAY', '#fff', 1);
          INSERT INTO repos (id, project_id, path, name, created_at) VALUES ('r1', 'p1', '/r1', 'web', 1);
          INSERT INTO source_links (id, project_id, provider, scope_kind, scope_id, scope_name, state_map_json, created_at)
@@ -189,14 +196,15 @@ fn migrates_v1_data_to_v2() {
          INSERT INTO settings (key, value_json) VALUES ('concurrency', '2');"#,
     )
     .unwrap();
-    migrate(&mut c).unwrap();
-    assert_eq!(user_version(&c).unwrap(), MIGRATIONS.len() as i64);
-    assert_eq!(get_project(&c, "p1").unwrap().unwrap().description, None);
-    let l = get_source_link(&c, "l1").unwrap().unwrap();
+    let c = Conn::wrap_mut(&mut raw);
+    migrate(c).unwrap();
+    assert_eq!(user_version(c).unwrap(), MIGRATIONS.len() as i64);
+    assert_eq!(get_project(c, "p1").unwrap().unwrap().description, None);
+    let l = get_source_link(c, "l1").unwrap().unwrap();
     assert_eq!((l.last_synced_at, l.last_sync_error, l.pending_state_changes), (None, None, None));
-    assert!(!get_task(&c, "t1").unwrap().unwrap().source.unwrap().unmapped);
-    assert_eq!(get_run(&c, "u1").unwrap().unwrap().tokens, None);
-    let mut s = load_settings(&c).unwrap();
+    assert!(!get_task(c, "t1").unwrap().unwrap().source.unwrap().unmapped);
+    assert_eq!(get_run(c, "u1").unwrap().unwrap().tokens, None);
+    let mut s = load_settings(c).unwrap();
     assert_eq!((s.concurrency, s.default_executor.clone()), (2, None));
 
     // The new fields are saved and read back.
@@ -209,21 +217,21 @@ fn migrates_v1_data_to_v2() {
         [serde_json::to_string(&changes).unwrap()],
     )
     .unwrap();
-    assert_eq!(get_source_link(&c, "l1").unwrap().unwrap().pending_state_changes, Some(changes));
+    assert_eq!(get_source_link(c, "l1").unwrap().unwrap().pending_state_changes, Some(changes));
     s.default_executor = Some(Executor::Workflow { name: "plan-task".into() });
-    save_settings(&mut c, &s).unwrap();
-    assert_eq!(load_settings(&c).unwrap().default_executor, s.default_executor);
+    save_settings(c, &s).unwrap();
+    assert_eq!(load_settings(c).unwrap().default_executor, s.default_executor);
 }
 
 #[test]
 fn migrates_v2_data_to_v3() {
-    let mut c = Connection::open_in_memory().unwrap();
-    c.pragma_update(None, "foreign_keys", "ON").unwrap();
-    c.execute_batch(MIGRATIONS[0]).unwrap();
-    c.execute_batch(MIGRATIONS[1]).unwrap();
-    c.pragma_update(None, "user_version", 2).unwrap();
+    let mut raw = rusqlite::Connection::open_in_memory().unwrap();
+    raw.pragma_update(None, "foreign_keys", "ON").unwrap();
+    raw.execute_batch(MIGRATIONS[0]).unwrap();
+    raw.execute_batch(MIGRATIONS[1]).unwrap();
+    raw.pragma_update(None, "user_version", 2).unwrap();
     // v2 database: rules with the old JSON and a linked task without project columns.
-    c.execute_batch(
+    raw.execute_batch(
         r#"INSERT INTO projects (id, name, key, color, created_at) VALUES ('p1', 'Pay', 'PAY', '#fff', 1);
          INSERT INTO repos (id, project_id, path, name, created_at) VALUES ('r1', 'p1', '/r1', 'web', 1);
          INSERT INTO source_links (id, project_id, provider, scope_kind, scope_id, scope_name, repo_rules_json,
@@ -235,11 +243,12 @@ fn migrates_v2_data_to_v3() {
            VALUES ('t1', 'p1', 'r1', 1, 'x', 'todo', 'text', 1, 1, 'linear', 'l1', 'e1', 'ENG-1', 'https://example.com/1');"#,
     )
     .unwrap();
-    migrate(&mut c).unwrap();
-    assert_eq!(user_version(&c).unwrap(), MIGRATIONS.len() as i64);
-    let src = get_task(&c, "t1").unwrap().unwrap().source.unwrap();
+    let c = Conn::wrap_mut(&mut raw);
+    migrate(c).unwrap();
+    assert_eq!(user_version(c).unwrap(), MIGRATIONS.len() as i64);
+    let src = get_task(c, "t1").unwrap().unwrap().source.unwrap();
     assert_eq!((src.project, src.rule_id, src.moved), (None, None, None));
-    let rules = get_source_link(&c, "l1").unwrap().unwrap().repo_rules;
+    let rules = get_source_link(c, "l1").unwrap().unwrap().repo_rules;
     assert_eq!(rules.len(), 1);
     assert_eq!((rules[0].kind, rules[0].value.as_str(), rules[0].created_at), (RuleKind::Label, "frontend", 7));
 
@@ -254,7 +263,7 @@ fn migrates_v2_data_to_v3() {
         [serde_json::to_string(&moved).unwrap()],
     )
     .unwrap();
-    let src = get_task(&c, "t1").unwrap().unwrap().source.unwrap();
+    let src = get_task(c, "t1").unwrap().unwrap().source.unwrap();
     assert_eq!(src.project, Some(ExtProject { id: "pb".into(), name: "B".into() }));
     assert_eq!((src.rule_id.as_deref(), src.moved.as_ref()), (Some("rule-0"), Some(&moved)));
     let json: serde_json::Value = serde_json::to_value(&src).unwrap();
@@ -265,21 +274,22 @@ fn migrates_v2_data_to_v3() {
 
 #[test]
 fn migrates_v3_data_to_v4() {
-    let mut c = Connection::open_in_memory().unwrap();
-    c.pragma_update(None, "foreign_keys", "ON").unwrap();
+    let mut raw = rusqlite::Connection::open_in_memory().unwrap();
+    raw.pragma_update(None, "foreign_keys", "ON").unwrap();
     for sql in &MIGRATIONS[..3] {
-        c.execute_batch(sql).unwrap();
+        raw.execute_batch(sql).unwrap();
     }
-    c.pragma_update(None, "user_version", 3).unwrap();
-    c.execute_batch(
+    raw.pragma_update(None, "user_version", 3).unwrap();
+    raw.execute_batch(
         r#"INSERT INTO projects (id, name, key, color, created_at) VALUES ('p1', 'Pay', 'PAY', '#fff', 1);
          INSERT INTO repos (id, project_id, path, name, created_at) VALUES ('r1', 'p1', '/r1', 'web', 1);"#,
     )
     .unwrap();
-    migrate(&mut c).unwrap();
-    assert_eq!(user_version(&c).unwrap(), MIGRATIONS.len() as i64);
-    assert_eq!(count(&c, "chats"), 0);
-    assert_eq!(get_repo(&c, "r1").unwrap().unwrap().name, "web");
+    let c = Conn::wrap_mut(&mut raw);
+    migrate(c).unwrap();
+    assert_eq!(user_version(c).unwrap(), MIGRATIONS.len() as i64);
+    assert_eq!(count(c, "chats"), 0);
+    assert_eq!(get_repo(c, "r1").unwrap().unwrap().name, "web");
 
     let chat = Chat {
         id: "c1".into(),
@@ -292,54 +302,56 @@ fn migrates_v3_data_to_v4() {
         created_at: 5,
         updated_at: 6,
     };
-    insert_chat(&c, &chat).unwrap();
-    assert_eq!(get_chat(&c, "c1").unwrap(), Some(chat));
+    insert_chat(c, &chat).unwrap();
+    assert_eq!(get_chat(c, "c1").unwrap(), Some(chat));
 }
 
 #[test]
 fn migrates_v5_data_to_v6() {
-    let mut c = Connection::open_in_memory().unwrap();
-    c.pragma_update(None, "foreign_keys", "ON").unwrap();
+    let mut raw = rusqlite::Connection::open_in_memory().unwrap();
+    raw.pragma_update(None, "foreign_keys", "ON").unwrap();
     for sql in &MIGRATIONS[..5] {
-        c.execute_batch(sql).unwrap();
+        raw.execute_batch(sql).unwrap();
     }
-    c.pragma_update(None, "user_version", 5).unwrap();
-    c.execute_batch("INSERT INTO projects (id, name, key, color, created_at) VALUES ('p1', 'Pay', 'PAY', '#fff', 1);")
+    raw.pragma_update(None, "user_version", 5).unwrap();
+    raw.execute_batch("INSERT INTO projects (id, name, key, color, created_at) VALUES ('p1', 'Pay', 'PAY', '#fff', 1);")
         .unwrap();
-    migrate(&mut c).unwrap();
-    assert_eq!(user_version(&c).unwrap(), MIGRATIONS.len() as i64);
-    let p = get_project(&c, "p1").unwrap().unwrap();
+    let c = Conn::wrap_mut(&mut raw);
+    migrate(c).unwrap();
+    assert_eq!(user_version(c).unwrap(), MIGRATIONS.len() as i64);
+    let p = get_project(c, "p1").unwrap().unwrap();
     assert_eq!((p.name.as_str(), p.root_path), ("Pay", None));
 
     let q = Project { root_path: Some("/Users/me/Code/acme".into()), ..project("p2", "ACME") };
-    insert_project(&c, &q).unwrap();
-    assert_eq!(get_project(&c, "p2").unwrap(), Some(q));
+    insert_project(c, &q).unwrap();
+    assert_eq!(get_project(c, "p2").unwrap(), Some(q));
 }
 
 #[test]
 fn migrates_v6_data_to_v7() {
-    let mut c = Connection::open_in_memory().unwrap();
-    c.pragma_update(None, "foreign_keys", "ON").unwrap();
+    let mut raw = rusqlite::Connection::open_in_memory().unwrap();
+    raw.pragma_update(None, "foreign_keys", "ON").unwrap();
     for sql in &MIGRATIONS[..6] {
-        c.execute_batch(sql).unwrap();
+        raw.execute_batch(sql).unwrap();
     }
-    c.pragma_update(None, "user_version", 6).unwrap();
-    c.execute_batch(
+    raw.pragma_update(None, "user_version", 6).unwrap();
+    raw.execute_batch(
         r#"INSERT INTO projects (id, name, key, color, created_at) VALUES ('p1', 'Pay', 'PAY', '#fff', 1);
          INSERT INTO repos (id, project_id, path, name, created_at) VALUES ('r1', 'p1', '/r1', 'web', 1);"#,
     )
     .unwrap();
-    migrate(&mut c).unwrap();
-    assert_eq!(user_version(&c).unwrap(), MIGRATIONS.len() as i64);
-    assert_eq!(count(&c, "project_hidden_executors"), 0);
-    assert_eq!(get_repo(&c, "r1").unwrap().unwrap().name, "web");
+    let c = Conn::wrap_mut(&mut raw);
+    migrate(c).unwrap();
+    assert_eq!(user_version(c).unwrap(), MIGRATIONS.len() as i64);
+    assert_eq!(count(c, "project_hidden_executors"), 0);
+    assert_eq!(get_repo(c, "r1").unwrap().unwrap().name, "web");
     c.execute(
         "INSERT INTO project_hidden_executors (project_id, kind, source, name, repo_id)
          VALUES ('p1', 'agent', 'repo', 'code-reviewer', 'r1')",
         [],
     )
     .unwrap();
-    assert_eq!(count(&c, "project_hidden_executors"), 1);
+    assert_eq!(count(c, "project_hidden_executors"), 1);
 }
 
 #[test]
@@ -723,15 +735,12 @@ fn legacy_imports_key_is_unique() {
 #[test]
 fn with_db_runs_off_the_async_thread() {
     let db = conn();
-    let n = tauri::async_runtime::block_on(with_db(&db, |c| {
+    let n = block_on(with_db(&db, |c| {
         insert_project(c, &project("p1", "PAY"))?;
         Ok(count(c, "projects"))
     }))
     .unwrap();
     assert_eq!(n, 1);
-    let err = tauri::async_runtime::block_on(with_db(&db, |_| -> Result<(), DbError> {
-        Err(DbError::Invalid("nope".into()))
-    }))
-    .unwrap_err();
+    let err = block_on(with_db(&db, |_| -> Result<(), DbError> { Err(DbError::Invalid("nope".into())) })).unwrap_err();
     assert_eq!(String::from(err), "nope");
 }

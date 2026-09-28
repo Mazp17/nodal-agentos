@@ -1,13 +1,13 @@
 //! Row ↔ struct conversion for each `domain` entity.
-//! Only the minimum (insert, read by id): the full CRUD lives in `db/queries` (F1-B).
+//! Only the minimum (insert, read by id): the full CRUD lives in `board`/`execution`/`chats`.
 
 use rusqlite::types::{FromSql, FromSqlError, FromSqlResult, ToSql, ToSqlOutput, Type, ValueRef};
-use rusqlite::{named_params, Connection, OptionalExtension, Row};
-use serde::de::DeserializeOwned;
-use serde::Serialize;
+use rusqlite::{named_params, OptionalExtension, Row};
 
-use super::DbError;
-use crate::domain::*;
+use crate::json::{get_json, get_opt_json, opt_json, to_json};
+use crate::Conn as Connection;
+use crate::DbError;
+use nodal_domain::model::*;
 
 // ---------- Column helpers ----------
 
@@ -47,26 +47,6 @@ macro_rules! sql_enum {
     )+};
 }
 sql_enum!(TaskStatus, Priority, Isolation, Finish, RelationKind, RunKind, RunStatus, RunOutcome);
-
-fn to_json<T: Serialize>(v: &T) -> rusqlite::Result<String> {
-    serde_json::to_string(v).map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))
-}
-
-fn opt_json<T: Serialize>(v: &Option<T>) -> rusqlite::Result<Option<String>> {
-    v.as_ref().map(to_json).transpose()
-}
-
-fn parse_json<T: DeserializeOwned>(s: &str) -> rusqlite::Result<T> {
-    serde_json::from_str(s).map_err(|e| rusqlite::Error::FromSqlConversionFailure(0, Type::Text, Box::new(e)))
-}
-
-fn get_json<T: DeserializeOwned>(row: &Row, col: &str) -> rusqlite::Result<T> {
-    parse_json(&row.get::<_, String>(col)?)
-}
-
-fn get_opt_json<T: DeserializeOwned>(row: &Row, col: &str) -> rusqlite::Result<Option<T>> {
-    row.get::<_, Option<String>>(col)?.as_deref().map(parse_json).transpose()
-}
 
 // ---------- Project ----------
 

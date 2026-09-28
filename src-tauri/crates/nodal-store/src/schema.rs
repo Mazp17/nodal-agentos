@@ -5,9 +5,7 @@
 //! Conventions: TEXT ids, INTEGER dates (epoch ms), INTEGER 0/1 booleans, TEXT enums
 //! (the `as_str` from `domain`), nested structures in `*_json` columns.
 
-use rusqlite::Connection;
-
-use super::DbError;
+use crate::{Conn, DbError};
 
 /// v1: the plan's full schema.
 ///
@@ -274,7 +272,7 @@ CREATE INDEX project_hidden_executors_repo ON project_hidden_executors(repo_id);
 
 pub const MIGRATIONS: &[&str] = &[V1, V2, V3, V4, V5, V6, V7];
 
-pub fn user_version(conn: &Connection) -> Result<i64, DbError> {
+pub fn user_version(conn: &Conn) -> Result<i64, DbError> {
     Ok(conn.query_row("PRAGMA user_version", [], |r| r.get(0))?)
 }
 
@@ -284,7 +282,7 @@ pub fn user_version(conn: &Connection) -> Result<i64, DbError> {
 /// A future migration that rebuilds tables needs FKs turned off, and
 /// `PRAGMA foreign_keys` does nothing inside a transaction: they'll have to be turned off
 /// before `transaction()` and `PRAGMA foreign_key_check` run before the commit.
-pub fn migrate(conn: &mut Connection) -> Result<(), DbError> {
+pub fn migrate(conn: &mut Conn) -> Result<(), DbError> {
     let current = user_version(conn)?;
     let target = MIGRATIONS.len() as i64;
     if current > target {
