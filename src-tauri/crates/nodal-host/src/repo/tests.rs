@@ -1,8 +1,9 @@
 use super::*;
+use crate::testutil::TempDir;
 
 #[test]
 fn detects_test_commands() {
-    let t = crate::util::paths::tests::TempDir::new("test-cmds");
+    let t = TempDir::new("test-cmds");
     assert!(test_commands(&t.0).is_empty());
     std::fs::write(t.0.join("package.json"), r#"{"scripts":{"test":"vitest"}}"#).unwrap();
     std::fs::write(t.0.join("pnpm-lock.yaml"), "").unwrap();

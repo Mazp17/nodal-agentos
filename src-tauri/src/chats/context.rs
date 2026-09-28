@@ -9,7 +9,7 @@
 //! in stream-json mode). The system prompt is recorded on the session's first request and
 //! reused on `--resume` (`--system-prompt-snapshot` defaults to on).
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use serde_json::json;
 
@@ -31,12 +31,8 @@ pub fn tool_name(tool: &str) -> String {
     format!("mcp__{MCP_SERVER}__{tool}")
 }
 
-/// `nodal-mcp` next to the app's executable: `Contents/MacOS` in the bundle,
-/// `target/<profile>` from source (only if it was built: `cargo build --bin nodal-mcp`).
-pub fn nodal_mcp_bin() -> Option<PathBuf> {
-    let exe = std::env::current_exe().ok()?;
-    Some(exe.parent()?.join("nodal-mcp")).filter(|p| p.is_file())
-}
+/// Moved to `nodal_host::repo::nodal_mcp_bin`; re-exported so current uses don't break.
+pub use nodal_host::repo::nodal_mcp_bin;
 
 /// Flags that give the chat its Nodal context, each value its own argument. `cwd` is where
 /// it runs; `mcp` is `nodal-mcp`, when found.

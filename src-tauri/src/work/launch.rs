@@ -25,45 +25,8 @@ use super::{diff, ops, validate, worktree, Cleaning, Env, CLEANING_ERR};
 
 pub use nodal_domain::execution::prompts::*;
 
-/// Test commands of the repo in `cwd`, detected by its files (fixed list: never text from
-/// the repo). They go as `Bash(<cmd>:*)` in the reviewer's allowed tools.
-pub fn test_commands(cwd: &Path) -> Vec<String> {
-    let has = |f: &str| cwd.join(f).is_file();
-    let mut out: Vec<&str> = Vec::new();
-    let npm_test = std::fs::read_to_string(cwd.join("package.json"))
-        .ok()
-        .and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok())
-        .is_some_and(|v| v["scripts"]["test"].is_string());
-    if npm_test {
-        out.push(if has("pnpm-lock.yaml") {
-            "pnpm test"
-        } else if has("yarn.lock") {
-            "yarn test"
-        } else if has("bun.lockb") || has("bun.lock") {
-            "bun run test"
-        } else {
-            "npm test"
-        });
-    }
-    if has("Cargo.toml") {
-        out.push("cargo test");
-    }
-    if has("go.mod") {
-        out.push("go test");
-    }
-    if has("pytest.ini") || has("pyproject.toml") || has("setup.cfg") || has("tox.ini") {
-        out.extend(["pytest", "python -m pytest"]);
-    }
-    if has("mix.exs") {
-        out.push("mix test");
-    }
-    let make_test = std::fs::read_to_string(cwd.join("Makefile"))
-        .is_ok_and(|t| t.lines().any(|l| l.starts_with("test:")));
-    if make_test {
-        out.push("make test");
-    }
-    out.into_iter().map(String::from).collect()
-}
+/// Moved to `nodal_host::repo::test_commands`; re-exported so current uses don't break.
+pub use nodal_host::repo::test_commands;
 
 /// Task context for the prompt, in `cwd` (worktree or repo).
 pub fn task_context(
@@ -477,6 +440,3 @@ pub fn confirm_legacy(db: &Db, env: &Env, cleaning: &Cleaning, run_id: &str, now
     tx.commit().map_err(|e| e.to_string())?;
     Ok(run)
 }
-
-#[cfg(test)]
-mod tests;
