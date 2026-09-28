@@ -1,3 +1,5 @@
+#![allow(clippy::disallowed_methods)] // snapshot helper reads/writes fixture files
+
 use std::path::Path;
 
 use super::*;

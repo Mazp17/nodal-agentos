@@ -8,6 +8,7 @@ pub const DEV: bool = cfg!(debug_assertions);
 
 pub mod diff;
 pub mod error;
+pub mod ports;
 pub mod serde_util;
 #[cfg(any(test, feature = "test-support"))]
 pub mod testutil;
