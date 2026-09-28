@@ -10,9 +10,8 @@
 //! re-exported here so current uses don't break.
 
 use std::path::Path;
-use std::sync::MutexGuard;
 
-use rusqlite::Connection;
+use crate::db::{Connection, DbGuard};
 
 use crate::db::queries::{projects, repos, runs as qruns, tasks};
 use crate::db::{rows, Db};
@@ -144,8 +143,8 @@ fn check_no_pending(conn: &Connection, task_id: &str, ignore: Option<&str>) -> R
 pub const TASK_CHANGED_ERR: &str = "The task changed while the run was being prepared: try again.";
 
 /// The connection (a panic while holding the lock doesn't leave it inconsistent: see `with_db`).
-pub fn lock(db: &Db) -> MutexGuard<'_, Connection> {
-    db.lock().unwrap_or_else(|p| p.into_inner())
+pub fn lock(db: &Db) -> DbGuard<'_> {
+    db.guard()
 }
 
 fn previous_step(prev: &Run, cwd: &str, base: Option<&str>) -> PreviousStep {
