@@ -34,6 +34,8 @@ export function useFocusTrap<T extends HTMLElement>(onEscape?: () => void) {
     // to the body and the dialog still has to respond to Escape and Tab.
     const onKey = (e: KeyboardEvent) => {
       if (stack[stack.length - 1] !== root) return;
+      // An embedded terminal (xterm) owns Esc and Tab: they go to the program running in it.
+      if (e.target instanceof Element && e.target.closest(".xterm")) return;
       if (e.key === "Escape" && escRef.current) {
         e.preventDefault();
         e.stopPropagation();
