@@ -2,6 +2,15 @@
 //! environment. Never prints the key.
 use super::*;
 
+/// No tauri runtime here: a plain multi-thread tokio runtime for the ignored live tests.
+fn block_on<F: std::future::Future>(f: F) -> F::Output {
+    tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .expect("tokio runtime")
+        .block_on(f)
+}
+
 fn env_key() -> Option<String> {
     std::env::var("LINEAR_API_KEY")
         .ok()
@@ -15,7 +24,7 @@ fn live_viewer_teams_board() {
         eprintln!("LINEAR_API_KEY not set: skipping live test");
         return;
     };
-    tauri::async_runtime::block_on(async {
+    block_on(async {
         let http = http_client();
         let c = LinearClient::new(&http, key.trim());
         let v = c.viewer().await.expect("viewer");
@@ -31,7 +40,7 @@ fn live_viewer_teams_board() {
 #[test]
 #[ignore]
 fn live_bogus_key_is_invalid() {
-    tauri::async_runtime::block_on(async {
+    block_on(async {
         let http = http_client();
         let err = LinearClient::new(&http, "lin_api_fake_key_for_test")
             .viewer()

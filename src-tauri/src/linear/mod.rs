@@ -1,16 +1,14 @@
 //! Linear in read-only mode. All calls go out from Rust, so the API key never goes
 //! through the webview and the CSP does not need to open `connect-src` to linear.app.
+//!
+//! The client, model and error types moved to `nodal_linear`; re-exported here so
+//! current uses don't break.
 
-pub(crate) mod client;
-mod detail;
-mod error;
 mod key;
-pub(crate) mod model;
 
-use client::{http_client, LinearClient};
-use detail::IssueDetail;
-pub use error::LinearError;
 use key::KeyCache;
+use nodal_linear::{http_client, IssueDetail, LinearClient};
+pub use nodal_linear::LinearError;
 use tauri::State;
 
 pub struct LinearState {
@@ -25,7 +23,7 @@ impl LinearState {
         Self { http: http_client(), key: KeyCache::new(secrets) }
     }
 
-    /// For `providers::linear`: same HTTP client.
+    /// For `providers::resolve_with_key`/`provider_set_key`: same HTTP client.
     pub(crate) fn http(&self) -> &reqwest::Client {
         &self.http
     }
@@ -41,6 +39,3 @@ pub async fn linear_issue_detail(
     let key = state.key.require().await?;
     LinearClient::new(&state.http, &key).issue_detail(&issue_id).await
 }
-
-#[cfg(test)]
-mod live_tests;

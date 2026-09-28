@@ -1,6 +1,6 @@
 use super::*;
-use crate::linear::model::interpret_response;
-use crate::linear::LinearError;
+use crate::model::interpret_response;
+use crate::LinearError;
 
 const DETAIL: &str = r###"{ "data": { "issue": {
       "id": "i1", "identifier": "ACME-8",

@@ -2,7 +2,7 @@
 //! `linear-api-key` in the `io.github.mazp17.nodal` service), with Linear's typed errors.
 //! The key is never serialized to the frontend nor logged.
 
-use super::error::LinearError;
+use super::LinearError;
 use crate::secrets::Secrets;
 
 const PROVIDER: &str = "linear";

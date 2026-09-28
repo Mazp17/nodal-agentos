@@ -15,7 +15,6 @@
 
 pub mod commands;
 mod import;
-mod linear;
 pub mod plan;
 pub mod state_map;
 pub mod store;
@@ -39,20 +38,6 @@ pub type PResult<T> = Result<T, String>;
 pub use nodal_domain::model::providers::{
     ChildItem, ErrorKind, ExternalItem, ImportQuery, ItemRef, Page, ProviderError, ProviderResult, OPEN_KINDS,
 };
-
-impl From<crate::linear::LinearError> for ProviderError {
-    fn from(e: crate::linear::LinearError) -> Self {
-        use crate::linear::LinearError as L;
-        let kind = match &e {
-            L::MissingKey | L::InvalidKey => ErrorKind::Auth,
-            L::RateLimited => ErrorKind::RateLimited,
-            // The classification comes from the HTTP status / `extensions.code` (`linear::model`).
-            L::Network(_) | L::Keychain(_) | L::Unavailable(_) => ErrorKind::Transient,
-            L::Api(_) => ErrorKind::Permanent,
-        };
-        ProviderError::new(kind, e.to_string())
-    }
-}
 
 /// Providers Nodal knows about (the rest are rejected with "Unknown provider").
 pub const KNOWN_PROVIDERS: &[&str] = &["linear"];

@@ -1,9 +1,16 @@
 //! Fictitious GraphQL fixtures (workspace "acme"), shaped like the real responses.
 use super::*;
-use crate::linear::model::{
-    interpret_response, IssueUpdateData, SyncIssuesData, WorkflowStatesData,
-};
+use crate::model::{interpret_response, IssueUpdateData, SyncIssuesData, WorkflowStatesData};
 use serde_json::json;
+
+/// No tauri runtime here: a plain multi-thread tokio runtime for the ignored live test.
+fn block_on<F: std::future::Future>(f: F) -> F::Output {
+    tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .expect("tokio runtime")
+        .block_on(f)
+}
 
 const ISSUES_BY_IDS: &str = r##"{"data":{"issues":{"nodes":[{
       "id":"uuid-142","identifier":"ENG-142","title":"Website rebrand",
@@ -75,7 +82,7 @@ fn workflow_states_single_and_multi_team() {
     assert_eq!(s[1].kind, ExtKind::Canceled);
 
     let mut multi = d.workflow_states.nodes.clone();
-    multi[1].team = crate::linear::model::Team {
+    multi[1].team = crate::model::Team {
         id: "t2".into(),
         key: "OPS".into(),
         name: "Ops".into(),
@@ -97,7 +104,7 @@ fn mutation_payloads_parse() {
         ext_state(&d.issue_update.issue.unwrap().state).name,
         "In Review"
     );
-    let d: crate::linear::model::CommentCreateData =
+    let d: crate::model::CommentCreateData =
         interpret_response(200, r#"{"data":{"commentCreate":{"success":false}}}"#).unwrap();
     assert!(!d.comment_create.success);
 }
@@ -111,7 +118,7 @@ fn push_state_is_resolved_in_the_issue_team() {
           ]}}},
           "workflowState":{"id":"eng-rev","name":"In Review","type":"started","position":3,"color":"#0f783c"}
         }}"##;
-    let d: crate::linear::model::IssueTeamStatesData = interpret_response(200, body).unwrap();
+    let d: crate::model::IssueTeamStatesData = interpret_response(200, body).unwrap();
     let team = d.issue.team.states.nodes;
     assert_eq!(
         pick_team_state(&team, &d.workflow_state).unwrap().id,
@@ -125,13 +132,13 @@ fn push_state_is_resolved_in_the_issue_team() {
 
 #[test]
 fn comment_marker_lookup_parses() {
-    let hit: crate::linear::model::CommentMarkerData = interpret_response(
+    let hit: crate::model::CommentMarkerData = interpret_response(
         200,
         r#"{"data":{"issue":{"comments":{"nodes":[{"id":"c1"}]}}}}"#,
     )
     .unwrap();
     assert_eq!(hit.issue.unwrap().comments.nodes.len(), 1);
-    let gone: crate::linear::model::CommentMarkerData =
+    let gone: crate::model::CommentMarkerData =
         interpret_response(200, r#"{"data":{"issue":null}}"#).unwrap();
     assert!(gone.issue.is_none());
 }
@@ -246,7 +253,7 @@ fn backfill_page_parses_dates_and_project() {
     let now = 1_789_948_800_000; // 2026-09-21
     let kept: Vec<_> = items
         .iter()
-        .filter(|i| crate::providers::import::backfill_keeps(i, now))
+        .filter(|i| nodal_domain::sources::routing::backfill_keeps(i, now))
         .map(|i| i.identifier.as_str())
         .collect();
     assert_eq!(kept, vec!["ENG-1", "ENG-2"]);
@@ -280,8 +287,8 @@ fn live_provider_read_only() {
         eprintln!("LINEAR_API_KEY not set: skipping live test");
         return;
     };
-    tauri::async_runtime::block_on(async {
-        let p = LinearProvider::new(crate::linear::client::http_client(), key.trim().to_string());
+    block_on(async {
+        let p = LinearProvider::new(crate::client::http_client(), key.trim().to_string());
         println!("viewer: {}", p.status().await.expect("status"));
         let scopes = p.scopes().await.expect("scopes");
         println!("{} scopes", scopes.len());
@@ -293,7 +300,7 @@ fn live_provider_read_only() {
         let q = ImportQuery {
             scope: team.clone(),
             text: None,
-            state_kinds: super::super::OPEN_KINDS.to_vec(),
+            state_kinds: nodal_domain::model::providers::OPEN_KINDS.to_vec(),
             created_after: None,
             project_id: None,
             closed_within_days: None,
