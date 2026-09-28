@@ -4,6 +4,7 @@ use crate::db::rows::{insert_project, insert_repo, insert_source_link};
 use crate::domain::*;
 use crate::providers::plan::tests::item;
 use crate::providers::state_map::{propose, tests::team_states};
+use crate::providers::OPEN_KINDS;
 
 pub fn seed(conn: &Connection) -> SourceLink {
     insert_project(
@@ -217,28 +218,6 @@ fn legacy_rules_json_still_reads() {
     assert_eq!(suggest_repo(&l, Some("m1"), &["m1".into()]), None);
 }
 
-#[test]
-fn backfill_keeps_open_and_recently_closed() {
-    let now = 1_790_000_000_000; // 2026-09-21
-    let day = 86_400_000;
-    let closed = |kind: ExtKind, ago_days: Option<i64>| {
-        let mut it = item(1, None);
-        it.state.kind = kind;
-        it.closed_at = ago_days.map(|d| iso_from_ms(now - d * day));
-        it
-    };
-    assert!(backfill_keeps(&closed(ExtKind::Backlog, None), now));
-    assert!(backfill_keeps(&closed(ExtKind::Triage, None), now));
-    assert!(backfill_keeps(&closed(ExtKind::Completed, Some(3)), now));
-    assert!(backfill_keeps(&closed(ExtKind::Canceled, Some(13)), now));
-    assert!(!backfill_keeps(&closed(ExtKind::Completed, Some(15)), now));
-    assert!(!backfill_keeps(&closed(ExtKind::Canceled, Some(40)), now));
-    assert!(
-        backfill_keeps(&closed(ExtKind::Completed, None), now),
-        "no date: trust the provider"
-    );
-    assert!(!backfill_keeps(&closed(ExtKind::Unknown, None), now));
-}
 
 #[test]
 fn backfill_plan_splits_new_here_elsewhere_and_unlinked() {

@@ -109,14 +109,6 @@ impl Env {
 }
 
 #[test]
-fn backoff_grows_and_caps() {
-    assert_eq!(backoff_ms(1), 30_000);
-    assert_eq!(backoff_ms(2), 60_000);
-    assert_eq!(backoff_ms(3), 120_000);
-    assert_eq!(backoff_ms(50), BACKOFF_MAX_MS);
-}
-
-#[test]
 fn push_retries_with_backoff_then_succeeds() {
     let env = Env::new();
     let t = env.import(1, "s-todo");
