@@ -12,8 +12,11 @@ use std::sync::{Arc, Mutex};
 // Keychain calls are blocking (and may wait on a system dialog).
 use crate::util::blocking;
 
-/// Debug builds use their own service so they don't read or overwrite the installed app's keys.
-pub const SERVICE: &str = if crate::util::paths::DEV { "io.github.mazp17.nodal.dev" } else { "io.github.mazp17.nodal" };
+/// Moved to `nodal_host::keychain`; re-exported so current uses don't break.
+pub use nodal_host::keychain::Keychain;
+/// Only the bridge is left; nothing in this crate calls it directly anymore.
+#[allow(unused_imports)]
+pub use nodal_host::keychain::SERVICE;
 
 /// Where the keys are actually stored. In the app it's the keychain; in tests, memory.
 pub trait SecretBackend: Send + Sync + 'static {
@@ -22,33 +25,17 @@ pub trait SecretBackend: Send + Sync + 'static {
     fn delete(&self, account: &str) -> Result<(), String>;
 }
 
-/// System keychain.
-pub struct Keychain;
-
-impl Keychain {
-    fn entry(account: &str) -> Result<keyring::Entry, String> {
-        keyring::Entry::new(SERVICE, account).map_err(|e| format!("Could not open the keychain: {e}"))
-    }
-}
-
 impl SecretBackend for Keychain {
     fn read(&self, account: &str) -> Result<Option<String>, String> {
-        match Self::entry(account)?.get_password() {
-            Ok(k) => Ok(Some(k)),
-            Err(keyring::Error::NoEntry) => Ok(None),
-            Err(e) => Err(format!("Could not read the keychain: {e}")),
-        }
+        nodal_domain::ports::SecretStore::read(self, account).map_err(String::from)
     }
 
     fn write(&self, account: &str, value: &str) -> Result<(), String> {
-        Self::entry(account)?.set_password(value).map_err(|e| format!("Could not save to the keychain: {e}"))
+        nodal_domain::ports::SecretStore::write(self, account, value).map_err(String::from)
     }
 
     fn delete(&self, account: &str) -> Result<(), String> {
-        match Self::entry(account)?.delete_credential() {
-            Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
-            Err(e) => Err(format!("Could not delete from the keychain: {e}")),
-        }
+        nodal_domain::ports::SecretStore::delete(self, account).map_err(String::from)
     }
 }
 
