@@ -1,7 +1,9 @@
+use std::path::{Path, PathBuf};
+
 use super::*;
 
 fn fixtures() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src/runs/fixtures/workflows")
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src/claude/fixtures/workflows")
 }
 
 #[test]
@@ -86,7 +88,7 @@ fn catalog_ignores_backups_and_repo_overrides_user() {
 #[test]
 #[ignore]
 fn real_user_catalog() {
-    let dir = crate::runs::claude_fs::claude_config_dir()
+    let dir = crate::paths::claude_config_dir()
         .unwrap()
         .join("workflows");
     let list = list_from(Some(&dir), None);

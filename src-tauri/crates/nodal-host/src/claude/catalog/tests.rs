@@ -1,5 +1,5 @@
 use super::*;
-use crate::util::paths::tests::TempDir;
+use crate::testutil::TempDir;
 
 #[test]
 fn frontmatter_real_shapes() {
@@ -144,7 +144,7 @@ fn catalog_merges_user_repo_plugins_and_workflows() {
 #[test]
 #[ignore]
 fn real_catalog() {
-    let dir = crate::runs::claude_fs::claude_config_dir().unwrap();
+    let dir = crate::paths::claude_config_dir().unwrap();
     for e in catalog(Some(&dir), None) {
         eprintln!(
             "{:?} · {:?} · {:?}",

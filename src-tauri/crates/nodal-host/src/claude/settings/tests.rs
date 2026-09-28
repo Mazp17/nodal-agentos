@@ -1,5 +1,8 @@
+use std::fs;
+use std::path::Path;
+
 use super::*;
-use crate::util::paths::tests::TempDir;
+use crate::testutil::TempDir;
 
 fn write(p: &Path, text: &str) {
     fs::create_dir_all(p.parent().unwrap()).unwrap();
