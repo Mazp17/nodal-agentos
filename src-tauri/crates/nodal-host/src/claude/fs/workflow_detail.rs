@@ -8,7 +8,9 @@ use std::time::SystemTime;
 use serde::Deserialize;
 use serde_json::Value;
 
-use nodal_domain::model::claude::{AgentInfo, AgentState, DetailSource, PhaseInfo, RunDetail, RunResult};
+use nodal_domain::model::claude::{
+    AgentInfo, AgentState, DetailSource, PhaseInfo, RunDetail, RunResult,
+};
 
 use super::js_script::parse_script_phases;
 use super::last_tool::last_tool_from_transcript;
@@ -93,7 +95,10 @@ fn result_status(result: Option<&Value>) -> Option<String> {
 
 fn phase_index(phases: &[PhaseInfo], title: Option<&str>) -> Option<u32> {
     let title = title?;
-    phases.iter().position(|p| p.title == title).map(|i| i as u32 + 1)
+    phases
+        .iter()
+        .position(|p| p.title == title)
+        .map(|i| i as u32 + 1)
 }
 
 // --- Final summary: workflows/wf_<id>.json --------------------------------
@@ -176,13 +181,23 @@ pub fn parse_final(text: &str, wf_id: &str) -> Option<RunDetail> {
         .phases
         .unwrap_or_default()
         .into_iter()
-        .filter_map(|p| Some(PhaseInfo { title: p.title?, detail: p.detail }))
+        .filter_map(|p| {
+            Some(PhaseInfo {
+                title: p.title?,
+                detail: p.detail,
+            })
+        })
         .collect();
     if phases.is_empty() {
         phases = progress
             .iter()
             .filter(|p| p.kind.as_deref() == Some("workflow_phase"))
-            .filter_map(|p| Some(PhaseInfo { title: p.title.clone()?, detail: None }))
+            .filter_map(|p| {
+                Some(PhaseInfo {
+                    title: p.title.clone()?,
+                    detail: None,
+                })
+            })
             .collect();
     }
 
@@ -191,7 +206,10 @@ pub fn parse_final(text: &str, wf_id: &str) -> Option<RunDetail> {
         .filter(|p| p.kind.as_deref() == Some("workflow_agent"))
         .map(|p| AgentInfo {
             state: map_state(p.state.as_deref()),
-            label: p.label.or_else(|| p.agent_id.clone()).unwrap_or_else(|| "(unnamed)".into()),
+            label: p
+                .label
+                .or_else(|| p.agent_id.clone())
+                .unwrap_or_else(|| "(unnamed)".into()),
             agent_id: p.agent_id,
             phase: p.phase_title,
             model: p.model,
@@ -254,8 +272,12 @@ pub fn parse_journal(text: &str) -> Vec<AgentInfo> {
     // Identity of each agent: agentId, or the `key` if missing.
     let mut ids: Vec<String> = Vec::new();
     for line in text.lines().filter(|l| !l.trim().is_empty()) {
-        let Ok(entry) = serde_json::from_str::<RawJournalLine>(line) else { continue };
-        let Some(ident) = entry.agent_id.clone().or(entry.key.clone()) else { continue };
+        let Ok(entry) = serde_json::from_str::<RawJournalLine>(line) else {
+            continue;
+        };
+        let Some(ident) = entry.agent_id.clone().or(entry.key.clone()) else {
+            continue;
+        };
         match entry.kind.as_deref() {
             Some("started") => {
                 let info = AgentInfo {
@@ -299,13 +321,17 @@ fn read_live(session_dir: &Path, wf_id: &str) -> RunDetail {
     let mut agents = parse_journal(&journal);
 
     for a in agents.iter_mut() {
-        let Some(id) = a.agent_id.clone() else { continue };
+        let Some(id) = a.agent_id.clone() else {
+            continue;
+        };
         a.model = fs::read_to_string(dir.join(format!("agent-{id}.meta.json")))
             .ok()
             .and_then(|t| serde_json::from_str::<RawMeta>(&t).ok())
             .and_then(|m| m.model);
         if a.state == AgentState::Running {
-            if let Some((name, summary)) = last_tool_from_transcript(&dir.join(format!("agent-{id}.jsonl"))) {
+            if let Some((name, summary)) =
+                last_tool_from_transcript(&dir.join(format!("agent-{id}.jsonl")))
+            {
                 a.last_tool_name = Some(name);
                 a.last_tool_summary = summary;
             }
@@ -322,13 +348,17 @@ fn read_live(session_dir: &Path, wf_id: &str) -> RunDetail {
     for a in &agents {
         if let Some(ph) = &a.phase {
             if !phases.iter().any(|p| &p.title == ph) {
-                phases.push(PhaseInfo { title: ph.clone(), detail: None });
+                phases.push(PhaseInfo {
+                    title: ph.clone(),
+                    detail: None,
+                });
             }
         }
     }
     let workflow_name = script.as_ref().and_then(|p| {
         let file = p.file_name()?.to_string_lossy().into_owned();
-        file.strip_suffix(&format!("-{wf_id}.js")).map(str::to_string)
+        file.strip_suffix(&format!("-{wf_id}.js"))
+            .map(str::to_string)
     });
 
     let current_phase = agents.iter().rev().find_map(|a| a.phase.clone());
@@ -358,7 +388,10 @@ fn find_script(session_dir: &Path, wf_id: &str) -> Option<PathBuf> {
         .ok()?
         .flatten()
         .map(|e| e.path())
-        .find(|p| p.file_name().is_some_and(|n| n.to_string_lossy().ends_with(&suffix)))
+        .find(|p| {
+            p.file_name()
+                .is_some_and(|n| n.to_string_lossy().ends_with(&suffix))
+        })
 }
 
 // --- Workflow result ----------------------------------------------------------
@@ -368,7 +401,11 @@ const RESULT_LIST_MAX: usize = 100;
 const RESULT_ITEM_MAX: usize = 2000;
 
 fn str_field(obj: &serde_json::Map<String, Value>, key: &str) -> Option<String> {
-    obj.get(key)?.as_str().map(str::trim).filter(|s| !s.is_empty()).map(|s| truncate(s, RESULT_ITEM_MAX))
+    obj.get(key)?
+        .as_str()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(|s| truncate(s, RESULT_ITEM_MAX))
 }
 
 /// List of strings; ignores elements that aren't. `None` if the field isn't an array.
@@ -393,7 +430,10 @@ pub fn parse_result(result: Option<&Value>) -> Option<RunResult> {
         Value::String(s) => s.clone(),
         other => serde_json::to_string_pretty(other).unwrap_or_default(),
     };
-    let mut out = RunResult { raw: Some(truncate(&raw, RESULT_RAW_MAX)), ..RunResult::default() };
+    let mut out = RunResult {
+        raw: Some(truncate(&raw, RESULT_RAW_MAX)),
+        ..RunResult::default()
+    };
     if let Some(obj) = v.as_object() {
         out.issue = str_field(obj, "issue");
         // Web URLs only: the frontend opens it with the system opener.
@@ -402,7 +442,10 @@ pub fn parse_result(result: Option<&Value>) -> Option<RunResult> {
             .get("pr")
             .and_then(Value::as_str)
             .map(str::trim)
-            .filter(|u| (u.starts_with("https://") || u.starts_with("http://")) && u.len() <= RESULT_ITEM_MAX)
+            .filter(|u| {
+                (u.starts_with("https://") || u.starts_with("http://"))
+                    && u.len() <= RESULT_ITEM_MAX
+            })
             .map(String::from);
         out.branch = str_field(obj, "branch");
         out.workdir = str_field(obj, "workdir");

@@ -17,7 +17,8 @@ pub fn parse_bg_line(line: &str) -> Option<String> {
 pub fn parse_bare_id(output: &str) -> Option<String> {
     let clean = strip_ansi(output);
     let t = clean.trim();
-    (t.len() >= 6 && t.len() <= 16 && t.chars().all(|c| c.is_ascii_hexdigit())).then(|| t.to_string())
+    (t.len() >= 6 && t.len() <= 16 && t.chars().all(|c| c.is_ascii_hexdigit()))
+        .then(|| t.to_string())
 }
 
 fn is_plausible_id(id: &str) -> bool {

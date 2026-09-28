@@ -15,7 +15,9 @@ pub fn claude_config_dir() -> Option<PathBuf> {
 /// Verified against `~/.claude/projects`: `/Users/x/Code/nodal-sandbox` →
 /// `-Users-x-Code-nodal-sandbox`, and `/.claude/worktrees` → `--claude-worktrees`.
 pub fn project_slug(cwd: &str) -> String {
-    cwd.chars().map(|c| if c.is_ascii_alphanumeric() { c } else { '-' }).collect()
+    cwd.chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+        .collect()
 }
 
 /// `<projects>/<slug>/<sessionId>`. If the slug doesn't match (long paths or changed
@@ -39,7 +41,11 @@ pub fn find_session_jsonl(projects: &Path, cwd: &str, session_id: &str) -> Optio
     if direct.is_file() {
         return Some(direct);
     }
-    fs::read_dir(projects).ok()?.flatten().map(|e| e.path().join(&file)).find(|p| p.is_file())
+    fs::read_dir(projects)
+        .ok()?
+        .flatten()
+        .map(|e| e.path().join(&file))
+        .find(|p| p.is_file())
 }
 
 #[cfg(test)]

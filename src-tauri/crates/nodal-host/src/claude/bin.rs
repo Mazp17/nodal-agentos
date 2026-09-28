@@ -45,7 +45,11 @@ pub fn resolve_bin(name: &str) -> Option<PathBuf> {
     let from_path = std::env::var_os("PATH")
         .map(|p| std::env::split_paths(&p).collect::<Vec<_>>())
         .unwrap_or_default();
-    from_path.into_iter().chain(extra_dirs()).map(|d| d.join(name)).find(|c| is_executable(c))
+    from_path
+        .into_iter()
+        .chain(extra_dirs())
+        .map(|d| d.join(name))
+        .find(|c| is_executable(c))
 }
 
 /// Path of the `claude` binary: PATH first, then `~/.local/bin/claude` and the like.
@@ -75,14 +79,25 @@ pub fn claude_command() -> Result<Command, String> {
 }
 
 /// Runs and waits for the full output; if `limit` passes, kills the process.
-pub async fn output_with_timeout(mut cmd: Command, limit: Duration, what: &str) -> Result<Output, String> {
-    cmd.stdout(Stdio::piped()).stderr(Stdio::piped()).kill_on_drop(true);
-    let child = cmd.spawn().map_err(|e| format!("Couldn't run {what}: {e}"))?;
+pub async fn output_with_timeout(
+    mut cmd: Command,
+    limit: Duration,
+    what: &str,
+) -> Result<Output, String> {
+    cmd.stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .kill_on_drop(true);
+    let child = cmd
+        .spawn()
+        .map_err(|e| format!("Couldn't run {what}: {e}"))?;
     match tokio::time::timeout(limit, child.wait_with_output()).await {
         Ok(Ok(out)) => Ok(out),
         Ok(Err(e)) => Err(format!("{what} failed: {e}")),
         // Dropping the future drops the child, and `kill_on_drop` kills it.
-        Err(_) => Err(format!("{what} didn't respond within {} s and was cancelled.", limit.as_secs())),
+        Err(_) => Err(format!(
+            "{what} didn't respond within {} s and was cancelled.",
+            limit.as_secs()
+        )),
     }
 }
 

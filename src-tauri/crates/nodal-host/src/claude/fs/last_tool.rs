@@ -20,7 +20,11 @@ pub fn last_tool_from_transcript(path: &Path) -> Option<(String, Option<String>)
         file.by_ref().take(window).read_to_end(&mut buf).ok()?;
         let text = String::from_utf8_lossy(&buf);
         // If we didn't start at the beginning, the first line is cut off.
-        let text = if start > 0 { text.split_once('\n').map_or("", |(_, r)| r) } else { &text };
+        let text = if start > 0 {
+            text.split_once('\n').map_or("", |(_, r)| r)
+        } else {
+            &text
+        };
         if let Some(found) = last_tool_in_lines(text) {
             return Some(found);
         }
@@ -57,8 +61,17 @@ pub(crate) fn tool_summary(input: &Value) -> Option<String> {
 }
 
 pub(crate) fn tool_summary_n(input: &Value, max: usize) -> Option<String> {
-    const KEYS: [&str; 9] =
-        ["command", "file_path", "pattern", "path", "url", "query", "skill", "description", "prompt"];
+    const KEYS: [&str; 9] = [
+        "command",
+        "file_path",
+        "pattern",
+        "path",
+        "url",
+        "query",
+        "skill",
+        "description",
+        "prompt",
+    ];
     let s = KEYS.iter().find_map(|k| input.get(*k)?.as_str())?;
     let one_line = s.lines().next().unwrap_or("").trim();
     Some(truncate(one_line, max))

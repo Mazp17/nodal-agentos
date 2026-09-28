@@ -48,7 +48,11 @@ pub fn parse_agents(text: &str) -> Result<Vec<AgentSession>, String> {
     Ok(values
         .into_iter()
         .filter_map(|v| serde_json::from_value::<AgentSession>(v).ok())
-        .filter(|a| a.session_id.as_deref().is_some_and(nodal_domain::sessions::transcript::is_valid_session_id))
+        .filter(|a| {
+            a.session_id
+                .as_deref()
+                .is_some_and(nodal_domain::sessions::transcript::is_valid_session_id)
+        })
         .collect())
 }
 
@@ -70,7 +74,11 @@ pub fn find_session_jsonl(projects: &Path, cwd: Option<&str>, session_id: &str) 
             return Some(direct);
         }
     }
-    fs::read_dir(projects).ok()?.flatten().map(|e| e.path().join(&file)).find(|p| p.is_file())
+    fs::read_dir(projects)
+        .ok()?
+        .flatten()
+        .map(|e| e.path().join(&file))
+        .find(|p| p.is_file())
 }
 
 /// Last `window` bytes of the file, without the first line if it was cut off.
@@ -82,7 +90,12 @@ pub fn read_tail(path: &Path, window: u64) -> Option<String> {
     let mut buf = Vec::new();
     file.take(window).read_to_end(&mut buf).ok()?;
     let text = String::from_utf8_lossy(&buf).into_owned();
-    Some(if start > 0 { text.split_once('\n').map_or(String::new(), |(_, r)| r.to_string()) } else { text })
+    Some(if start > 0 {
+        text.split_once('\n')
+            .map_or(String::new(), |(_, r)| r.to_string())
+    } else {
+        text
+    })
 }
 
 /// What's extracted from a transcript's tail.
@@ -106,14 +119,26 @@ pub struct TailInfo {
 const MAX_TOUCHED: usize = 32;
 
 fn collect_touched(v: &Value, out: &mut Vec<String>) {
-    let Some(content) = v.get("message").and_then(|m| m.get("content")).and_then(Value::as_array) else { return };
+    let Some(content) = v
+        .get("message")
+        .and_then(|m| m.get("content"))
+        .and_then(Value::as_array)
+    else {
+        return;
+    };
     for c in content {
         if c.get("type").and_then(Value::as_str) != Some("tool_use") {
             continue;
         }
-        let Some(input) = c.get("input") else { continue };
+        let Some(input) = c.get("input") else {
+            continue;
+        };
         for key in ["file_path", "path", "notebook_path"] {
-            if let Some(p) = input.get(key).and_then(Value::as_str).filter(|p| p.starts_with('/')) {
+            if let Some(p) = input
+                .get(key)
+                .and_then(Value::as_str)
+                .filter(|p| p.starts_with('/'))
+            {
                 if out.len() < MAX_TOUCHED && !out.iter().any(|x| x == p) {
                     out.push(p.to_string());
                 }
@@ -130,7 +155,9 @@ pub fn parse_tail(text: &str) -> TailInfo {
         if line.is_empty() {
             continue;
         }
-        let Ok(v) = serde_json::from_str::<Value>(line) else { continue };
+        let Ok(v) = serde_json::from_str::<Value>(line) else {
+            continue;
+        };
         if line.contains("\"tool_use\"") {
             collect_touched(&v, &mut info.touched_paths);
         }
@@ -138,14 +165,20 @@ pub fn parse_tail(text: &str) -> TailInfo {
             info.cwd = v.get("cwd").and_then(Value::as_str).map(String::from);
         }
         if info.entrypoint.is_none() {
-            info.entrypoint = v.get("entrypoint").and_then(Value::as_str).map(String::from);
+            info.entrypoint = v
+                .get("entrypoint")
+                .and_then(Value::as_str)
+                .map(String::from);
         }
         if !decided {
             match v.get("type").and_then(Value::as_str) {
                 Some("assistant") => {
                     decided = true;
                     info.has_turns = true;
-                    let stop = v.get("message").and_then(|m| m.get("stop_reason")).and_then(Value::as_str);
+                    let stop = v
+                        .get("message")
+                        .and_then(|m| m.get("stop_reason"))
+                        .and_then(Value::as_str);
                     info.finished = matches!(stop, Some("end_turn") | Some("stop_sequence"));
                 }
                 Some("user") => {
@@ -198,11 +231,22 @@ pub struct SubagentFile {
 }
 
 fn agent_files_in(dir: &Path, workflow_id: Option<&str>, out: &mut Vec<SubagentFile>) {
-    let Ok(entries) = fs::read_dir(dir) else { return };
+    let Ok(entries) = fs::read_dir(dir) else {
+        return;
+    };
     for e in entries.flatten() {
         let name = e.file_name().to_string_lossy().into_owned();
-        let Some(id) = name.strip_prefix("agent-").and_then(|n| n.strip_suffix(".jsonl")) else { continue };
-        if id.is_empty() || !id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') {
+        let Some(id) = name
+            .strip_prefix("agent-")
+            .and_then(|n| n.strip_suffix(".jsonl"))
+        else {
+            continue;
+        };
+        if id.is_empty()
+            || !id
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+        {
             continue;
         }
         let meta = dir.join(format!("agent-{id}.meta.json"));
@@ -233,17 +277,27 @@ pub fn subagent_files(session_dir: &Path) -> Vec<SubagentFile> {
 /// `slug_prefix` (the repo and its worktrees in `.claude/worktrees/…`), modified since
 /// `since_ms`. The prefix may catch sibling repos (`nodal-sandbox`): the caller
 /// filters by the transcript's real `cwd`.
-pub fn recent_session_transcripts(projects: &Path, slug_prefix: &str, since_ms: i64) -> Vec<(String, PathBuf, i64)> {
-    let Ok(dirs) = fs::read_dir(projects) else { return Vec::new() };
+pub fn recent_session_transcripts(
+    projects: &Path,
+    slug_prefix: &str,
+    since_ms: i64,
+) -> Vec<(String, PathBuf, i64)> {
+    let Ok(dirs) = fs::read_dir(projects) else {
+        return Vec::new();
+    };
     let mut out = Vec::new();
     for d in dirs.flatten() {
         if !d.file_name().to_string_lossy().starts_with(slug_prefix) {
             continue;
         }
-        let Ok(files) = fs::read_dir(d.path()) else { continue };
+        let Ok(files) = fs::read_dir(d.path()) else {
+            continue;
+        };
         for f in files.flatten() {
             let name = f.file_name().to_string_lossy().into_owned();
-            let Some(sid) = name.strip_suffix(".jsonl") else { continue };
+            let Some(sid) = name.strip_suffix(".jsonl") else {
+                continue;
+            };
             if !nodal_domain::sessions::transcript::is_valid_session_id(sid) {
                 continue;
             }

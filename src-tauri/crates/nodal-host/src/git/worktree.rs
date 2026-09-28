@@ -22,7 +22,16 @@ pub fn current_base(repo: &Path) -> Result<String, String> {
 }
 
 pub(crate) fn branch_exists(repo: &Path, branch: &str) -> Result<bool, String> {
-    Ok(run(repo, &["rev-parse", "--verify", "--quiet", &format!("refs/heads/{branch}")])?.ok)
+    Ok(run(
+        repo,
+        &[
+            "rev-parse",
+            "--verify",
+            "--quiet",
+            &format!("refs/heads/{branch}"),
+        ],
+    )?
+    .ok)
 }
 
 /// Is `dir` a live worktree (its toplevel is itself)?
@@ -37,7 +46,12 @@ pub(crate) fn is_live_worktree(dir: &Path) -> bool {
 }
 
 /// Creates (or reuses) the task's worktree. `existing`: the one it already has stored.
-pub fn ensure(repo: &Path, dir: &Path, branch: &str, existing: Option<&WorktreeRef>) -> Result<WorktreeRef, String> {
+pub fn ensure(
+    repo: &Path,
+    dir: &Path,
+    branch: &str,
+    existing: Option<&WorktreeRef>,
+) -> Result<WorktreeRef, String> {
     if let Some(wt) = existing {
         let p = Path::new(&wt.path);
         if is_live_worktree(p) {
@@ -56,15 +70,25 @@ pub fn ensure(repo: &Path, dir: &Path, branch: &str, existing: Option<&WorktreeR
     let _ = run(repo, &["worktree", "prune"]);
     if dir.exists() {
         if is_live_worktree(&dir) {
-            return Ok(WorktreeRef { path: dir.to_string_lossy().into_owned(), branch, base });
+            return Ok(WorktreeRef {
+                path: dir.to_string_lossy().into_owned(),
+                branch,
+                base,
+            });
         }
-        let empty = std::fs::read_dir(&dir).map(|mut d| d.next().is_none()).unwrap_or(false);
+        let empty = std::fs::read_dir(&dir)
+            .map(|mut d| d.next().is_none())
+            .unwrap_or(false);
         if !empty {
-            return Err(format!("{} already exists and is not a worktree of this repo.", dir.display()));
+            return Err(format!(
+                "{} already exists and is not a worktree of this repo.",
+                dir.display()
+            ));
         }
     }
     if let Some(parent) = dir.parent() {
-        std::fs::create_dir_all(parent).map_err(|e| format!("Couldn't create {}: {e}", parent.display()))?;
+        std::fs::create_dir_all(parent)
+            .map_err(|e| format!("Couldn't create {}: {e}", parent.display()))?;
     }
     let dir_s = dir.to_string_lossy().into_owned();
     if branch_exists(repo, &branch)? {
@@ -72,7 +96,10 @@ pub fn ensure(repo: &Path, dir: &Path, branch: &str, existing: Option<&WorktreeR
     } else {
         ok(repo, &["worktree", "add", "-b", &branch, &dir_s, &base])?;
     }
-    let path = dir.canonicalize().map(|p| p.to_string_lossy().into_owned()).unwrap_or(dir_s);
+    let path = dir
+        .canonicalize()
+        .map(|p| p.to_string_lossy().into_owned())
+        .unwrap_or(dir_s);
     Ok(WorktreeRef { path, branch, base })
 }
 
@@ -96,12 +123,16 @@ pub(crate) fn count(repo: &Path, args: &[&str]) -> Result<u32, String> {
     full.extend_from_slice(args);
     full.push("--");
     let out = ok(repo, &full)?;
-    out.trim().parse().map_err(|_| format!("Unexpected output from git rev-list: {}", out.trim()))
+    out.trim()
+        .parse()
+        .map_err(|_| format!("Unexpected output from git rev-list: {}", out.trim()))
 }
 
 /// State of `wt` (`None`: the task has no worktree).
 pub fn status(repo: &Path, wt: Option<&WorktreeRef>) -> Result<WorktreeStatus, String> {
-    let Some(wt) = wt else { return Ok(WorktreeStatus::default()) };
+    let Some(wt) = wt else {
+        return Ok(WorktreeStatus::default());
+    };
     let exists = is_live_worktree(Path::new(&wt.path));
     let mut st = WorktreeStatus {
         exists,
@@ -111,7 +142,16 @@ pub fn status(repo: &Path, wt: Option<&WorktreeRef>) -> Result<WorktreeStatus, S
     };
     if branch_exists(repo, &wt.branch)? {
         let branch = format!("refs/heads/{}", wt.branch);
-        let base_ok = run(repo, &["rev-parse", "--verify", "--quiet", &format!("{}^{{commit}}", wt.base)])?.ok;
+        let base_ok = run(
+            repo,
+            &[
+                "rev-parse",
+                "--verify",
+                "--quiet",
+                &format!("{}^{{commit}}", wt.base),
+            ],
+        )?
+        .ok;
         if base_ok {
             st.ahead = count(repo, &[&branch, "--not", &wt.base])?;
             st.unpushed = count(repo, &[&branch, "--not", &wt.base, "--remotes"])?;
@@ -122,7 +162,9 @@ pub fn status(repo: &Path, wt: Option<&WorktreeRef>) -> Result<WorktreeStatus, S
         }
     }
     if exists {
-        st.dirty = !ok(Path::new(&wt.path), &["status", "--porcelain"])?.trim().is_empty();
+        st.dirty = !ok(Path::new(&wt.path), &["status", "--porcelain"])?
+            .trim()
+            .is_empty();
     }
     Ok(st)
 }

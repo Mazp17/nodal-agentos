@@ -36,16 +36,25 @@ impl ChatHooks for LegacyHooks {
     /// `cwd` is the running process's `Spec.cwd` (a repo or the project root), not one
     /// recomputed from the project, which may have changed since the process started.
     fn turn_ended(&self, chat_id: &str, cwd: PathBuf, project_id: String) {
-        let Some(projects) = self.claude_dir.as_ref().map(|d| d.join("projects")) else { return };
+        let Some(projects) = self.claude_dir.as_ref().map(|d| d.join("projects")) else {
+            return;
+        };
         let (db, events, chat_id) = (self.db.clone(), self.events.clone(), chat_id.to_string());
         tauri::async_runtime::spawn_blocking(move || {
             let sid = {
                 let conn = db.lock().unwrap_or_else(|p| p.into_inner());
                 chats::get(&conn, &chat_id).ok().and_then(|c| c.session_id)
             };
-            let Some(sid) = sid.filter(|s| claude_fs::is_valid_session_id(s)) else { return };
-            let Some(path) = claude_fs::find_session_jsonl(&projects, &cwd.to_string_lossy(), &sid) else { return };
-            let Some(title) = claude_fs::session_title(&path) else { return };
+            let Some(sid) = sid.filter(|s| claude_fs::is_valid_session_id(s)) else {
+                return;
+            };
+            let Some(path) = claude_fs::find_session_jsonl(&projects, &cwd.to_string_lossy(), &sid)
+            else {
+                return;
+            };
+            let Some(title) = claude_fs::session_title(&path) else {
+                return;
+            };
             let conn = db.lock().unwrap_or_else(|p| p.into_inner());
             match chats::set_session_title(&conn, &chat_id, &title) {
                 Ok(true) => events.notify(Kind::Chats, Some(&project_id)),

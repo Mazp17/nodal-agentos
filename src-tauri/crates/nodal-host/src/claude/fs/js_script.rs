@@ -5,14 +5,20 @@ use nodal_domain::model::claude::PhaseInfo;
 /// Phases declared in `meta.phases` of the workflow's JS script. Best effort: it's JS, not
 /// JSON; looks for `title:` / `detail:` with string literals inside the array.
 pub fn parse_script_phases(src: &str) -> Vec<PhaseInfo> {
-    let Some(start) = src.find("phases:") else { return Vec::new() };
+    let Some(start) = src.find("phases:") else {
+        return Vec::new();
+    };
     let after = &src[start + "phases:".len()..];
-    let Some(open) = after.find('[') else { return Vec::new() };
+    let Some(open) = after.find('[') else {
+        return Vec::new();
+    };
     if !after[..open].trim().is_empty() {
         return Vec::new();
     }
     let body = &after[open + 1..];
-    let Some(end) = find_closing(body, '[', ']') else { return Vec::new() };
+    let Some(end) = find_closing(body, '[', ']') else {
+        return Vec::new();
+    };
     split_top_level_objects(&body[..end])
         .into_iter()
         .filter_map(|obj| {
@@ -61,7 +67,9 @@ fn split_top_level_objects(s: &str) -> Vec<&str> {
     let mut rest = s;
     while let Some(open) = rest.find('{') {
         let inner = &rest[open + 1..];
-        let Some(end) = find_closing(inner, '{', '}') else { break };
+        let Some(end) = find_closing(inner, '{', '}') else {
+            break;
+        };
         out.push(&inner[..end]);
         rest = &inner[end + 1..];
     }
@@ -81,7 +89,11 @@ pub(crate) fn js_string_prop(obj: &str, key: &str) -> Option<String> {
         if before_ok {
             if let Some(rest) = rest.strip_prefix(':') {
                 let rest = rest.trim_start();
-                let Some(q) = rest.chars().next().filter(|c| matches!(c, '\'' | '"' | '`')) else {
+                let Some(q) = rest
+                    .chars()
+                    .next()
+                    .filter(|c| matches!(c, '\'' | '"' | '`'))
+                else {
                     search = &search[pos + key.len()..];
                     continue;
                 };

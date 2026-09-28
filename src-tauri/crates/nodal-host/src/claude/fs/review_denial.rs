@@ -27,13 +27,17 @@ pub fn last_assistant_text_in(text: &str) -> Option<String> {
         if !line.contains("\"assistant\"") {
             continue;
         }
-        let Ok(v) = serde_json::from_str::<Value>(line) else { continue };
+        let Ok(v) = serde_json::from_str::<Value>(line) else {
+            continue;
+        };
         if v.get("type").and_then(Value::as_str) != Some("assistant")
             || v.get("isSidechain").and_then(Value::as_bool) == Some(true)
         {
             continue;
         }
-        let Some(Value::Array(blocks)) = v.get("message").and_then(|m| m.get("content")) else { continue };
+        let Some(Value::Array(blocks)) = v.get("message").and_then(|m| m.get("content")) else {
+            continue;
+        };
         let joined: Vec<&str> = blocks
             .iter()
             .filter(|b| b.get("type").and_then(Value::as_str) == Some("text"))
@@ -76,19 +80,29 @@ pub fn find_workflow_review_denial(text: &str) -> Option<Option<String>> {
         if !has_call && !has_denial {
             continue;
         }
-        let Ok(v) = serde_json::from_str::<Value>(line) else { continue };
-        let Some(blocks) = v.pointer("/message/content").and_then(Value::as_array) else { continue };
+        let Ok(v) = serde_json::from_str::<Value>(line) else {
+            continue;
+        };
+        let Some(blocks) = v.pointer("/message/content").and_then(Value::as_array) else {
+            continue;
+        };
         for b in blocks {
             match b.get("type").and_then(Value::as_str) {
                 Some("tool_use") if b.get("name").and_then(Value::as_str) == Some("Workflow") => {
                     if let Some(id) = b.get("id").and_then(Value::as_str) {
-                        let name = b.pointer("/input/name").and_then(Value::as_str).map(str::to_string);
+                        let name = b
+                            .pointer("/input/name")
+                            .and_then(Value::as_str)
+                            .map(str::to_string);
                         calls.push((id.to_string(), name));
                     }
                 }
                 Some("tool_result") if tool_result_text(b).contains(WORKFLOW_REVIEW_TEXT) => {
                     let id = b.get("tool_use_id").and_then(Value::as_str);
-                    let name = calls.iter().find(|(c, _)| Some(c.as_str()) == id).and_then(|(_, n)| n.clone());
+                    let name = calls
+                        .iter()
+                        .find(|(c, _)| Some(c.as_str()) == id)
+                        .and_then(|(_, n)| n.clone());
                     return Some(name);
                 }
                 _ => {}

@@ -21,7 +21,9 @@ pub fn read_session(session_id: &str, cwd: &str) -> SessionReadout {
     if !is_valid_session_id(session_id) {
         return SessionReadout::default();
     }
-    let Ok(projects) = projects_dir() else { return SessionReadout::default() };
+    let Ok(projects) = projects_dir() else {
+        return SessionReadout::default();
+    };
     let detail = find_session_dir(&projects, cwd, session_id).and_then(|d| read_run_detail(&d));
     let jsonl = find_session_jsonl(&projects, cwd, session_id);
     SessionReadout {

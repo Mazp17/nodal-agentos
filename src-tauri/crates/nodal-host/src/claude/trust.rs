@@ -48,12 +48,21 @@ pub fn global_config_file() -> Option<PathBuf> {
 }
 
 fn accepted(config: &Value, key: &Path) -> Option<bool> {
-    config.get("projects")?.get(key.to_str()?)?.get("hasTrustDialogAccepted")?.as_bool()
+    config
+        .get("projects")?
+        .get(key.to_str()?)?
+        .get("hasTrustDialogAccepted")?
+        .as_bool()
 }
 
 /// Pure rule. `canonical_root`: root of the main repo (or the folder, outside git);
 /// `bound`: the folder's git root (`None` outside git).
-pub fn trust_of(config: &Value, path: &Path, canonical_root: &Path, bound: Option<&Path>) -> RepoTrust {
+pub fn trust_of(
+    config: &Value,
+    path: &Path,
+    canonical_root: &Path,
+    bound: Option<&Path>,
+) -> RepoTrust {
     if accepted(config, canonical_root) == Some(true) {
         return RepoTrust {
             trusted: Some(true),
@@ -78,14 +87,24 @@ pub fn trust_of(config: &Value, path: &Path, canonical_root: &Path, bound: Optio
         }
         cur = dir.parent();
     }
-    RepoTrust { trusted: Some(false), source: TrustSource::NotTrusted, matched_path: None }
+    RepoTrust {
+        trusted: Some(false),
+        source: TrustSource::NotTrusted,
+        matched_path: None,
+    }
 }
 
 /// Root of the main repo containing `dir` (the same for its worktrees).
 fn main_root(dir: &Path) -> Option<PathBuf> {
-    let out = git::run(dir, &["rev-parse", "--path-format=absolute", "--git-common-dir"]).ok()?;
+    let out = git::run(
+        dir,
+        &["rev-parse", "--path-format=absolute", "--git-common-dir"],
+    )
+    .ok()?;
     let common = PathBuf::from(out.stdout.trim());
-    (out.ok && common.file_name().is_some_and(|n| n == ".git")).then(|| common.parent().map(Path::to_path_buf)).flatten()
+    (out.ok && common.file_name().is_some_and(|n| n == ".git"))
+        .then(|| common.parent().map(Path::to_path_buf))
+        .flatten()
 }
 
 /// Blocking: reads the config and queries git.
@@ -93,16 +112,32 @@ pub fn repo_trust_blocking(path: &Path, config_file: Option<&Path>) -> Result<Re
     if !path.is_absolute() {
         return Err(format!("The path must be absolute: {}", path.display()));
     }
-    let unknown = RepoTrust { trusted: None, source: TrustSource::Unknown, matched_path: None };
-    let Some(file) = config_file else { return Ok(unknown) };
-    let Ok(text) = std::fs::read_to_string(file) else { return Ok(unknown) };
-    let Ok(config) = serde_json::from_str::<Value>(&text) else { return Ok(unknown) };
+    let unknown = RepoTrust {
+        trusted: None,
+        source: TrustSource::Unknown,
+        matched_path: None,
+    };
+    let Some(file) = config_file else {
+        return Ok(unknown);
+    };
+    let Ok(text) = std::fs::read_to_string(file) else {
+        return Ok(unknown);
+    };
+    let Ok(config) = serde_json::from_str::<Value>(&text) else {
+        return Ok(unknown);
+    };
     // git returns resolved paths (`/private/tmp`, not `/tmp`): compare with the canonicalized
     // path, and if that's not enough, with the path as is (no git bound).
     let real = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
-    let bound = if real.is_dir() { git::toplevel(&real)?.map(|t| t.canonicalize().unwrap_or(t)) } else { None };
+    let bound = if real.is_dir() {
+        git::toplevel(&real)?.map(|t| t.canonicalize().unwrap_or(t))
+    } else {
+        None
+    };
     let canonical = match &bound {
-        Some(top) => main_root(top).map(|m| m.canonicalize().unwrap_or(m)).unwrap_or_else(|| top.clone()),
+        Some(top) => main_root(top)
+            .map(|m| m.canonicalize().unwrap_or(m))
+            .unwrap_or_else(|| top.clone()),
         None => real.clone(),
     };
     let t = trust_of(&config, &real, &canonical, bound.as_deref());
@@ -119,7 +154,12 @@ pub fn repo_trust_blocking(path: &Path, config_file: Option<&Path>) -> Result<Re
         }
         Some(p.to_path_buf())
     });
-    let raw = trust_of(&config, path, raw_bound.as_deref().unwrap_or(path), raw_bound.as_deref());
+    let raw = trust_of(
+        &config,
+        path,
+        raw_bound.as_deref().unwrap_or(path),
+        raw_bound.as_deref(),
+    );
     Ok(if raw.trusted == Some(true) { raw } else { t })
 }
 

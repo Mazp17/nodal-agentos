@@ -26,6 +26,12 @@ fn finds_session_dir_by_slug_and_by_scan() {
     let dir = find_session_dir(&projects, SANDBOX, DONE_SESSION).unwrap();
     assert!(dir.ends_with(DONE_SESSION));
     // cwd that doesn't match the slug: falls back to the scan.
-    assert_eq!(find_session_dir(&projects, "/somewhere/else", DONE_SESSION), Some(dir));
-    assert_eq!(find_session_dir(&projects, SANDBOX, "no-such-session"), None);
+    assert_eq!(
+        find_session_dir(&projects, "/somewhere/else", DONE_SESSION),
+        Some(dir)
+    );
+    assert_eq!(
+        find_session_dir(&projects, SANDBOX, "no-such-session"),
+        None
+    );
 }

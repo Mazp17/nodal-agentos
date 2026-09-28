@@ -21,7 +21,11 @@ const LIST_TIMEOUT: Duration = Duration::from_secs(15);
 const STOP_TIMEOUT: Duration = Duration::from_secs(20);
 
 /// Forwards each line of a child stream to the channel.
-fn forward_lines<R: AsyncRead + Unpin + Send + 'static>(stream: R, tx: mpsc::UnboundedSender<String>, rt: &Handle) {
+fn forward_lines<R: AsyncRead + Unpin + Send + 'static>(
+    stream: R,
+    tx: mpsc::UnboundedSender<String>,
+    rt: &Handle,
+) {
     rt.spawn(async move {
         let mut lines = BufReader::new(stream).lines();
         // Drain until EOF even if nobody listens anymore: closing the pipe would give EPIPE to
@@ -68,7 +72,9 @@ pub async fn launch_bg(
         .current_dir(dir)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-    let mut child = cmd.spawn().map_err(|e| format!("Couldn't run `claude --bg`: {e}"))?;
+    let mut child = cmd
+        .spawn()
+        .map_err(|e| format!("Couldn't run `claude --bg`: {e}"))?;
 
     // Don't wait for EOF: seeing the `backgrounded · <id>` line on either stream is enough
     // (there's no guarantee the background session releases the pipes).
@@ -107,11 +113,17 @@ pub async fn launch_bg(
             }
             let _ = child.start_kill();
             let code = match status {
-                Ok(Ok(s)) => s.code().map(|c| format!(" (exit code {c})")).unwrap_or_default(),
+                Ok(Ok(s)) => s
+                    .code()
+                    .map(|c| format!(" (exit code {c})"))
+                    .unwrap_or_default(),
                 _ => String::new(),
             };
             let seen: String = seen.trim().chars().take(500).collect();
-            Err(format!("`claude --bg` exited without returning the session id{code}: {seen}").into())
+            Err(
+                format!("`claude --bg` exited without returning the session id{code}: {seen}")
+                    .into(),
+            )
         }
         Err(_) => {
             let _ = child.start_kill();
@@ -132,7 +144,8 @@ pub async fn launch_bg(
 pub async fn version() -> Result<String, String> {
     let mut cmd = claude_bin::claude_command()?;
     cmd.arg("--version");
-    let out = claude_bin::output_with_timeout(cmd, Duration::from_secs(10), "claude --version").await?;
+    let out =
+        claude_bin::output_with_timeout(cmd, Duration::from_secs(10), "claude --version").await?;
     if !out.status.success() {
         return Err(claude_bin::error_text(&out));
     }
@@ -145,7 +158,10 @@ pub async fn list_runs() -> Result<Vec<RunSummary>, String> {
     cmd.args(["agents", "--json", "--all"]);
     let out = claude_bin::output_with_timeout(cmd, LIST_TIMEOUT, "`claude agents`").await?;
     if !out.status.success() {
-        return Err(format!("`claude agents` failed: {}", claude_bin::error_text(&out)));
+        return Err(format!(
+            "`claude agents` failed: {}",
+            claude_bin::error_text(&out)
+        ));
     }
     parse_agents_json(&String::from_utf8_lossy(&out.stdout))
 }
@@ -159,7 +175,10 @@ pub async fn stop(run_id: &str) -> Result<(), String> {
     cmd.args(["stop", run_id]);
     let out = claude_bin::output_with_timeout(cmd, STOP_TIMEOUT, "`claude stop`").await?;
     if !out.status.success() {
-        return Err(format!("`claude stop {run_id}` failed: {}", claude_bin::error_text(&out)));
+        return Err(format!(
+            "`claude stop {run_id}` failed: {}",
+            claude_bin::error_text(&out)
+        ));
     }
     Ok(())
 }

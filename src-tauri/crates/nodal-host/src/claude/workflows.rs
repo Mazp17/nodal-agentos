@@ -47,7 +47,11 @@ fn scan_top_level(s: &str, stop_at_close: bool) -> (String, Option<usize>) {
             } else if c as u32 == q as u32 {
                 quote = None;
             }
-            if depth == 0 { out.push(c) } else { blank(&mut out, c) }
+            if depth == 0 {
+                out.push(c)
+            } else {
+                blank(&mut out, c)
+            }
             i += len;
             continue;
         }
@@ -67,7 +71,11 @@ fn scan_top_level(s: &str, stop_at_close: bool) -> (String, Option<usize>) {
         match c {
             '\'' | '"' | '`' => {
                 quote = Some(c as u8);
-                if depth == 0 { out.push(c) } else { blank(&mut out, c) }
+                if depth == 0 {
+                    out.push(c)
+                } else {
+                    blank(&mut out, c)
+                }
             }
             '{' | '[' | '(' => {
                 depth += 1;
@@ -112,7 +120,10 @@ fn top_level_bool(flat: &str, key: &str) -> Option<bool> {
             let rest = search[pos + k.len()..].trim_start();
             if before_ok {
                 if let Some(v) = rest.strip_prefix(':').map(str::trim_start) {
-                    let word: String = v.chars().take_while(|c| c.is_ascii_alphanumeric()).collect();
+                    let word: String = v
+                        .chars()
+                        .take_while(|c| c.is_ascii_alphanumeric())
+                        .collect();
                     match word.as_str() {
                         "true" => return Some(true),
                         "false" => return Some(false),
@@ -154,19 +165,33 @@ pub fn parse_meta(src: &str) -> Option<Meta> {
 
 /// Backup files (`x.js.bak`, `x.js.bak-2026…`, `x.bak.js`) and hidden ones don't count.
 fn is_workflow_file(p: &Path) -> bool {
-    let Some(name) = p.file_name().and_then(|n| n.to_str()) else { return false };
+    let Some(name) = p.file_name().and_then(|n| n.to_str()) else {
+        return false;
+    };
     p.is_file() && name.ends_with(".js") && !name.starts_with('.') && !name.contains(".bak")
 }
 
 fn read_dir_workflows(dir: &Path, source: WorkflowSource) -> Vec<WorkflowInfo> {
-    let Ok(entries) = std::fs::read_dir(dir) else { return Vec::new() };
-    let mut paths: Vec<PathBuf> = entries.flatten().map(|e| e.path()).filter(|p| is_workflow_file(p)).collect();
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return Vec::new();
+    };
+    let mut paths: Vec<PathBuf> = entries
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| is_workflow_file(p))
+        .collect();
     paths.sort();
     paths
         .into_iter()
         .map(|path| {
-            let stem = path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
-            let meta = std::fs::read_to_string(&path).ok().and_then(|s| parse_meta(&s)).unwrap_or_default();
+            let stem = path
+                .file_stem()
+                .map(|s| s.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            let meta = std::fs::read_to_string(&path)
+                .ok()
+                .and_then(|s| parse_meta(&s))
+                .unwrap_or_default();
             WorkflowInfo {
                 name: meta.name.unwrap_or(stem),
                 description: meta.description,
@@ -183,7 +208,9 @@ fn read_dir_workflows(dir: &Path, source: WorkflowSource) -> Vec<WorkflowInfo> {
 /// Catalog sorted by name. A repo workflow overrides the user's one with the same name.
 pub fn list_from(user_dir: Option<&Path>, repo: Option<&Path>) -> Vec<WorkflowInfo> {
     let mut out: Vec<WorkflowInfo> = Vec::new();
-    let user = user_dir.map(|d| read_dir_workflows(d, WorkflowSource::User)).unwrap_or_default();
+    let user = user_dir
+        .map(|d| read_dir_workflows(d, WorkflowSource::User))
+        .unwrap_or_default();
     let repo = repo
         .map(|r| read_dir_workflows(&r.join(".claude").join("workflows"), WorkflowSource::Repo))
         .unwrap_or_default();

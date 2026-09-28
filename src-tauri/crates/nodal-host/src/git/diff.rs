@@ -19,7 +19,18 @@ pub fn commits(dir: &Path, base: &str, head: &str) -> Result<Vec<CommitInfo>, St
     }
     let range = format!("{base}..{head}");
     let max = COMMITS_MAX.to_string();
-    let out = ok(dir, &["log", "--no-color", "--format=%H%x1f%h%x1f%an%x1f%at%x1f%s", "-n", &max, &range, "--"])?;
+    let out = ok(
+        dir,
+        &[
+            "log",
+            "--no-color",
+            "--format=%H%x1f%h%x1f%an%x1f%at%x1f%s",
+            "-n",
+            &max,
+            &range,
+            "--",
+        ],
+    )?;
     Ok(parse_log(&out))
 }
 
@@ -51,11 +62,24 @@ pub fn collect(cwd: &Path, base: Option<&str>) -> Result<(String, bool), String>
     // commits and whatever wasn't committed.
     let mut patch = ok(
         cwd,
-        &["-c", "core.quotePath=false", "diff", "-M", "--no-color", "--no-ext-diff", &from, "--"],
+        &[
+            "-c",
+            "core.quotePath=false",
+            "diff",
+            "-M",
+            "--no-color",
+            "--no-ext-diff",
+            &from,
+            "--",
+        ],
     )?;
     if dirty {
         let untracked = ok(cwd, &["ls-files", "--others", "--exclude-standard", "-z"])?;
-        for file in untracked.split('\0').filter(|f| !f.is_empty()).take(UNTRACKED_MAX) {
+        for file in untracked
+            .split('\0')
+            .filter(|f| !f.is_empty())
+            .take(UNTRACKED_MAX)
+        {
             if std::fs::metadata(cwd.join(file)).is_ok_and(|m| m.len() > UNTRACKED_FILE_MAX) {
                 patch.push_str(&format!("diff --git a/{file} b/{file}\nnew file mode 100644\nBinary files /dev/null and b/{file} differ\n"));
                 continue;
@@ -63,7 +87,17 @@ pub fn collect(cwd: &Path, base: Option<&str>) -> Result<(String, bool), String>
             // `--no-index` exits with 1 when there are differences: use `run`, not `ok`.
             let out = run(
                 cwd,
-                &["-c", "core.quotePath=false", "diff", "--no-index", "--no-color", "--no-ext-diff", "--", "/dev/null", file],
+                &[
+                    "-c",
+                    "core.quotePath=false",
+                    "diff",
+                    "--no-index",
+                    "--no-color",
+                    "--no-ext-diff",
+                    "--",
+                    "/dev/null",
+                    file,
+                ],
             )?;
             patch.push_str(&out.stdout);
             if patch.len() > PATCH_MAX {
@@ -90,7 +124,16 @@ pub fn collect_branch(repo: &Path, base: &str, branch: &str) -> Result<String, S
     let range = format!("{base}...{branch}");
     let mut patch = ok(
         repo,
-        &["-c", "core.quotePath=false", "diff", "-M", "--no-color", "--no-ext-diff", &range, "--"],
+        &[
+            "-c",
+            "core.quotePath=false",
+            "diff",
+            "-M",
+            "--no-color",
+            "--no-ext-diff",
+            &range,
+            "--",
+        ],
     )?;
     if patch.len() > PATCH_MAX {
         let mut cut = PATCH_MAX;

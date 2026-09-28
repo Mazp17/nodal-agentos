@@ -27,7 +27,10 @@ use tokio::runtime::Handle;
 use tokio::sync::{mpsc, oneshot};
 
 use nodal_domain::error::HostError;
-use nodal_domain::model::chat::{ChatEnvelope, ChatEvent, ChatLive, ChatSpec as Spec, HostEvent, PermissionRequest, RunState, StreamEvent};
+use nodal_domain::model::chat::{
+    ChatEnvelope, ChatEvent, ChatLive, ChatSpec as Spec, HostEvent, PermissionRequest, RunState,
+    StreamEvent,
+};
 use nodal_domain::ports::{ChatHooks, ChatRuntime, ChatSink};
 use nodal_domain::sessions::transcript::is_valid_session_id;
 
@@ -68,7 +71,9 @@ impl Proc {
     }
 
     fn write(&self, line: String) -> Result<(), HostError> {
-        self.stdin.send(line).map_err(|_| "The chat's Claude process is gone: send the message again.".into())
+        self.stdin
+            .send(line)
+            .map_err(|_| "The chat's Claude process is gone: send the message again.".into())
     }
 }
 
@@ -92,12 +97,29 @@ impl ChatProcesses {
     }
 
     #[cfg(any(test, feature = "test-support"))]
-    pub fn with_program(sink: Arc<dyn ChatSink>, hooks: Arc<dyn ChatHooks>, rt: Handle, program: Option<PathBuf>) -> Arc<Self> {
+    pub fn with_program(
+        sink: Arc<dyn ChatSink>,
+        hooks: Arc<dyn ChatHooks>,
+        rt: Handle,
+        program: Option<PathBuf>,
+    ) -> Arc<Self> {
         Self::with_program_inner(sink, hooks, rt, program)
     }
 
-    fn with_program_inner(sink: Arc<dyn ChatSink>, hooks: Arc<dyn ChatHooks>, rt: Handle, program: Option<PathBuf>) -> Arc<Self> {
-        Arc::new(ChatProcesses(Arc::new(Shared { procs: Mutex::default(), gens: AtomicU64::new(1), sink, hooks, rt, program })))
+    fn with_program_inner(
+        sink: Arc<dyn ChatSink>,
+        hooks: Arc<dyn ChatHooks>,
+        rt: Handle,
+        program: Option<PathBuf>,
+    ) -> Arc<Self> {
+        Arc::new(ChatProcesses(Arc::new(Shared {
+            procs: Mutex::default(),
+            gens: AtomicU64::new(1),
+            sink,
+            hooks,
+            rt,
+            program,
+        })))
     }
 
     fn procs(&self) -> MutexGuard<'_, HashMap<String, Proc>> {
@@ -105,7 +127,10 @@ impl ChatProcesses {
     }
 
     fn emit(&self, chat_id: &str, event: ChatEvent) {
-        self.0.sink.emit(ChatEnvelope { chat_id: chat_id.to_string(), event });
+        self.0.sink.emit(ChatEnvelope {
+            chat_id: chat_id.to_string(),
+            event,
+        });
     }
 
     fn emit_state(&self, chat_id: &str, state: RunState) {
@@ -117,7 +142,9 @@ impl ChatProcesses {
     fn reap(&self, max_idle: Duration, now: Instant) -> usize {
         let mut procs = self.procs();
         let before = procs.len();
-        procs.retain(|_, p| p.turns > 0 || !p.pending.is_empty() || now.duration_since(p.last_active) < max_idle);
+        procs.retain(|_, p| {
+            p.turns > 0 || !p.pending.is_empty() || now.duration_since(p.last_active) < max_idle
+        });
         before - procs.len()
     }
 
@@ -140,13 +167,21 @@ impl ChatProcesses {
         }
     }
 
-    fn spawn(&self, chat_id: &str, project_id: &str, session_id: Option<&str>, spec: Spec) -> Result<Proc, HostError> {
+    fn spawn(
+        &self,
+        chat_id: &str,
+        project_id: &str,
+        session_id: Option<&str>,
+        spec: Spec,
+    ) -> Result<Proc, HostError> {
         if !spec.cwd.is_dir() {
             return Err(format!("The chat's folder doesn't exist: {}", spec.cwd.display()).into());
         }
         let mut cmd = self.command()?;
         let (key, value) = stream_json::CHAT_ENTRYPOINT;
-        cmd.args(stream_json::CHAT_ARGS).args(&spec.args).env(key, value);
+        cmd.args(stream_json::CHAT_ARGS)
+            .args(&spec.args)
+            .env(key, value);
         if let Some(sid) = session_id {
             if !is_valid_session_id(sid) {
                 return Err(format!("Invalid session id: \"{sid}\".").into());
@@ -158,8 +193,11 @@ impl ChatProcesses {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .kill_on_drop(true);
-        let mut child = cmd.spawn().map_err(|e| format!("Couldn't start `claude`: {e}"))?;
-        let (Some(stdin), Some(stdout), Some(stderr)) = (child.stdin.take(), child.stdout.take(), child.stderr.take())
+        let mut child = cmd
+            .spawn()
+            .map_err(|e| format!("Couldn't start `claude`: {e}"))?;
+        let (Some(stdin), Some(stdout), Some(stderr)) =
+            (child.stdin.take(), child.stdout.take(), child.stderr.take())
         else {
             return Err("Couldn't connect to `claude`'s input and output.".into());
         };
@@ -170,7 +208,11 @@ impl ChatProcesses {
         rt.spawn(async move {
             let mut stdin = stdin;
             while let Some(line) = rx.recv().await {
-                let ok = stdin.write_all(format!("{line}\n").as_bytes()).await.is_ok() && stdin.flush().await.is_ok();
+                let ok = stdin
+                    .write_all(format!("{line}\n").as_bytes())
+                    .await
+                    .is_ok()
+                    && stdin.flush().await.is_ok();
                 if !ok {
                     break;
                 }
@@ -200,7 +242,10 @@ impl ChatProcesses {
                 let _ = errors.await;
             })
             .await;
-            let tail = tail.lock().map(|t| t.trim().to_string()).unwrap_or_default();
+            let tail = tail
+                .lock()
+                .map(|t| t.trim().to_string())
+                .unwrap_or_default();
             me.on_exit(&id, gen, status, stopped, &tail);
         });
 
@@ -234,7 +279,9 @@ impl ChatProcesses {
                             p.pending.clear();
                         }
                     }
-                    StreamEvent::Init { session_id, .. } => session = Some((session_id.clone(), p.project_id.clone())),
+                    StreamEvent::Init { session_id, .. } => {
+                        session = Some((session_id.clone(), p.project_id.clone()))
+                    }
                     _ => {}
                 }
             }
@@ -253,7 +300,14 @@ impl ChatProcesses {
         }
     }
 
-    fn on_exit(&self, chat_id: &str, gen: u64, status: Option<ExitStatus>, stopped: bool, stderr: &str) {
+    fn on_exit(
+        &self,
+        chat_id: &str,
+        gen: u64,
+        status: Option<ExitStatus>,
+        stopped: bool,
+        stderr: &str,
+    ) {
         let mut procs = self.procs();
         let current = procs.get(chat_id).is_some_and(|p| p.gen == gen);
         let mid_turn = current && procs.get(chat_id).is_some_and(|p| p.turns > 0);
@@ -284,16 +338,28 @@ impl ChatRuntime for ChatProcesses {
     /// Sends a message, starting the process if needed (resuming `session_id`). A process
     /// launched with another spec is restarted first, unless it is in the middle of a turn:
     /// then the message queues and the new spec applies once it goes idle.
-    fn send(&self, chat_id: &str, project_id: &str, session_id: Option<&str>, spec: Spec, text: &str) -> Result<(), HostError> {
+    fn send(
+        &self,
+        chat_id: &str,
+        project_id: &str,
+        session_id: Option<&str>,
+        spec: Spec,
+        text: &str,
+    ) -> Result<(), HostError> {
         let mut procs = self.procs();
-        if procs.get(chat_id).is_some_and(|p| p.spec != spec && p.turns == 0 && p.pending.is_empty()) {
+        if procs
+            .get(chat_id)
+            .is_some_and(|p| p.spec != spec && p.turns == 0 && p.pending.is_empty())
+        {
             procs.remove(chat_id);
         }
         if !procs.contains_key(chat_id) {
             let p = self.spawn(chat_id, project_id, session_id, spec)?;
             procs.insert(chat_id.to_string(), p);
         }
-        let Some(p) = procs.get_mut(chat_id) else { return Err("The chat's Claude process didn't start.".into()) };
+        let Some(p) = procs.get_mut(chat_id) else {
+            return Err("The chat's Claude process didn't start.".into());
+        };
         p.write(stream_json::user_message(text))?;
         p.turns += 1;
         p.last_active = Instant::now();
@@ -303,22 +369,43 @@ impl ChatRuntime for ChatProcesses {
     }
 
     /// Answers a pending permission request. `message` is what the model reads on a denial.
-    fn respond(&self, chat_id: &str, request_id: &str, allow: bool, message: Option<&str>) -> Result<(), HostError> {
+    fn respond(
+        &self,
+        chat_id: &str,
+        request_id: &str,
+        allow: bool,
+        message: Option<&str>,
+    ) -> Result<(), HostError> {
         let mut procs = self.procs();
-        let p = procs.get_mut(chat_id).ok_or("The chat isn't running anymore, so that request has expired.")?;
+        let p = procs
+            .get_mut(chat_id)
+            .ok_or("The chat isn't running anymore, so that request has expired.")?;
         let i = p
             .pending
             .iter()
             .position(|r| r.request_id == request_id)
             .ok_or("That permission request is no longer pending.")?;
-        let deny = message.map(str::trim).filter(|m| !m.is_empty()).unwrap_or(DENY_MESSAGE);
+        let deny = message
+            .map(str::trim)
+            .filter(|m| !m.is_empty())
+            .unwrap_or(DENY_MESSAGE);
         let deny = nodal_domain::util::clip_chars(deny, DENY_MESSAGE_MAX);
-        let line = stream_json::permission_response(request_id, allow.then_some(&p.pending[i].input), &deny);
+        let line = stream_json::permission_response(
+            request_id,
+            allow.then_some(&p.pending[i].input),
+            &deny,
+        );
         p.write(line)?;
         p.pending.remove(i);
         p.last_active = Instant::now();
         drop(procs);
-        self.emit(chat_id, ChatEvent::Host(HostEvent::PermissionResolved { request_id: request_id.into(), allowed: allow }));
+        self.emit(
+            chat_id,
+            ChatEvent::Host(HostEvent::PermissionResolved {
+                request_id: request_id.into(),
+                allowed: allow,
+            }),
+        );
         Ok(())
     }
 
@@ -326,13 +413,24 @@ impl ChatRuntime for ChatProcesses {
     /// are dropped (the turn that asked is over). Nothing to do if no turn is running.
     fn interrupt(&self, chat_id: &str) -> Result<(), HostError> {
         let mut procs = self.procs();
-        let Some(p) = procs.get_mut(chat_id).filter(|p| p.turns > 0) else { return Ok(()) };
+        let Some(p) = procs.get_mut(chat_id).filter(|p| p.turns > 0) else {
+            return Ok(());
+        };
         p.interrupts += 1;
-        p.write(stream_json::interrupt_request(&format!("interrupt-{}", p.interrupts)))?;
+        p.write(stream_json::interrupt_request(&format!(
+            "interrupt-{}",
+            p.interrupts
+        )))?;
         let dropped = std::mem::take(&mut p.pending);
         drop(procs);
         for r in dropped {
-            self.emit(chat_id, ChatEvent::Host(HostEvent::PermissionResolved { request_id: r.request_id, allowed: false }));
+            self.emit(
+                chat_id,
+                ChatEvent::Host(HostEvent::PermissionResolved {
+                    request_id: r.request_id,
+                    allowed: false,
+                }),
+            );
         }
         Ok(())
     }
@@ -349,8 +447,14 @@ impl ChatRuntime for ChatProcesses {
 
     fn live(&self, chat_id: &str) -> ChatLive {
         match self.procs().get(chat_id) {
-            Some(p) => ChatLive { state: p.state(), pending: p.pending.clone() },
-            None => ChatLive { state: RunState::Stopped, pending: vec![] },
+            Some(p) => ChatLive {
+                state: p.state(),
+                pending: p.pending.clone(),
+            },
+            None => ChatLive {
+                state: RunState::Stopped,
+                pending: vec![],
+            },
         }
     }
 
@@ -368,7 +472,10 @@ impl ChatRuntime for ChatProcesses {
 
 /// Waits for the child to exit, or for `stop` to fire (or be dropped): then gives it
 /// `EXIT_GRACE` to exit on its own and kills it. Returns the status and whether it was stopped.
-async fn supervise(mut child: Child, mut stop: oneshot::Receiver<()>) -> (Option<ExitStatus>, bool) {
+async fn supervise(
+    mut child: Child,
+    mut stop: oneshot::Receiver<()>,
+) -> (Option<ExitStatus>, bool) {
     let exited = {
         let mut wait = pin!(child.wait());
         std::future::poll_fn(|cx| {

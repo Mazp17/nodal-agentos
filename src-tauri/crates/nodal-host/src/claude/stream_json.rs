@@ -49,17 +49,23 @@ fn str_of(v: &Value, key: &str) -> Option<String> {
 }
 
 fn context_tokens(usage: &Value) -> Option<i64> {
-    let n: i64 = ["input_tokens", "cache_creation_input_tokens", "cache_read_input_tokens"]
-        .iter()
-        .filter_map(|k| usage.get(*k).and_then(Value::as_i64))
-        .sum();
+    let n: i64 = [
+        "input_tokens",
+        "cache_creation_input_tokens",
+        "cache_read_input_tokens",
+    ]
+    .iter()
+    .filter_map(|k| usage.get(*k).and_then(Value::as_i64))
+    .sum();
     (n > 0).then_some(n)
 }
 
 /// Parses one stdout line. Most lines give zero or one event; an assistant or user message
 /// gives one per content block.
 pub fn parse_line(line: &str) -> Vec<StreamEvent> {
-    let Ok(v) = serde_json::from_str::<Value>(line.trim()) else { return vec![] };
+    let Ok(v) = serde_json::from_str::<Value>(line.trim()) else {
+        return vec![];
+    };
     match v.get("type").and_then(Value::as_str) {
         Some("system") => match v.get("subtype").and_then(Value::as_str) {
             Some("init") => str_of(&v, "session_id")
@@ -79,15 +85,21 @@ pub fn parse_line(line: &str) -> Vec<StreamEvent> {
             _ => vec![],
         },
         Some("stream_event") => {
-            let Some(delta) = v.pointer("/event/delta") else { return vec![] };
+            let Some(delta) = v.pointer("/event/delta") else {
+                return vec![];
+            };
             if v.get("parent_tool_use_id").is_some_and(|p| !p.is_null()) {
                 return vec![];
             }
             match delta.get("type").and_then(Value::as_str) {
-                Some("text_delta") => str_of(delta, "text").map(|text| StreamEvent::TextDelta { text }).into_iter().collect(),
-                Some("thinking_delta") => {
-                    str_of(delta, "thinking").map(|text| StreamEvent::ThinkingDelta { text }).into_iter().collect()
-                }
+                Some("text_delta") => str_of(delta, "text")
+                    .map(|text| StreamEvent::TextDelta { text })
+                    .into_iter()
+                    .collect(),
+                Some("thinking_delta") => str_of(delta, "thinking")
+                    .map(|text| StreamEvent::ThinkingDelta { text })
+                    .into_iter()
+                    .collect(),
                 _ => vec![],
             }
         }
@@ -123,10 +135,16 @@ pub fn parse_line(line: &str) -> Vec<StreamEvent> {
                         .filter_map(|b| match b.get("type").and_then(Value::as_str) {
                             Some("tool_result") => {
                                 let (id, result) = tool_result_info(b, structured);
-                                Some(StreamEvent::ToolResult { tool_use_id: id?.to_string(), result })
+                                Some(StreamEvent::ToolResult {
+                                    tool_use_id: id?.to_string(),
+                                    result,
+                                })
                             }
                             Some("text") => {
-                                let s = b.get("text").and_then(Value::as_str).filter(|s| !s.trim().is_empty())?;
+                                let s = b
+                                    .get("text")
+                                    .and_then(Value::as_str)
+                                    .filter(|s| !s.trim().is_empty())?;
                                 Some(StreamEvent::Item { item: user_item(s) })
                             }
                             _ => None,
@@ -136,8 +154,12 @@ pub fn parse_line(line: &str) -> Vec<StreamEvent> {
                 _ => vec![],
             }
         }
-        Some("control_request") if v.pointer("/request/subtype").and_then(Value::as_str) == Some("can_use_tool") => {
-            let (Some(request_id), Some(req)) = (str_of(&v, "request_id"), v.get("request")) else { return vec![] };
+        Some("control_request")
+            if v.pointer("/request/subtype").and_then(Value::as_str) == Some("can_use_tool") =>
+        {
+            let (Some(request_id), Some(req)) = (str_of(&v, "request_id"), v.get("request")) else {
+                return vec![];
+            };
             let input = req.get("input").cloned().unwrap_or_else(|| json!({}));
             vec![StreamEvent::PermissionRequest(PermissionRequest {
                 request_id,
@@ -152,7 +174,11 @@ pub fn parse_line(line: &str) -> Vec<StreamEvent> {
             let context_window = v
                 .get("modelUsage")
                 .and_then(Value::as_object)
-                .and_then(|m| m.values().filter_map(|u| u.get("contextWindow").and_then(Value::as_i64)).max());
+                .and_then(|m| {
+                    m.values()
+                        .filter_map(|u| u.get("contextWindow").and_then(Value::as_i64))
+                        .max()
+                });
             vec![StreamEvent::TurnEnd {
                 ok: !v.get("is_error").and_then(Value::as_bool).unwrap_or(false),
                 subtype: str_of(&v, "subtype").unwrap_or_default(),
