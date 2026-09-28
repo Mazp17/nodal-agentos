@@ -1,5 +1,6 @@
-//! Board context: projects, repos, tasks, relations, executors and settings. Filled in
-//! wave 3a (`ops.rs` moves here from `work::ops` then).
+//! Board context: projects, repos, tasks, relations, executors and settings.
+
+pub mod ops;
 
 use std::sync::Arc;
 

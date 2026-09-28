@@ -1,7 +1,29 @@
-use super::*;
-use crate::db::open_in_memory;
-use crate::util::paths::tests::TempDir;
+#![allow(clippy::disallowed_methods)] // builds fixture folders/files directly on disk
+
+use std::sync::Arc;
+
+use nodal_host::adapters::{HostClaudeConfig, HostGit, HostLocalFs, HostPlanFiles};
+use nodal_host::testutil::TempDir;
+use nodal_store::Db;
 use serde_json::json;
+
+use super::*;
+
+/// `Env` for tests: real (blocking, synchronous) host adapters rooted at `data_dir`/
+/// `worktrees_root`, so callers keep their own `TempDir` and path names. Local copy of the
+/// old `work::test_env` helper (board owns its own tests; it doesn't reach into
+/// `nodal_app::testutil`).
+fn test_env(data_dir: PathBuf, worktrees_root: PathBuf, claude_dir: Option<PathBuf>) -> Env {
+    Env {
+        data_dir,
+        worktrees_root,
+        claude_dir,
+        plans: Arc::new(HostPlanFiles),
+        fs: Arc::new(HostLocalFs),
+        git: Arc::new(HostGit),
+        claude_config: Arc::new(HostClaudeConfig),
+    }
+}
 
 struct Fx {
     _t: TempDir,
@@ -14,7 +36,7 @@ fn fx(name: &str) -> Fx {
     let repo_dir = t.0.join("web");
     std::fs::create_dir_all(repo_dir.join("docs")).unwrap();
     std::fs::write(repo_dir.join("docs/plan.md"), "# Repo plan").unwrap();
-    let env = crate::work::test_env(t.0.join("data"), t.0.join("wt"), None);
+    let env = test_env(t.0.join("data"), t.0.join("wt"), None);
     Fx {
         _t: t,
         env,
@@ -34,8 +56,8 @@ fn new_task(project: &Project, repo: &Repo, title: &str) -> NewTask {
 #[test]
 fn projects_crud_and_unique_keys() {
     let t = TempDir::new("ops-projects-crud");
-    let env = crate::work::test_env(t.0.join("data"), t.0.join("wt"), None);
-    let db = open_in_memory().unwrap();
+    let env = test_env(t.0.join("data"), t.0.join("wt"), None);
+    let db = Db::open_in_memory().unwrap();
     let mut c = db.lock().unwrap();
     let p = create_project(
         &c,
@@ -142,8 +164,8 @@ fn project_root_path_is_an_existing_canonical_folder_and_clearable() {
     let root = t.0.join("acme");
     std::fs::create_dir_all(root.join("docs")).unwrap();
     std::fs::write(t.0.join("notes.md"), "# Notes").unwrap();
-    let env = crate::work::test_env(t.0.join("data"), t.0.join("wt"), None);
-    let db = open_in_memory().unwrap();
+    let env = test_env(t.0.join("data"), t.0.join("wt"), None);
+    let db = Db::open_in_memory().unwrap();
     let c = db.lock().unwrap();
     let input = |root_path: Option<String>| NewProject {
         name: "Acme".into(),
@@ -215,7 +237,7 @@ fn project_root_path_is_an_existing_canonical_folder_and_clearable() {
 #[test]
 fn repos_unique_path_options_and_delete_guard() {
     let f = fx("ops-repos");
-    let db = open_in_memory().unwrap();
+    let db = Db::open_in_memory().unwrap();
     let mut c = db.lock().unwrap();
     let p = create_project(
         &c,
@@ -302,7 +324,7 @@ fn repos_unique_path_options_and_delete_guard() {
 #[test]
 fn tasks_numbering_plan_move_and_patch() {
     let f = fx("ops-tasks");
-    let db = open_in_memory().unwrap();
+    let db = Db::open_in_memory().unwrap();
     let mut c = db.lock().unwrap();
     let p = create_project(
         &c,
@@ -458,7 +480,7 @@ fn tasks_numbering_plan_move_and_patch() {
 #[test]
 fn imported_tasks_are_read_only_and_manual_moves_push_state() {
     let f = fx("ops-imported");
-    let db = open_in_memory().unwrap();
+    let db = Db::open_in_memory().unwrap();
     let mut c = db.lock().unwrap();
     let p = create_project(
         &c,
@@ -545,7 +567,7 @@ fn imported_tasks_are_read_only_and_manual_moves_push_state() {
 
 #[test]
 fn settings_validation() {
-    let db = open_in_memory().unwrap();
+    let db = Db::open_in_memory().unwrap();
     let mut c = db.lock().unwrap();
     let s = set_settings(
         &mut c,
