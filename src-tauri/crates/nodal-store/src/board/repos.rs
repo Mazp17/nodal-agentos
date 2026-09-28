@@ -1,9 +1,11 @@
-use rusqlite::{named_params, Connection, OptionalExtension};
+use rusqlite::{named_params, OptionalExtension};
 
-use super::{not_found, opt_json};
-use crate::db::rows::{get_repo, insert_repo, repo_from_row, SqlEnum};
-use crate::db::DbError;
-use crate::domain::Repo;
+use crate::error::not_found;
+use crate::json::opt_json;
+use crate::rows::{get_repo, insert_repo, repo_from_row, SqlEnum};
+use crate::Conn as Connection;
+use crate::DbError;
+use nodal_domain::model::Repo;
 
 /// `None`: all of them. Order: project, position.
 pub fn list(conn: &Connection, project_id: Option<&str>) -> Result<Vec<Repo>, DbError> {

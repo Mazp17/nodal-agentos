@@ -1,9 +1,11 @@
-use rusqlite::{named_params, Connection};
+use rusqlite::named_params;
 
-use super::{is_constraint, not_found, opt_json};
-use crate::db::rows::{get_project, insert_project, project_from_row};
-use crate::db::DbError;
-use crate::domain::Project;
+use crate::error::{is_constraint, not_found};
+use crate::json::opt_json;
+use crate::rows::{get_project, insert_project, project_from_row};
+use crate::Conn as Connection;
+use crate::DbError;
+use nodal_domain::model::Project;
 
 pub fn list(conn: &Connection, include_archived: bool) -> Result<Vec<Project>, DbError> {
     let sql = if include_archived {

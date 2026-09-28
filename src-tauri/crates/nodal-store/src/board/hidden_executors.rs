@@ -1,11 +1,12 @@
 //! Agents and workflows each project hides from its pickers. Launching never reads this:
 //! a task already assigned to a hidden executor still runs.
 
-use rusqlite::{named_params, Connection};
+use rusqlite::named_params;
 
-use super::is_constraint;
-use crate::db::DbError;
-use crate::domain::{AgentSource, HiddenExecutor, HiddenKind};
+use crate::error::is_constraint;
+use crate::Conn as Connection;
+use crate::DbError;
+use nodal_domain::model::{AgentSource, HiddenExecutor, HiddenKind};
 
 const NAME_MAX: usize = 200;
 

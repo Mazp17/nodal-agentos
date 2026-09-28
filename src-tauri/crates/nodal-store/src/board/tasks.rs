@@ -1,9 +1,11 @@
-use rusqlite::{named_params, Connection};
+use rusqlite::named_params;
 
-use super::{not_found, opt_json, to_json};
-use crate::db::rows::{get_task, insert_task, task_from_row, SqlEnum};
-use crate::db::DbError;
-use crate::domain::{PlanRef, Task, TaskStatus};
+use crate::error::not_found;
+use crate::json::{opt_json, to_json};
+use crate::rows::{get_task, insert_task, task_from_row, SqlEnum};
+use crate::Conn as Connection;
+use crate::{DbError, SqliteError};
+use nodal_domain::model::{PlanRef, Task, TaskStatus};
 
 /// `None`: all of them. Order: project, status, position.
 pub fn list(conn: &Connection, project_id: Option<&str>) -> Result<Vec<Task>, DbError> {
@@ -98,4 +100,27 @@ pub fn blocked_ids(conn: &Connection, project_id: Option<&str>) -> Result<Vec<St
     let mut stmt = conn.prepare("SELECT id FROM tasks WHERE status = 'blocked' AND (?1 IS NULL OR project_id = ?1)")?;
     let rows = stmt.query_map([project_id], |r| r.get::<_, String>(0))?;
     Ok(rows.collect::<rusqlite::Result<_>>()?)
+}
+
+/// Unlinks the project's tasks from their sources (used before the cascade delete: the
+/// `src_link_id` FK doesn't allow deleting a link with tasks pointing to it).
+pub fn unlink_project_sources(conn: &Connection, project_id: &str) -> Result<usize, SqliteError> {
+    Ok(conn.execute(
+        "UPDATE tasks SET src_link_id = NULL WHERE project_id = ?1 AND src_link_id IS NOT NULL",
+        [project_id],
+    )?)
+}
+
+/// `(id, position)` of the project's tasks in a status column, in board order.
+pub fn column_positions(conn: &Connection, project_id: &str, status: TaskStatus) -> Result<Vec<(String, f64)>, SqliteError> {
+    let mut stmt = conn.prepare(
+        "SELECT id, position FROM tasks WHERE project_id = ?1 AND status = ?2 ORDER BY position, created_at, id",
+    )?;
+    let rows = stmt.query_map(rusqlite::params![project_id, SqlEnum(status)], |r| Ok((r.get::<_, String>(0)?, r.get::<_, f64>(1)?)))?;
+    Ok(rows.collect::<rusqlite::Result<_>>()?)
+}
+
+/// Sets a task's board position (and `updated_at`).
+pub fn set_position(conn: &Connection, id: &str, pos: f64, now: i64) -> Result<usize, SqliteError> {
+    Ok(conn.execute("UPDATE tasks SET position = ?1, updated_at = ?2 WHERE id = ?3", rusqlite::params![pos, now, id])?)
 }

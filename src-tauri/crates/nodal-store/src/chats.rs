@@ -1,9 +1,10 @@
-use rusqlite::{named_params, Connection};
+use rusqlite::named_params;
 
-use super::not_found;
-use crate::db::rows::{chat_from_row, get_chat, insert_chat};
-use crate::db::DbError;
-use crate::domain::Chat;
+use crate::error::not_found;
+use crate::rows::{chat_from_row, get_chat, insert_chat};
+use crate::Conn as Connection;
+use crate::DbError;
+use nodal_domain::model::Chat;
 
 /// The project's chats, most recently used first.
 pub fn list(conn: &Connection, project_id: &str) -> Result<Vec<Chat>, DbError> {

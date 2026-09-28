@@ -1,9 +1,8 @@
-use rusqlite::Connection;
-
-use super::is_constraint;
-use crate::db::rows::{insert_relation, relations_of, SqlEnum};
-use crate::db::DbError;
-use crate::domain::{RelationKind, TaskRelation};
+use crate::error::is_constraint;
+use crate::rows::{insert_relation, relations_of, SqlEnum};
+use crate::Conn as Connection;
+use crate::DbError;
+use nodal_domain::model::{RelationKind, TaskRelation};
 
 pub fn list(conn: &Connection, task_id: &str) -> Result<Vec<TaskRelation>, DbError> {
     relations_of(conn, task_id)
@@ -16,7 +15,7 @@ pub fn add(conn: &Connection, r: &TaskRelation) -> Result<(), DbError> {
     }
     match insert_relation(conn, r) {
         Ok(()) => Ok(()),
-        Err(DbError::Sqlite(e)) if is_constraint(&e) => {
+        Err(DbError::Sqlite(e)) if is_constraint(&e.0) => {
             // Duplicate PK (already exists) or FK (one of the tasks doesn't exist).
             let exists: i64 = conn.query_row(
                 "SELECT COUNT(*) FROM tasks WHERE id IN (?1, ?2)",

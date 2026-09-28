@@ -1,9 +1,11 @@
-use rusqlite::{named_params, Connection, OptionalExtension};
+use rusqlite::{named_params, OptionalExtension};
 
-use super::{not_found, opt_json, to_json};
-use crate::db::rows::{get_run, insert_run, run_from_row, SqlEnum};
-use crate::db::DbError;
-use crate::domain::{Run, RunStatus};
+use crate::error::not_found;
+use crate::json::{opt_json, to_json};
+use crate::rows::{get_run, insert_run, run_from_row, SqlEnum};
+use crate::Conn as Connection;
+use crate::{DbError, SqliteError};
+use nodal_domain::model::{Run, RunStatus};
 
 const HISTORY_LIMIT: i64 = 500;
 
@@ -200,4 +202,15 @@ pub fn launched_refs(conn: &Connection) -> Result<Vec<LaunchedRef>, DbError> {
     )?;
     let rows = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?;
     Ok(rows.collect::<rusqlite::Result<_>>()?)
+}
+
+/// Sets `session_id` on a run that doesn't have one yet (the queue pass fills it in once
+/// `claude agents` reports it). No-op if the run already has one.
+pub fn set_session_id_if_null(conn: &Connection, id: &str, session_id: Option<&str>) -> Result<usize, SqliteError> {
+    Ok(conn.execute("UPDATE runs SET session_id = ?2 WHERE id = ?1 AND session_id IS NULL", rusqlite::params![id, session_id])?)
+}
+
+/// Sets `finished_at` on a run being cancelled while queued.
+pub fn set_finished_at(conn: &Connection, id: &str, now: i64) -> Result<usize, SqliteError> {
+    Ok(conn.execute("UPDATE runs SET finished_at = ?2 WHERE id = ?1", rusqlite::params![id, now])?)
 }
