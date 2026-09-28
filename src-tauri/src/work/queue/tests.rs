@@ -37,7 +37,11 @@ pub(crate) fn run(id: &str, status: RunStatus, pos: f64) -> Run {
 }
 
 fn launched(id: &str, claude_id: &str, at: i64) -> Run {
-    Run { claude_run_id: Some(claude_id.into()), launched_at: Some(at), ..run(id, RunStatus::Launched, 0.0) }
+    Run {
+        claude_run_id: Some(claude_id.into()),
+        launched_at: Some(at),
+        ..run(id, RunStatus::Launched, 0.0)
+    }
 }
 
 fn live(id: &str, state: &str) -> RunSummary {
@@ -72,7 +76,12 @@ fn work_summary_counts_slots_and_dedupes_need_you() {
     perm.status = Some("waiting".into());
     let mut foreign_wait = live("ffff", "working");
     foreign_wait.status = Some("waiting".into());
-    let lv = vec![perm, live("bbbb", "working"), live("xxxx", "working"), foreign_wait];
+    let lv = vec![
+        perm,
+        live("bbbb", "working"),
+        live("xxxx", "working"),
+        foreign_wait,
+    ];
     let blocked = vec!["t-blocked".to_string(), "t-other".to_string()];
 
     let g = work_summary(&runs, &blocked, &lv, 3, true, NOW);
@@ -85,8 +94,18 @@ fn work_summary_counts_slots_and_dedupes_need_you() {
     let p = work_summary(&runs, &blocked, &lv, 3, false, NOW);
     // Own only: b (working), c (grace), n (launching). `a` is blocked: takes no slot.
     assert_eq!((p.running, p.queued, p.need_you), (3, 1, 3), "{p:?}");
-    assert_eq!(work_summary(&[], &[], &[], 2, false, NOW), WorkSummary { capacity: 2, ..Default::default() });
-    let v = serde_json::to_value(WorkSummary { pump_error: Some("`claude agents` failed".into()), ..Default::default() }).unwrap();
+    assert_eq!(
+        work_summary(&[], &[], &[], 2, false, NOW),
+        WorkSummary {
+            capacity: 2,
+            ..Default::default()
+        }
+    );
+    let v = serde_json::to_value(WorkSummary {
+        pump_error: Some("`claude agents` failed".into()),
+        ..Default::default()
+    })
+    .unwrap();
     assert_eq!(v["pumpError"], "`claude agents` failed");
     assert!(serde_json::to_value(WorkSummary::default()).unwrap()["pumpError"].is_null());
 }
@@ -99,7 +118,11 @@ fn queue_follows_position_and_respects_free_slots() {
         run("b", RunStatus::Queued, 20.0),
         run("x", RunStatus::Failed, 1.0),
     ];
-    let lv = vec![live("aa11", "working"), live("bb22", "done"), live("cc33", "stopped")];
+    let lv = vec![
+        live("aa11", "working"),
+        live("bb22", "done"),
+        live("cc33", "stopped"),
+    ];
     // 3 slots, 1 foreign working → 2 free: the first two in the queue.
     assert_eq!(next_to_launch(&runs, &lv, 3, NOW), ["a", "b"]);
     assert_eq!(next_to_launch(&runs, &lv, 1, NOW), Vec::<String>::new());
@@ -134,7 +157,9 @@ fn launching_and_fresh_launches_occupy_slots() {
 #[test]
 fn global_concurrency_never_exceeded() {
     // Four queued with concurrency 2: 2 go, and with those 2 working no more go.
-    let mut runs: Vec<Run> = (0..4).map(|i| run(&format!("r{i}"), RunStatus::Queued, i as f64)).collect();
+    let mut runs: Vec<Run> = (0..4)
+        .map(|i| run(&format!("r{i}"), RunStatus::Queued, i as f64))
+        .collect();
     let first = next_to_launch(&runs, &[], 2, NOW);
     assert_eq!(first, ["r0", "r1"]);
     for (i, id) in first.iter().enumerate() {
@@ -160,12 +185,18 @@ fn in_place_runs_lock_their_repo() {
     c.repo_id = Some("other".into());
     let d = run("d", RunStatus::Queued, 4.0);
     // Two in_place on the same repo: one goes; the other repo's and the worktree one proceed.
-    assert_eq!(next_to_launch(&[a.clone(), b.clone(), c.clone(), d.clone()], &[], 10, NOW), ["a", "c", "d"]);
+    assert_eq!(
+        next_to_launch(&[a.clone(), b.clone(), c.clone(), d.clone()], &[], 10, NOW),
+        ["a", "c", "d"]
+    );
     // With an active in_place run in the repo, the next one waits.
     let mut active = launched("x", "xxxx0001", NOW - 1_000);
     active.isolation = Some(Isolation::InPlace);
     let lv = vec![live("xxxx0001", "working")];
-    assert_eq!(next_to_launch(&[active.clone(), b.clone(), d.clone()], &lv, 10, NOW), ["d"]);
+    assert_eq!(
+        next_to_launch(&[active.clone(), b.clone(), d.clone()], &lv, 10, NOW),
+        ["d"]
+    );
     // When it finishes, it's released.
     let lv = vec![live("xxxx0001", "done")];
     assert_eq!(next_to_launch(&[active, b, d], &lv, 10, NOW), ["b", "d"]);
@@ -183,27 +214,48 @@ fn migrated_queued_runs_wait_for_confirmation() {
 
 #[test]
 fn session_ids_are_filled_from_live_runs() {
-    let mut runs = vec![launched("a", "aaaa0001", NOW), run("q", RunStatus::Queued, 1.0)];
+    let mut runs = vec![
+        launched("a", "aaaa0001", NOW),
+        run("q", RunStatus::Queued, 1.0),
+    ];
     assert!(needs_tick(&runs));
     assert!(fill_session_ids(&mut runs, &[live("zzzz", "working")]).is_empty());
-    assert_eq!(fill_session_ids(&mut runs, &[live("aaaa0001", "working")]), [0]);
+    assert_eq!(
+        fill_session_ids(&mut runs, &[live("aaaa0001", "working")]),
+        [0]
+    );
     assert_eq!(runs[0].session_id.as_deref(), Some("sess-aaaa0001"));
-    let finished = vec![run("f", RunStatus::Finished, 1.0), run("x", RunStatus::Canceled, 2.0)];
+    let finished = vec![
+        run("f", RunStatus::Finished, 1.0),
+        run("x", RunStatus::Canceled, 2.0),
+    ];
     assert!(!needs_tick(&finished));
 }
 
 #[test]
 fn active_detection() {
-    let lv = vec![live("aaaa", "working"), live("bbbb", "done"), live("cccc", "blocked")];
+    let lv = vec![
+        live("aaaa", "working"),
+        live("bbbb", "done"),
+        live("cccc", "blocked"),
+    ];
     assert!(is_active(&run("q", RunStatus::Queued, 1.0), None, NOW));
-    assert!(!is_active(&run("f", RunStatus::Failed, 1.0), Some(&lv), NOW));
+    assert!(!is_active(
+        &run("f", RunStatus::Failed, 1.0),
+        Some(&lv),
+        NOW
+    ));
     assert!(is_active(&launched("a", "aaaa", 1), Some(&lv), NOW));
     assert!(!is_active(&launched("b", "bbbb", NOW), Some(&lv), NOW));
     // `blocked` is still active (not relaunched) but takes no slot.
     assert!(is_active(&launched("c", "cccc", 1), Some(&lv), NOW));
     assert_eq!(occupied_slots(&[], &[live("cccc", "blocked")], NOW), 0);
     assert!(is_active(&launched("d", "dddd", NOW - 10), Some(&lv), NOW));
-    assert!(!is_active(&launched("d", "dddd", NOW - LAUNCH_GRACE_MS), Some(&lv), NOW));
+    assert!(!is_active(
+        &launched("d", "dddd", NOW - LAUNCH_GRACE_MS),
+        Some(&lv),
+        NOW
+    ));
     // Without `claude agents` it's assumed active (no blind relaunch).
     assert!(is_active(&launched("e", "eeee", 1), None, NOW));
 }

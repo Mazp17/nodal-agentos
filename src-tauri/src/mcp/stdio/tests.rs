@@ -4,10 +4,18 @@ fn run(input: &str, call: impl FnMut(&str, Value) -> Result<Value, String>) -> V
     run_with(input, &tools::definitions(), call)
 }
 
-fn run_with(input: &str, defs: &Value, mut call: impl FnMut(&str, Value) -> Result<Value, String>) -> Vec<Value> {
+fn run_with(
+    input: &str,
+    defs: &Value,
+    mut call: impl FnMut(&str, Value) -> Result<Value, String>,
+) -> Vec<Value> {
     let mut out = Vec::new();
     serve(input.as_bytes(), &mut out, defs, &mut call).unwrap();
-    String::from_utf8(out).unwrap().lines().map(|l| serde_json::from_str(l).unwrap()).collect()
+    String::from_utf8(out)
+        .unwrap()
+        .lines()
+        .map(|l| serde_json::from_str(l).unwrap())
+        .collect()
 }
 
 #[test]
@@ -51,16 +59,26 @@ fn tool_calls_are_forwarded_and_errors_reach_the_agent() {
             Err(OPEN_NODAL.to_string())
         }
     });
-    assert_eq!(calls, [("get_task".to_string(), json!({"task": "PAY-1"})), ("list_projects".to_string(), json!({}))]);
+    assert_eq!(
+        calls,
+        [
+            ("get_task".to_string(), json!({"task": "PAY-1"})),
+            ("list_projects".to_string(), json!({}))
+        ]
+    );
     assert_eq!(out.len(), 5);
     assert_eq!(out[0]["result"]["isError"], false);
-    let text: Value = serde_json::from_str(out[0]["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
+    let text: Value =
+        serde_json::from_str(out[0]["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
     assert_eq!(text["key"], "PAY-1");
     assert_eq!(out[1]["result"]["isError"], true);
     assert_eq!(out[1]["result"]["content"][0]["text"], OPEN_NODAL);
     assert_eq!(out[2]["error"]["code"], INVALID_PARAMS);
     assert_eq!(out[3]["error"]["code"], METHOD_NOT_FOUND);
-    assert_eq!((out[4]["error"]["code"].as_i64(), &out[4]["id"]), (Some(PARSE_ERROR), &Value::Null));
+    assert_eq!(
+        (out[4]["error"]["code"].as_i64(), &out[4]["id"]),
+        (Some(PARSE_ERROR), &Value::Null)
+    );
 }
 
 #[test]
@@ -88,8 +106,14 @@ fn only_the_chat_server_lists_and_forwards_propose_task() {
 fn a_closed_app_means_open_nodal_first() {
     let t = crate::util::paths::tests::TempDir::new("mcpcl");
     let missing = t.0.join("mcp.sock");
-    assert_eq!(forward(&missing, "list_projects", json!({})).unwrap_err(), OPEN_NODAL);
+    assert_eq!(
+        forward(&missing, "list_projects", json!({})).unwrap_err(),
+        OPEN_NODAL
+    );
     // Stale socket file left by an app that quit.
     drop(std::os::unix::net::UnixListener::bind(&missing).unwrap());
-    assert_eq!(forward(&missing, "list_projects", json!({})).unwrap_err(), OPEN_NODAL);
+    assert_eq!(
+        forward(&missing, "list_projects", json!({})).unwrap_err(),
+        OPEN_NODAL
+    );
 }

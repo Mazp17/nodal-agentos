@@ -14,17 +14,31 @@ fn account_names() {
 fn get_set_delete_with_cache() {
     tauri::async_runtime::block_on(async {
         let mem = MemoryBackend::default();
-        mem.data.lock().unwrap().insert("linear-api-key".into(), "  lin_abc \n".into());
+        mem.data
+            .lock()
+            .unwrap()
+            .insert("linear-api-key".into(), "  lin_abc \n".into());
         let s = Secrets::with_backend(mem.clone());
 
         assert_eq!(s.get("linear").await.unwrap().as_deref(), Some("lin_abc"));
         assert_eq!(s.get("linear").await.unwrap().as_deref(), Some("lin_abc"));
-        assert_eq!(*mem.reads.lock().unwrap(), 1, "the second read comes from the cache");
+        assert_eq!(
+            *mem.reads.lock().unwrap(),
+            1,
+            "the second read comes from the cache"
+        );
 
         assert_eq!(s.get("asana").await.unwrap(), None);
         s.set("asana", " as_1 ").await.unwrap();
         assert_eq!(s.get("asana").await.unwrap().as_deref(), Some("as_1"));
-        assert_eq!(mem.data.lock().unwrap().get("asana-api-key").map(String::as_str), Some("as_1"));
+        assert_eq!(
+            mem.data
+                .lock()
+                .unwrap()
+                .get("asana-api-key")
+                .map(String::as_str),
+            Some("as_1")
+        );
 
         s.delete("linear").await.unwrap();
         assert_eq!(s.get("linear").await.unwrap(), None);

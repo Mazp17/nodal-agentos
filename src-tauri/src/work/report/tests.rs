@@ -19,9 +19,15 @@ fn agent_report_blocked_loose_json_and_bad_fields() {
     assert_eq!(r.branch, None);
     assert_eq!(parse_agent_report("no report"), None);
     assert_eq!(parse_agent_report("{\"status\": \"maybe\"}"), None);
-    assert_eq!(parse_agent_report("{\"status\": \"done\", \"pr\": null}").unwrap().pr, None);
+    assert_eq!(
+        parse_agent_report("{\"status\": \"done\", \"pr\": null}")
+            .unwrap()
+            .pr,
+        None
+    );
     // Broken JSON at the end: the last valid one is used.
-    let r = parse_agent_report("{\"status\":\"done\",\"summary\":\"ok\"} and then {\"status\": ").unwrap();
+    let r = parse_agent_report("{\"status\":\"done\",\"summary\":\"ok\"} and then {\"status\": ")
+        .unwrap();
     assert_eq!(r.summary.as_deref(), Some("ok"));
 }
 
@@ -55,6 +61,12 @@ fn reads_last_message_from_session_lines() {
     .join("\n");
     let last = crate::runs::claude_fs::last_assistant_text_in(&lines).unwrap();
     assert!(last.starts_with("Done."));
-    assert_eq!(parse_agent_report(&last).unwrap().status, ReportStatus::Done);
-    assert_eq!(crate::runs::claude_fs::last_assistant_text_in("{\"type\":\"user\"}"), None);
+    assert_eq!(
+        parse_agent_report(&last).unwrap().status,
+        ReportStatus::Done
+    );
+    assert_eq!(
+        crate::runs::claude_fs::last_assistant_text_in("{\"type\":\"user\"}"),
+        None
+    );
 }

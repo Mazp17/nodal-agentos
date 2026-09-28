@@ -50,7 +50,9 @@ const DETAIL: &str = r###"{ "data": { "issue": {
     } } }"###;
 
 fn parse(body: &str) -> IssueDetail {
-    interpret_response::<IssueDetailData>(200, body).unwrap().into_detail()
+    interpret_response::<IssueDetailData>(200, body)
+        .unwrap()
+        .into_detail()
 }
 
 #[test]
@@ -63,7 +65,14 @@ fn parses_scalar_fields_parent_and_labels() {
     assert_eq!(d.creator.as_ref().unwrap().display_name, "jane");
     assert_eq!(d.parent.as_ref().unwrap().identifier, "ACME-2");
     assert_eq!(d.parent.as_ref().unwrap().state.state_type, "started");
-    assert_eq!(d.labels, vec![Label { id: "l1".into(), name: "Bug".into(), color: "#eb5757".into() }]);
+    assert_eq!(
+        d.labels,
+        vec![Label {
+            id: "l1".into(),
+            name: "Bug".into(),
+            color: "#eb5757".into()
+        }]
+    );
 }
 
 #[test]
@@ -98,11 +107,18 @@ fn maps_relations_by_direction_and_drops_similar_and_dupes() {
 #[test]
 fn comments_sorted_chronologically_with_author_fallbacks() {
     let d = parse(DETAIL);
-    let got: Vec<(&str, Option<&str>)> =
-        d.comments.iter().map(|c| (c.body.as_str(), c.author.as_deref())).collect();
+    let got: Vec<(&str, Option<&str>)> = d
+        .comments
+        .iter()
+        .map(|c| (c.body.as_str(), c.author.as_deref()))
+        .collect();
     assert_eq!(
         got,
-        vec![("First", Some("jane")), ("Second", Some("GitHub")), ("Third", None)]
+        vec![
+            ("First", Some("jane")),
+            ("Second", Some("GitHub")),
+            ("Third", None)
+        ]
     );
     assert!(!d.comments_truncated);
 }

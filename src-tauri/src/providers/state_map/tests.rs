@@ -1,7 +1,12 @@
 use super::*;
 
 fn st(id: &str, name: &str, kind: ExtKind) -> ExternalState {
-    ExternalState { id: id.into(), name: name.into(), kind, color: Some("#999999".into()) }
+    ExternalState {
+        id: id.into(),
+        name: name.into(),
+        kind,
+        color: Some("#999999".into()),
+    }
 }
 
 /// Fictional team with the typical states of a Linear workspace.
@@ -35,7 +40,10 @@ fn proposal_for_typical_team() {
 
     assert_eq!(m.push.len(), 4);
     assert_eq!(m.push[&TaskStatus::Todo].as_deref(), Some("s-todo"));
-    assert_eq!(m.push[&TaskStatus::InProgress].as_deref(), Some("s-progress"));
+    assert_eq!(
+        m.push[&TaskStatus::InProgress].as_deref(),
+        Some("s-progress")
+    );
     assert_eq!(m.push[&TaskStatus::InReview].as_deref(), Some("s-review"));
     assert_eq!(m.push[&TaskStatus::Blocked].as_deref(), Some("s-blocked"));
     assert!(m.confirmed_at.is_none());
@@ -52,13 +60,28 @@ fn push_falls_back_to_similar_or_no_sync() {
         st("c", "Code review", ExtKind::Started),
         st("d", "Done", ExtKind::Completed),
     ];
-    assert_eq!(propose_push(TaskStatus::InProgress, &states).as_deref(), Some("b"));
-    assert_eq!(propose_push(TaskStatus::InReview, &states).as_deref(), Some("c"));
+    assert_eq!(
+        propose_push(TaskStatus::InProgress, &states).as_deref(),
+        Some("b")
+    );
+    assert_eq!(
+        propose_push(TaskStatus::InReview, &states).as_deref(),
+        Some("c")
+    );
     assert_eq!(propose_push(TaskStatus::Blocked, &states), None);
 
-    let unstarted = vec![st("u", "Ready", ExtKind::Unstarted), st("b", "Doing", ExtKind::Started)];
-    assert_eq!(propose_push(TaskStatus::Todo, &unstarted).as_deref(), Some("u"));
-    assert_eq!(propose_push(TaskStatus::Todo, &[st("b", "Doing", ExtKind::Started)]), None);
+    let unstarted = vec![
+        st("u", "Ready", ExtKind::Unstarted),
+        st("b", "Doing", ExtKind::Started),
+    ];
+    assert_eq!(
+        propose_push(TaskStatus::Todo, &unstarted).as_deref(),
+        Some("u")
+    );
+    assert_eq!(
+        propose_push(TaskStatus::Todo, &[st("b", "Doing", ExtKind::Started)]),
+        None
+    );
 
     let only_review = vec![st("r", "Peer Review", ExtKind::Started)];
     assert_eq!(propose_push(TaskStatus::InProgress, &only_review), None);
@@ -66,9 +89,18 @@ fn push_falls_back_to_similar_or_no_sync() {
 
 #[test]
 fn push_matches_names_with_team_prefix() {
-    let states = vec![st("x", "ENG · Blocked", ExtKind::Started), st("y", "ENG · In Progress", ExtKind::Started)];
-    assert_eq!(propose_push(TaskStatus::Blocked, &states).as_deref(), Some("x"));
-    assert_eq!(propose_push(TaskStatus::InProgress, &states).as_deref(), Some("y"));
+    let states = vec![
+        st("x", "ENG · Blocked", ExtKind::Started),
+        st("y", "ENG · In Progress", ExtKind::Started),
+    ];
+    assert_eq!(
+        propose_push(TaskStatus::Blocked, &states).as_deref(),
+        Some("x")
+    );
+    assert_eq!(
+        propose_push(TaskStatus::InProgress, &states).as_deref(),
+        Some("y")
+    );
 }
 
 #[test]
@@ -106,15 +138,24 @@ fn report_detects_new_and_removed_states() {
     states.push(st("s-qa", "QA", ExtKind::Started));
     let r = report(&saved, states);
 
-    assert_eq!(r.added.iter().map(|s| s.id.as_str()).collect::<Vec<_>>(), vec!["s-qa"]);
-    assert_eq!(r.removed.iter().map(|s| s.id.as_str()).collect::<Vec<_>>(), vec!["s-review"]);
+    assert_eq!(
+        r.added.iter().map(|s| s.id.as_str()).collect::<Vec<_>>(),
+        vec!["s-qa"]
+    );
+    assert_eq!(
+        r.removed.iter().map(|s| s.id.as_str()).collect::<Vec<_>>(),
+        vec!["s-review"]
+    );
     assert_eq!(r.pull_origin["s-qa"], MapOrigin::Unmapped);
     assert_eq!(r.proposal.pull["s-qa"], TaskStatus::InReview);
     assert_eq!(r.pull_origin["s-todo"], MapOrigin::Confirmed);
     assert!(!r.proposal.pull.contains_key("s-review"));
     // Push for In Review pointed to a state that is gone: unmapped, with a new proposal.
     assert_eq!(r.push_origin[&TaskStatus::InReview], MapOrigin::Unmapped);
-    assert_eq!(r.proposal.push[&TaskStatus::InReview].as_deref(), Some("s-qa"));
+    assert_eq!(
+        r.proposal.push[&TaskStatus::InReview].as_deref(),
+        Some("s-qa")
+    );
     assert_eq!(r.push_origin[&TaskStatus::Blocked], MapOrigin::Confirmed);
     assert_eq!(r.proposal.push[&TaskStatus::Blocked], None);
     assert_eq!(r.proposal.known_states, saved.known_states);
@@ -124,19 +165,38 @@ fn report_detects_new_and_removed_states() {
 fn push_target_rules() {
     let states = team_states();
     let mut m = propose(&states);
-    assert_eq!(push_target(&m, TaskStatus::InReview, None), PushTarget::Skip(SkipReason::Pending));
+    assert_eq!(
+        push_target(&m, TaskStatus::InReview, None),
+        PushTarget::Skip(SkipReason::Pending)
+    );
     m.confirmed_at = Some(1);
-    assert_eq!(push_target(&m, TaskStatus::InReview, Some(&states)), PushTarget::Push("s-review".into()));
-    assert_eq!(push_target(&m, TaskStatus::Done, Some(&states)), PushTarget::Skip(SkipReason::NotMapped));
+    assert_eq!(
+        push_target(&m, TaskStatus::InReview, Some(&states)),
+        PushTarget::Push("s-review".into())
+    );
+    assert_eq!(
+        push_target(&m, TaskStatus::Done, Some(&states)),
+        PushTarget::Skip(SkipReason::NotMapped)
+    );
     m.push.insert(TaskStatus::Blocked, None);
-    assert_eq!(push_target(&m, TaskStatus::Blocked, None), PushTarget::Skip(SkipReason::NoSync));
-    let gone: Vec<_> = states.iter().filter(|s| s.id != "s-review").cloned().collect();
+    assert_eq!(
+        push_target(&m, TaskStatus::Blocked, None),
+        PushTarget::Skip(SkipReason::NoSync)
+    );
+    let gone: Vec<_> = states
+        .iter()
+        .filter(|s| s.id != "s-review")
+        .cloned()
+        .collect();
     assert_eq!(
         push_target(&m, TaskStatus::InReview, Some(&gone)),
         PushTarget::Skip(SkipReason::TargetGone("s-review".into()))
     );
     // Without known current states it pushes anyway.
-    assert_eq!(push_target(&m, TaskStatus::InReview, None), PushTarget::Push("s-review".into()));
+    assert_eq!(
+        push_target(&m, TaskStatus::InReview, None),
+        PushTarget::Push("s-review".into())
+    );
 }
 
 #[test]

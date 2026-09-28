@@ -13,7 +13,10 @@ impl SecretBackend for MemoryBackend {
         Ok(self.data.lock().unwrap().get(account).cloned())
     }
     fn write(&self, account: &str, value: &str) -> Result<(), String> {
-        self.data.lock().unwrap().insert(account.into(), value.into());
+        self.data
+            .lock()
+            .unwrap()
+            .insert(account.into(), value.into());
         Ok(())
     }
     fn delete(&self, account: &str) -> Result<(), String> {

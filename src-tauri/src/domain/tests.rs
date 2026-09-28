@@ -24,25 +24,44 @@ fn enums_serialize_snake_case_and_match_as_str() {
 
 #[test]
 fn executor_shape() {
-    let a = Executor::Agent { name: "frontend-developer".into(), source: AgentSource::User };
+    let a = Executor::Agent {
+        name: "frontend-developer".into(),
+        source: AgentSource::User,
+    };
     assert_eq!(
         serde_json::to_value(&a).unwrap(),
         json!({"kind": "agent", "name": "frontend-developer", "source": "user"})
     );
-    assert_eq!(serde_json::to_value(Executor::Claude).unwrap(), json!({"kind": "claude"}));
     assert_eq!(
-        serde_json::to_value(Executor::Workflow { name: "plan-task".into() }).unwrap(),
+        serde_json::to_value(Executor::Claude).unwrap(),
+        json!({"kind": "claude"})
+    );
+    assert_eq!(
+        serde_json::to_value(Executor::Workflow {
+            name: "plan-task".into()
+        })
+        .unwrap(),
         json!({"kind": "workflow", "name": "plan-task"})
     );
 }
 
 #[test]
 fn outbox_payload_shape() {
-    let p = OutboxPayload::SetState { state_id: "s3".into() };
-    assert_eq!(serde_json::to_value(&p).unwrap(), json!({"kind": "set_state", "stateId": "s3"}));
+    let p = OutboxPayload::SetState {
+        state_id: "s3".into(),
+    };
+    assert_eq!(
+        serde_json::to_value(&p).unwrap(),
+        json!({"kind": "set_state", "stateId": "s3"})
+    );
     assert_eq!(p.kind(), "set_state");
-    let c = OutboxPayload::Comment { body: "hello".into() };
-    assert_eq!(serde_json::to_value(&c).unwrap(), json!({"kind": "comment", "body": "hello"}));
+    let c = OutboxPayload::Comment {
+        body: "hello".into(),
+    };
+    assert_eq!(
+        serde_json::to_value(&c).unwrap(),
+        json!({"kind": "comment", "body": "hello"})
+    );
     assert_eq!(c.kind(), "comment");
 }
 
@@ -50,10 +69,13 @@ fn outbox_payload_shape() {
 fn repo_flattens_launch_options() {
     let r = Repo {
         id: "r".into(),
-            project_id: "p".into(),
+        project_id: "p".into(),
         path: "/x".into(),
         name: "x".into(),
-        launch: LaunchOptions { model: Some("opus".into()), ..Default::default() },
+        launch: LaunchOptions {
+            model: Some("opus".into()),
+            ..Default::default()
+        },
         default_executor: None,
         default_isolation: Isolation::InPlace,
         default_finish: Finish::Pr,

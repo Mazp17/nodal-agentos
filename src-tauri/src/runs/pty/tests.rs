@@ -20,12 +20,36 @@ fn next_id_errors_instead_of_wrapping_to_zero() {
 #[test]
 fn locale_fallback_when_unset_blank_c_posix_or_non_utf8() {
     assert!(needs_default_locale(|_| None));
-    assert!(needs_default_locale(|k| if k == "LANG" { Some(String::new()) } else { None }));
-    assert!(needs_default_locale(|k| if k == "LANG" { Some("C".into()) } else { None }));
-    assert!(needs_default_locale(|k| if k == "LC_ALL" { Some("POSIX".into()) } else { None }));
-    assert!(needs_default_locale(|k| if k == "LANG" { Some("en_US.ISO8859-1".into()) } else { None }));
-    assert!(!needs_default_locale(|k| if k == "LANG" { Some("en_US.UTF-8".into()) } else { None }));
-    assert!(!needs_default_locale(|k| if k == "LC_CTYPE" { Some("C.UTF-8".into()) } else { None }));
+    assert!(needs_default_locale(|k| if k == "LANG" {
+        Some(String::new())
+    } else {
+        None
+    }));
+    assert!(needs_default_locale(|k| if k == "LANG" {
+        Some("C".into())
+    } else {
+        None
+    }));
+    assert!(needs_default_locale(|k| if k == "LC_ALL" {
+        Some("POSIX".into())
+    } else {
+        None
+    }));
+    assert!(needs_default_locale(|k| if k == "LANG" {
+        Some("en_US.ISO8859-1".into())
+    } else {
+        None
+    }));
+    assert!(!needs_default_locale(|k| if k == "LANG" {
+        Some("en_US.UTF-8".into())
+    } else {
+        None
+    }));
+    assert!(!needs_default_locale(|k| if k == "LC_CTYPE" {
+        Some("C.UTF-8".into())
+    } else {
+        None
+    }));
 }
 
 #[test]
@@ -55,8 +79,14 @@ fn env_sets_terminal_type_and_removes_multiplexer_and_size_markers() {
     builder.env("COLUMNS", "80");
     builder.env("LINES", "24");
     configure_env(&mut builder);
-    assert_eq!(builder.get_env("TERM"), Some(std::ffi::OsStr::new("xterm-256color")));
-    assert_eq!(builder.get_env("COLORTERM"), Some(std::ffi::OsStr::new("truecolor")));
+    assert_eq!(
+        builder.get_env("TERM"),
+        Some(std::ffi::OsStr::new("xterm-256color"))
+    );
+    assert_eq!(
+        builder.get_env("COLORTERM"),
+        Some(std::ffi::OsStr::new("truecolor"))
+    );
     assert!(builder.get_env("TMUX").is_none());
     assert!(builder.get_env("ITERM_SESSION_ID").is_none());
     assert!(builder.get_env("COLUMNS").is_none());
@@ -71,7 +101,9 @@ fn cwd_uses_the_given_dir_when_it_exists() {
 
 #[test]
 fn cwd_falls_back_to_home_when_missing_or_not_a_directory() {
-    let home = std::env::var_os("HOME").map(PathBuf::from).unwrap_or_else(|| PathBuf::from("/"));
+    let home = std::env::var_os("HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("/"));
     assert_eq!(resolve_cwd(Some("/no/such/dir-nodal-test")), home);
     assert_eq!(resolve_cwd(None), home);
 }

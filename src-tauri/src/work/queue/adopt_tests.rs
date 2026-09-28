@@ -16,8 +16,15 @@ fn session(id: &str, cwd: &str, started: i64) -> RunSummary {
 
 #[test]
 fn adopts_only_an_unambiguous_new_session_in_the_cwd() {
-    let live = vec![session("old", "/r/web", 100), session("other", "/r/api", 10_000), session("new", "/r/web/", 10_000)];
-    assert_eq!(adoptable("/r/web", 9_000, &live, &[]).map(|s| s.id.as_str()), Some("new"));
+    let live = vec![
+        session("old", "/r/web", 100),
+        session("other", "/r/api", 10_000),
+        session("new", "/r/web/", 10_000),
+    ];
+    assert_eq!(
+        adoptable("/r/web", 9_000, &live, &[]).map(|s| s.id.as_str()),
+        Some("new")
+    );
     // Another run already has it.
     assert!(adoptable("/r/web", 9_000, &live, &["new".into()]).is_none());
     // Two candidates: no guessing.

@@ -9,7 +9,8 @@ fn debug_builds_do_not_check() {
 
 #[test]
 fn config_ships_signed_updater_artifacts() {
-    let conf: serde_json::Value = serde_json::from_str(include_str!("../../tauri.conf.json")).unwrap();
+    let conf: serde_json::Value =
+        serde_json::from_str(include_str!("../../tauri.conf.json")).unwrap();
     assert_eq!(conf["bundle"]["createUpdaterArtifacts"], true);
     let updater = &conf["plugins"]["updater"];
     assert!(!updater["pubkey"].as_str().unwrap_or_default().is_empty());
@@ -17,6 +18,9 @@ fn config_ships_signed_updater_artifacts() {
     assert!(!endpoints.is_empty());
     for e in endpoints {
         let url = e.as_str().unwrap();
-        assert!(url.starts_with("https://") && url.ends_with("/latest.json"), "{url}");
+        assert!(
+            url.starts_with("https://") && url.ends_with("/latest.json"),
+            "{url}"
+        );
     }
 }

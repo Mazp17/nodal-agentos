@@ -22,10 +22,18 @@ fn plan_file_rules() {
     assert_eq!(plan_file(&repo, ok.to_str().unwrap()).unwrap(), ok);
     assert_eq!(plan_file(&repo, "docs/plan.md").unwrap(), ok);
     assert_eq!(plan_file(&repo, "./docs/../docs/plan.md").unwrap(), ok);
-    assert!(plan_file(&repo, "../outside/evil.md").unwrap_err().contains("inside"));
-    assert!(plan_file(&repo, outside.join("evil.md").to_str().unwrap()).unwrap_err().contains("inside"));
-    assert!(plan_file(&repo, "docs/missing.md").unwrap_err().contains("doesn't exist"));
-    assert!(plan_file(&repo, "docs/notes.txt").unwrap_err().contains(".md"));
+    assert!(plan_file(&repo, "../outside/evil.md")
+        .unwrap_err()
+        .contains("inside"));
+    assert!(plan_file(&repo, outside.join("evil.md").to_str().unwrap())
+        .unwrap_err()
+        .contains("inside"));
+    assert!(plan_file(&repo, "docs/missing.md")
+        .unwrap_err()
+        .contains("doesn't exist"));
+    assert!(plan_file(&repo, "docs/notes.txt")
+        .unwrap_err()
+        .contains(".md"));
     assert!(plan_file(&repo, "").is_err());
     std::fs::write(repo.join(".git/x.md"), "#").unwrap();
     assert!(plan_file(&repo, ".git/x.md").unwrap_err().contains(".git"));
@@ -36,9 +44,13 @@ fn plan_file_rules() {
 fn plan_file_symlink_escaping_repo_is_rejected() {
     let (_g, repo, outside) = setup("symlink");
     std::os::unix::fs::symlink(outside.join("evil.md"), repo.join("docs/link.md")).unwrap();
-    assert!(plan_file(&repo, "docs/link.md").unwrap_err().contains("inside"));
+    assert!(plan_file(&repo, "docs/link.md")
+        .unwrap_err()
+        .contains("inside"));
     std::fs::create_dir_all(repo.join("dir.md")).unwrap();
-    assert!(plan_file(&repo, "dir.md").unwrap_err().contains("not a file"));
+    assert!(plan_file(&repo, "dir.md")
+        .unwrap_err()
+        .contains("not a file"));
 }
 
 #[test]
@@ -55,10 +67,17 @@ fn simple_fields() {
     }
     assert!(color("#d98c3f").is_ok() && color("#abc").is_ok() && color(PALETTE[0]).is_ok());
     assert!(color("red").is_err() && color("oklch(1;x)").is_err() && color("#12345").is_err());
-    assert_eq!(labels(&[" ui ".into(), "UI".into(), "".into(), "api".into()]).unwrap(), ["ui", "api"]);
+    assert_eq!(
+        labels(&[" ui ".into(), "UI".into(), "".into(), "api".into()]).unwrap(),
+        ["ui", "api"]
+    );
     assert!(labels(&["x".repeat(41)]).is_err());
     assert_eq!(acceptance(&["a\nb".into(), "  ".into()]).unwrap(), ["a b"]);
-    assert!(executor(&Executor::Agent { name: "a b".into(), source: crate::domain::AgentSource::User }).is_err());
+    assert!(executor(&Executor::Agent {
+        name: "a b".into(),
+        source: crate::domain::AgentSource::User
+    })
+    .is_err());
     assert!(executor(&Executor::Workflow { name: "-x".into() }).is_err());
     assert!(executor(&Executor::Claude).is_ok());
     assert_eq!(editor(" cursor ").unwrap(), "cursor");

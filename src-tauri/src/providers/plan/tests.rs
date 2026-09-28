@@ -3,7 +3,12 @@ use crate::domain::{ExternalState, Priority, ScopeRef};
 use crate::providers::{ChildItem, ItemRef};
 
 fn state(id: &str, name: &str, kind: ExtKind) -> ExternalState {
-    ExternalState { id: id.into(), name: name.into(), kind, color: None }
+    ExternalState {
+        id: id.into(),
+        name: name.into(),
+        kind,
+        color: None,
+    }
 }
 
 pub fn item(n: u32, desc: Option<&str>) -> ExternalItem {
@@ -14,7 +19,11 @@ pub fn item(n: u32, desc: Option<&str>) -> ExternalItem {
         title: format!("Issue {n}"),
         description_md: desc.map(Into::into),
         state: state("s-todo", "Todo", ExtKind::Unstarted),
-        scopes: vec![ScopeRef { kind: "team".into(), id: "team-eng".into(), name: "Engineering".into() }],
+        scopes: vec![ScopeRef {
+            kind: "team".into(),
+            id: "team-eng".into(),
+            name: "Engineering".into(),
+        }],
         parent: None,
         children: Vec::new(),
         labels: Vec::new(),
@@ -28,7 +37,10 @@ pub fn item(n: u32, desc: Option<&str>) -> ExternalItem {
 
 #[test]
 fn plan_snapshot() {
-    let mut it = item(142, Some("Change the site logo.\n\n## Acceptance criteria\n- New logo in the header\n"));
+    let mut it = item(
+        142,
+        Some("Change the site logo.\n\n## Acceptance criteria\n- New logo in the header\n"),
+    );
     it.title = "Website rebrand".into();
     it.parent = Some(ItemRef {
         external_id: "uuid-100".into(),
@@ -100,7 +112,11 @@ fn extracts_criteria_from_heading_section() {
     let md = "Intro.\n\n## Acceptance Criteria\n\nThe feature is done when:\n\n- [ ] Logo in the header\n- [x] Favicon\n  with transparent background\n1. Green tests\n\n## Notes\n- not a criterion\n";
     assert_eq!(
         extract_acceptance(md),
-        vec!["Logo in the header", "Favicon with transparent background", "Green tests"]
+        vec![
+            "Logo in the header",
+            "Favicon with transparent background",
+            "Green tests"
+        ]
     );
 }
 

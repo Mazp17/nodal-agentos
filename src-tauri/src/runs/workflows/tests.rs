@@ -9,7 +9,10 @@ fn parses_real_linear_issue_meta() {
     let src = std::fs::read_to_string(fixtures().join("user/linear-issue.js")).unwrap();
     let m = parse_meta(&src).unwrap();
     assert_eq!(m.name.as_deref(), Some("linear-issue"));
-    assert!(m.description.unwrap().starts_with("Lleva una issue de Linear"));
+    assert!(m
+        .description
+        .unwrap()
+        .starts_with("Lleva una issue de Linear"));
     assert!(m.when_to_use.unwrap().contains("Nunca mergea."));
 }
 
@@ -38,7 +41,8 @@ fn manages_source_and_reviews() {
     let m = parse_meta(src).unwrap();
     assert_eq!(m.manages_source.as_deref(), Some("linear"));
     assert_eq!(m.reviews, Some(true));
-    let m = parse_meta("export const meta = { name: 'y', 'reviews': false, noreviews: true }").unwrap();
+    let m =
+        parse_meta("export const meta = { name: 'y', 'reviews': false, noreviews: true }").unwrap();
     assert_eq!(m.reviews, Some(false));
     assert_eq!(m.manages_source, None);
     // Only the nested one: doesn't count.
@@ -66,7 +70,10 @@ fn catalog_ignores_backups_and_repo_overrides_user() {
     assert_eq!(names, ["demo-board", "linear-issue", "sin-meta"]);
     let li = &list[1];
     assert_eq!(li.source, WorkflowSource::Repo);
-    assert_eq!(li.description.as_deref(), Some("Variante del repo con \"comillas\" escapadas"));
+    assert_eq!(
+        li.description.as_deref(),
+        Some("Variante del repo con \"comillas\" escapadas")
+    );
     assert_eq!(list[2].description, None);
 
     let only_user = list_from(Some(&root.join("user")), None);
@@ -79,12 +86,16 @@ fn catalog_ignores_backups_and_repo_overrides_user() {
 #[test]
 #[ignore]
 fn real_user_catalog() {
-    let dir = crate::runs::claude_fs::claude_config_dir().unwrap().join("workflows");
+    let dir = crate::runs::claude_fs::claude_config_dir()
+        .unwrap()
+        .join("workflows");
     let list = list_from(Some(&dir), None);
     for w in &list {
         eprintln!("{} · {:?}", w.name, w.description);
     }
-    assert!(list.iter().any(|w| w.name == "linear-issue" && w.description.is_some()));
+    assert!(list
+        .iter()
+        .any(|w| w.name == "linear-issue" && w.description.is_some()));
     assert!(list.iter().all(|w| !w.path.contains(".bak")));
 }
 

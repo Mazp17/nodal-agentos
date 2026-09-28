@@ -32,7 +32,10 @@ fn provider_status_shape() {
 
 #[test]
 fn prepare_rules_assigns_ids_and_keeps_created_at() {
-    let old = vec![RepoRule::project("proj-a", "A", "r1", 5), RepoRule::label("docs", "r2")];
+    let old = vec![
+        RepoRule::project("proj-a", "A", "r1", 5),
+        RepoRule::label("docs", "r2"),
+    ];
     // Unchanged: keeps id and created_at even if the client sends another.
     let mut same = old.clone();
     same[0].created_at = 999;
@@ -46,20 +49,42 @@ fn prepare_rules_assigns_ids_and_keeps_created_at() {
     ]))
     .unwrap();
     let out = prepare_rules(&old, incoming, 50).unwrap();
-    assert!(out.iter().all(|r| r.id.starts_with('r') && r.id != "rule-proj-a" && r.created_at == 50), "{out:?}");
-    assert_eq!((out[1].value.as_str(), out[1].name.as_str()), ("proj-c", "proj-c"));
-    assert_eq!((out[2].kind, out[2].value.as_str()), (RuleKind::Label, "legacy"));
+    assert!(
+        out.iter()
+            .all(|r| r.id.starts_with('r') && r.id != "rule-proj-a" && r.created_at == 50),
+        "{out:?}"
+    );
+    assert_eq!(
+        (out[1].value.as_str(), out[1].name.as_str()),
+        ("proj-c", "proj-c")
+    );
+    assert_eq!(
+        (out[2].kind, out[2].value.as_str()),
+        (RuleKind::Label, "legacy")
+    );
     // Validations.
-    let dup = vec![RepoRule::project("p", "P", "r1", 1), RepoRule::project("p", "P", "r2", 1)];
-    assert!(prepare_rules(&[], dup, 1).unwrap_err().to_string().contains("already has a rule"));
+    let dup = vec![
+        RepoRule::project("p", "P", "r1", 1),
+        RepoRule::project("p", "P", "r2", 1),
+    ];
+    assert!(prepare_rules(&[], dup, 1)
+        .unwrap_err()
+        .to_string()
+        .contains("already has a rule"));
     let empty = vec![RepoRule::label(" ", "r1")];
-    assert!(prepare_rules(&[], empty, 1).unwrap_err().to_string().contains("need a label"));
+    assert!(prepare_rules(&[], empty, 1)
+        .unwrap_err()
+        .to_string()
+        .contains("need a label"));
 }
 
 #[test]
 fn key_hint_never_reveals_the_key() {
     use super::super::key_hint;
-    assert_eq!(key_hint("  lin_api_0123456789wxyz \n").as_deref(), Some("wxyz"));
+    assert_eq!(
+        key_hint("  lin_api_0123456789wxyz \n").as_deref(),
+        Some("wxyz")
+    );
     assert_eq!(key_hint("short-key"), None, "short keys give no hint");
     assert_eq!(key_hint(""), None);
 }

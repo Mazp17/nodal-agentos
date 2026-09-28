@@ -28,26 +28,49 @@ fn fixture() -> (Project, Vec<Repo>) {
 }
 
 fn value_of<'a>(args: &'a [String], flag: &str) -> Vec<&'a str> {
-    let Some(i) = args.iter().position(|a| a == flag) else { return vec![] };
-    args[i + 1..].iter().take_while(|a| !a.starts_with("--")).map(String::as_str).collect()
+    let Some(i) = args.iter().position(|a| a == flag) else {
+        return vec![];
+    };
+    args[i + 1..]
+        .iter()
+        .take_while(|a| !a.starts_with("--"))
+        .map(String::as_str)
+        .collect()
 }
 
 #[test]
 fn a_project_chat_gets_nodal_mcp_every_other_repo_and_the_project() {
     let (project, repos) = fixture();
     let bin = Path::new("/Applications/Nodal.app/Contents/MacOS/nodal-mcp");
-    let args = args(&chat(None), &project, &repos, ChatCwd::Repo(&repos[0]), Some(bin));
+    let args = args(
+        &chat(None),
+        &project,
+        &repos,
+        ChatCwd::Repo(&repos[0]),
+        Some(bin),
+    );
 
-    let config: serde_json::Value = serde_json::from_str(value_of(&args, "--mcp-config")[0]).unwrap();
-    assert_eq!(config, json!({"mcpServers": {"nodal": {"command": "/Applications/Nodal.app/Contents/MacOS/nodal-mcp", "args": ["--chat"]}}}));
+    let config: serde_json::Value =
+        serde_json::from_str(value_of(&args, "--mcp-config")[0]).unwrap();
+    assert_eq!(
+        config,
+        json!({"mcpServers": {"nodal": {"command": "/Applications/Nodal.app/Contents/MacOS/nodal-mcp", "args": ["--chat"]}}})
+    );
     assert_eq!(
         value_of(&args, "--allowedTools"),
         ["mcp__nodal__list_projects,mcp__nodal__list_tasks,mcp__nodal__get_task,mcp__nodal__get_run,mcp__nodal__propose_task"]
     );
-    assert_eq!(value_of(&args, "--add-dir"), ["/Users/me/Code/acme-web"], "the cwd isn't added again");
+    assert_eq!(
+        value_of(&args, "--add-dir"),
+        ["/Users/me/Code/acme-web"],
+        "the cwd isn't added again"
+    );
 
     let prompt = value_of(&args, "--append-system-prompt")[0];
-    assert!(prompt.starts_with("You are"), "a value starting with - would read as a flag");
+    assert!(
+        prompt.starts_with("You are"),
+        "a value starting with - would read as a flag"
+    );
     for part in [
         "Project: Acme payments (key PAY, id p1)",
         "Description: Checkout and invoices.\n",
@@ -65,22 +88,47 @@ fn a_project_chat_gets_nodal_mcp_every_other_repo_and_the_project() {
 #[test]
 fn a_repo_chat_is_narrowed_and_works_without_nodal_mcp() {
     let (project, repos) = fixture();
-    let args = args(&chat(Some("r2")), &project, &repos, ChatCwd::Repo(&repos[1]), None);
+    let args = args(
+        &chat(Some("r2")),
+        &project,
+        &repos,
+        ChatCwd::Repo(&repos[1]),
+        None,
+    );
     assert_eq!(args.len(), 2, "{args:?}");
     assert_eq!(args[0], "--append-system-prompt");
     let prompt = &args[1];
-    assert!(prompt.contains("Scope: only the repo acme-web (/Users/me/Code/acme-web)"), "{prompt}");
+    assert!(
+        prompt.contains("Scope: only the repo acme-web (/Users/me/Code/acme-web)"),
+        "{prompt}"
+    );
     assert!(prompt.contains("- acme-web: /Users/me/Code/acme-web (id r2) (this chat runs here)"));
-    assert!(prompt.contains("tools are not available") && !prompt.contains(PROPOSE_TASK), "{prompt}");
+    assert!(
+        prompt.contains("tools are not available") && !prompt.contains(PROPOSE_TASK),
+        "{prompt}"
+    );
 }
 
 #[test]
 fn a_long_description_is_clipped() {
     let (mut project, repos) = fixture();
     project.description = Some("x".repeat(DESCRIPTION_MAX + 50));
-    let prompt = system_prompt(&chat(None), &project, &repos, ChatCwd::Repo(&repos[0]), true);
-    let line = prompt.lines().find(|l| l.starts_with("Description: ")).unwrap();
-    assert!(line.chars().count() <= "Description: ".len() + DESCRIPTION_MAX, "{}", line.len());
+    let prompt = system_prompt(
+        &chat(None),
+        &project,
+        &repos,
+        ChatCwd::Repo(&repos[0]),
+        true,
+    );
+    let line = prompt
+        .lines()
+        .find(|l| l.starts_with("Description: "))
+        .unwrap();
+    assert!(
+        line.chars().count() <= "Description: ".len() + DESCRIPTION_MAX,
+        "{}",
+        line.len()
+    );
 }
 
 #[test]
@@ -89,8 +137,18 @@ fn a_root_chat_runs_at_the_root_and_adds_only_repos_outside_it() {
     project.root_path = Some("/Users/me/Code/acme".into());
     repos[0].path = "/Users/me/Code/acme/api".into();
     repos[1].path = "/Users/me/Code/acme-web".into();
-    let args = args(&chat(None), &project, &repos, ChatCwd::Root("/Users/me/Code/acme"), None);
-    assert_eq!(value_of(&args, "--add-dir"), ["/Users/me/Code/acme-web"], "a sibling with a shared prefix is outside");
+    let args = args(
+        &chat(None),
+        &project,
+        &repos,
+        ChatCwd::Root("/Users/me/Code/acme"),
+        None,
+    );
+    assert_eq!(
+        value_of(&args, "--add-dir"),
+        ["/Users/me/Code/acme-web"],
+        "a sibling with a shared prefix is outside"
+    );
 
     let prompt = value_of(&args, "--append-system-prompt")[0];
     for part in [
@@ -102,7 +160,11 @@ fn a_root_chat_runs_at_the_root_and_adds_only_repos_outside_it() {
     ] {
         assert!(prompt.contains(part), "missing {part:?} in:\n{prompt}");
     }
-    assert_eq!(prompt.matches("(this chat runs here)").count(), 1, "{prompt}");
+    assert_eq!(
+        prompt.matches("(this chat runs here)").count(),
+        1,
+        "{prompt}"
+    );
 }
 
 #[test]
@@ -112,7 +174,11 @@ fn a_root_chat_with_every_repo_under_it_adds_none() {
     repos[0].path = "/Users/me/Code/acme/api".into();
     repos[1].path = "/Users/me/Code/acme/web/app".into();
     let root = ChatCwd::Root("/Users/me/Code/acme");
-    assert!(value_of(&args(&chat(None), &project, &repos, root, None), "--add-dir").is_empty());
+    assert!(value_of(
+        &args(&chat(None), &project, &repos, root, None),
+        "--add-dir"
+    )
+    .is_empty());
 
     let prompt = system_prompt(&chat(None), &project, &[], root, false);
     assert!(prompt.contains("Repos:\n- none yet\n"), "{prompt}");
@@ -130,7 +196,13 @@ fn real_chat_sees_propose_task() {
     let mut project = project_of("p1", "PAY");
     project.name = "Acme".into();
     let repo = repo_of("r1", "p1", &dir.to_string_lossy());
-    let args = args(&chat(None), &project, std::slice::from_ref(&repo), ChatCwd::Repo(&repo), Some(&bin));
+    let args = args(
+        &chat(None),
+        &project,
+        std::slice::from_ref(&repo),
+        ChatCwd::Repo(&repo),
+        Some(&bin),
+    );
     let tools = tauri::async_runtime::block_on(async {
         let mut cmd = crate::runs::claude_bin::claude_command().expect("claude");
         cmd.args(crate::runs::stream_json::CHAT_ARGS)
@@ -144,7 +216,10 @@ fn real_chat_sees_propose_task() {
         let mut child = cmd.spawn().unwrap();
         let mut stdin = child.stdin.take().unwrap();
         let msg = json!({"type": "user", "message": {"role": "user", "content": "Reply OK"}});
-        stdin.write_all(format!("{msg}\n").as_bytes()).await.unwrap();
+        stdin
+            .write_all(format!("{msg}\n").as_bytes())
+            .await
+            .unwrap();
         let mut lines = BufReader::new(child.stdout.take().unwrap()).lines();
         while let Some(line) = lines.next_line().await.unwrap() {
             let ev: serde_json::Value = serde_json::from_str(&line).unwrap();
@@ -154,5 +229,12 @@ fn real_chat_sees_propose_task() {
         }
         panic!("no init event");
     });
-    assert!(tools.as_array().unwrap().iter().any(|t| t == &json!(tool_name(PROPOSE_TASK))), "{tools}");
+    assert!(
+        tools
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|t| t == &json!(tool_name(PROPOSE_TASK))),
+        "{tools}"
+    );
 }

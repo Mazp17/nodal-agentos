@@ -39,11 +39,26 @@ fn session_file_edit_results_carry_their_diff() {
         r#"{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"t1","content":"The file was updated."}]},"toolUseResult":{"filePath":"/r/README.md","structuredPatch":[{"oldStart":17,"oldLines":1,"newStart":17,"newLines":3,"lines":[" last line","+","+Modificado desde Nodal"]}]}}"#,
     ];
     let p = parse_transcript(&lines.join("\n"), 100);
-    let TranscriptItem::ToolUse { result: Some(r), .. } = &p.items[0] else { panic!("{:?}", p.items) };
+    let TranscriptItem::ToolUse {
+        result: Some(r), ..
+    } = &p.items[0]
+    else {
+        panic!("{:?}", p.items)
+    };
     let patch = r.patch.as_ref().expect("patch");
-    assert_eq!((patch.file.path.as_str(), patch.file.additions, patch.file.deletions), ("/r/README.md", 2, 0));
+    assert_eq!(
+        (
+            patch.file.path.as_str(),
+            patch.file.additions,
+            patch.file.deletions
+        ),
+        ("/r/README.md", 2, 0)
+    );
     let last = patch.file.hunks[0].lines.last().unwrap();
-    assert_eq!((last.text.as_str(), last.new_no), ("Modificado desde Nodal", Some(19)));
+    assert_eq!(
+        (last.text.as_str(), last.new_no),
+        ("Modificado desde Nodal", Some(19))
+    );
 }
 
 #[test]
@@ -55,7 +70,10 @@ fn workflow_review_denial_from_real_session() {
         r#"{"type":"user","message":{"role":"user","content":[{"type":"tool_result","content":"Review dynamic workflow before running","is_error":true,"tool_use_id":"toolu_01D3"}]},"toolUseResult":"Error: Review dynamic workflow before running"}"#,
         "\n",
     );
-    assert_eq!(find_workflow_review_denial(text), Some(Some("plan-task".into())));
+    assert_eq!(
+        find_workflow_review_denial(text),
+        Some(Some("plan-task".into()))
+    );
     // Without the call (or with another format): still detected, without a name.
     let only = text.lines().nth(1).unwrap();
     assert_eq!(find_workflow_review_denial(only), Some(None));
@@ -67,10 +85,22 @@ fn workflow_review_denial_from_real_session() {
 
 #[test]
 fn bg_line_real_format() {
-    assert_eq!(parse_bg_line("backgrounded · ddb91222").as_deref(), Some("ddb91222"));
-    assert_eq!(parse_bg_line("\u{1b}[2mbackgrounded\u{1b}[0m · \u{1b}[1mddb91222\u{1b}[0m").as_deref(), Some("ddb91222"));
-    assert_eq!(parse_bg_line("  backgrounded · ab12cd34  \r").as_deref(), Some("ab12cd34"));
-    assert_eq!(parse_bg_line("backgrounded · ab12cd34 · run `claude agents` to view").as_deref(), Some("ab12cd34"));
+    assert_eq!(
+        parse_bg_line("backgrounded · ddb91222").as_deref(),
+        Some("ddb91222")
+    );
+    assert_eq!(
+        parse_bg_line("\u{1b}[2mbackgrounded\u{1b}[0m · \u{1b}[1mddb91222\u{1b}[0m").as_deref(),
+        Some("ddb91222")
+    );
+    assert_eq!(
+        parse_bg_line("  backgrounded · ab12cd34  \r").as_deref(),
+        Some("ab12cd34")
+    );
+    assert_eq!(
+        parse_bg_line("backgrounded · ab12cd34 · run `claude agents` to view").as_deref(),
+        Some("ab12cd34")
+    );
     assert_eq!(parse_bg_line("backgrounded"), None);
     assert_eq!(parse_bg_line("Error: not logged in"), None);
     assert_eq!(parse_bare_id("ddb91222\n").as_deref(), Some("ddb91222"));
@@ -121,13 +151,21 @@ fn finds_session_dir_by_slug_and_by_scan() {
     let dir = find_session_dir(&projects, SANDBOX, DONE_SESSION).unwrap();
     assert!(dir.ends_with(DONE_SESSION));
     // cwd that doesn't match the slug: falls back to the scan.
-    assert_eq!(find_session_dir(&projects, "/somewhere/else", DONE_SESSION), Some(dir));
-    assert_eq!(find_session_dir(&projects, SANDBOX, "no-such-session"), None);
+    assert_eq!(
+        find_session_dir(&projects, "/somewhere/else", DONE_SESSION),
+        Some(dir)
+    );
+    assert_eq!(
+        find_session_dir(&projects, SANDBOX, "no-such-session"),
+        None
+    );
 }
 
 #[test]
 fn completed_run_uses_final_summary() {
-    let dir = fixtures_projects().join(project_slug(SANDBOX)).join(DONE_SESSION);
+    let dir = fixtures_projects()
+        .join(project_slug(SANDBOX))
+        .join(DONE_SESSION);
     let d = read_run_detail(&dir).unwrap();
     assert_eq!(d.source, DetailSource::Final);
     assert_eq!(d.workflow_id, "wf_2450b7a8-254");
@@ -136,7 +174,10 @@ fn completed_run_uses_final_summary() {
     assert_eq!(d.result_status.as_deref(), Some("green"));
     let titles: Vec<&str> = d.phases.iter().map(|p| p.title.as_str()).collect();
     assert_eq!(titles, ["Idear", "Escribir", "Revisar", "Cerrar"]);
-    assert_eq!(d.phases[0].detail.as_deref(), Some("un agente propone 4 subtemas"));
+    assert_eq!(
+        d.phases[0].detail.as_deref(),
+        Some("un agente propone 4 subtemas")
+    );
     assert_eq!(d.current_phase.as_deref(), Some("Cerrar"));
     assert_eq!(d.current_phase_index, Some(4));
     assert_eq!(d.agent_count, 10);
@@ -155,12 +196,17 @@ fn completed_run_uses_final_summary() {
     assert_eq!(first.tool_calls, Some(1));
     let last = d.agents.last().unwrap();
     assert_eq!(last.last_tool_name.as_deref(), Some("Bash"));
-    assert_eq!(last.last_tool_summary.as_deref(), Some("ls -la ./demo-out && wc -w ./demo-out/*.md"));
+    assert_eq!(
+        last.last_tool_summary.as_deref(),
+        Some("ls -la ./demo-out && wc -w ./demo-out/*.md")
+    );
 }
 
 #[test]
 fn cut_run_is_rebuilt_from_journal() {
-    let dir = fixtures_projects().join(project_slug(SANDBOX)).join(CUT_SESSION);
+    let dir = fixtures_projects()
+        .join(project_slug(SANDBOX))
+        .join(CUT_SESSION);
     let d = read_run_detail(&dir).unwrap();
     assert_eq!(d.source, DetailSource::Live);
     assert_eq!(d.workflow_id, "wf_4ec5fcf1-d6b");
@@ -173,7 +219,11 @@ fn cut_run_is_rebuilt_from_journal() {
     assert_eq!(d.current_phase.as_deref(), Some("Escribir"));
     assert_eq!(d.current_phase_index, Some(2));
     assert_eq!(d.agent_count, 5);
-    let states: Vec<(&str, AgentState)> = d.agents.iter().map(|a| (a.label.as_str(), a.state)).collect();
+    let states: Vec<(&str, AgentState)> = d
+        .agents
+        .iter()
+        .map(|a| (a.label.as_str(), a.state))
+        .collect();
     assert_eq!(
         states,
         [
@@ -184,9 +234,16 @@ fn cut_run_is_rebuilt_from_journal() {
             ("escribir:volcanes-y-el-planeta", AgentState::Running),
         ]
     );
-    assert!(d.agents.iter().all(|a| a.model.as_deref() == Some("claude-haiku-4-5-20251001")));
+    assert!(d
+        .agents
+        .iter()
+        .all(|a| a.model.as_deref() == Some("claude-haiku-4-5-20251001")));
     // Last tool taken from the transcript's tail (only agents in progress).
-    let planeta = d.agents.iter().find(|a| a.label == "escribir:volcanes-y-el-planeta").unwrap();
+    let planeta = d
+        .agents
+        .iter()
+        .find(|a| a.label == "escribir:volcanes-y-el-planeta")
+        .unwrap();
     assert_eq!(planeta.last_tool_name.as_deref(), Some("Bash"));
     assert_eq!(planeta.last_tool_summary.as_deref(), Some("sleep 34"));
     let idear = &d.agents[0];
@@ -264,56 +321,92 @@ fn linear_issue_result_is_typed() {
     assert!(r.raw.unwrap().contains("\"children\""));
 
     // Another workflow: no known fields, but with the raw JSON.
-    let demo = read_run_detail(&fixtures_projects().join(project_slug(SANDBOX)).join(DONE_SESSION)).unwrap();
+    let demo = read_run_detail(
+        &fixtures_projects()
+            .join(project_slug(SANDBOX))
+            .join(DONE_SESSION),
+    )
+    .unwrap();
     let res = demo.result.unwrap();
     assert_eq!((res.pr, res.unmet_acceptance, res.nits), (None, None, None));
     assert!(res.raw.unwrap().contains("\"tema\": \"volcanes\""));
 
     // PR that isn't a web URL: dropped. `null` or missing: no result.
-    let v: Value = serde_json::from_str(r#"{"pr":"javascript:alert(1)","nits":"not-a-list"}"#).unwrap();
+    let v: Value =
+        serde_json::from_str(r#"{"pr":"javascript:alert(1)","nits":"not-a-list"}"#).unwrap();
     let r = parse_result(Some(&v)).unwrap();
     assert_eq!((r.pr, r.nits), (None, None));
     assert_eq!(parse_result(Some(&Value::Null)), None);
     assert_eq!(parse_result(None), None);
-    assert_eq!(parse_result(Some(&Value::String("done".into()))).unwrap().raw.as_deref(), Some("done"));
+    assert_eq!(
+        parse_result(Some(&Value::String("done".into())))
+            .unwrap()
+            .raw
+            .as_deref(),
+        Some("done")
+    );
 }
 
 #[test]
 fn transcript_from_real_fixture() {
-    let dir = fixtures_projects().join(project_slug(SANDBOX)).join(DONE_SESSION);
-    let t = read_agent_transcript(&dir, "wf_2450b7a8-254", "a1007a0f03db17270", 200).unwrap().unwrap();
+    let dir = fixtures_projects()
+        .join(project_slug(SANDBOX))
+        .join(DONE_SESSION);
+    let t = read_agent_transcript(&dir, "wf_2450b7a8-254", "a1007a0f03db17270", 200)
+        .unwrap()
+        .unwrap();
     assert_eq!(t.label.as_deref(), Some("revisar:volcanes-famosos"));
     assert_eq!(t.model.as_deref(), Some("claude-sonnet-5"));
     assert_eq!(t.phase.as_deref(), Some("Revisar"));
     // Without the harness wrapper and without the indentation.
     let prompt = t.prompt.unwrap();
-    assert!(prompt.starts_with("Leé /Users/me/Code/nodal-sandbox/demo-out/04-volcanes-famosos.md"), "{prompt}");
+    assert!(
+        prompt.starts_with("Leé /Users/me/Code/nodal-sandbox/demo-out/04-volcanes-famosos.md"),
+        "{prompt}"
+    );
     assert!(!prompt.contains("Workflow harness"));
     // Empty (signed) thinking is skipped: Bash, text, StructuredOutput.
     assert_eq!(t.total_items, 3);
     assert_eq!(t.tool_calls, 2);
     assert_eq!(t.omitted, 0);
     match &t.items[0] {
-        TranscriptItem::ToolUse { name, summary, result, .. } => {
+        TranscriptItem::ToolUse {
+            name,
+            summary,
+            result,
+            ..
+        } => {
             assert_eq!(name, "Bash");
-            assert!(summary.as_deref().unwrap().starts_with("cat /Users/me/Code/nodal-sandbox/demo-out/04"));
+            assert!(summary
+                .as_deref()
+                .unwrap()
+                .starts_with("cat /Users/me/Code/nodal-sandbox/demo-out/04"));
             let r = result.as_ref().unwrap();
             assert!(r.text.starts_with("# Volcanes famosos del mundo"));
             assert!(!r.is_error);
         }
         other => panic!("{other:?}"),
     }
-    assert!(matches!(&t.items[1], TranscriptItem::Text { text, .. } if text.starts_with("160 palabras")));
+    assert!(
+        matches!(&t.items[1], TranscriptItem::Text { text, .. } if text.starts_with("160 palabras"))
+    );
     assert!(t.final_output.unwrap().contains("\"ok\": true"));
     assert!(!t.partial);
 
     // Limit: only the last N.
-    let t = read_agent_transcript(&dir, "wf_2450b7a8-254", "a1007a0f03db17270", 1).unwrap().unwrap();
+    let t = read_agent_transcript(&dir, "wf_2450b7a8-254", "a1007a0f03db17270", 1)
+        .unwrap()
+        .unwrap();
     assert_eq!((t.items.len(), t.omitted, t.total_items), (1, 2, 3));
-    assert!(matches!(&t.items[0], TranscriptItem::ToolUse { name, .. } if name == "StructuredOutput"));
+    assert!(
+        matches!(&t.items[0], TranscriptItem::ToolUse { name, .. } if name == "StructuredOutput")
+    );
 
     // No file → None; ids with paths → error.
-    assert_eq!(read_agent_transcript(&dir, "wf_2450b7a8-254", "nope", 10).unwrap(), None);
+    assert_eq!(
+        read_agent_transcript(&dir, "wf_2450b7a8-254", "nope", 10).unwrap(),
+        None
+    );
     assert!(read_agent_transcript(&dir, "wf_2450b7a8-254", "../x", 10).is_err());
     assert!(read_agent_transcript(&dir, "..", "a1", 10).is_err());
 }
@@ -336,9 +429,15 @@ fn transcript_tolerates_errors_arrays_and_long_text() {
     assert_eq!(p.total, 5);
     assert_eq!(p.tool_calls, 2);
     assert!(matches!(&p.items[0], TranscriptItem::Thinking { text, .. } if text == "hmm"));
-    assert!(matches!(&p.items[1], TranscriptItem::Text { truncated: true, text } if text.chars().count() == TEXT_MAX + 1));
+    assert!(
+        matches!(&p.items[1], TranscriptItem::Text { truncated: true, text } if text.chars().count() == TEXT_MAX + 1)
+    );
     match &p.items[2] {
-        TranscriptItem::ToolUse { summary, result: Some(r), .. } => {
+        TranscriptItem::ToolUse {
+            summary,
+            result: Some(r),
+            ..
+        } => {
             assert_eq!(summary.as_deref(), Some("/a/b.rs"));
             assert!(r.is_error);
             assert_eq!(r.text, "File not found\n[image]");
@@ -347,7 +446,15 @@ fn transcript_tolerates_errors_arrays_and_long_text() {
     }
     assert!(matches!(&p.items[3], TranscriptItem::User { text, .. } if text == "still there?"));
     // Tool with no result yet (agent running) and empty input.
-    assert!(matches!(&p.items[4], TranscriptItem::ToolUse { result: None, input: None, summary: None, .. }));
+    assert!(matches!(
+        &p.items[4],
+        TranscriptItem::ToolUse {
+            result: None,
+            input: None,
+            summary: None,
+            ..
+        }
+    ));
     // No StructuredOutput: the final output is the last text.
     assert!(p.final_output.unwrap().starts_with("xxx"));
 }
@@ -382,9 +489,16 @@ fn real_transcripts_on_disk() {
                 let wf_id = wf.file_name().to_string_lossy().into_owned();
                 for f in fs::read_dir(wf.path()).into_iter().flatten().flatten() {
                     let name = f.file_name().to_string_lossy().into_owned();
-                    let Some(agent) = name.strip_prefix("agent-").and_then(|s| s.strip_suffix(".jsonl")) else { continue };
+                    let Some(agent) = name
+                        .strip_prefix("agent-")
+                        .and_then(|s| s.strip_suffix(".jsonl"))
+                    else {
+                        continue;
+                    };
                     let t0 = std::time::Instant::now();
-                    let t = read_agent_transcript(&sess.path(), &wf_id, agent, 200).unwrap().unwrap();
+                    let t = read_agent_transcript(&sess.path(), &wf_id, agent, 200)
+                        .unwrap()
+                        .unwrap();
                     let dt = t0.elapsed();
                     assert!(t.items.len() <= 200);
                     if dt > slowest.0 {
@@ -395,7 +509,11 @@ fn real_transcripts_on_disk() {
             }
         }
     }
-    eprintln!("{n} transcripts; slowest {:?} {}", slowest.0, slowest.1.display());
+    eprintln!(
+        "{n} transcripts; slowest {:?} {}",
+        slowest.0,
+        slowest.1.display()
+    );
 }
 
 /// Against this machine's real data:
@@ -426,13 +544,22 @@ fn session_transcript_skips_sidechains() {
     fs::create_dir_all(&dir).unwrap();
     let path = dir.join("s.jsonl");
     fs::write(&path, lines.join("\n")).unwrap();
-    let t = read_session_transcript(&path, "run-1", Some("Claude".into()), None, 2).unwrap().unwrap();
+    let t = read_session_transcript(&path, "run-1", Some("Claude".into()), None, 2)
+        .unwrap()
+        .unwrap();
     assert_eq!(t.agent_id, "run-1");
     assert_eq!(t.prompt.as_deref(), Some("Fix the login bug"));
     assert_eq!((t.total_items, t.omitted, t.tool_calls), (3, 1, 1));
     assert_eq!(t.final_output.as_deref(), Some("Done."));
-    assert!(!t.items.iter().any(|i| matches!(i, TranscriptItem::Text { text, .. } if text == "subagent")));
-    assert!(read_session_transcript(&dir.join("nope.jsonl"), "x", None, None, 10).unwrap().is_none());
+    assert!(!t
+        .items
+        .iter()
+        .any(|i| matches!(i, TranscriptItem::Text { text, .. } if text == "subagent")));
+    assert!(
+        read_session_transcript(&dir.join("nope.jsonl"), "x", None, None, 10)
+            .unwrap()
+            .is_none()
+    );
     fs::remove_dir_all(&dir).ok();
 }
 
@@ -446,7 +573,10 @@ fn usage_tokens_dedupe_by_message_id() {
         "not json \"usage\" \"assistant\"",
     ];
     assert_eq!(usage_tokens_in(lines), Some(1115 + 3));
-    assert_eq!(usage_tokens_in([r#"{"type":"assistant","message":{"content":[]}}"#]), None);
+    assert_eq!(
+        usage_tokens_in([r#"{"type":"assistant","message":{"content":[]}}"#]),
+        None
+    );
     let dir = std::env::temp_dir().join(format!("nodal-usage-{}", std::process::id()));
     fs::create_dir_all(&dir).unwrap();
     let path = dir.join("s.jsonl");

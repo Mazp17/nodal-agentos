@@ -46,8 +46,18 @@ Binary files /dev/null and b/logo.png differ
 #[test]
 fn parses_statuses_counts_and_line_numbers() {
     let files = parse(SAMPLE);
-    let summary: Vec<(&str, DiffFileStatus, u32, u32, bool)> =
-        files.iter().map(|f| (f.path.as_str(), f.status, f.additions, f.deletions, f.binary)).collect();
+    let summary: Vec<(&str, DiffFileStatus, u32, u32, bool)> = files
+        .iter()
+        .map(|f| {
+            (
+                f.path.as_str(),
+                f.status,
+                f.additions,
+                f.deletions,
+                f.binary,
+            )
+        })
+        .collect();
     assert_eq!(
         summary,
         [
@@ -60,9 +70,16 @@ fn parses_statuses_counts_and_line_numbers() {
     );
     assert_eq!(files[3].old_path.as_deref(), Some("a b.txt"));
     let h = &files[0].hunks[0];
-    assert_eq!((h.old_start, h.old_lines, h.new_start, h.new_lines), (1, 3, 1, 4));
+    assert_eq!(
+        (h.old_start, h.old_lines, h.new_start, h.new_lines),
+        (1, 3, 1, 4)
+    );
     assert_eq!(h.header, "@@ -1,3 +1,4 @@ export function main() {");
-    let nums: Vec<(DiffLineKind, Option<u32>, Option<u32>)> = h.lines.iter().map(|l| (l.kind, l.old_no, l.new_no)).collect();
+    let nums: Vec<(DiffLineKind, Option<u32>, Option<u32>)> = h
+        .lines
+        .iter()
+        .map(|l| (l.kind, l.old_no, l.new_no))
+        .collect();
     assert_eq!(
         nums,
         [
@@ -73,7 +90,11 @@ fn parses_statuses_counts_and_line_numbers() {
             (DiffLineKind::Context, Some(3), Some(4)),
         ]
     );
-    assert_eq!(files[1].hunks[0].lines.len(), 2, "without the `\\ No newline` line");
+    assert_eq!(
+        files[1].hunks[0].lines.len(),
+        2,
+        "without the `\\ No newline` line"
+    );
     assert!(parse("").is_empty());
 }
 
@@ -87,8 +108,17 @@ fn diff_of_a_worktree_branch_includes_uncommitted_and_untracked() {
     let repo = t.0.join("repo");
     init_repo(&repo);
     let git = |args: &[&str]| {
-        let out = std::process::Command::new("git").arg("-C").arg(&repo).args(args).output().unwrap();
-        assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+        let out = std::process::Command::new("git")
+            .arg("-C")
+            .arg(&repo)
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
     };
     git(&["checkout", "-q", "-b", "feature"]);
     std::fs::write(repo.join("README.md"), "# demo\ncommitted\n").unwrap();
@@ -98,7 +128,10 @@ fn diff_of_a_worktree_branch_includes_uncommitted_and_untracked() {
     assert_eq!(current_branch(&repo).as_deref(), Some("feature"));
     let log = commits(&repo, "main", "HEAD").unwrap();
     assert_eq!(log.len(), 1);
-    assert_eq!((log[0].subject.as_str(), log[0].author.as_str()), ("change", "Test"));
+    assert_eq!(
+        (log[0].subject.as_str(), log[0].author.as_str()),
+        ("change", "Test")
+    );
     assert!(log[0].sha.starts_with(&log[0].short_sha) && log[0].at > 0);
     assert_eq!(commits(&repo, "main", "feature").unwrap(), log);
     assert!(commits(&repo, "feature", "HEAD").unwrap().is_empty());
@@ -107,7 +140,10 @@ fn diff_of_a_worktree_branch_includes_uncommitted_and_untracked() {
     assert_eq!(files.len(), 1);
     assert_eq!((files[0].additions, files[0].deletions), (1, 0));
     // The same branch seen from outside (like a workflow's).
-    assert_eq!(parse(&collect_branch(&repo, "main", "feature").unwrap()).len(), 1);
+    assert_eq!(
+        parse(&collect_branch(&repo, "main", "feature").unwrap()).len(),
+        1
+    );
     assert!(collect_branch(&repo, "main", "--output=x").is_err());
 
     std::fs::write(repo.join("README.md"), "# demo\ncommitted\nwip\n").unwrap();
@@ -115,8 +151,17 @@ fn diff_of_a_worktree_branch_includes_uncommitted_and_untracked() {
     let (patch, dirty) = collect(&repo, Some("main")).unwrap();
     assert!(dirty);
     let files = parse(&patch);
-    let paths: Vec<(&str, DiffFileStatus, u32)> = files.iter().map(|f| (f.path.as_str(), f.status, f.additions)).collect();
-    assert_eq!(paths, [("README.md", DiffFileStatus::Modified, 2), ("new file.txt", DiffFileStatus::Added, 1)]);
+    let paths: Vec<(&str, DiffFileStatus, u32)> = files
+        .iter()
+        .map(|f| (f.path.as_str(), f.status, f.additions))
+        .collect();
+    assert_eq!(
+        paths,
+        [
+            ("README.md", DiffFileStatus::Modified, 2),
+            ("new file.txt", DiffFileStatus::Added, 1)
+        ]
+    );
     // No base (in_place): only uncommitted work.
     let (patch, _) = collect(&repo, None).unwrap();
     let files = parse(&patch);
@@ -129,6 +174,9 @@ fn parse_log_tolerates_bad_lines() {
     let text = "aaaa\u{1f}aa\u{1f}Ana\u{1f}1700000000\u{1f}fix: a\u{1f}b\nbroken\nbbbb\u{1f}bb\u{1f}Ana\u{1f}x\u{1f}s\n";
     let log = parse_log(text);
     assert_eq!(log.len(), 1);
-    assert_eq!(log[0].subject, "fix: a\u{1f}b", "the subject may contain the separator");
+    assert_eq!(
+        log[0].subject, "fix: a\u{1f}b",
+        "the subject may contain the separator"
+    );
     assert_eq!(log[0].at, 1_700_000_000_000);
 }

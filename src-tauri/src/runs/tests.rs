@@ -7,7 +7,15 @@ fn append_system_prompt_is_one_arg_after_the_variadic_lists() {
         append_system_prompt: Some("Don't ask: stop.".into()),
         ..Default::default()
     };
-    assert_eq!(extra.to_args(), ["--allowedTools", "Bash(npm test:*)", "--append-system-prompt", "Don't ask: stop."]);
+    assert_eq!(
+        extra.to_args(),
+        [
+            "--allowedTools",
+            "Bash(npm test:*)",
+            "--append-system-prompt",
+            "Don't ask: stop."
+        ]
+    );
     assert!(ExtraFlags::default().to_args().is_empty());
 }
 
@@ -20,7 +28,8 @@ fn real_list_and_detail() {
     eprintln!("{} background runs", runs.len());
     for r in runs.iter().take(5) {
         let cwd = r.cwd.clone().unwrap_or_default();
-        let d = tauri::async_runtime::block_on(get_run_detail(r.session_id.clone(), cwd)).expect("detail");
+        let d = tauri::async_runtime::block_on(get_run_detail(r.session_id.clone(), cwd))
+            .expect("detail");
         eprintln!(
             "{} {:?} {:?} -> {:?}",
             r.id,
@@ -29,9 +38,17 @@ fn real_list_and_detail() {
             d.map(|d| (d.workflow_id, d.source, d.current_phase, d.agents.len()))
         );
     }
-    let err = tauri::async_runtime::block_on(launch_with("/no/such/dir".into(), "x".into(), &LaunchOptions::default(), &ExtraFlags::default()))
-        .unwrap_err();
-    assert_eq!(err, "The folder doesn't exist or isn't a directory: /no/such/dir");
+    let err = tauri::async_runtime::block_on(launch_with(
+        "/no/such/dir".into(),
+        "x".into(),
+        &LaunchOptions::default(),
+        &ExtraFlags::default(),
+    ))
+    .unwrap_err();
+    assert_eq!(
+        err,
+        "The folder doesn't exist or isn't a directory: /no/such/dir"
+    );
 }
 
 /// Against the real `claude`: `cargo test -- --ignored`. Launches two runs (plain and with
@@ -43,9 +60,18 @@ fn real_launch_with_append_system_prompt() {
     let prompt = "Reply with the single word OK.".to_string();
     let sp = Some(crate::work::launch::UNATTENDED_SYSTEM_PROMPT.to_string());
     for agent in [None, Some("code-reviewer".to_string())] {
-        let extra = ExtraFlags { agent: agent.clone(), append_system_prompt: sp.clone(), ..Default::default() };
-        let run = tauri::async_runtime::block_on(launch_with(cwd.clone(), prompt.clone(), &LaunchOptions::default(), &extra))
-            .unwrap_or_else(|e| panic!("launch with agent {agent:?}: {e}"));
+        let extra = ExtraFlags {
+            agent: agent.clone(),
+            append_system_prompt: sp.clone(),
+            ..Default::default()
+        };
+        let run = tauri::async_runtime::block_on(launch_with(
+            cwd.clone(),
+            prompt.clone(),
+            &LaunchOptions::default(),
+            &extra,
+        ))
+        .unwrap_or_else(|e| panic!("launch with agent {agent:?}: {e}"));
         eprintln!("agent {agent:?} -> backgrounded · {}", run.id);
         tauri::async_runtime::block_on(terminal::stop(&run.id)).expect("stop");
     }
@@ -62,8 +88,16 @@ fn transcript_rejects_traversal_ids() {
             None,
         ))
     };
-    assert!(call("wf_../../etc", "a1").unwrap_err().contains("Invalid workflow run id"));
-    assert!(call("../wf_x", "a1").unwrap_err().contains("Invalid workflow run id"));
-    assert!(call("wf_abc", "../../x").unwrap_err().contains("Invalid agent id"));
-    assert!(call("wf_abc", "a/b").unwrap_err().contains("Invalid agent id"));
+    assert!(call("wf_../../etc", "a1")
+        .unwrap_err()
+        .contains("Invalid workflow run id"));
+    assert!(call("../wf_x", "a1")
+        .unwrap_err()
+        .contains("Invalid workflow run id"));
+    assert!(call("wf_abc", "../../x")
+        .unwrap_err()
+        .contains("Invalid agent id"));
+    assert!(call("wf_abc", "a/b")
+        .unwrap_err()
+        .contains("Invalid agent id"));
 }

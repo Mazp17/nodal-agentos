@@ -3,7 +3,9 @@
 use super::*;
 
 fn env_key() -> Option<String> {
-    std::env::var("LINEAR_API_KEY").ok().filter(|k| !k.trim().is_empty())
+    std::env::var("LINEAR_API_KEY")
+        .ok()
+        .filter(|k| !k.trim().is_empty())
 }
 
 #[test]
@@ -31,7 +33,9 @@ fn live_viewer_teams_board() {
 fn live_bogus_key_is_invalid() {
     tauri::async_runtime::block_on(async {
         let http = http_client();
-        let err = LinearClient::new(&http, "lin_api_fake_key_for_test").viewer().await;
+        let err = LinearClient::new(&http, "lin_api_fake_key_for_test")
+            .viewer()
+            .await;
         assert_eq!(err.unwrap_err(), LinearError::InvalidKey);
     });
 }

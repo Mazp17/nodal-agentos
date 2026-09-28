@@ -19,14 +19,26 @@ impl Drop for TempDir {
 }
 
 pub fn git_available() -> bool {
-    std::process::Command::new("git").arg("--version").output().is_ok_and(|o| o.status.success())
+    std::process::Command::new("git")
+        .arg("--version")
+        .output()
+        .is_ok_and(|o| o.status.success())
 }
 
 /// `git init` with an initial commit on `main` and a local test identity.
 pub fn init_repo(dir: &Path) {
     let run = |args: &[&str]| {
-        let out = std::process::Command::new("git").arg("-C").arg(dir).args(args).output().unwrap();
-        assert!(out.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&out.stderr));
+        let out = std::process::Command::new("git")
+            .arg("-C")
+            .arg(dir)
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "git {args:?}: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
     };
     std::fs::create_dir_all(dir).unwrap();
     run(&["init", "-q", "-b", "main"]);
@@ -41,17 +53,24 @@ pub fn init_repo(dir: &Path) {
 #[test]
 fn dev_data_lives_next_to_the_release_data() {
     let dir = Path::new("/Users/me/Library/Application Support/io.github.mazp17.nodal");
-    assert_eq!(dev_sibling(dir), Path::new("/Users/me/Library/Application Support/io.github.mazp17.nodal.dev"));
+    assert_eq!(
+        dev_sibling(dir),
+        Path::new("/Users/me/Library/Application Support/io.github.mazp17.nodal.dev")
+    );
     // `cargo test` is a debug build unless run with --release.
     assert_eq!(nodal_home().unwrap().ends_with(".nodal-dev"), DEV);
 }
 
 #[test]
 fn standalone_data_dir_matches_the_app_and_keeps_debug_apart() {
-    let conf: serde_json::Value = serde_json::from_str(include_str!("../../../tauri.conf.json")).unwrap();
+    let conf: serde_json::Value =
+        serde_json::from_str(include_str!("../../../tauri.conf.json")).unwrap();
     assert_eq!(conf["identifier"], APP_IDENTIFIER);
     let dir = data_dir_standalone().unwrap();
-    assert_eq!(dir.parent().unwrap(), home().unwrap().join("Library/Application Support"));
+    assert_eq!(
+        dir.parent().unwrap(),
+        home().unwrap().join("Library/Application Support")
+    );
     assert_eq!(dir.to_string_lossy().ends_with(".nodal.dev"), DEV);
     assert_eq!(mcp_socket(&dir), dir.join("mcp.sock"));
 }
@@ -72,9 +91,13 @@ fn git_root_of_subfolder() {
     let outside = t.0.join("not-git");
     std::fs::create_dir_all(&outside).unwrap();
     assert_eq!(git_root_of(outside.to_str().unwrap()).unwrap(), None);
-    assert!(require_git_root(outside.to_str().unwrap()).unwrap_err().contains("not inside a git repository"));
+    assert!(require_git_root(outside.to_str().unwrap())
+        .unwrap_err()
+        .contains("not inside a git repository"));
     assert!(tauri::async_runtime::block_on(resolve_git_root("relative".into())).is_err());
-    assert!(git_root_of("/no/such/dir").unwrap_err().contains("doesn't exist"));
+    assert!(git_root_of("/no/such/dir")
+        .unwrap_err()
+        .contains("doesn't exist"));
 }
 
 #[test]
@@ -85,27 +108,57 @@ fn scans_repos_up_to_three_levels_down() {
     }
     let t = TempDir::new("scan-repos");
     let root = &t.0;
-    for repo in ["api", "web/app", "a/b/c", "x/y/z/too-deep", "node_modules/pkg", ".hidden/repo", "api/vendor/lib"] {
+    for repo in [
+        "api",
+        "web/app",
+        "a/b/c",
+        "x/y/z/too-deep",
+        "node_modules/pkg",
+        ".hidden/repo",
+        "api/vendor/lib",
+    ] {
         init_repo(&root.join(repo));
     }
     std::fs::create_dir_all(root.join("notes/2026")).unwrap();
     let git = |args: &[&str]| {
-        let out = std::process::Command::new("git").arg("-C").arg(root.join("api")).args(args).output().unwrap();
-        assert!(out.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&out.stderr));
+        let out = std::process::Command::new("git")
+            .arg("-C")
+            .arg(root.join("api"))
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "git {args:?}: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
     };
     git(&["worktree", "add", "-q", "-b", "wt", "../worktrees/api-wt"]);
     #[cfg(unix)]
     std::os::unix::fs::symlink(root.join("web"), root.join("web-link")).unwrap();
 
-    let found = tauri::async_runtime::block_on(scan_git_repos(root.to_string_lossy().into_owned())).unwrap();
-    let expected: Vec<String> =
-        ["a/b/c", "api", "web/app", "worktrees/api-wt"].iter().map(|r| root.join(r).to_string_lossy().into_owned()).collect();
+    let found = tauri::async_runtime::block_on(scan_git_repos(root.to_string_lossy().into_owned()))
+        .unwrap();
+    let expected: Vec<String> = ["a/b/c", "api", "web/app", "worktrees/api-wt"]
+        .iter()
+        .map(|r| root.join(r).to_string_lossy().into_owned())
+        .collect();
     assert_eq!(found, expected);
 
-    assert_eq!(git_repos_under(root.join("api").to_str().unwrap()).unwrap(), vec![root.join("api")]);
-    assert_eq!(git_repos_under(root.join("notes").to_str().unwrap()).unwrap(), Vec::<PathBuf>::new());
-    assert!(git_repos_under("/no/such/dir").unwrap_err().contains("doesn't exist"));
-    assert!(git_repos_under("relative").unwrap_err().contains("absolute"));
+    assert_eq!(
+        git_repos_under(root.join("api").to_str().unwrap()).unwrap(),
+        vec![root.join("api")]
+    );
+    assert_eq!(
+        git_repos_under(root.join("notes").to_str().unwrap()).unwrap(),
+        Vec::<PathBuf>::new()
+    );
+    assert!(git_repos_under("/no/such/dir")
+        .unwrap_err()
+        .contains("doesn't exist"));
+    assert!(git_repos_under("relative")
+        .unwrap_err()
+        .contains("absolute"));
 }
 
 #[test]
@@ -115,11 +168,19 @@ fn canonical_dir_resolves_symlinks() {
     #[cfg(unix)]
     {
         std::os::unix::fs::symlink(t.0.join("real"), t.0.join("link")).unwrap();
-        assert_eq!(canonical_dir(t.0.join("link").to_str().unwrap()).unwrap(), t.0.join("real"));
+        assert_eq!(
+            canonical_dir(t.0.join("link").to_str().unwrap()).unwrap(),
+            t.0.join("real")
+        );
     }
-    assert_eq!(canonical_dir(&format!("  {}  ", t.0.join("real").display())).unwrap(), t.0.join("real"));
+    assert_eq!(
+        canonical_dir(&format!("  {}  ", t.0.join("real").display())).unwrap(),
+        t.0.join("real")
+    );
     std::fs::write(t.0.join("file"), "x").unwrap();
-    assert!(canonical_dir(t.0.join("file").to_str().unwrap()).unwrap_err().contains("doesn't exist"));
+    assert!(canonical_dir(t.0.join("file").to_str().unwrap())
+        .unwrap_err()
+        .contains("doesn't exist"));
 }
 
 #[test]

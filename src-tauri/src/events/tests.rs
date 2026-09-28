@@ -1,7 +1,10 @@
 use super::*;
 
 fn c(kind: Kind, p: Option<&str>) -> Changed {
-    Changed { kind, project_id: p.map(str::to_string) }
+    Changed {
+        kind,
+        project_id: p.map(str::to_string),
+    }
 }
 
 #[test]
@@ -10,8 +13,14 @@ fn pending_schedules_once_and_dedupes() {
     assert!(p.push(c(Kind::Tasks, Some("p1"))));
     assert!(!p.push(c(Kind::Tasks, Some("p1"))));
     assert!(!p.push(c(Kind::Runs, None)));
-    assert_eq!(p.drain(), vec![c(Kind::Tasks, Some("p1")), c(Kind::Runs, None)]);
-    assert!(p.push(c(Kind::Queue, None)), "after draining it schedules again");
+    assert_eq!(
+        p.drain(),
+        vec![c(Kind::Tasks, Some("p1")), c(Kind::Runs, None)]
+    );
+    assert!(
+        p.push(c(Kind::Queue, None)),
+        "after draining it schedules again"
+    );
 }
 
 #[test]
@@ -20,7 +29,10 @@ fn global_notice_covers_project_ones() {
     p.push(c(Kind::Tasks, Some("p1")));
     p.push(c(Kind::Tasks, None));
     p.push(c(Kind::Sources, Some("p2")));
-    assert_eq!(p.drain(), vec![c(Kind::Tasks, None), c(Kind::Sources, Some("p2"))]);
+    assert_eq!(
+        p.drain(),
+        vec![c(Kind::Tasks, None), c(Kind::Sources, Some("p2"))]
+    );
 }
 
 #[test]

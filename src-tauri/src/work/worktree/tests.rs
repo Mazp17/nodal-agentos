@@ -3,14 +3,23 @@ use crate::util::paths::tests::{git_available, init_repo, TempDir};
 
 #[test]
 fn slugs() {
-    assert_eq!(task_slug("PAY", 1, "New logo in the header!"), "pay-1-new-logo-in-the-header");
-    assert_eq!(task_slug("WEB", 12, "Crème brûlée for the piñata"), "web-12-creme-brulee-for-the-pinata");
+    assert_eq!(
+        task_slug("PAY", 1, "New logo in the header!"),
+        "pay-1-new-logo-in-the-header"
+    );
+    assert_eq!(
+        task_slug("WEB", 12, "Crème brûlée for the piñata"),
+        "web-12-creme-brulee-for-the-pinata"
+    );
     assert_eq!(task_slug("A1", 3, "  ¿¿??  "), "a1-3");
     let long = task_slug("PAY", 1, &"word ".repeat(20));
     assert!(long.len() <= SLUG_MAX, "{long}");
     assert!(!long.ends_with('-'));
     assert_eq!(branch_for("pay-1-x"), "nodal/pay-1-x");
-    assert_eq!(dir_for(Path::new("/w"), "My Repo", "pay-1"), PathBuf::from("/w/my-repo/pay-1"));
+    assert_eq!(
+        dir_for(Path::new("/w"), "My Repo", "pay-1"),
+        PathBuf::from("/w/my-repo/pay-1")
+    );
 }
 
 #[test]
@@ -27,7 +36,10 @@ fn create_reuse_and_cleanup() {
     assert_eq!(wt.branch, "nodal/pay-1-logo");
     assert_eq!(wt.base, "main");
     assert!(Path::new(&wt.path).join("README.md").is_file());
-    assert_eq!(current_base(Path::new(&wt.path)).unwrap(), "nodal/pay-1-logo");
+    assert_eq!(
+        current_base(Path::new(&wt.path)).unwrap(),
+        "nodal/pay-1-logo"
+    );
 
     // Reuse: same worktree, without touching what's inside.
     std::fs::write(Path::new(&wt.path).join("wip.txt"), "x").unwrap();
@@ -45,7 +57,9 @@ fn create_reuse_and_cleanup() {
     let foreign = t.0.join("worktrees/repo/other");
     std::fs::create_dir_all(&foreign).unwrap();
     std::fs::write(foreign.join("f"), "x").unwrap();
-    assert!(ensure(&repo, &foreign, "nodal/other", None).unwrap_err().contains("not a worktree"));
+    assert!(ensure(&repo, &foreign, "nodal/other", None)
+        .unwrap_err()
+        .contains("not a worktree"));
 
     // Status: foreign folder deleted; the worktree is clean and has no commits of its own.
     std::fs::remove_dir_all(&foreign).unwrap();
@@ -59,19 +73,28 @@ fn create_reuse_and_cleanup() {
     std::fs::write(wtp.join("new.txt"), "x").unwrap();
     let st = status(&repo, Some(&recreated)).unwrap();
     assert!(st.dirty);
-    assert!(cleanup_blocker(&st).unwrap().contains("uncommitted changes"));
+    assert!(cleanup_blocker(&st)
+        .unwrap()
+        .contains("uncommitted changes"));
     git::ok(wtp, &["add", "."]).unwrap();
     git::ok(wtp, &["commit", "-q", "-m", "wip"]).unwrap();
     let st = status(&repo, Some(&recreated)).unwrap();
     assert!(!st.dirty);
     assert_eq!((st.ahead, st.unpushed), (1, 1));
     let msg = cleanup_blocker(&st).unwrap();
-    assert!(msg.contains("1 unpushed commit:") && msg.contains("force"), "{msg}");
+    assert!(
+        msg.contains("1 unpushed commit:") && msg.contains("force"),
+        "{msg}"
+    );
 
     // With the branch pushed to a remote there's nothing left to lose.
     let remote = t.0.join("remote.git");
     git::ok(&t.0, &["init", "-q", "--bare", remote.to_str().unwrap()]).unwrap();
-    git::ok(&repo, &["remote", "add", "origin", remote.to_str().unwrap()]).unwrap();
+    git::ok(
+        &repo,
+        &["remote", "add", "origin", remote.to_str().unwrap()],
+    )
+    .unwrap();
     git::ok(&repo, &["push", "-q", "origin", "nodal/pay-1-logo"]).unwrap();
     let st = status(&repo, Some(&recreated)).unwrap();
     assert_eq!((st.ahead, st.unpushed), (1, 0));
