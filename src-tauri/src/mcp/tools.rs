@@ -4,7 +4,7 @@
 
 use std::path::Path;
 
-use rusqlite::Connection;
+use crate::db::Connection;
 use serde::Deserialize;
 use serde_json::{json, Map, Value};
 

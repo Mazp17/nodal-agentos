@@ -12,7 +12,7 @@ pub mod process;
 
 use std::path::{Path, PathBuf};
 
-use rusqlite::Connection;
+use crate::db::Connection;
 use serde::Deserialize;
 
 use crate::db::queries::{chats, double_option, projects, repos};

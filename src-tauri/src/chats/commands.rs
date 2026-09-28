@@ -19,7 +19,7 @@ use super::{chat_cwd, ops, spec, ChatPatch, ChatState, NewChat};
 async fn db<T, F>(state: &WorkState, f: F) -> Result<T, String>
 where
     T: Send + 'static,
-    F: FnOnce(&mut rusqlite::Connection) -> Result<T, String> + Send + 'static,
+    F: FnOnce(&mut crate::db::Connection) -> Result<T, String> + Send + 'static,
 {
     Ok(crate::db::with_db(&state.0.db, move |c| f(c).map_err(crate::db::DbError::Invalid)).await?)
 }

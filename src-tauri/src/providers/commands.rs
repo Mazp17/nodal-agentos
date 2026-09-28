@@ -168,7 +168,7 @@ pub struct SourceLinkPatch {
     pub auto_import: Option<bool>,
 }
 
-fn check_link_repos(conn: &rusqlite::Connection, link: &SourceLink) -> Result<(), DbError> {
+fn check_link_repos(conn: &crate::db::Connection, link: &SourceLink) -> Result<(), DbError> {
     let repos = link.default_repo_id.iter().chain(link.repo_rules.iter().map(|r| &r.repo_id));
     for repo in repos {
         store::check_repo_in_project(conn, repo, &link.project_id)?;

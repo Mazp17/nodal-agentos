@@ -27,7 +27,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use rusqlite::Connection;
+use crate::db::Connection;
 use tauri::{AppHandle, Manager};
 
 use crate::db::{rows, with_db, Db, DbError};

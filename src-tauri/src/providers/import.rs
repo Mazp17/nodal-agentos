@@ -2,7 +2,7 @@
 
 use std::path::Path;
 
-use rusqlite::Connection;
+use crate::db::Connection;
 
 use crate::db::{rows, DbError};
 use crate::domain::{RepoRule, SourceLink, Task};
