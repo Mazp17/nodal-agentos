@@ -32,8 +32,9 @@ impl Db {
     /// Opens (or creates) the database at `path`, with WAL, FKs on and migrations applied.
     pub fn open(path: &Path) -> Result<Db, StoreError> {
         if let Some(dir) = path.parent() {
-            std::fs::create_dir_all(dir)
-                .map_err(|e| StoreError::Invalid(format!("Could not create {}: {e}", dir.display())))?;
+            std::fs::create_dir_all(dir).map_err(|e| {
+                StoreError::Invalid(format!("Could not create {}: {e}", dir.display()))
+            })?;
         }
         let mut conn = Connection::open(path)?;
         configure(&mut conn)?;
@@ -50,7 +51,10 @@ impl Db {
 
     /// Std semantics: propagates poisoning.
     pub fn lock(&self) -> LockResult<DbGuard<'_>> {
-        self.0.lock().map(DbGuard).map_err(|e| PoisonError::new(DbGuard(e.into_inner())))
+        self.0
+            .lock()
+            .map(DbGuard)
+            .map_err(|e| PoisonError::new(DbGuard(e.into_inner())))
     }
 
     /// Poison-recovering (a panic while holding the lock doesn't leave the connection
@@ -60,7 +64,10 @@ impl Db {
     }
 
     /// Forward-compat (P10): not used by moved code, which keeps using `with_db`.
-    pub async fn read<T, E>(&self, f: impl FnOnce(&Conn) -> Result<T, E> + Send + 'static) -> Result<T, E>
+    pub async fn read<T, E>(
+        &self,
+        f: impl FnOnce(&Conn) -> Result<T, E> + Send + 'static,
+    ) -> Result<T, E>
     where
         T: Send + 'static,
         E: From<StoreError> + Send + 'static,
@@ -78,7 +85,10 @@ impl Db {
     }
 
     /// Forward-compat (P10): not used by moved code. `DEFERRED` transaction, committed on `Ok`.
-    pub async fn write<T, E>(&self, f: impl FnOnce(&Tx<'_>) -> Result<T, E> + Send + 'static) -> Result<T, E>
+    pub async fn write<T, E>(
+        &self,
+        f: impl FnOnce(&Tx<'_>) -> Result<T, E> + Send + 'static,
+    ) -> Result<T, E>
     where
         T: Send + 'static,
         E: From<StoreError> + Send + 'static,
@@ -86,7 +96,9 @@ impl Db {
         let db = self.0.clone();
         match tokio::task::spawn_blocking(move || {
             let mut conn = db.lock().unwrap_or_else(|p| p.into_inner());
-            let tx = Conn::wrap_mut(&mut conn).transaction().map_err(StoreError::from)?;
+            let tx = Conn::wrap_mut(&mut conn)
+                .transaction()
+                .map_err(StoreError::from)?;
             let result = f(&tx)?;
             tx.commit().map_err(StoreError::from)?;
             Ok(result)

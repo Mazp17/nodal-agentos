@@ -14,13 +14,20 @@ pub(crate) fn opt_json<T: Serialize>(v: &Option<T>) -> rusqlite::Result<Option<S
 }
 
 pub(crate) fn parse_json<T: DeserializeOwned>(s: &str) -> rusqlite::Result<T> {
-    serde_json::from_str(s).map_err(|e| rusqlite::Error::FromSqlConversionFailure(0, Type::Text, Box::new(e)))
+    serde_json::from_str(s)
+        .map_err(|e| rusqlite::Error::FromSqlConversionFailure(0, Type::Text, Box::new(e)))
 }
 
 pub(crate) fn get_json<T: DeserializeOwned>(row: &Row, col: &str) -> rusqlite::Result<T> {
     parse_json(&row.get::<_, String>(col)?)
 }
 
-pub(crate) fn get_opt_json<T: DeserializeOwned>(row: &Row, col: &str) -> rusqlite::Result<Option<T>> {
-    row.get::<_, Option<String>>(col)?.as_deref().map(parse_json).transpose()
+pub(crate) fn get_opt_json<T: DeserializeOwned>(
+    row: &Row,
+    col: &str,
+) -> rusqlite::Result<Option<T>> {
+    row.get::<_, Option<String>>(col)?
+        .as_deref()
+        .map(parse_json)
+        .transpose()
 }

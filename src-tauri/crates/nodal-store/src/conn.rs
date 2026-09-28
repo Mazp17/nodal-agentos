@@ -51,7 +51,11 @@ impl Conn {
         self.0.execute(sql, params)
     }
     #[cfg(not(any(test, feature = "test-support")))]
-    pub(crate) fn execute<P: rusqlite::Params>(&self, sql: &str, params: P) -> rusqlite::Result<usize> {
+    pub(crate) fn execute<P: rusqlite::Params>(
+        &self,
+        sql: &str,
+        params: P,
+    ) -> rusqlite::Result<usize> {
         self.0.execute(sql, params)
     }
 
@@ -85,7 +89,12 @@ impl Conn {
     }
 
     #[cfg(any(test, feature = "test-support"))]
-    pub fn pragma_update<V: rusqlite::ToSql>(&self, schema_name: Option<&str>, pragma_name: &str, pragma_value: V) -> rusqlite::Result<()> {
+    pub fn pragma_update<V: rusqlite::ToSql>(
+        &self,
+        schema_name: Option<&str>,
+        pragma_name: &str,
+        pragma_value: V,
+    ) -> rusqlite::Result<()> {
         self.0.pragma_update(schema_name, pragma_name, pragma_value)
     }
     /// Not called by moved SQL bodies yet (`db.rs`'s `configure` works on the raw connection);
