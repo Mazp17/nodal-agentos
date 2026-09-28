@@ -127,69 +127,7 @@ impl Secrets {
 }
 
 #[cfg(test)]
-pub mod testing {
-    use super::*;
-
-    /// In-memory backend that counts reads (to test the cache).
-    #[derive(Default, Clone)]
-    pub struct MemoryBackend {
-        pub data: Arc<Mutex<HashMap<String, String>>>,
-        pub reads: Arc<Mutex<usize>>,
-    }
-
-    impl SecretBackend for MemoryBackend {
-        fn read(&self, account: &str) -> Result<Option<String>, String> {
-            *self.reads.lock().unwrap() += 1;
-            Ok(self.data.lock().unwrap().get(account).cloned())
-        }
-        fn write(&self, account: &str, value: &str) -> Result<(), String> {
-            self.data.lock().unwrap().insert(account.into(), value.into());
-            Ok(())
-        }
-        fn delete(&self, account: &str) -> Result<(), String> {
-            self.data.lock().unwrap().remove(account);
-            Ok(())
-        }
-    }
-}
+pub mod testing;
 
 #[cfg(test)]
-mod tests {
-    use super::testing::MemoryBackend;
-    use super::*;
-
-    #[test]
-    fn account_names() {
-        assert_eq!(account_for("linear").unwrap(), "linear-api-key");
-        assert_eq!(account_for("azure_devops").unwrap(), "azure_devops-api-key");
-        assert!(account_for("").is_err());
-        assert!(account_for("Linear").is_err());
-        assert!(account_for("a/b").is_err());
-    }
-
-    #[test]
-    fn get_set_delete_with_cache() {
-        tauri::async_runtime::block_on(async {
-            let mem = MemoryBackend::default();
-            mem.data.lock().unwrap().insert("linear-api-key".into(), "  lin_abc \n".into());
-            let s = Secrets::with_backend(mem.clone());
-
-            assert_eq!(s.get("linear").await.unwrap().as_deref(), Some("lin_abc"));
-            assert_eq!(s.get("linear").await.unwrap().as_deref(), Some("lin_abc"));
-            assert_eq!(*mem.reads.lock().unwrap(), 1, "the second read comes from the cache");
-
-            assert_eq!(s.get("asana").await.unwrap(), None);
-            s.set("asana", " as_1 ").await.unwrap();
-            assert_eq!(s.get("asana").await.unwrap().as_deref(), Some("as_1"));
-            assert_eq!(mem.data.lock().unwrap().get("asana-api-key").map(String::as_str), Some("as_1"));
-
-            s.delete("linear").await.unwrap();
-            assert_eq!(s.get("linear").await.unwrap(), None);
-            assert!(!mem.data.lock().unwrap().contains_key("linear-api-key"));
-
-            s.set("asana", "   ").await.unwrap();
-            assert_eq!(s.get("asana").await.unwrap(), None);
-            assert!(s.get("Bad/Name").await.is_err());
-        });
-    }
-}
+mod tests;
