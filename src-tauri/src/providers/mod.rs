@@ -27,7 +27,6 @@ use std::path::PathBuf;
 
 use tauri::{AppHandle, Manager};
 
-pub use store::{enqueue_comment, enqueue_status};
 
 /// Tauri commands reject with a display-ready string (in English).
 pub type PResult<T> = Result<T, String>;
