@@ -4,11 +4,16 @@
 
 mod claude_sessions;
 
-/// Moved to `nodal_domain::model::activity`; re-exported so current uses don't break.
+/// Only the bridge is left; nothing in this crate calls them directly anymore
+/// (`nodal_app::sessions::Sessions::external_sessions` uses the `SessionFiles`/`ClaudeCli`
+/// ports instead).
+#[allow(unused_imports)]
 pub use nodal_domain::model::activity::{AppRuns, ExternalSessions};
 /// Only the bridge is left; nothing in this crate calls them directly anymore.
 #[allow(unused_imports)]
 pub use nodal_domain::model::activity::{RepoActivity, RepoSessions, SessionActivity, SubagentActivity};
+/// Only the bridge is left; nothing in this crate calls them directly anymore.
+#[allow(unused_imports)]
 pub use nodal_host::claude::activity::{existing_roots, external_sessions_of, list_agents};
 #[allow(unused_imports)]
 pub use nodal_host::claude::activity::assemble;

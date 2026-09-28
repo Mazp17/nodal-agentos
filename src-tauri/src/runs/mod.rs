@@ -26,14 +26,31 @@ pub use nodal_host::claude::fs::readout::{read_session, session_tokens};
 #[allow(unused_imports)]
 pub use nodal_host::claude::fs::readout::projects_dir;
 
-/// `list_runs`, `get_run_detail`, `get_agent_transcript` and `get_launch_blocker` moved to
-/// `SRC/commands/sessions.rs`; re-exported so current uses (and this module's tests) don't
-/// break.
+/// `list_runs` moved to `SRC/commands/sessions.rs`, which keeps this exact (state-free)
+/// signature: `commands::execution::work_summary` and `work::pump` call it directly, without
+/// going through Tauri's state injection (see wave 3a's report for why).
 pub use crate::commands::sessions::list_runs;
-/// Only the bridge is left; nothing in this crate calls them directly anymore (this
-/// module's tests use them through `super::*`, which still resolves through the bridge).
+
+/// `get_run_detail`'s validation and lookup moved to `nodal_app::sessions::SessionReader`,
+/// behind the Tauri command's new `State<'_, Arc<SessionReader>>`. Kept here, state-free and
+/// with the same body as before, only for this module's `real_list_and_detail` smoke test
+/// (like `launch_with`, below, it has no other caller, hence `#[cfg(test)]`).
+#[cfg(test)]
+pub async fn get_run_detail(session_id: String, cwd: String) -> Result<Option<types::RunDetail>, String> {
+    if !claude_fs::is_valid_session_id(&session_id) {
+        return Err(format!("Invalid session id: {session_id}"));
+    }
+    tauri::async_runtime::spawn_blocking(move || -> Result<Option<types::RunDetail>, String> {
+        let projects = claude_fs::projects_dir()?;
+        Ok(claude_fs::find_session_dir(&projects, &cwd, &session_id).and_then(|dir| claude_fs::read_run_detail(&dir)))
+    })
+    .await
+    .map_err(|e| format!("Internal error reading the session: {e}"))?
+}
+
+/// Only the bridge is left; nothing in this crate calls them directly anymore.
 #[allow(unused_imports)]
-pub use crate::commands::sessions::{get_agent_transcript, get_launch_blocker, get_run_detail};
+pub use crate::commands::sessions::{get_agent_transcript, get_launch_blocker};
 
 fn runtime_handle() -> tokio::runtime::Handle {
     tauri::async_runtime::handle().inner().clone()

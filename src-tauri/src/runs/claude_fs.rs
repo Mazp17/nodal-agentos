@@ -3,16 +3,32 @@
 //! `js_script`, `last_tool`, `transcript`, `usage`, `review_denial`, `readout`);
 //! re-exported here so current uses don't break.
 
-pub use nodal_domain::sessions::transcript::{
-    is_valid_path_id, is_valid_session_id, user_item, TRANSCRIPT_DEFAULT_LIMIT, TRANSCRIPT_MAX_LIMIT,
-};
+pub use nodal_domain::sessions::transcript::{is_valid_session_id, user_item, TRANSCRIPT_DEFAULT_LIMIT, TRANSCRIPT_MAX_LIMIT};
+/// Only the bridge is left; nothing in this crate calls it directly anymore
+/// (`nodal_app::sessions::SessionReader` validates workflow/agent ids itself now).
+#[allow(unused_imports)]
+pub use nodal_domain::sessions::transcript::is_valid_path_id;
 /// Only the bridge is left; nothing in this crate calls them directly anymore.
 #[allow(unused_imports)]
 pub use nodal_domain::sessions::transcript::{clip, TEXT_MAX};
 
-pub use nodal_host::claude::fs::paths::{claude_config_dir, find_session_dir, find_session_jsonl};
+pub use nodal_host::claude::fs::paths::{claude_config_dir, find_session_jsonl};
+/// Only `runs::get_run_detail` (`#[cfg(test)]`, above) still calls this directly.
+#[cfg(test)]
+pub use nodal_host::claude::fs::paths::find_session_dir;
+/// Only the bridge is left; nothing in this crate calls it directly anymore
+/// (`nodal_host::adapters::HostSessionFiles::launch_blocker` calls the underlying
+/// `fs::review_denial` module directly).
+#[allow(unused_imports)]
 pub use nodal_host::claude::fs::review_denial::read_workflow_review_denial;
-pub use nodal_host::claude::fs::transcript::{read_agent_transcript, read_session_transcript, session_title};
+pub use nodal_host::claude::fs::transcript::{read_session_transcript, session_title};
+/// Only the bridge is left; nothing in this crate calls it directly anymore
+/// (`nodal_host::adapters::HostSessionFiles::agent_transcript` calls the underlying
+/// `fs::transcript` module directly).
+#[allow(unused_imports)]
+pub use nodal_host::claude::fs::transcript::read_agent_transcript;
+/// Only `runs::get_run_detail` (`#[cfg(test)]`, above) still calls this directly.
+#[cfg(test)]
 pub use nodal_host::claude::fs::workflow_detail::read_run_detail;
 
 /// Only the bridge is left; nothing in this crate calls them directly anymore.
