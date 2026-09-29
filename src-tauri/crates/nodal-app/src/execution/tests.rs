@@ -6,9 +6,10 @@
 #![allow(clippy::disallowed_methods)] // TempDir-rooted fixtures touch the real filesystem
 
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use serde_json::json;
+use tokio::runtime::Runtime;
 
 use nodal_domain::board::dto::{MergeInput, NewProject, NewRepo, NewTask};
 use nodal_domain::diff::CommitInfo;
@@ -30,9 +31,21 @@ use nodal_store::Db;
 
 use crate::board::ops;
 use crate::core::{Core, Env};
-use crate::testutil::{block_on, NoopNotifier};
+use crate::testutil::NoopNotifier;
 
 use super::Execution;
+
+/// A runtime local to this module (not `crate::testutil`'s shared one): `Execution::kick`
+/// spawns a detached pump pass on `core.rt`, and giving each test suite its own runtime
+/// avoids any cross-test interaction through a process-wide singleton.
+fn rt() -> &'static Runtime {
+    static RT: OnceLock<Runtime> = OnceLock::new();
+    RT.get_or_init(|| tokio::runtime::Builder::new_current_thread().enable_time().enable_io().build().unwrap())
+}
+
+fn block_on<F: std::future::Future>(fut: F) -> F::Output {
+    rt().block_on(fut)
+}
 
 #[derive(Default)]
 struct FakeGit {
@@ -202,6 +215,18 @@ struct Fx {
 fn fx(name: &str) -> Fx {
     let t = TempDir::new(name);
     let db = Db::open_in_memory().unwrap();
+    {
+        // Concurrency 0: `launch_task`/`hand_off`/`review_now`/`confirm_run` all `kick()` a
+        // real (if short-lived) background pump pass after returning. With any capacity, that
+        // pass could race a test's own queue/task assertions (it would even "launch" the run
+        // through `FakeClaude`, which always succeeds) between one `.await` and the next.
+        // Nothing here exercises the pump itself — that's `execution::pump::tests`' job — so
+        // this keeps every enqueued run `queued` for the rest of the test, deterministically.
+        let mut c = db.lock().unwrap();
+        let mut s = nodal_store::rows::load_settings(&c).unwrap();
+        s.concurrency = 0;
+        nodal_store::rows::save_settings(&mut c, &s).unwrap();
+    }
     let git = Arc::new(FakeGit::default());
     let claude = Arc::new(FakeClaude::default());
     let env = Env {
@@ -216,7 +241,7 @@ fn fx(name: &str) -> Fx {
     let core = Arc::new(Core {
         db: db.clone(),
         env: env.clone(),
-        rt: crate::testutil::rt(),
+        rt: rt().handle().clone(),
         clock: Arc::new(nodal_host::adapters::SystemClock),
         claude: claude.clone() as Arc<dyn ClaudeCli>,
         sessions: Arc::new(FakeSessions),
@@ -325,7 +350,7 @@ fn cancel_run_stops_a_launched_run_and_saves_the_patch() {
 #[test]
 fn confirm_run_requeues_a_legacy_queued_run_from_the_task() {
     block_on(async {
-        let f = fx("confirm-legacy");
+        let f = fx("exec-confirm-legacy");
         let task = task_fixture(&f, &f._t.0.join("web"));
         let legacy = {
             let c = f.db.lock().unwrap();
