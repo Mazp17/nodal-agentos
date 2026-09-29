@@ -4,23 +4,19 @@ All notable changes to Nodal are documented here. The project uses [Semantic Ver
 
 ## Unreleased
 
-Closed out wave 4 of the backend's modular-monolith refactor. The cross-context `delete_project`/`set_settings` logic now lives in `nodal-app`'s `flows.rs`, the bridge-only legacy modules under `src-tauri/src/` (`work`, `runs`, `providers`, `linear`, `mcp`, `chats`, `activity`, `db`, `migrate`, `util`, `domain`) are gone, the root `nodal` package's manifest and `deny.toml` no longer carry its now-unused `rusqlite`/`reqwest`/`keyring`/`portable-pty`/`libc` dependencies, and a new architecture test plus a blocking `clippy::disallowed-methods` pass enforce the crate dependency whitelist in CI. This was a pure structural refactor: no Tauri command name, argument, event, payload, error text, SQL statement or MCP protocol message changed.
+### Refactor
 
-Re-measured against the wave's baseline (`refactor/modular-monolith` @ `0ef380d`), with the same commands used to record it:
+* **backend:** split `src-tauri` into a cargo workspace (`nodal-domain`, `nodal-store`, `nodal-host`, `nodal-linear`, `nodal-mcp-proto`, `nodal-app` and the `nodal` shell) with no behavior change. Metrics before (`c1cd9ef`) and after:
 
-| Metric | Baseline | After wave 4 |
+| Metric | Before | After |
 | --- | --- | --- |
-| Incremental build (`cargo clean -p nodal && cargo build --locked`) | 21.31s real, ~1.68GB peak RSS | 9.28s real, ~1.42GB peak RSS |
-| `cargo test` (root package only, pre-workspace) | 326 passed / 14 ignored (340 total) | 14 passed / 0 ignored (all moved into workspace crates) |
-| `cargo test --workspace --locked` (full workspace) | n/a (workspace was still stub crates) | 394 passed / 14 ignored (408 total) |
-| Release `nodal-mcp` binary size | 419,312 bytes | 418,816 bytes |
-| `nodal-mcp` linked frameworks (`otool -L`) | 14, incl. AppKit/WebKit/Carbon/OSAKit | 1 (`libSystem.B.dylib` only) |
-| `strings nodal-mcp \| grep -ci tauri` | 1 | 0 |
-| `cargo llvm-cov --workspace --lib` line coverage | 70.47% (right after wave 0's test-module split) | 76.21% |
+| Rust tests (passed / ignored) | 326 / 14 | 394 / 14 |
+| Line coverage (`cargo llvm-cov --workspace --lib`) | 76.89% | 76.21% |
+| `cargo clean -p nodal && cargo build` | 21.3 s, 1.68 GB RSS (whole backend) | 11.8 s, 1.39 GB RSS (shell only; crates cached) |
+| Release `nodal-mcp` size | 419,312 B | 418,816 B |
+| `nodal-mcp` dylibs (`otool -L`) | 14 (AppKit, WebKit, …) | 1 (`libSystem`) |
 
-The ignored-test count held at 14 through the move, confirming none were dropped, only relocated. The `nodal-mcp` binary no longer links a single AppKit/WebKit/Carbon/OSAKit framework, confirming the crate split actually decoupled the MCP server from the Tauri app shell it never called into.
-
-Idle CPU/RSS with Runs open and Claude spawns/minute could not be measured here: it needs a running GUI session, so it has to be gathered by hand.
+Before, coverage counted inline test code; the tests now live in their own files and aren't counted. Idle CPU/RSS needs a GUI session and wasn't measured.
 
 ## [0.5.0](https://github.com/Mazp17/nodal-agentos/compare/v0.4.0...v0.5.0) (2026-09-26)
 
