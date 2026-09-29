@@ -1,11 +1,17 @@
+#![allow(clippy::disallowed_methods)] // Env cleans up its throwaway temp dir on drop
+
+use std::path::PathBuf;
+
 use super::*;
-use crate::db::open_in_memory;
-use crate::domain::*;
-use crate::providers::fake::FakeProvider;
-use crate::providers::import::tests::{seed, tmp_dir};
-use crate::providers::plan::tests::item;
-use crate::providers::state_map::tests::team_states;
-use crate::providers::{ErrorKind, ProviderError};
+use nodal_domain::model::*;
+use nodal_domain::model::providers::{ErrorKind, ProviderError};
+use nodal_domain::sources::state_map::tests::team_states;
+use nodal_host::adapters::HostPlanFiles;
+use nodal_store::Db;
+
+use crate::sources::fake::FakeProvider;
+use crate::sources::import::tests::{item, seed, tmp_dir};
+use crate::sources::moved::{resolve_moved, MovedAction};
 
 fn state(id: &str) -> ExternalState {
     team_states().into_iter().find(|s| s.id == id).unwrap()
@@ -14,6 +20,7 @@ fn state(id: &str) -> ExternalState {
 struct Env {
     db: Db,
     dir: PathBuf,
+    plans: Arc<dyn PlanFiles>,
     fake: FakeProvider,
     providers: Vec<Provider>,
     link: SourceLink,
@@ -28,13 +35,14 @@ impl Drop for Env {
 
 impl Env {
     fn new() -> Self {
-        let db = open_in_memory().unwrap();
+        let db = Db::open_in_memory().unwrap();
         let link = seed(&db.lock().unwrap());
         let fake = FakeProvider::default();
         fake.data().states = team_states();
         Env {
             db,
             dir: tmp_dir(),
+            plans: Arc::new(HostPlanFiles),
             providers: vec![std::sync::Arc::new(fake.clone())],
             fake,
             link,
@@ -54,6 +62,7 @@ impl Env {
         let r = import_items(
             &mut conn,
             &self.dir,
+            &self.plans,
             &self.link,
             vec![(it, "r-web".into())],
             1,
@@ -78,9 +87,10 @@ impl Env {
 
     fn run_with(&self, now: i64, force: bool) -> SyncReport {
         let mut memo = self.memo.borrow_mut();
-        tauri::async_runtime::block_on(sync_run(
+        crate::testutil::block_on(sync_run(
             &self.db,
             &self.dir,
+            &self.plans,
             &self.providers,
             None,
             now,
@@ -787,7 +797,7 @@ fn auto_import_with_deleted_repo_is_reported_not_retried() {
 }
 
 fn in_project(it: ExternalItem, proj: &str) -> ExternalItem {
-    crate::providers::import::tests::in_project(it, proj)
+    crate::sources::import::tests::in_project(it, proj)
 }
 
 /// 2026-09-10T00:00:00Z.
@@ -824,6 +834,7 @@ fn project_rule_auto_imports_new_items_even_without_auto_import() {
         import_items(
             &mut conn,
             &env.dir,
+            &env.plans,
             &env.link,
             vec![(it, "r-docs".into())],
             1,
@@ -882,14 +893,14 @@ fn import_in(env: &Env, n: u32, proj: &str, repo: &str) -> Task {
         .items
         .insert(it.external_id.clone(), it.clone());
     let mut conn = env.db.lock().unwrap();
-    import_items(&mut conn, &env.dir, &env.link, vec![(it, repo.into())], 1)
+    import_items(&mut conn, &env.dir, &env.plans, &env.link, vec![(it, repo.into())], 1)
         .unwrap()
         .imported
         .remove(0)
 }
 
-fn resolve(env: &Env, id: &str, action: store::MovedAction) -> Result<Task, DbError> {
-    store::resolve_moved(&env.db.lock().unwrap(), id, action, 99)
+fn resolve(env: &Env, id: &str, action: MovedAction) -> Result<Task, String> {
+    resolve_moved(&env.db.lock().unwrap(), &env.plans, id, action, 99)
 }
 
 #[test]
@@ -950,7 +961,7 @@ fn project_change_flags_rule_tasks_and_resolves() {
             [&t.id],
         )
         .unwrap();
-    let err = resolve(&env, &t.id, store::MovedAction::Move)
+    let err = resolve(&env, &t.id, MovedAction::Move)
         .unwrap_err()
         .to_string();
     assert!(err.contains("queued or running run"), "{err}");
@@ -968,7 +979,7 @@ fn project_change_flags_rule_tasks_and_resolves() {
             [&t.id],
         )
         .unwrap();
-    let err = resolve(&env, &t.id, store::MovedAction::Move)
+    let err = resolve(&env, &t.id, MovedAction::Move)
         .unwrap_err()
         .to_string();
     assert!(err.contains("worktree"), "{err}");
@@ -980,7 +991,7 @@ fn project_change_flags_rule_tasks_and_resolves() {
             [&t.id],
         )
         .unwrap();
-    let moved = resolve(&env, &t.id, store::MovedAction::Move).unwrap();
+    let moved = resolve(&env, &t.id, MovedAction::Move).unwrap();
     assert_eq!(moved.repo_id, "r-docs");
     let src = moved.source.unwrap();
     assert_eq!(
@@ -993,7 +1004,7 @@ fn project_change_flags_rule_tasks_and_resolves() {
         None,
         "does not notify again"
     );
-    assert!(resolve(&env, &t.id, store::MovedAction::Keep)
+    assert!(resolve(&env, &t.id, MovedAction::Keep)
         .unwrap_err()
         .to_string()
         .contains("no pending"));
@@ -1023,11 +1034,11 @@ fn project_change_keep_and_same_repo() {
         (None, Some("rule-proj-alt"))
     );
 
-    let err = resolve(&env, &a.id, store::MovedAction::Move)
+    let err = resolve(&env, &a.id, MovedAction::Move)
         .unwrap_err()
         .to_string();
     assert!(err.contains("No repo is suggested"), "{err}");
-    let kept = resolve(&env, &a.id, store::MovedAction::Keep).unwrap();
+    let kept = resolve(&env, &a.id, MovedAction::Keep).unwrap();
     assert_eq!(kept.repo_id, "r-web");
     let src = kept.source.unwrap();
     assert_eq!((src.moved, src.rule_id), (None, None));

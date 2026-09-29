@@ -1,10 +1,38 @@
+#![allow(clippy::disallowed_methods)] // reads/writes the imported plan under a throwaway temp dir
+
+use std::sync::Arc;
+
+use nodal_domain::model::providers::ExternalItem;
+use nodal_domain::model::*;
+use nodal_domain::ports::PlanFiles;
+use nodal_domain::sources::state_map::{propose, tests::team_states};
+use nodal_domain::util::new_id;
+use nodal_host::adapters::HostPlanFiles;
+use nodal_store::rows::{insert_project, insert_repo, insert_source_link};
+use nodal_store::Db;
+
 use super::*;
-use crate::db::open_in_memory;
-use crate::db::rows::{insert_project, insert_repo, insert_source_link};
-use crate::domain::*;
-use crate::providers::plan::tests::item;
-use crate::providers::state_map::{propose, tests::team_states};
-use crate::providers::OPEN_KINDS;
+
+/// A provider item: `uuid-{n}` / `ENG-{n}`, in the Engineering team, `Todo`.
+pub fn item(n: u32, desc: Option<&str>) -> ExternalItem {
+    ExternalItem {
+        external_id: format!("uuid-{n}"),
+        identifier: format!("ENG-{n}"),
+        url: format!("https://linear.app/acme/issue/ENG-{n}/x"),
+        title: format!("Issue {n}"),
+        description_md: desc.map(Into::into),
+        state: ExternalState { id: "s-todo".into(), name: "Todo".into(), kind: ExtKind::Unstarted, color: None },
+        scopes: vec![ScopeRef { kind: "team".into(), id: "team-eng".into(), name: "Engineering".into() }],
+        parent: None,
+        children: Vec::new(),
+        labels: Vec::new(),
+        assignee: None,
+        priority: Priority::None,
+        updated_at: "2026-09-20T10:00:00.000Z".into(),
+        created_at: Some("2026-09-01T10:00:00.000Z".into()),
+        closed_at: None,
+    }
+}
 
 pub fn seed(conn: &Connection) -> SourceLink {
     insert_project(
@@ -86,15 +114,17 @@ pub fn seed(conn: &Connection) -> SourceLink {
 }
 
 pub fn tmp_dir() -> std::path::PathBuf {
-    std::env::temp_dir().join(format!(
-        "nodal-import-{}",
-        new_id('x', crate::util::now_ms())
-    ))
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis() as i64;
+    std::env::temp_dir().join(format!("nodal-import-{}", new_id('x', now)))
+}
+
+fn plans() -> Arc<dyn PlanFiles> {
+    Arc::new(HostPlanFiles)
 }
 
 #[test]
 fn suggest_repo_by_rule_then_default() {
-    let db = open_in_memory().unwrap();
+    let db = Db::open_in_memory().unwrap();
     let conn = db.lock().unwrap();
     let mut link = seed(&conn);
     assert_eq!(
@@ -122,7 +152,7 @@ pub fn in_project(mut it: ExternalItem, proj: &str) -> ExternalItem {
 
 #[test]
 fn project_rule_beats_label_rule_beats_default() {
-    let db = open_in_memory().unwrap();
+    let db = Db::open_in_memory().unwrap();
     let conn = db.lock().unwrap();
     let mut link = seed(&conn);
     link.default_repo_id = Some("r-web".into());
@@ -163,7 +193,7 @@ fn project_rule_beats_label_rule_beats_default() {
 
 #[test]
 fn legacy_rules_json_still_reads() {
-    let db = open_in_memory().unwrap();
+    let db = Db::open_in_memory().unwrap();
     let conn = db.lock().unwrap();
     let link = seed(&conn);
     conn.execute(
@@ -218,10 +248,9 @@ fn legacy_rules_json_still_reads() {
     assert_eq!(suggest_repo(&l, Some("m1"), &["m1".into()]), None);
 }
 
-
 #[test]
 fn backfill_plan_splits_new_here_elsewhere_and_unlinked() {
-    let db = open_in_memory().unwrap();
+    let db = Db::open_in_memory().unwrap();
     let mut conn = db.lock().unwrap();
     let mut link = seed(&conn);
     let rule = RepoRule::project("proj-guides", "Guides", "r-docs", 5);
@@ -234,6 +263,7 @@ fn backfill_plan_splits_new_here_elsewhere_and_unlinked() {
     let r = import_items(
         &mut conn,
         &dir,
+        &plans(),
         &link,
         vec![
             (items[0].clone(), "r-docs".into()),
@@ -284,7 +314,7 @@ fn backfill_plan_splits_new_here_elsewhere_and_unlinked() {
 
 #[test]
 fn rule_queries_backfill_vs_auto_import() {
-    let db = open_in_memory().unwrap();
+    let db = Db::open_in_memory().unwrap();
     let conn = db.lock().unwrap();
     let link = seed(&conn);
     let rule = RepoRule::project("proj-guides", "Guides", "r-docs", 77);
@@ -297,7 +327,7 @@ fn rule_queries_backfill_vs_auto_import() {
         ),
         (Some("proj-guides"), Some(14), None)
     );
-    assert_eq!(b.state_kinds, OPEN_KINDS.to_vec());
+    assert_eq!(b.state_kinds, nodal_domain::model::providers::OPEN_KINDS.to_vec());
     let a = rule_query(&link, &rule, false);
     assert_eq!((a.closed_within_days, a.created_after), (None, Some(77)));
     assert_eq!(a.scope, link.scope);
@@ -305,7 +335,7 @@ fn rule_queries_backfill_vs_auto_import() {
 
 #[test]
 fn imports_with_plan_criteria_and_status() {
-    let db = open_in_memory().unwrap();
+    let db = Db::open_in_memory().unwrap();
     let mut conn = db.lock().unwrap();
     let link = seed(&conn);
     let dir = tmp_dir();
@@ -323,6 +353,7 @@ fn imports_with_plan_criteria_and_status() {
     let r = import_items(
         &mut conn,
         &dir,
+        &plans(),
         &link,
         vec![(it.clone(), "r-web".into())],
         10,
@@ -342,7 +373,7 @@ fn imports_with_plan_criteria_and_status() {
     let plan = std::fs::read_to_string(plan_path(&dir, &t.id)).unwrap();
     assert!(plan.starts_with("# ENG-142 · Issue 142\n"));
     assert_eq!(
-        crate::db::rows::get_task(&conn, &t.id).unwrap().as_ref(),
+        nodal_store::rows::get_task(&conn, &t.id).unwrap().as_ref(),
         Some(t)
     );
 
@@ -352,6 +383,7 @@ fn imports_with_plan_criteria_and_status() {
     let r = import_items(
         &mut conn,
         &dir,
+        &plans(),
         &link,
         vec![(it, "r-web".into()), (other, "r-ops".into())],
         11,
@@ -365,14 +397,14 @@ fn imports_with_plan_criteria_and_status() {
 
 #[test]
 fn listing_marks_imported_and_suggests_repo() {
-    let db = open_in_memory().unwrap();
+    let db = Db::open_in_memory().unwrap();
     let mut conn = db.lock().unwrap();
     let link = seed(&conn);
     let dir = tmp_dir();
     let a = item(1, None);
     let mut b = item(2, None);
     b.labels = vec!["DOCS".into()];
-    let r = import_items(&mut conn, &dir, &link, vec![(a.clone(), "r-web".into())], 1).unwrap();
+    let r = import_items(&mut conn, &dir, &plans(), &link, vec![(a.clone(), "r-web".into())], 1).unwrap();
     let rows = importable_rows(&conn, &link, vec![a, b]).unwrap();
     assert_eq!(rows[0].task_id.as_deref(), Some(r.imported[0].id.as_str()));
     assert_eq!(rows[1].task_id, None);

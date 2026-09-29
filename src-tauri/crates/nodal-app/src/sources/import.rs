@@ -1,26 +1,28 @@
 //! Importing provider items as Nodal tasks.
 
 use std::path::Path;
+use std::sync::Arc;
 
-use crate::db::Connection;
+use nodal_domain::model::providers::ExternalItem;
+use nodal_domain::model::{RepoRule, SourceLink, Task};
+use nodal_domain::ports::PlanFiles;
+use nodal_domain::sources::plan_render::{extract_acceptance, render_plan};
+use nodal_domain::sources::state_map::{propose_pull, pull_status};
+use nodal_domain::util::new_id;
+use nodal_store::sources as store;
+use nodal_store::{rows, Conn as Connection};
 
-use crate::db::{rows, DbError};
-use crate::domain::{RepoRule, SourceLink, Task};
-
-use super::plan::{extract_acceptance, plan_path, render_plan, write_plan};
-use super::state_map::{propose_pull, pull_status};
-use super::{store, ExternalItem};
-use crate::util::new_id;
-
-/// Moved to `nodal_domain::sources::routing`; re-exported so current uses don't break.
+/// Moved to `nodal_domain::sources::routing`; used directly (no more shell-crate bridge).
 pub use nodal_domain::sources::routing::*;
+
+use super::plan_path;
 
 pub fn plan_backfill(
     conn: &Connection,
     link: &SourceLink,
     rule: &RepoRule,
     items: &[ExternalItem],
-) -> Result<BackfillPlan, DbError> {
+) -> Result<BackfillPlan, String> {
     let mut plan = BackfillPlan::default();
     let mut seen = std::collections::HashSet::new();
     for i in items {
@@ -51,7 +53,7 @@ pub fn plan_backfill(
 }
 
 /// Listing rows: suggests a repo and marks the ones already imported.
-pub fn importable_rows(conn: &Connection, link: &SourceLink, items: Vec<ExternalItem>) -> Result<Vec<ImportableItem>, DbError> {
+pub fn importable_rows(conn: &Connection, link: &SourceLink, items: Vec<ExternalItem>) -> Result<Vec<ImportableItem>, String> {
     items
         .into_iter()
         .map(|i| {
@@ -75,15 +77,16 @@ pub fn importable_rows(conn: &Connection, link: &SourceLink, items: Vec<External
 pub fn import_items(
     conn: &mut Connection,
     data_dir: &Path,
+    plans: &Arc<dyn PlanFiles>,
     link: &SourceLink,
     items: Vec<(ExternalItem, String)>,
     now: i64,
-) -> Result<ImportResult, DbError> {
+) -> Result<ImportResult, String> {
     let mut out = ImportResult::default();
     for (item, repo_id) in items {
-        match import_one(conn, data_dir, link, &item, &repo_id, now) {
+        match import_one(conn, data_dir, plans, link, &item, &repo_id, now) {
             Ok(task) => out.imported.push(task),
-            Err(reason) => out.skipped.push(Skipped { external_id: item.external_id, reason: reason.to_string() }),
+            Err(reason) => out.skipped.push(Skipped { external_id: item.external_id, reason }),
         }
     }
     Ok(out)
@@ -92,15 +95,16 @@ pub fn import_items(
 fn import_one(
     conn: &mut Connection,
     data_dir: &Path,
+    plans: &Arc<dyn PlanFiles>,
     link: &SourceLink,
     item: &ExternalItem,
     repo_id: &str,
     now: i64,
-) -> Result<Task, DbError> {
+) -> Result<Task, String> {
     store::check_repo_in_project(conn, repo_id, &link.project_id)?;
     if let Some(t) = store::task_by_external(conn, &link.provider, &item.external_id)? {
         let where_ = if t.project_id == link.project_id { "" } else { " in another project" };
-        return Err(DbError::Invalid(format!("{} is already imported{where_}.", item.identifier)));
+        return Err(format!("{} is already imported{where_}.", item.identifier));
     }
     // An unmapped state has no Nodal status: the new task starts with the proposal.
     let status = pull_status(&link.state_map, &item.state).unwrap_or_else(|| propose_pull(&item.state));
@@ -110,7 +114,7 @@ fn import_one(
         .filter(|r| r.repo_id == repo_id)
         .map(|r| r.id.clone());
 
-    let tx = conn.transaction()?;
+    let tx = conn.transaction().map_err(|e| e.to_string())?;
     let task = store::insert_imported(
         &tx,
         store::NewImported {
@@ -127,13 +131,14 @@ fn import_one(
     )?;
     // The file goes before the commit: if it can't be written, the task isn't left half-done.
     let path = plan_path(data_dir, &task.id);
-    write_plan(&path, &render_plan(item))
-        .map_err(|e| DbError::Invalid(format!("Could not write the plan for {}: {e}", item.identifier)))?;
-    if let Err(e) = tx.commit() {
+    plans
+        .write_plan(&path, &render_plan(item))
+        .map_err(|e| format!("Could not write the plan for {}: {e}", item.identifier))?;
+    if let Err(e) = tx.commit().map_err(|e| e.to_string()) {
         if let Some(dir) = path.parent() {
-            let _ = std::fs::remove_dir_all(dir);
+            let _ = plans.remove_dir_all(dir);
         }
-        return Err(e.into());
+        return Err(e);
     }
     Ok(task)
 }

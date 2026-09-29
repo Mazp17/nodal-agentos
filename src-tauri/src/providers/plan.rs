@@ -5,10 +5,10 @@
 //! Moved to `nodal_domain::sources::plan_render`; re-exported here so current uses don't
 //! break. `plan_path` and `write_plan` moved to `nodal_host::plans` (they touch disk).
 
-#[cfg(test)]
-use super::ExternalItem;
-
 pub use nodal_domain::sources::plan_render::*;
+/// Only `tests.rs` still calls these (through `use super::*`); rustc's unused-import check
+/// doesn't credit that for a named (non-glob) re-export.
+#[allow(unused_imports)]
 pub use nodal_host::plans::{plan_path, write_plan};
 
 #[cfg(test)]

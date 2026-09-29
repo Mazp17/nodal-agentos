@@ -1,4 +1,5 @@
-//! Sync with the providers: a worker every 60 s and `sync_now`.
+//! Sync with the providers: the worker pass. `SourcesHub` (in `mod.rs`) drives it every 60 s
+//! and serves `sync_now`.
 //!
 //! Order per provider: current states of each link → push (drains the outbox) → pull →
 //! auto-import. Push goes first so that pull already sees what Nodal pushed.
@@ -24,33 +25,31 @@
 //!   manual sync (`force`) ignores the pause and re-reads the states.
 
 use std::collections::{HashMap, HashSet};
-use std::path::{Path, PathBuf};
+use std::path::Path;
+use std::sync::Arc;
 use std::time::Duration;
 
-use crate::db::Connection;
-use tauri::{AppHandle, Manager};
-
-use crate::db::{rows, with_db, Db, DbError};
-use crate::util::now_ms;
-use crate::domain::{ExternalState, PlanRef, SourceLink, StateChanges, StateMap, Task};
+use nodal_domain::model::providers::{ErrorKind, ExternalItem, ImportQuery, ProviderError, ProviderResult};
+use nodal_domain::model::{ExternalState, PlanRef, SourceLink, StateChanges, StateMap, Task};
+use nodal_domain::ports::PlanFiles;
+use nodal_domain::sources::iso_from_ms;
+use nodal_domain::sources::plan_render::render_plan;
+use nodal_domain::sources::state_map::diff_known;
+use nodal_store::{rows, sources as store, with_db, Conn as Connection, Db, StoreError};
 
 use super::import::{import_items, rule_query, suggest_repo_for};
-use super::plan::{plan_path, render_plan, write_plan};
-use super::state_map::diff_known;
-use super::{
-    resolve, store, ErrorKind, ExternalItem, ImportQuery, PResult, Provider, ProviderError, ProviderResult,
-    ProvidersState,
-};
+use super::plan_path;
+use super::Provider;
 
-/// Moved to `nodal_domain::sources::decisions`; re-exported so current uses don't break.
+/// Moved to `nodal_domain::sources::decisions`; used directly (no more shell-crate bridge).
 pub use nodal_domain::sources::decisions::*;
 
 pub const TICK: Duration = Duration::from_secs(60);
 /// First pass a while after startup, so as not to compete with the rest of startup.
-const FIRST_TICK: Duration = Duration::from_secs(15);
+pub const FIRST_TICK: Duration = Duration::from_secs(15);
 const AUTO_IMPORT_MAX_PAGES: usize = 4;
 
-/// Sync memory between passes (in memory; lives under `ProvidersState::sync_lock`).
+/// Sync memory between passes (in memory; lives under `SourcesHub::sync_lock`).
 #[derive(Debug, Default)]
 pub struct SyncMemo {
     /// Provider → pause.
@@ -60,7 +59,6 @@ pub struct SyncMemo {
     /// vanished.
     states: HashMap<String, (i64, StateMap, Vec<ExternalState>)>,
 }
-
 
 /// Sends the comment of row `id` unless it is already in the provider: if an earlier attempt
 /// reached Linear but not `outbox_done` (timeout, app closed), it is not repeated.
@@ -73,15 +71,17 @@ async fn send_comment(p: &Provider, external_id: &str, body: &str, id: i64) -> P
 
 // ---------- Sync pass ----------
 
-fn err(e: DbError) -> String {
+fn err(e: StoreError) -> String {
     e.to_string()
 }
 
 /// A full pass (or only for `link_filter`). `providers`: those with a key.
 /// `force` (manual sync): ignores the providers' pause and re-reads the states.
+#[allow(clippy::too_many_arguments)] // `plans` (the PlanFiles port) joins the params `run_for_app` already had
 pub async fn sync_run(
     db: &Db,
     data_dir: &Path,
+    plans: &Arc<dyn PlanFiles>,
     providers: &[Provider],
     link_filter: Option<&str>,
     now: i64,
@@ -114,11 +114,7 @@ pub async fn sync_run(
         let name = p.name();
         match memo.paused.get(name) {
             Some(pause) if !force && pause.until > now => {
-                report.notices.push(format!(
-                    "{name}: sync paused until {} ({})",
-                    super::iso_from_ms(pause.until),
-                    pause.reason
-                ));
+                report.notices.push(format!("{name}: sync paused until {} ({})", iso_from_ms(pause.until), pause.reason));
                 continue;
             }
             Some(_) => {
@@ -186,16 +182,16 @@ pub async fn sync_run(
                     break;
                 }
                 let before = report.errors.len();
-                halt = pull_link(db, data_dir, p, link, &flagged, now, &mut report).await;
+                halt = pull_link(db, data_dir, plans, p, link, &flagged, now, &mut report).await;
                 if (link.auto_import || link.repo_rules.iter().any(|r| r.is_project())) && halt.is_none() {
-                    halt = auto_import_link(db, data_dir, p, link, now, &mut report).await;
+                    halt = auto_import_link(db, data_dir, plans, p, link, now, &mut report).await;
                 }
                 link_errors.entry(link.id.clone()).or_default().extend(report.errors[before..].iter().cloned());
             }
         }
         if let Some(e) = &halt {
             let until = now + if e.kind == ErrorKind::Auth { AUTH_PAUSE_MS } else { RATE_LIMIT_PAUSE_MS };
-            report.notices.push(format!("{name}: sync paused until {} ({e})", super::iso_from_ms(until)));
+            report.notices.push(format!("{name}: sync paused until {} ({e})", iso_from_ms(until)));
             memo.paused.insert(name.to_string(), Pause { until, reason: e.message.clone() });
         }
         for link in &targets {
@@ -343,6 +339,7 @@ async fn drain_outbox(
 /// What all tasks of a link share during the pull.
 struct PullCtx<'a> {
     data_dir: &'a Path,
+    plans: &'a Arc<dyn PlanFiles>,
     provider: &'a str,
     link: &'a SourceLink,
     now: i64,
@@ -355,8 +352,8 @@ fn apply_pull_task(
     task: &Task,
     item: Option<&ExternalItem>,
     keep_error: bool,
-) -> Result<bool, DbError> {
-    let PullCtx { data_dir, provider, link, now } = *ctx;
+) -> Result<bool, StoreError> {
+    let PullCtx { data_dir, plans, provider, link, now } = *ctx;
     let map = &link.state_map;
     // The task was read before going to the network: if in the meantime it was unlinked,
     // moved to another link or had its plan overwritten, what is there now wins.
@@ -391,15 +388,18 @@ fn apply_pull_task(
     let pu = decide_project(task, item, link);
     store::set_src_project(conn, &task.id, pu.project.as_ref(), pu.rule_id.as_deref(), pu.moved.as_ref())?;
     if !task.plan_overridden && task.plan == PlanRef::Text {
-        write_plan(&plan_path(data_dir, &task.id), &render_plan(item))
-            .map_err(|e| DbError::Invalid(format!("Could not write the plan of {}: {e}", item.identifier)))?;
+        plans
+            .write_plan(&plan_path(data_dir, &task.id), &render_plan(item))
+            .map_err(|e| StoreError::Invalid(format!("Could not write the plan of {}: {e}", item.identifier)))?;
     }
     Ok(true)
 }
 
+#[allow(clippy::too_many_arguments)] // `plans` (the PlanFiles port) joins the params this already had
 async fn pull_link(
     db: &Db,
     data_dir: &Path,
+    plans: &Arc<dyn PlanFiles>,
     p: &Provider,
     link: &SourceLink,
     flagged: &HashSet<String>,
@@ -425,11 +425,11 @@ async fn pull_link(
             return halts(&e).then_some(e);
         }
     };
-    let (data_dir, provider, link, flagged) = (data_dir.to_path_buf(), p.name(), link.clone(), flagged.clone());
+    let (data_dir, provider, link, flagged, plans) = (data_dir.to_path_buf(), p.name(), link.clone(), flagged.clone(), plans.clone());
     let res = with_db(db, move |c| {
         let mut pulled = 0;
         let mut errors = Vec::new();
-        let ctx = PullCtx { data_dir: &data_dir, provider, link: &link, now };
+        let ctx = PullCtx { data_dir: &data_dir, plans: &plans, provider, link: &link, now };
         for t in &tasks {
             let item = t.source.as_ref().and_then(|s| items.get(&s.external_id));
             match apply_pull_task(c, &ctx, t, item, flagged.contains(&t.id)) {
@@ -454,6 +454,7 @@ async fn pull_link(
 async fn auto_import_link(
     db: &Db,
     data_dir: &Path,
+    plans: &Arc<dyn PlanFiles>,
     p: &Provider,
     link: &SourceLink,
     now: i64,
@@ -549,13 +550,13 @@ async fn auto_import_link(
     };
     let pairs: Vec<(ExternalItem, String)> =
         routed.into_iter().filter_map(|(id, repo)| full.get(&id).cloned().map(|i| (i, repo))).collect();
-    let (link_id, dir) = (link.id.clone(), data_dir.to_path_buf());
+    let (link_id, dir, plans) = (link.id.clone(), data_dir.to_path_buf(), plans.clone());
     let res = with_db(db, move |c| {
         // `update_source_link` does not take the sync lock: with the link re-read, an item
         // whose routing changed while going to the network waits for the next pass.
         let l = store::get_link(c, &link_id)?;
         let pairs = pairs.into_iter().filter(|(i, repo)| suggest_repo_for(&l, i).as_deref() == Some(repo.as_str())).collect();
-        import_items(c, &dir, &l, pairs, now)
+        import_items(c, &dir, &plans, &l, pairs, now).map_err(StoreError::Invalid)
     });
     match res.await {
         Ok(r) => {
@@ -565,58 +566,6 @@ async fn auto_import_link(
         Err(e) => report.errors.push(err(e)),
     }
     None
-}
-
-// ---------- Worker and command ----------
-
-/// Providers with a key, one pass, under the sync lock. `force`: manual sync (see
-/// `sync_run`).
-pub async fn run_for_app(app: &AppHandle, link_filter: Option<&str>, force: bool) -> PResult<SyncReport> {
-    let db: Db = app.try_state::<Db>().map(|s| s.inner().clone()).ok_or("The database is not available.")?;
-    let state = app.state::<ProvidersState>();
-    let mut memo = state.sync_lock.lock().await;
-    // Pauses are read from `ProvidersState::pauses`: a new key may have lifted them.
-    memo.paused = state.paused();
-    let before = memo.paused.clone();
-    let mut providers = Vec::new();
-    for name in super::KNOWN_PROVIDERS {
-        match resolve(app, name).await {
-            Ok(Some(p)) => providers.push(p),
-            Ok(None) => {}
-            Err(e) if link_filter.is_some() => return Err(e),
-            Err(e) => eprintln!("sync: {name}: {e}"),
-        }
-    }
-    let data_dir: PathBuf = state.data_dir.clone();
-    let report = sync_run(&db, &data_dir, &providers, link_filter, now_ms(), &mut memo, force).await;
-    // Only what changed in this pass: a new key saved while it ran (which lifted an earlier
-    // pause) does not get it back through the copy the pass took.
-    state.merge_paused(&before, &memo.paused);
-    if !providers.is_empty() {
-        use crate::events::Kind;
-        // Link state changes on every pass; tasks only if something moved.
-        let kinds: &[Kind] =
-            if report.pulled + report.pushed + report.imported > 0 { &[Kind::Sources, Kind::Tasks] } else { &[Kind::Sources] };
-        crate::events::notify(app, kinds, None);
-    }
-    Ok(report)
-}
-
-pub fn spawn_worker(app: AppHandle) {
-    tauri::async_runtime::spawn(async move {
-        tokio::time::sleep(FIRST_TICK).await;
-        loop {
-            match run_for_app(&app, None, false).await {
-                Ok(r) => {
-                    for e in &r.errors {
-                        eprintln!("sync: {e}");
-                    }
-                }
-                Err(e) => eprintln!("sync: {e}"),
-            }
-            tokio::time::sleep(TICK).await;
-        }
-    });
 }
 
 #[cfg(test)]

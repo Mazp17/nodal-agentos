@@ -4,12 +4,10 @@
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex, MutexGuard};
 
-use nodal_domain::model::providers::Page;
-use nodal_domain::ports::BoxFut;
-
-use crate::domain::{ExternalState, ScopeRef};
-
-use super::{iso_from_ms, ErrorKind, ExternalItem, ImportQuery, ProviderError, ProviderResult, TaskProvider};
+use nodal_domain::model::providers::{ErrorKind, ExternalItem, ImportQuery, Page, ProviderError, ProviderResult};
+use nodal_domain::model::{ExternalState, ScopeRef};
+use nodal_domain::ports::{BoxFut, TaskProvider};
+use nodal_domain::sources::iso_from_ms;
 
 #[derive(Default)]
 pub struct FakeData {
