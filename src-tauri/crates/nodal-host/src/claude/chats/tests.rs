@@ -1,0 +1,149 @@
+//! P05 (delta batching) and P08 (stdout line cap), driven against a real `ChatProcesses` and a
+//! fake `claude` shell script — no database, no `ChatHooksImpl` (that's covered against a real
+//! one in `nodal-app::chats::hooks::tests`, which this must keep passing unchanged).
+#![allow(clippy::disallowed_methods)] // spins up a fake `claude` script on disk
+
+use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
+
+use nodal_domain::error::HostError;
+use nodal_domain::model::chat::{ChatEnvelope, ChatEvent, ChatSpec, HostEvent, StreamEvent};
+use nodal_domain::ports::{ChatHooks, ChatSink};
+
+use super::ChatProcesses;
+use crate::testutil::block_on;
+
+/// A `Handle` to the same static runtime `block_on` drives, for `ChatProcesses::with_program`
+/// (which spawns background tasks that need to keep being polled while a test's own `block_on`
+/// future is running).
+fn rt() -> tokio::runtime::Handle {
+    block_on(async { tokio::runtime::Handle::current() })
+}
+
+struct NoopHooks;
+
+impl ChatHooks for NoopHooks {
+    fn session_started(&self, _chat_id: &str, _session_id: String, _project_id: String) {}
+    fn turn_ended(&self, _chat_id: &str, _cwd: PathBuf, _project_id: String) {}
+}
+
+struct RecordingSink(Arc<Mutex<Vec<ChatEnvelope>>>);
+
+impl ChatSink for RecordingSink {
+    fn emit(&self, ev: ChatEnvelope) {
+        self.0.lock().unwrap().push(ev);
+    }
+}
+
+struct Fixture {
+    chats: Arc<ChatProcesses>,
+    events: Arc<Mutex<Vec<ChatEnvelope>>>,
+    dir: PathBuf,
+}
+
+impl Fixture {
+    fn new(name: &str, script: &str) -> Fixture {
+        let dir = std::env::temp_dir().join(format!("nodal-chats-batch-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let program = dir.join("claude");
+        std::fs::write(&program, script).unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let sink: Arc<dyn ChatSink> = Arc::new(RecordingSink(events.clone()));
+        let hooks: Arc<dyn ChatHooks> = Arc::new(NoopHooks);
+        let chats = ChatProcesses::with_program(sink, hooks, rt(), Some(program));
+        Fixture { chats, events, dir }
+    }
+
+    fn spec(&self) -> ChatSpec {
+        ChatSpec { cwd: self.dir.clone(), args: vec![] }
+    }
+
+    fn events(&self) -> Vec<ChatEvent> {
+        self.events.lock().unwrap().iter().map(|e| e.event.clone()).collect()
+    }
+
+    async fn wait_for(&self, n: usize, what: &str, pred: impl Fn(&ChatEvent) -> bool) {
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while self.events().iter().filter(|e| pred(e)).count() < n {
+            assert!(Instant::now() < deadline, "timed out waiting for {what}: {:#?}", self.events());
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    }
+}
+
+impl Drop for Fixture {
+    fn drop(&mut self) {
+        self.chats.clear();
+        let _ = std::fs::remove_dir_all(&self.dir);
+    }
+}
+
+fn send(chats: &ChatProcesses, spec: ChatSpec) -> Result<(), HostError> {
+    use nodal_domain::ports::ChatRuntime;
+    chats.send("c1", "p1", None, spec, "hi")
+}
+
+/// A burst of `text_delta` lines (no delay between them, like `claude` printing tokens faster
+/// than 60/s) followed by the matching full text and a `result`.
+const BURST_DELTAS: &str = r#"#!/bin/sh
+echo '{"type":"system","subtype":"init","session_id":"00000000-0000-4000-8000-000000000001","cwd":"/tmp"}'
+i=0
+while [ $i -lt 40 ]; do
+  echo "{\"type\":\"stream_event\",\"event\":{\"delta\":{\"type\":\"text_delta\",\"text\":\" $i\"}},\"parent_tool_use_id\":null}"
+  i=$((i + 1))
+done
+echo '{"type":"assistant","message":{"content":[{"type":"text","text":"done"}]},"parent_tool_use_id":null}'
+echo '{"type":"result","subtype":"success","is_error":false}'
+"#;
+
+#[test]
+fn bursts_of_deltas_are_coalesced_but_lose_no_text() {
+    let f = Fixture::new("burst", BURST_DELTAS);
+    block_on(async {
+        send(&f.chats, f.spec()).unwrap();
+        f.wait_for(1, "turn end", |e| matches!(e, ChatEvent::Stream(StreamEvent::TurnEnd { .. }))).await;
+
+        let expected: String = (0..40).map(|i| format!(" {i}")).collect();
+        let deltas: Vec<String> = f
+            .events()
+            .into_iter()
+            .filter_map(|e| match e {
+                ChatEvent::Stream(StreamEvent::TextDelta { text }) => Some(text),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(deltas.concat(), expected, "no text lost across flushes");
+        assert!(deltas.len() < 40, "the burst must be coalesced into fewer emits: {}", deltas.len());
+        assert!(!deltas.is_empty());
+    });
+}
+
+/// After a `TextDelta` and a `ThinkingDelta` interleave, and after the process exits mid-turn,
+/// nothing buffered is lost: a kind change flushes the old buffer, and `on_exit` flushes too.
+const INTERLEAVED_THEN_CRASH: &str = r#"#!/bin/sh
+echo '{"type":"system","subtype":"init","session_id":"00000000-0000-4000-8000-000000000002","cwd":"/tmp"}'
+echo '{"type":"stream_event","event":{"delta":{"type":"thinking_delta","thinking":"hmm"}},"parent_tool_use_id":null}'
+echo '{"type":"stream_event","event":{"delta":{"type":"text_delta","text":"tail"}},"parent_tool_use_id":null}'
+exit 3
+"#;
+
+#[test]
+fn a_kind_change_and_a_crash_both_flush_the_buffer() {
+    let f = Fixture::new("interleave", INTERLEAVED_THEN_CRASH);
+    block_on(async {
+        send(&f.chats, f.spec()).unwrap();
+        f.wait_for(1, "error", |e| matches!(e, ChatEvent::Host(HostEvent::Error { .. }))).await;
+        let ev = f.events();
+        assert!(ev.contains(&ChatEvent::Stream(StreamEvent::ThinkingDelta { text: "hmm".into() })), "{ev:#?}");
+        assert!(ev.contains(&ChatEvent::Stream(StreamEvent::TextDelta { text: "tail".into() })), "{ev:#?}");
+    });
+}
+
+
