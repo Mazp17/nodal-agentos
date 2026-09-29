@@ -45,6 +45,12 @@ impl HostClaudeCli {
     pub fn new(rt: Handle) -> Self {
         Self { rt, agents: AgentsRaw::new() }
     }
+
+    /// `claude agents` served by a fake `program` instead of the real `claude`.
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn with_program(rt: Handle, program: std::path::PathBuf) -> Self {
+        Self { rt, agents: AgentsRaw::with_program(program) }
+    }
 }
 
 impl ClaudeCli for HostClaudeCli {

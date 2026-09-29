@@ -1,25 +1,6 @@
-use std::path::{Path, PathBuf};
-
-use crate::testutil::{block_on, TempDir};
+use crate::testutil::{block_on, fake_claude_counting as fake_claude, spawn_count, TempDir};
 
 use super::AgentsRaw;
-
-/// A fake `claude` that appends one line to `count_file` per invocation, so a test can see
-/// how many times it actually ran, and prints a valid (empty) `claude agents --json` list.
-fn fake_claude(dir: &Path, count_file: &Path) -> PathBuf {
-    let script = dir.join("claude");
-    std::fs::write(&script, format!("#!/bin/sh\necho x >> \"{}\"\necho '[]'\n", count_file.display())).unwrap();
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
-    }
-    script
-}
-
-fn spawn_count(count_file: &Path) -> usize {
-    std::fs::read_to_string(count_file).unwrap_or_default().lines().count()
-}
 
 #[test]
 fn reads_within_the_ttl_spawn_claude_once() {
