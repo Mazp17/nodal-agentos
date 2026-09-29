@@ -1,6 +1,6 @@
 //! Paths: `~`, the canonical git root and Nodal's folder in the home directory.
 //!
-//! No tauri dependency: the app data folder (which needs an `AppHandle`) is resolved by
+//! No tauri dependency: the app data folder (which needs a running Tauri app) is resolved by
 //! the shell (`SRC/paths.rs`), not here.
 
 use std::path::PathBuf;

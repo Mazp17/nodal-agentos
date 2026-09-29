@@ -21,7 +21,7 @@ impl System {
 
     /// "Import data from a previous version…": copies `folder` into a dated backup under the
     /// data dir, then imports it inside one transaction (`nodal_store::legacy`). Same as
-    /// today's `import_legacy_data` command, minus the `AppHandle`/`State<Db>` plumbing:
+    /// today's `import_legacy_data` command, minus the Tauri app handle/`State<Db>` plumbing:
     /// `data_dir` comes from `core.env`, `now` from `core.clock`, the connection from
     /// `core.db`.
     pub async fn import_legacy(&self, folder: String) -> Result<nodal_store::legacy::LegacyImportReport, AppError> {
