@@ -74,6 +74,15 @@ pub trait SessionFiles: Send + Sync {
         limit: usize,
     ) -> Result<Option<Transcript>, HostError>;
     fn session_title(&self, path: &Path) -> Option<String>;
+    /// Tool calls in the main transcript's complete lines from byte offset `from` (`0`: the
+    /// whole file) to the current end, and the offset to resume from next poll (P03): an
+    /// incremental cursor instead of re-parsing the transcript on every poll. A concurrent
+    /// partial write is left for the next call. Default: no progress (only `HostSessionFiles`
+    /// implements the real incremental read).
+    fn count_new_tool_calls(&self, path: &Path, from: u64) -> io::Result<(u32, u64)> {
+        let _ = path;
+        Ok((0, from))
+    }
     /// external_sessions closure body: projects dir lookup + external_sessions_of(.., existing_roots).
     fn external_sessions(
         &self,

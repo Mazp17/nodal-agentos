@@ -248,3 +248,45 @@ fn real_transcripts_on_disk() {
         slowest.1.display()
     );
 }
+
+#[test]
+fn count_new_tool_calls_is_incremental() {
+    let t = TempDir::new("count-new-tool-calls");
+    let f = t.0.join("s.jsonl");
+    let assistant = |id: &str| {
+        format!(
+            r#"{{"type":"assistant","message":{{"content":[{{"type":"tool_use","id":"{id}","name":"Bash","input":{{}}}}]}}}}"#
+        )
+    };
+    fs::write(&f, format!("{}\n{}\n", assistant("t1"), assistant("t2"))).unwrap();
+    let (n, offset) = count_new_tool_calls(&f, 0).unwrap();
+    assert_eq!(n, 2);
+    // Steady state: nothing new appended, the cursor doesn't recount what it already read.
+    assert_eq!(count_new_tool_calls(&f, offset).unwrap(), (0, offset));
+    // New data appended: only the new line is counted.
+    let mut file = fs::OpenOptions::new().append(true).open(&f).unwrap();
+    use std::io::Write;
+    writeln!(file, "{}", assistant("t3")).unwrap();
+    let (n2, offset2) = count_new_tool_calls(&f, offset).unwrap();
+    assert_eq!(n2, 1);
+    assert!(offset2 > offset);
+}
+
+#[test]
+fn count_new_tool_calls_ignores_sidechains_and_partial_tail_lines() {
+    let t = TempDir::new("count-new-tool-calls-edge");
+    let f = t.0.join("s.jsonl");
+    let sidechain = r#"{"type":"assistant","isSidechain":true,"message":{"content":[{"type":"tool_use","id":"s1","name":"Bash","input":{}}]}}"#;
+    let main = r#"{"type":"assistant","message":{"content":[{"type":"tool_use","id":"m1","name":"Bash","input":{}}]}}"#;
+    // A cut-off last line (still being written) isn't counted, and the cursor stays before it.
+    fs::write(&f, format!("{sidechain}\n{main}\n{{\"type\":\"assist")).unwrap();
+    let (n, offset) = count_new_tool_calls(&f, 0).unwrap();
+    assert_eq!(n, 1);
+    assert_eq!(offset, (sidechain.len() + main.len() + 2) as u64);
+}
+
+#[test]
+fn count_new_tool_calls_missing_file_reports_no_progress() {
+    let t = TempDir::new("count-new-tool-calls-missing");
+    assert_eq!(count_new_tool_calls(&t.0.join("nope.jsonl"), 7).unwrap(), (0, 7));
+}

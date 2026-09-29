@@ -1,10 +1,10 @@
-//! Baseline for P12 (transcript closing a run — currently several reads of the same
-//! `.jsonl`): a synthetic ~14 MB session transcript, read + parsed end to end through the
-//! same entry point the app uses. Run with: `cargo bench -p nodal-host --features test-support`.
+//! P03 (`count_new_tool_calls`, incremental cursor): a synthetic ~14 MB session transcript,
+//! read through the same entry points the app uses. Run with:
+//! `cargo bench -p nodal-host --features test-support`.
 
 use criterion::{criterion_group, criterion_main, Criterion};
 
-use nodal_host::claude::fs::transcript::read_session_transcript;
+use nodal_host::claude::fs::transcript::{count_new_tool_calls, read_session_transcript};
 use nodal_host::testutil::TempDir;
 
 const TARGET_BYTES: usize = 14 * 1024 * 1024;
@@ -67,5 +67,26 @@ fn bench_transcript(c: &mut Criterion) {
     group.finish();
 }
 
-criterion_group!(benches, bench_transcript);
+/// P03: an active run's toolCalls, read with an incremental cursor instead of re-parsing the
+/// whole transcript on every poll. `full` = first poll (nothing cached yet); `steady` = a
+/// later poll with no new data appended, the common case while the app waits between turns.
+fn bench_tool_call_progress(c: &mut Criterion) {
+    let dir = TempDir::new("bench-tool-call-progress");
+    let path = dir.0.join("session.jsonl");
+    let text = synthetic_transcript();
+    std::fs::write(&path, &text).unwrap();
+
+    let mut group = c.benchmark_group("claude::fs::transcript::progress");
+    group.sample_size(10);
+    group.bench_function(format!("count_new_tool_calls, full ({} MB)", text.len() / (1024 * 1024)), |b| {
+        b.iter(|| count_new_tool_calls(&path, 0).unwrap());
+    });
+    let (_, offset) = count_new_tool_calls(&path, 0).unwrap();
+    group.bench_function("count_new_tool_calls, steady state (no new data)", |b| {
+        b.iter(|| count_new_tool_calls(&path, offset).unwrap());
+    });
+    group.finish();
+}
+
+criterion_group!(benches, bench_transcript, bench_tool_call_progress);
 criterion_main!(benches);

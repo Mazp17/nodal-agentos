@@ -5,12 +5,12 @@
 //! nothing but the two ports it needs. `Sessions` needs the database too (`get_run_transcript`,
 //! `external_sessions`), so it holds the shared `Core`.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use nodal_domain::model::activity::{AppRuns, ExternalSessions};
-use nodal_domain::model::claude::{LaunchBlocker, RunDetail, RunSummary, Transcript};
+use nodal_domain::model::claude::{LaunchBlocker, RunDetail, RunProgress, RunSummary, Transcript};
 use nodal_domain::model::Executor;
 use nodal_domain::ports::{ClaudeCli, SessionFiles};
 use nodal_domain::sessions::transcript::{
@@ -115,14 +115,29 @@ impl SessionReader {
     }
 }
 
+/// Byte offset and cumulative tool-call count `run_progress` last read a run's session at
+/// (P03): the next poll only scans what was appended since.
+#[derive(Default, Clone, Copy)]
+struct ProgressCursor {
+    offset: u64,
+    tool_calls: u32,
+}
+
 /// Needs the database: `get_run_transcript` and `external_sessions`.
 pub struct Sessions {
     core: Arc<Core>,
+    /// One cursor per run, alive as long as the app runs. Bounded in practice: it only grows
+    /// for runs `run_progress` was actually polled for (live, non-workflow runs), the same
+    /// small set `RunMonitor` shows at once.
+    progress: Mutex<HashMap<String, ProgressCursor>>,
 }
 
 impl Sessions {
     pub(crate) fn new(core: Arc<Core>) -> Self {
-        Self { core }
+        Self {
+            core,
+            progress: Mutex::new(HashMap::new()),
+        }
     }
 
     /// Transcript of an agent, Claude or reviewer run (the main session). Workflows have one
@@ -173,6 +188,59 @@ impl Sessions {
         })
         .await
         .map_err(AppError::from)
+    }
+
+    /// Tool calls of a live run so far, read with an incremental cursor (byte offset per
+    /// run) instead of re-parsing the whole transcript on every poll (P03). `None` if the
+    /// run has no session yet. Errors like `get_run_transcript` (invalid id, workflow run,
+    /// missing Claude Code folder).
+    pub async fn run_progress(&self, run_id: String) -> Result<Option<RunProgress>, AppError> {
+        check_id(&run_id, "run")?;
+        let run = with_db(&self.core.db, move |c| runs::get(c, &run_id)).await?;
+        if matches!(run.executor, Executor::Workflow { .. }) {
+            return Err(
+                "Workflow runs report progress per phase: open the run detail instead.".into(),
+            );
+        }
+        let Some(sid) = run.session_id.clone().filter(|s| is_valid_session_id(s)) else {
+            return Ok(None);
+        };
+        let Some(claude_dir) = self.core.env.claude_dir.clone() else {
+            return Err("Couldn't locate the Claude Code folder ($HOME is not set).".into());
+        };
+        let from = self.cursor_offset(&run.id);
+        let sessions = self.core.sessions.clone();
+        let cwd = run.cwd.clone();
+        let (delta, offset) = blocking(move || {
+            let Some(path) = sessions.find_session_jsonl(&claude_dir.join("projects"), &cwd, &sid) else {
+                return Ok((0, from));
+            };
+            sessions
+                .count_new_tool_calls(&path, from)
+                .map_err(|e| format!("Couldn't read the transcript: {e}"))
+        })
+        .await
+        .map_err(AppError::from)?;
+        Ok(Some(self.advance_cursor(run.id, delta, offset)))
+    }
+
+    fn cursor_offset(&self, run_id: &str) -> u64 {
+        self.progress
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .get(run_id)
+            .map(|c| c.offset)
+            .unwrap_or(0)
+    }
+
+    fn advance_cursor(&self, run_id: String, delta: u32, offset: u64) -> RunProgress {
+        let mut cache = self.progress.lock().unwrap_or_else(|p| p.into_inner());
+        let cursor = cache.entry(run_id).or_default();
+        cursor.tool_calls += delta;
+        cursor.offset = offset;
+        RunProgress {
+            tool_calls: cursor.tool_calls,
+        }
     }
 
     /// Runs launched by the app (`runs` table). If the database read fails, nothing is

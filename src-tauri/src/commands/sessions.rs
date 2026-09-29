@@ -13,7 +13,7 @@ use nodal_app::sessions::SessionReader;
 use nodal_app::sources::SourcesHub;
 use nodal_app::App;
 use nodal_domain::model::activity::ExternalSessions;
-use nodal_domain::model::claude::{LaunchBlocker, RunDetail, RunSummary, Transcript};
+use nodal_domain::model::claude::{LaunchBlocker, RunDetail, RunProgress, RunSummary, Transcript};
 
 use super::CommandError;
 
@@ -78,6 +78,14 @@ pub async fn get_run_transcript(
     limit: Option<u32>,
 ) -> Result<Option<Transcript>, CommandError> {
     Ok(state.sessions.get_run_transcript(run_id, limit).await?)
+}
+
+/// Tool calls of a live, non-workflow run so far, read with an incremental cursor instead of
+/// re-parsing the whole transcript on every poll (P03). `null` if the run has no session yet.
+#[tauri::command]
+#[tracing::instrument(skip_all, level = "info")]
+pub async fn run_progress(state: State<'_, Arc<App>>, run_id: String) -> Result<Option<RunProgress>, CommandError> {
+    Ok(state.sessions.run_progress(run_id).await?)
 }
 
 /// Claude Code sessions started outside the app in the project's repos (`None`: every

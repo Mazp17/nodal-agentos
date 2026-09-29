@@ -135,6 +135,10 @@ impl SessionFiles for HostSessionFiles {
         fs::transcript::session_title(path)
     }
 
+    fn count_new_tool_calls(&self, path: &Path, from: u64) -> io::Result<(u32, u64)> {
+        fs::transcript::count_new_tool_calls(path, from)
+    }
+
     fn external_sessions(
         &self,
         repos: &[(String, PathBuf)],
