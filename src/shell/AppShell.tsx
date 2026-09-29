@@ -10,7 +10,7 @@ import { BoardView } from "../features/board";
 import { ChatView } from "../features/chats";
 import { chatTitle } from "../features/chats/model";
 import { setInAppNotice } from "../features/chats/alerts";
-import { listen as listenToChats, pruneUnread, useUnreadChats } from "../features/chats/stream";
+import { pruneUnread, useUnreadChats } from "../features/chats/stream";
 import { Onboarding } from "../features/onboarding/Onboarding";
 import { CreateProjectDialog } from "../features/projects/CreateProjectDialog";
 import { resolveExecutor } from "../features/executors";
@@ -82,8 +82,9 @@ export function AppShell() {
   const visible = route.page === "run" ? nav.runFrom : route;
   const projectRepos = project ? ctx.reposOf(project.id) : [];
 
-  // Chat answers notify from any page, not only once the Chat page has opened.
-  useEffect(listenToChats, []);
+  // Chat answers notify from any page, not only while the Chat page is open: `ensureChatAttached`
+  // (called once a chat is sent to, from the Chat page) keeps its channel attached regardless of
+  // which page is showing afterward.
   const unreadChats = useUnreadChats();
   const unreadProjects = useMemo(() => new Set(unreadChats.values()), [unreadChats]);
   useEffect(() => {

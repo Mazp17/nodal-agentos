@@ -1,13 +1,17 @@
-// Live state of each chat: its history (read once from the Claude Code session) plus what
-// `nodal://chat` streams after that. One listener for the whole app; views subscribe per chat.
+// Live state of each chat: its history (read once from the Claude Code session) plus what its
+// dedicated channel streams after that (P05: one `Channel` per chat, attached before its first
+// message and kept for the app's session — not a listener shared by every chat).
 
+import { Channel } from "@tauri-apps/api/core";
 import { useCallback, useEffect, useSyncExternalStore } from "react";
 import {
+  attachChatChannel,
+  detachChatChannel,
   listChats,
   getChatLive,
   getChatTranscript,
-  onChatEvent,
   type ChatEvent,
+  type ChatEventEnvelope,
   type ChatRunState,
   type PermissionRequest,
 } from "../../domain/api";
@@ -224,31 +228,36 @@ export function reduce(s: ChatStream, e: ChatEvent): ChatStream {
   }
 }
 
-let unlisten: Promise<() => void> | null = null;
+/** One attach (in flight or done) per chat id we've ever touched, so a repeat call is free. */
+const attached = new Map<string, Promise<void>>();
+
+function handle({ chatId, event }: ChatEventEnvelope) {
+  if (event.type === "state") setRunState(chatId, event.state);
+  // Before reducing: `turnEnd` clears `interrupting`.
+  alertOn(chatId, event);
+  if (streams.has(chatId)) set(chatId, (s) => reduce(s, event));
+}
 
 /**
- * The listener of whichever copy of this module listens. Vite's HMR only disposes the module
- * that accepts an update (a component importing this one), so an edited copy would otherwise
- * keep listening next to the new one and every event (and notice) would arrive twice.
+ * Attaches `chatId`'s dedicated channel (P05): from then on its events arrive at `handle`.
+ * Idempotent and cached, so callers can call it freely; `send()` awaits it once before a
+ * chat's first message, so the process can't start (and stream) before something is listening.
+ * No HMR dedup needed here (unlike a shared listener would): the backend keeps one channel per
+ * chat id, so a second `attach` (an edited copy of this module reattaching) simply replaces the
+ * first instead of both delivering.
  */
-const HANDLE = "__nodalChatListener";
-const slot = globalThis as { [HANDLE]?: Promise<() => void> };
-
-/** Listens to every chat's events; the app calls it once so answers notify from any page. */
-export function listen() {
-  if (unlisten || typeof window === "undefined" || !("__TAURI_INTERNALS__" in window)) return;
-  void slot[HANDLE]?.then(
-    (u) => u(),
-    () => {},
-  );
-  unlisten = onChatEvent(({ chatId, event }) => {
-    if (event.type === "state") setRunState(chatId, event.state);
-    // Before reducing: `turnEnd` clears `interrupting`.
-    alertOn(chatId, event);
-    if (streams.has(chatId)) set(chatId, (s) => reduce(s, event));
+export function ensureChatAttached(chatId: string): Promise<void> {
+  if (typeof window === "undefined" || !("__TAURI_INTERNALS__" in window)) return Promise.resolve();
+  const cached = attached.get(chatId);
+  if (cached) return cached;
+  const channel = new Channel<ChatEventEnvelope>();
+  channel.onmessage = handle;
+  const p = attachChatChannel(chatId, channel).catch((err: unknown) => {
+    attached.delete(chatId);
+    throw err;
   });
-  slot[HANDLE] = unlisten;
-  unlisten.catch((err: unknown) => console.error("nodal://chat", err));
+  attached.set(chatId, p);
+  return p;
 }
 
 /** Reads the chat's history and live state. `fresh`: a new chat with nothing to read. */
@@ -285,7 +294,7 @@ function load(chatId: string, fresh = false): Promise<void> {
 
 /** A chat just created here: nothing to read yet. */
 export function seedChat(chatId: string) {
-  listen();
+  void ensureChatAttached(chatId);
   if (!streams.has(chatId)) void load(chatId, true);
 }
 
@@ -311,6 +320,8 @@ export function forgetChat(chatId: string) {
   setUnread(chatId, null);
   setRunState(chatId, null);
   notify(chatId);
+  attached.delete(chatId);
+  void detachChatChannel(chatId).catch(() => {});
 }
 
 /**
@@ -319,8 +330,8 @@ export function forgetChat(chatId: string) {
  */
 export function useChatStream(chatId: string | null): ChatStream | null {
   useEffect(() => {
-    listen();
     if (!chatId) return;
+    void ensureChatAttached(chatId);
     const s = streams.get(chatId);
     if (!s || (s.loaded && s.state === "stopped" && s.outbox.length === 0 && !loading.has(chatId))) void load(chatId);
   }, [chatId]);
@@ -338,9 +349,9 @@ export function useChatStream(chatId: string | null): ChatStream | null {
   return useSyncExternalStore(subscribe, () => (chatId ? (streams.get(chatId) ?? null) : null));
 }
 
-/** Run state per chat id (only chats that reported one). */
+/** Run state per chat id (only chats that reported one; each got there via `ensureChatAttached`
+ * — this hook doesn't know which ids to attach, only chat views and `seedChat` do). */
 export function useRunStates(): ReadonlyMap<string, ChatRunState> {
-  useEffect(listen, []);
   const subscribe = useCallback((l: () => void) => {
     stateListeners.add(l);
     return () => stateListeners.delete(l);

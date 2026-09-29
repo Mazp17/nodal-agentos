@@ -12,7 +12,7 @@
 // "missing" from "null" apart (`Option<Option<T>>` with `#[serde(default, deserialize_with = ...)]`
 // or `serde_with::double_option`): a bare `Option<Option<T>>` reads `null` as "missing".
 
-import { invoke } from "@tauri-apps/api/core";
+import { invoke, type Channel } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type {
   AgentSource,
@@ -596,6 +596,15 @@ export const getChatLive = (id: string) => invoke<ChatLive>("get_chat_live", { i
 /** History from the Claude Code session; `null` before the first message. */
 export const getChatTranscript = (id: string, limit?: number) =>
   invoke<Transcript | null>("get_chat_transcript", { id, limit: limit ?? null });
+/**
+ * Registers `onEvent` as `id`'s dedicated channel (P05): from then on its events arrive there,
+ * batched on the Rust side, instead of the shared `nodal://chat` broadcast. Call before the
+ * chat's first message; safe to call again (e.g. after a reload).
+ */
+export const attachChatChannel = (id: string, onEvent: Channel<ChatEventEnvelope>) =>
+  invoke<void>("attach_chat_channel", { id, onEvent });
+/** Stops delivering `id`'s events (called when the chat is deleted). */
+export const detachChatChannel = (id: string) => invoke<void>("detach_chat_channel", { id });
 
 // ---------- Migration ----------
 
@@ -645,10 +654,6 @@ export interface ChangedEvent {
  */
 export const onChanged = (cb: (e: ChangedEvent) => void): Promise<UnlistenFn> =>
   listen<ChangedEvent>("nodal://changed", (ev) => cb(ev.payload));
-
-/** Everything every chat streams, as it happens (not debounced). Returns the unlisten. */
-export const onChatEvent = (cb: (e: ChatEventEnvelope) => void): Promise<UnlistenFn> =>
-  listen<ChatEventEnvelope>("nodal://chat", (ev) => cb(ev.payload));
 
 /** "Check for Updates…" in the app menu (release builds only). Returns the unlisten. */
 export const onCheckForUpdates = (cb: () => void): Promise<UnlistenFn> => listen("nodal://check-updates", () => cb());
