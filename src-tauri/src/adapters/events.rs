@@ -8,7 +8,7 @@ use std::collections::BTreeSet;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::{AppHandle, Emitter};
 
 use nodal_domain::model::events::{Changed, ChangeKind as Kind, CHANGED};
 use nodal_domain::ports::ChangeNotifier;
@@ -82,13 +82,6 @@ impl Events {
 impl ChangeNotifier for Events {
     fn notify(&self, kind: Kind, project_id: Option<&str>) {
         Events::notify(self, kind, project_id)
-    }
-}
-
-/// From anywhere with an `AppHandle` (the emitter lives as Tauri state).
-pub fn notify(app: &AppHandle, kinds: &[Kind], project_id: Option<&str>) {
-    if let Some(ev) = app.try_state::<Events>() {
-        ev.notify_all(kinds, project_id);
     }
 }
 

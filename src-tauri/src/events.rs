@@ -7,4 +7,4 @@ pub use nodal_domain::model::events::ChangeKind as Kind;
 #[allow(unused_imports)]
 pub use nodal_domain::model::events::{Changed, CHANGED};
 
-pub use crate::adapters::events::{notify, Events};
+pub use crate::adapters::events::Events;
