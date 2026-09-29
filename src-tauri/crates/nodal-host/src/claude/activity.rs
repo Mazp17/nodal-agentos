@@ -5,7 +5,6 @@
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
-use std::time::Duration;
 
 use nodal_domain::model::activity::{
     AgentSession, AppRuns, ExternalSessions, RepoActivity, RepoSessions, SessionActivity,
@@ -13,9 +12,8 @@ use nodal_domain::model::activity::{
 };
 
 use super::activity_files::{self, SubagentFile};
-use super::bin as claude_bin;
+use super::live::AgentsRaw;
 
-const LIST_TIMEOUT: Duration = Duration::from_secs(15);
 /// Tail read from each transcript.
 const TAIL_BYTES: u64 = 64 * 1024;
 /// An unfinished subagent that hasn't written in this long is considered hung/inactive.
@@ -282,18 +280,11 @@ pub fn assemble(
     }
 }
 
-/// Background and interactive sessions (`claude agents --json --all`, unfiltered).
-pub async fn list_agents() -> Result<Vec<AgentSession>, String> {
-    let mut cmd = claude_bin::claude_command()?;
-    cmd.args(["agents", "--json", "--all"]);
-    let out = claude_bin::output_with_timeout(cmd, LIST_TIMEOUT, "`claude agents`").await?;
-    if !out.status.success() {
-        return Err(format!(
-            "`claude agents` failed: {}",
-            claude_bin::error_text(&out)
-        ));
-    }
-    activity_files::parse_agents(&String::from_utf8_lossy(&out.stdout))
+/// Background and interactive sessions (`claude agents --json --all`, unfiltered). `cache`:
+/// the single-flight cache shared with `cli::list_runs` (P01) — neither spawns its own
+/// `claude agents` anymore.
+pub async fn list_agents(cache: &AgentsRaw) -> Result<Vec<AgentSession>, String> {
+    activity_files::parse_agents(&cache.get().await?)
 }
 
 /// Existing paths, each one as is and canonicalized, without duplicates.

@@ -6,7 +6,7 @@ use super::*;
 #[ignore]
 fn real_list_and_detail() {
     crate::testutil::block_on(async {
-        let runs = list_runs().await.expect("list_runs");
+        let runs = list_runs(&AgentsRaw::new()).await.expect("list_runs");
         eprintln!("{} background runs", runs.len());
         for r in runs.iter().take(5) {
             let cwd = r.cwd.clone().unwrap_or_default();

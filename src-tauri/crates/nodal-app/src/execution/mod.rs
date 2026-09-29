@@ -18,6 +18,7 @@ mod cancel;
 pub mod cleaning;
 mod diff;
 mod enqueue;
+mod live;
 mod pump;
 mod summary;
 mod worktrees;
@@ -36,6 +37,11 @@ use crate::core::{AppError, Core};
 /// today's `work::init`). Kept `pub` (unlike the rest of `pump`): the shell passes it to
 /// `fail_stale_launches`.
 pub use pump::NOTE_APP_CLOSED;
+
+/// `claude agents` single-flight cache (P01), shared by `App::new`'s `Deps.claude` and
+/// `SessionReader` so pump, `list_runs`, `work_summary` and `external_sessions` read the same
+/// cache instead of each spawning their own `claude agents`.
+pub use live::LiveSessions;
 
 /// What changes when a run is enqueued, launched or cancelled.
 const RUN_KINDS: &[ChangeKind] = &[ChangeKind::Runs, ChangeKind::Queue, ChangeKind::Tasks];

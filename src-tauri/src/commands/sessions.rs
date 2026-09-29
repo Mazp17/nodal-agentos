@@ -17,17 +17,13 @@ use nodal_domain::model::claude::{LaunchBlocker, RunDetail, RunSummary, Transcri
 
 use super::CommandError;
 
-/// Background sessions (`claude agents --json --all`), most recent first.
-///
-/// Kept without a `State` (unlike the other three DB-free session commands, below):
-/// `commands::execution::work_summary` and `work::pump` still call this as a plain function,
-/// with no `State` argument (see the report for wave 3a). Once wave 3c moves those call sites
-/// onto `core.claude`/`SessionReader`, this can switch to `State<'_, Arc<SessionReader>>` like
-/// the rest and return `CommandError`.
+/// Background sessions (`claude agents --json --all`), most recent first. Goes through
+/// `SessionReader` (P01's `LiveSessions` cache underneath), like the other DB-free session
+/// commands, instead of spawning its own `claude agents`.
 #[tauri::command]
 #[tracing::instrument(skip_all, level = "info")]
-pub async fn list_runs() -> Result<Vec<RunSummary>, String> {
-    nodal_host::claude::cli::list_runs().await
+pub async fn list_runs(state: State<'_, Arc<SessionReader>>) -> Result<Vec<RunSummary>, CommandError> {
+    Ok(state.list_runs().await?)
 }
 
 /// Detail of the session's most recent workflow. `None` if the session has no folder on

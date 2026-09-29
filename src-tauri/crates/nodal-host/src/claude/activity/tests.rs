@@ -324,7 +324,7 @@ fn repo_prefix_is_not_containment() {
 #[test]
 #[ignore]
 fn real_repo_activity() {
-    let agents = block_on(list_agents()).expect("claude agents");
+    let agents = block_on(list_agents(&AgentsRaw::new())).expect("claude agents");
     let projects = crate::paths::claude_config_dir().unwrap().join("projects");
     let repo = std::env::var("ACTIVITY_REPO").expect("ACTIVITY_REPO=<path to a repo>");
     let now = std::time::SystemTime::now()
