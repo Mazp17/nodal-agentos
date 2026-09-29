@@ -91,6 +91,10 @@ impl SessionFiles for HostSessionFiles {
         fs::readout::session_tokens(session_id, cwd)
     }
 
+    fn session_close(&self, session_id: &str, cwd: &str) -> (SessionReadout, Option<i64>) {
+        fs::readout::read_session_close(session_id, cwd)
+    }
+
     fn run_detail(&self, session_id: &str, cwd: &str) -> Result<Option<RunDetail>, HostError> {
         let projects = fs::readout::projects_dir()?;
         Ok(fs::paths::find_session_dir(&projects, cwd, session_id).and_then(|dir| fs::workflow_detail::read_run_detail(&dir)))

@@ -1,11 +1,16 @@
-//! P03 (`count_new_tool_calls`, incremental cursor): a synthetic ~14 MB session transcript,
-//! read through the same entry points the app uses. Run with:
-//! `cargo bench -p nodal-host --features test-support`.
+//! P03 (`count_new_tool_calls`, incremental cursor) and P12 (`read_session_close`, one read
+//! instead of 3): a synthetic ~14 MB session transcript, read through the same entry points
+//! the app uses. Run with: `cargo bench -p nodal-host --features test-support`.
 
 use criterion::{criterion_group, criterion_main, Criterion};
 
+use nodal_host::claude::fs::paths::project_slug;
+use nodal_host::claude::fs::readout::read_session_close;
 use nodal_host::claude::fs::transcript::{count_new_tool_calls, read_session_transcript};
 use nodal_host::testutil::TempDir;
+
+const CWD: &str = "/repo";
+const SESSION_ID: &str = "ddb91222-57b2-4ae4-a0bb-d1c5993dc1c8";
 
 const TARGET_BYTES: usize = 14 * 1024 * 1024;
 
@@ -67,6 +72,28 @@ fn bench_transcript(c: &mut Criterion) {
     group.finish();
 }
 
+/// P12 after: run closing reads the `.jsonl` once (before: 3 separate opens, see the P12
+/// commit for the measured before/after).
+fn bench_session_close(c: &mut Criterion) {
+    let dir = TempDir::new("bench-session-close");
+    let claude_dir = dir.0.join("claude");
+    let slug_dir = claude_dir.join("projects").join(project_slug(CWD));
+    std::fs::create_dir_all(&slug_dir).unwrap();
+    let text = synthetic_transcript();
+    std::fs::write(slug_dir.join(format!("{SESSION_ID}.jsonl")), &text).unwrap();
+    // SAFETY: this binary only runs criterion benchmarks sequentially (no other threads read
+    // or write this env var while `benches` runs).
+    unsafe { std::env::set_var("CLAUDE_CONFIG_DIR", &claude_dir) };
+
+    let mut group = c.benchmark_group("claude::fs::readout");
+    group.sample_size(10);
+    group.bench_function(format!("read_session_close ({} MB)", text.len() / (1024 * 1024)), |b| {
+        b.iter(|| read_session_close(SESSION_ID, CWD));
+    });
+    group.finish();
+    unsafe { std::env::remove_var("CLAUDE_CONFIG_DIR") };
+}
+
 /// P03: an active run's toolCalls, read with an incremental cursor instead of re-parsing the
 /// whole transcript on every poll. `full` = first poll (nothing cached yet); `steady` = a
 /// later poll with no new data appended, the common case while the app waits between turns.
@@ -88,5 +115,5 @@ fn bench_tool_call_progress(c: &mut Criterion) {
     group.finish();
 }
 
-criterion_group!(benches, bench_transcript, bench_tool_call_progress);
+criterion_group!(benches, bench_transcript, bench_session_close, bench_tool_call_progress);
 criterion_main!(benches);

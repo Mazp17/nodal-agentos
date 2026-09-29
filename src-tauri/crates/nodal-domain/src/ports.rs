@@ -50,6 +50,15 @@ pub trait ClaudeCli: Send + Sync {
 pub trait SessionFiles: Send + Sync {
     fn read_session(&self, session_id: &str, cwd: &str) -> SessionReadout; // runs::read_session
     fn session_tokens(&self, session_id: &str, cwd: &str) -> Option<i64>; // runs::session_tokens
+    /// `read_session` + `session_tokens` together (run closing needs both), from a single
+    /// read of the main transcript instead of one open per field (P12). Default: the two
+    /// calls above, for implementations that don't need the merged read.
+    fn session_close(&self, session_id: &str, cwd: &str) -> (SessionReadout, Option<i64>) {
+        (
+            self.read_session(session_id, cwd),
+            self.session_tokens(session_id, cwd),
+        )
+    }
     fn run_detail(&self, session_id: &str, cwd: &str) -> Result<Option<RunDetail>, HostError>; // get_run_detail closure body
     fn launch_blocker(
         &self,
