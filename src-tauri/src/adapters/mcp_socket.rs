@@ -5,7 +5,6 @@ use std::io::{self, BufRead, BufReader, Read, Write};
 use std::os::unix::fs::{DirBuilderExt, FileTypeExt, MetadataExt, PermissionsExt};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
@@ -13,18 +12,20 @@ use std::time::Duration;
 use nodal_app::App;
 use nodal_mcp_proto::paths::mcp_socket;
 use nodal_mcp_proto::protocol::{Reply, Request, MAX_LINE};
+use tokio::net::UnixListener as TokioUnixListener;
 
-/// How often the listener checks whether it was asked to stop.
-const POLL: Duration = Duration::from_millis(100);
+/// Backoff after a genuine `accept` error (e.g. out of file descriptors). Idle waiting for
+/// the next connection costs nothing: `accept().await` parks on the OS reactor (kqueue on
+/// macOS) instead of polling, so there is no wakeup to back off from in the common case.
+const ERROR_BACKOFF: Duration = Duration::from_millis(100);
 
-/// A running listener. Dropping it keeps the thread alive; `stop` closes it.
+/// A running listener. Dropping it keeps the task alive; `stop` aborts it.
 #[derive(Debug)]
 pub struct Listening {
     path: PathBuf,
     /// `(dev, ino)` of the socket we bound, so `stop` never deletes another instance's.
     id: (u64, u64),
-    stop: Arc<AtomicBool>,
-    thread: thread::JoinHandle<()>,
+    task: tauri::async_runtime::JoinHandle<()>,
 }
 
 impl Listening {
@@ -33,18 +34,17 @@ impl Listening {
     }
 
     /// Stops accepting connections and removes the socket. Requests already being served
-    /// finish on their own threads. Returns within one `POLL`.
+    /// finish on their own threads.
     pub fn stop(self) {
-        self.stop.store(true, Ordering::SeqCst);
         // Removed while the listener is still open: nobody else can have taken the path yet.
         if fs::symlink_metadata(&self.path).is_ok_and(|m| (m.dev(), m.ino()) == self.id) {
             let _ = fs::remove_file(&self.path);
         }
-        let _ = self.thread.join();
+        self.task.abort();
     }
 }
 
-/// Listens on `<data_dir>/mcp.sock` in a background thread. Fails if another Nodal with the
+/// Listens on `<data_dir>/mcp.sock` in a background task. Fails if another Nodal with the
 /// same data folder is already listening.
 pub fn start(app: Arc<App>) -> Result<Listening, String> {
     let path = mcp_socket(app.agent_api.data_dir());
@@ -53,51 +53,51 @@ pub fn start(app: Arc<App>) -> Result<Listening, String> {
     let id = fs::symlink_metadata(&path)
         .map(|m| (m.dev(), m.ino()))
         .map_err(fail)?;
-    // Non-blocking, so the thread can notice `stop` without a connection to wake it up.
     listener.set_nonblocking(true).map_err(fail)?;
-    let stop = Arc::new(AtomicBool::new(false));
-    let stopping = stop.clone();
-    let thread = thread::Builder::new()
-        .name("mcp".into())
-        .spawn(move || {
-            while !stopping.load(Ordering::SeqCst) {
-                let stream = match listener.accept() {
-                    Ok((s, _)) => s,
-                    Err(e) if e.kind() == io::ErrorKind::WouldBlock => {
-                        thread::sleep(POLL);
-                        continue;
-                    }
-                    Err(e) => {
-                        eprintln!("mcp: {e}");
-                        thread::sleep(POLL);
-                        continue;
-                    }
-                };
-                // Accepted sockets inherit non-blocking mode on macOS.
-                if let Err(e) = stream.set_nonblocking(false) {
+    // `from_std` registers the fd with the reactor right away, so it needs a runtime in
+    // scope even though `start` itself is a plain, synchronous call.
+    let handle = tauri::async_runtime::handle();
+    let listener = {
+        let _enter = handle.inner().enter();
+        TokioUnixListener::from_std(listener).map_err(fail)?
+    };
+    let task = tauri::async_runtime::spawn(async move {
+        loop {
+            let stream = match listener.accept().await {
+                Ok((s, _)) => s,
+                Err(e) => {
+                    eprintln!("mcp: {e}");
+                    tokio::time::sleep(ERROR_BACKOFF).await;
+                    continue;
+                }
+            };
+            let stream = match stream.into_std() {
+                Ok(s) => s,
+                Err(e) => {
                     eprintln!("mcp: {e}");
                     continue;
                 }
-                let app = app.clone();
-                let spawned = thread::Builder::new()
-                    .name("mcp-conn".into())
-                    .spawn(move || {
-                        if let Err(e) = handle_conn(stream, |r| respond(&app, r)) {
-                            eprintln!("mcp: {e}");
-                        }
-                    });
-                if let Err(e) = spawned {
-                    eprintln!("mcp: {e}");
-                }
+            };
+            // Accepted sockets inherit non-blocking mode; the connection handler below does
+            // synchronous, blocking I/O on its own thread.
+            if let Err(e) = stream.set_nonblocking(false) {
+                eprintln!("mcp: {e}");
+                continue;
             }
-        })
-        .map_err(fail)?;
-    Ok(Listening {
-        path,
-        id,
-        stop,
-        thread,
-    })
+            let app = app.clone();
+            let spawned = thread::Builder::new()
+                .name("mcp-conn".into())
+                .spawn(move || {
+                    if let Err(e) = handle_conn(stream, |r| respond(&app, r)) {
+                        eprintln!("mcp: {e}");
+                    }
+                });
+            if let Err(e) = spawned {
+                eprintln!("mcp: {e}");
+            }
+        }
+    });
+    Ok(Listening { path, id, task })
 }
 
 /// One request: `AgentApi::call` runs the same `ops` as the UI with the database locked, then
