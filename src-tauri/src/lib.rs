@@ -66,6 +66,14 @@ pub fn run() {
             let clock: Arc<dyn nodal_domain::ports::Clock> = Arc::new(nodal_host::adapters::SystemClock);
             let rt = tauri::async_runtime::handle().inner().clone();
 
+            // P01: one `HostClaudeCli` (its own single-flight `claude agents` cache), wrapped
+            // by `LiveSessions` (a second, typed-result cache). Both `Deps.claude` (the queue
+            // pump, `work_summary`, `cancel_run`) and `SessionReader` (`list_runs`) below share
+            // this same instance, so `external_sessions` (also `Deps.claude`, via `App::sessions`)
+            // reads it too — no more of the two independent `HostClaudeCli`s today's code had.
+            let claude: Arc<dyn nodal_domain::ports::ClaudeCli> =
+                nodal_app::execution::LiveSessions::new(Arc::new(nodal_host::adapters::HostClaudeCli::new(rt.clone())));
+
             // The hub works without a database: provider, key and live-session commands do
             // too. Registered before the database opens, and always.
             let data_dir = paths::data_dir(&handle)?;
@@ -93,7 +101,6 @@ pub fn run() {
                     app.manage(db.clone());
                     let claude_dir = nodal_host::claude::fs::paths::claude_config_dir();
                     let sessions: Arc<dyn nodal_domain::ports::SessionFiles> = Arc::new(nodal_host::adapters::HostSessionFiles);
-                    let claude: Arc<dyn nodal_domain::ports::ClaudeCli> = Arc::new(nodal_host::adapters::HostClaudeCli::new(rt.clone()));
                     // Builds the one `ChatProcesses` instance and starts its reaper (today's
                     // chats setup) — unconditionally, like today, regardless of whether the env
                     // below can be built.
@@ -117,7 +124,7 @@ pub fn run() {
                                 env,
                                 rt: rt.clone(),
                                 clock: clock.clone(),
-                                claude,
+                                claude: claude.clone(),
                                 sessions,
                                 notifier: Arc::new(events),
                                 chats: chat_runtime,
@@ -137,7 +144,7 @@ pub fn run() {
             // (`SourcesHub`, `SessionReader`) still work.
             app.manage(hub.clone());
             app.manage(nodal_app::sessions::SessionReader::new(
-                Arc::new(nodal_host::adapters::HostClaudeCli::new(rt)),
+                claude,
                 Arc::new(nodal_host::adapters::HostSessionFiles),
             ));
 
