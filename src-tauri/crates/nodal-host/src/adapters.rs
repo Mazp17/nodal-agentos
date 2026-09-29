@@ -19,6 +19,7 @@ use nodal_domain::model::executors::{AgentDef, ExecutorInfo};
 use nodal_domain::model::{LaunchOptions, WorktreeRef};
 use nodal_domain::ports::{BoxFut, ClaudeCli, ClaudeConfig, Clock, Git, LocalFs, PlanFiles, SessionFiles};
 
+use crate::claude::live::AgentsRaw;
 use crate::claude::{activity, catalog, cli, fs, settings};
 use crate::git;
 use crate::{paths, plans, repo};
@@ -32,24 +33,27 @@ impl Clock for SystemClock {
     }
 }
 
-/// The `claude` CLI (`nodal_domain::ports::ClaudeCli`).
+/// The `claude` CLI (`nodal_domain::ports::ClaudeCli`). `agents`: the single-flight cache
+/// (P01) `list_sessions`/`list_agent_sessions` share instead of each spawning `claude agents`;
+/// `launch_bg`/`stop` invalidate it, since either can change the live set.
 pub struct HostClaudeCli {
     rt: Handle,
+    agents: AgentsRaw,
 }
 
 impl HostClaudeCli {
     pub fn new(rt: Handle) -> Self {
-        Self { rt }
+        Self { rt, agents: AgentsRaw::new() }
     }
 }
 
 impl ClaudeCli for HostClaudeCli {
     fn list_sessions(&self) -> BoxFut<'_, Result<Vec<RunSummary>, HostError>> {
-        Box::pin(async move { Ok(cli::list_runs().await?) })
+        Box::pin(async move { Ok(cli::list_runs(&self.agents).await?) })
     }
 
     fn list_agent_sessions(&self) -> BoxFut<'_, Result<Vec<AgentSession>, HostError>> {
-        Box::pin(async move { Ok(activity::list_agents().await?) })
+        Box::pin(async move { Ok(activity::list_agents(&self.agents).await?) })
     }
 
     fn launch_bg<'a>(
@@ -59,11 +63,19 @@ impl ClaudeCli for HostClaudeCli {
         opts: &'a LaunchOptions,
         extra: &'a ExtraFlags,
     ) -> BoxFut<'a, Result<RunRef, LaunchError>> {
-        Box::pin(async move { cli::launch_bg(cwd, prompt, opts, extra, &self.rt).await })
+        Box::pin(async move {
+            let r = cli::launch_bg(cwd, prompt, opts, extra, &self.rt).await;
+            self.agents.invalidate().await;
+            r
+        })
     }
 
     fn stop<'a>(&'a self, short_id: &'a str) -> BoxFut<'a, Result<(), HostError>> {
-        Box::pin(async move { Ok(cli::stop(short_id).await?) })
+        Box::pin(async move {
+            let r = cli::stop(short_id).await;
+            self.agents.invalidate().await;
+            Ok(r?)
+        })
     }
 }
 
