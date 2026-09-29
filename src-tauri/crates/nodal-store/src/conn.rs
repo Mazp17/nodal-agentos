@@ -80,9 +80,7 @@ impl Conn {
     pub fn execute_batch(&self, sql: &str) -> rusqlite::Result<()> {
         self.0.execute_batch(sql)
     }
-    /// Not called by moved SQL bodies yet (`db.rs`/`schema.rs` work on the raw connection);
-    /// kept for API completeness and future store code.
-    #[allow(dead_code)]
+    /// Called by `schema::migrate`'s per-migration transaction to run each migration's SQL.
     #[cfg(not(any(test, feature = "test-support")))]
     pub(crate) fn execute_batch(&self, sql: &str) -> rusqlite::Result<()> {
         self.0.execute_batch(sql)
@@ -97,9 +95,8 @@ impl Conn {
     ) -> rusqlite::Result<()> {
         self.0.pragma_update(schema_name, pragma_name, pragma_value)
     }
-    /// Not called by moved SQL bodies yet (`db.rs`'s `configure` works on the raw connection);
-    /// kept for API completeness and future store code.
-    #[allow(dead_code)]
+    /// Called by `schema::migrate`'s per-migration transaction to bump `user_version` after
+    /// applying it.
     #[cfg(not(any(test, feature = "test-support")))]
     pub(crate) fn pragma_update<V: rusqlite::ToSql>(
         &self,
