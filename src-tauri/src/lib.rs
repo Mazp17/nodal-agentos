@@ -79,9 +79,9 @@ pub fn run() {
                     let claude_dir = nodal_host::claude::fs::paths::claude_config_dir();
                     let sessions: Arc<dyn nodal_domain::ports::SessionFiles> = Arc::new(nodal_host::adapters::HostSessionFiles);
                     let claude: Arc<dyn nodal_domain::ports::ClaudeCli> = Arc::new(nodal_host::adapters::HostClaudeCli::new(rt.clone()));
-                    // Builds the one `ChatProcesses` instance, manages it as the legacy
-                    // `ChatState` and starts its reaper (today's chats setup) — unconditionally,
-                    // like today, regardless of whether the env below can be built.
+                    // Builds the one `ChatProcesses` instance and starts its reaper (today's
+                    // chats setup) — unconditionally, like today, regardless of whether the env
+                    // below can be built.
                     let chat_runtime = commands::chats::runtime(&handle, &db, &events, sessions.clone(), claude_dir.clone(), &rt);
 
                     let env_built = (|| -> Result<nodal_app::Env, String> {

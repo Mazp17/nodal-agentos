@@ -1,10 +1,9 @@
-//! Tauri commands, one file per bounded context (frozen split: wave 3 fills each context's
-//! use cases behind it, one agent per file, without touching this one).
+//! Tauri commands, one file per bounded context.
 //!
-//! Command bodies still validate ids, run the legacy `WorkState`/`ChatState`/`Db` and reject
-//! with `String`, exactly like before the move: only their location and imports changed.
-//! `CommandError` is ready for wave 3, which switches each context to `State<Arc<App>>` and
-//! `AppError`.
+//! Most bodies take `State<'_, Arc<App>>` and reject with `CommandError` (from an `AppError`
+//! or a bare `String`); a few contexts with no shared `App` state of their own (`host`,
+//! `linear`, `mcp`, `pty`) still take their own state, or none, and reject with a plain
+//! `String`.
 
 pub mod board;
 pub mod chats;
