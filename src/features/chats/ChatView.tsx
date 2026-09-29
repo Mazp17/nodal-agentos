@@ -12,6 +12,7 @@ import { Conversation } from "./Conversation";
 import { chatTitle, effortOptions, modelOptions, modeOptions, repoOptions, shortAgo, toTurns } from "./model";
 import {
   dropOutbox,
+  ensureChatAttached,
   forgetChat,
   markInterrupting,
   pushOutbox,
@@ -146,6 +147,9 @@ export function ChatView({ project, repos, onOpenTask, focusChatId, onFocused }:
     setDraft("");
     atBottom.current = true;
     try {
+      // Its channel must be attached before the process can start (and stream): `seedChat`/
+      // `useChatStream` already kicked this off, cached and idempotent, so this just awaits it.
+      await ensureChatAttached(id);
       await sendChatMessage(id, text);
       void invalidate("chats");
     } catch (e) {

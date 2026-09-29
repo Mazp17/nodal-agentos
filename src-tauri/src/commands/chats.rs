@@ -1,18 +1,20 @@
 //! Chats Tauri commands (signatures in `src/domain/api.ts`): thin wrappers over `state.chats`.
-//! What the process prints arrives as `nodal://chat` events.
+//! What a chat's process prints arrives on the `ChatEnvelope` channel `attach_chat_channel`
+//! registered for it (P05), or on the `nodal://chat` broadcast for one that never attached.
 
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use tauri::{AppHandle, State};
+use tauri::ipc::Channel;
+use tauri::{AppHandle, Manager, State};
 use tokio::runtime::Handle;
 
 use nodal_app::chats::{ChatPatch, NewChat};
 use nodal_app::App;
-use nodal_domain::model::chat::{ChatLive, ClaudeDefaults};
+use nodal_domain::model::chat::{ChatEnvelope, ChatLive, ClaudeDefaults};
 use nodal_domain::model::claude::Transcript;
 use nodal_domain::model::Chat;
-use nodal_domain::ports::{ChangeNotifier, ChatHooks, ChatRuntime, ChatSink, SessionFiles};
+use nodal_domain::ports::{ChangeNotifier, ChatHooks, ChatRuntime, SessionFiles};
 use nodal_store::Db;
 
 use crate::adapters::chat_sink::TauriChatSink;
@@ -21,8 +23,9 @@ use crate::adapters::events::Events;
 use super::CommandError;
 
 /// Builds the one `ChatProcesses` instance (`nodal_host::claude::chats::ChatProcesses`), with a
-/// `TauriChatSink` for `nodal://chat` and a `ChatHooksImpl` for the process's DB side effects
-/// (saving the session id, refreshing the title), and starts its reaper.
+/// `TauriChatSink` (managed separately so `attach_chat_channel`/`detach_chat_channel` can reach
+/// it) and a `ChatHooksImpl` for the process's DB side effects (saving the session id,
+/// refreshing the title), and starts its reaper.
 pub fn runtime(
     h: &AppHandle,
     db: &Db,
@@ -39,10 +42,36 @@ pub fn runtime(
         claude_dir,
         rt.clone(),
     ));
-    let sink: Arc<dyn ChatSink> = Arc::new(TauriChatSink::new(h.clone()));
+    let sink = Arc::new(TauriChatSink::new(h.clone()));
+    // Managed separately from the `Arc<dyn ChatSink>` below so `attach_chat_channel` /
+    // `detach_chat_channel` can reach the concrete type (registering a channel isn't part of
+    // the `ChatSink` port: it's IPC/Tauri-only glue, which nodal-domain can't know about).
+    h.manage(sink.clone());
     let runtime: Arc<dyn ChatRuntime> = nodal_host::claude::chats::ChatProcesses::new(sink, hooks, rt.clone());
     runtime.start_reaper();
     runtime
+}
+
+/// Registers (or replaces) `id`'s channel: from now on its events arrive there instead of the
+/// `nodal://chat` broadcast. The frontend calls this before a chat's first message, and again
+/// after a full reload, and keeps it for the chat's lifetime.
+#[tauri::command]
+#[tracing::instrument(skip_all, level = "info")]
+pub async fn attach_chat_channel(
+    sink: State<'_, Arc<TauriChatSink>>,
+    id: String,
+    on_event: Channel<ChatEnvelope>,
+) -> Result<(), CommandError> {
+    sink.attach(id, on_event);
+    Ok(())
+}
+
+/// Stops delivering `id`'s events (the chat was deleted).
+#[tauri::command]
+#[tracing::instrument(skip_all, level = "info")]
+pub async fn detach_chat_channel(sink: State<'_, Arc<TauriChatSink>>, id: String) -> Result<(), CommandError> {
+    sink.detach(&id);
+    Ok(())
 }
 
 /// Nothing to do yet: `runtime` already starts the reaper. Kept for the frozen setup order

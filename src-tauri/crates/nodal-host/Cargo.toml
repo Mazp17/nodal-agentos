@@ -42,3 +42,8 @@ required-features = ["test-support"]
 name = "catalog"
 harness = false
 required-features = ["test-support"]
+
+[[bench]]
+name = "stream_json"
+harness = false
+required-features = ["test-support"]

@@ -477,3 +477,112 @@ fn turn_ended_does_nothing_without_a_claude_dir_or_a_saved_session_id() {
     block_on(async { tokio::time::sleep(Duration::from_millis(50)).await });
     assert_eq!(chats::get(&db.lock().unwrap(), "c1").unwrap().session_title, None);
 }
+
+/// Counts `session_title` calls (P11): a chat that already has a title must not re-scan on
+/// every turn.
+struct CountingSessionFiles {
+    jsonl: Option<std::path::PathBuf>,
+    title: Option<String>,
+    title_reads: std::sync::atomic::AtomicU32,
+}
+
+impl SessionFiles for CountingSessionFiles {
+    fn read_session(&self, _session_id: &str, _cwd: &str) -> SessionReadout {
+        unimplemented!()
+    }
+    fn session_tokens(&self, _session_id: &str, _cwd: &str) -> Option<i64> {
+        unimplemented!()
+    }
+    fn run_detail(&self, _session_id: &str, _cwd: &str) -> Result<Option<RunDetail>, HostError> {
+        unimplemented!()
+    }
+    fn launch_blocker(&self, _session_id: &str, _cwd: &str) -> Result<Option<LaunchBlocker>, HostError> {
+        unimplemented!()
+    }
+    fn agent_transcript(
+        &self,
+        _session_id: &str,
+        _cwd: &str,
+        _run_id: &str,
+        _agent_id: &str,
+        _limit: usize,
+    ) -> Result<Option<Transcript>, HostError> {
+        unimplemented!()
+    }
+    fn find_session_jsonl(&self, _projects: &Path, _cwd: &str, _session_id: &str) -> Option<std::path::PathBuf> {
+        self.jsonl.clone()
+    }
+    fn read_session_transcript(
+        &self,
+        _path: &Path,
+        _id: &str,
+        _label: Option<String>,
+        _model: Option<String>,
+        _limit: usize,
+    ) -> Result<Option<Transcript>, HostError> {
+        unimplemented!()
+    }
+    fn session_title(&self, _path: &Path) -> Option<String> {
+        self.title_reads.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        self.title.clone()
+    }
+    fn external_sessions(
+        &self,
+        _repos: &[(String, std::path::PathBuf)],
+        _agents: &[AgentSession],
+        _app: &AppRuns,
+        _now: i64,
+    ) -> Result<ExternalSessions, HostError> {
+        unimplemented!()
+    }
+}
+
+#[test]
+fn turn_ended_does_not_rescan_an_established_title_right_away() {
+    let db = Db::open_in_memory().unwrap();
+    {
+        let c = db.lock().unwrap();
+        rows::insert_project(&c, &project_of("p1", "PAY")).unwrap();
+        rows::insert_chat(
+            &c,
+            &Chat {
+                id: "c1".into(),
+                project_id: "p1".into(),
+                repo_id: None,
+                title: None,
+                session_title: Some("Already named".into()),
+                session_id: Some(SESSION.into()),
+                launch: LaunchOptions::default(),
+                created_at: 1,
+                updated_at: 1,
+            },
+        )
+        .unwrap();
+    }
+    let sessions = Arc::new(CountingSessionFiles {
+        jsonl: Some(std::path::PathBuf::from("/x/s.jsonl")),
+        title: Some("Renamed by claude".into()),
+        title_reads: std::sync::atomic::AtomicU32::new(0),
+    });
+    let hooks = ChatHooksImpl::new(
+        db.clone(),
+        Arc::new(NoopNotifier),
+        sessions.clone(),
+        Some(std::path::PathBuf::from("/claude")),
+        rt(),
+    );
+
+    hooks.turn_ended("c1", std::path::PathBuf::from("/repo"), "p1".into());
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while chats::get(&db.lock().unwrap(), "c1").unwrap().session_title.as_deref() != Some("Renamed by claude") {
+        assert!(Instant::now() < deadline, "first turn never refreshed the title");
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert_eq!(sessions.title_reads.load(std::sync::atomic::Ordering::SeqCst), 1);
+
+    // A second turn right after: the title is already set, so this one is rate-limited.
+    hooks.turn_ended("c1", std::path::PathBuf::from("/repo"), "p1".into());
+    block_on(async { tokio::time::sleep(Duration::from_millis(100)).await });
+    assert_eq!(sessions.title_reads.load(std::sync::atomic::Ordering::SeqCst), 1, "must not re-scan so soon");
+    assert_eq!(chats::get(&db.lock().unwrap(), "c1").unwrap().session_title.as_deref(), Some("Renamed by claude"));
+}

@@ -250,6 +250,8 @@ pub fn run() {
             commands::chats::stop_chat,
             commands::chats::get_chat_live,
             commands::chats::get_chat_transcript,
+            commands::chats::attach_chat_channel,
+            commands::chats::detach_chat_channel,
         ])
         .build(tauri::generate_context!())
         .expect("error while running tauri application")
