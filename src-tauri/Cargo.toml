@@ -67,11 +67,15 @@ nodal-store = { workspace = true, features = ["test-support"] }
 nodal-host = { workspace = true, features = ["test-support"] }
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration
+# P18 (ADR-014): "unwind", not "abort" — a panic in a background worker (pump, sync, a
+# chat's reader/supervisor task) fails only that tokio task/thread, and the existing
+# poisoned-mutex (`unwrap_or_else(|p| p.into_inner())`) and `JoinError` recovery code
+# actually gets exercised instead of being dead code the whole app dies before reaching.
 [profile.release]
 codegen-units = 1
 lto = true
 opt-level = 3
-panic = "abort"
+panic = "unwind"
 strip = true
 
 # Release codegen (lto, codegen-units=1) with symbols kept, for perf profiling
