@@ -19,9 +19,8 @@ deny = [
     "tauri-plugin-updater",
   ] },
   { crate = "rusqlite", wrappers = ["nodal-store"] },
-  # tauri-plugin-updater depends on a separate reqwest 0.13 (untouched, out of scope
-  # per ADR-020); it is listed here only so it isn't flagged as an unexpected
-  # direct dependent of the "reqwest" crate name.
+  # nodal-linear and tauri-plugin-updater share one reqwest 0.13 (ADR-020, P17): a
+  # single version workspace-wide, not two coexisting majors.
   { crate = "reqwest", wrappers = ["nodal-linear", "tauri-plugin-updater"] },
   { crate = "keyring", wrappers = ["nodal-host"] },
   { crate = "portable-pty", wrappers = ["nodal-host"] },
