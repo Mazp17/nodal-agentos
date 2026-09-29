@@ -5,7 +5,7 @@
 use tauri::menu::{Menu, MenuEvent, MenuItem};
 use tauri::{AppHandle, Emitter, Runtime};
 
-use crate::util::paths::DEV;
+use nodal_domain::DEV;
 
 pub const MENU_ID: &str = "check-for-updates";
 pub const CHECK_EVENT: &str = "nodal://check-updates";
@@ -49,27 +49,4 @@ pub fn on_menu_event<R: Runtime>(app: &AppHandle<R>, event: MenuEvent) {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn debug_builds_do_not_check() {
-        assert!(!enabled(true));
-        assert!(enabled(false));
-        assert_eq!(updates_enabled(), !cfg!(debug_assertions));
-    }
-
-    #[test]
-    fn config_ships_signed_updater_artifacts() {
-        let conf: serde_json::Value = serde_json::from_str(include_str!("../tauri.conf.json")).unwrap();
-        assert_eq!(conf["bundle"]["createUpdaterArtifacts"], true);
-        let updater = &conf["plugins"]["updater"];
-        assert!(!updater["pubkey"].as_str().unwrap_or_default().is_empty());
-        let endpoints = updater["endpoints"].as_array().unwrap();
-        assert!(!endpoints.is_empty());
-        for e in endpoints {
-            let url = e.as_str().unwrap();
-            assert!(url.starts_with("https://") && url.ends_with("/latest.json"), "{url}");
-        }
-    }
-}
+mod tests;

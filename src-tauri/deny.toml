@@ -1,0 +1,31 @@
+# Keeps the domain/store/host/linear/proto/app crates free of the shell's own
+# dependencies (tauri) and each I/O crate confined to the one crate that owns it.
+[graph]
+targets = ["aarch64-apple-darwin", "x86_64-apple-darwin"]
+exclude-dev = true
+
+[bans]
+multiple-versions = "allow"
+deny = [
+  # Only the shell (and the pre-existing tauri-plugin-* crates it depends on) may
+  # depend on tauri directly; none of the domain/store/host/linear/proto/app
+  # crates may.
+  { crate = "tauri", wrappers = [
+    "nodal",
+    "tauri-plugin-dialog",
+    "tauri-plugin-fs",
+    "tauri-plugin-notification",
+    "tauri-plugin-opener",
+    "tauri-plugin-updater",
+  ] },
+  { crate = "rusqlite", wrappers = ["nodal-store"] },
+  # tauri-plugin-updater depends on a separate reqwest 0.13 (untouched, out of scope
+  # per ADR-020); it is listed here only so it isn't flagged as an unexpected
+  # direct dependent of the "reqwest" crate name.
+  { crate = "reqwest", wrappers = ["nodal-linear", "tauri-plugin-updater"] },
+  { crate = "keyring", wrappers = ["nodal-host"] },
+  { crate = "portable-pty", wrappers = ["nodal-host"] },
+  # libc is NOT banned: `cargo tree -i libc -e normal --depth 1` lists ~30 direct
+  # dependents (mostly third-party transitive deps: core-foundation, mio, nix,
+  # rustix, tokio, ...), which is not a maintainable allowlist.
+]

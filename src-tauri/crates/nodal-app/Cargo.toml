@@ -1,0 +1,20 @@
+[package]
+name = "nodal-app"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+nodal-domain = { workspace = true }
+nodal-store = { workspace = true }
+nodal-mcp-proto = { workspace = true }
+tokio = { workspace = true, features = ["rt", "sync", "time"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+nodal-host = { workspace = true, features = ["test-support"] }
+nodal-store = { workspace = true, features = ["test-support"] }
+nodal-domain = { workspace = true, features = ["test-support"] }
+tokio = { workspace = true, features = ["rt-multi-thread"] }

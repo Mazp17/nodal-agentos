@@ -28,6 +28,11 @@ jobs:
         with:
           persist-credentials: false
 
+      # Fails fast, before any build: the frontend's `invoke("...")` calls must match the
+      # Tauri commands registered in src-tauri/src/lib.rs, name for name.
+      - name: Commands contract
+        run: bash .github/scripts/check-commands.sh
+
       - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
         with:
           version: 10
@@ -51,7 +56,7 @@ jobs:
 
       - uses: taiki-e/install-action@9983c65e42da123ff25d1f78505eb6de315aa172 # v2
         with:
-          tool: cargo-llvm-cov
+          tool: cargo-llvm-cov,cargo-deny
 
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
@@ -60,7 +65,7 @@ jobs:
 
       - name: Rust tests with coverage
         working-directory: src-tauri
-        run: cargo llvm-cov --lib --locked --json --summary-only --output-path ../coverage.json
+        run: cargo llvm-cov --workspace --lib --locked --json --summary-only --output-path ../coverage.json
 
       - name: Coverage summary
         env:
@@ -88,7 +93,26 @@ jobs:
 
       - name: Clippy
         working-directory: src-tauri
-        run: cargo clippy --all-targets --locked -- -D warnings
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+
+      # nodal-domain and nodal-app must stay free of direct I/O (fs/process/env/clock):
+      # all of it goes through nodal_domain::ports. See their clippy.toml for the list.
+      - name: Clippy (disallowed methods)
+        working-directory: src-tauri
+        run: cargo clippy -p nodal-domain -p nodal-app --lib --locked -- -D clippy::disallowed_methods
+
+      - name: Architecture test
+        working-directory: src-tauri
+        run: cargo test -p nodal --test architecture --locked
+
+      # Resolver 2 can merge dev-dependency features (e.g. test-support) into the
+      # normal build graph; building lib+bins without dev-deps catches that leak.
+      - name: Build without dev-dependencies
+        working-directory: src-tauri
+        run: cargo build --workspace --lib --bins --locked
+
+      - name: cargo-deny (bans)
+        run: cargo deny --manifest-path src-tauri/Cargo.toml check bans
 
       - name: Coverage threshold
         run: |

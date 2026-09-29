@@ -1,0 +1,526 @@
+//! Synchronous CRUD for projects, repos, tasks, relations and settings. Each function takes
+//! the connection (facades run it with `with_db`) and returns errors ready to display.
+//!
+//! Frozen API (plan §3.5): execution, sources and agent_api call this module through
+//! `nodal_app::board::ops`, which stays `pub` until W4.
+
+use std::path::{Path, PathBuf};
+
+use nodal_domain::board::dto::*;
+use nodal_domain::board::validate;
+use nodal_domain::execution::options;
+use nodal_domain::execution::transitions::{apply_status, outbox_ops, OutboxOp};
+use nodal_domain::model::*;
+use nodal_domain::util::new_id;
+use nodal_store::board::{projects, relations, repos, tasks};
+use nodal_store::sources as providers;
+use nodal_store::{rows, Conn as Connection};
+
+use crate::core::Env;
+
+// ---------- Projects ----------
+
+/// Project root folder: absolute, existing, stored canonical; empty → `None`.
+fn root_path(env: &Env, s: Option<&str>) -> Result<Option<String>, String> {
+    let Some(t) = s.map(str::trim).filter(|t| !t.is_empty()) else { return Ok(None) };
+    Ok(Some(env.fs.canonical_dir(t)?.to_string_lossy().into_owned()))
+}
+
+pub fn create_project(conn: &Connection, env: &Env, input: &NewProject, now: i64) -> Result<Project, String> {
+    let name = validate::name(&input.name, "project")?;
+    let key = validate::project_key(&input.key)?;
+    let color = match input.color.as_deref().map(str::trim).filter(|c| !c.is_empty()) {
+        Some(c) => validate::color(c)?,
+        None => validate::PALETTE[projects::count(conn)? as usize % validate::PALETTE.len()].to_string(),
+    };
+    let p = Project {
+        id: new_id('p', now),
+        name,
+        key,
+        next_task_number: 1,
+        color,
+        default_executor: None,
+        reviewer: None,
+        created_at: now,
+        archived_at: None,
+        description: validate::description(input.description.as_deref())?,
+        root_path: root_path(env, input.root_path.as_deref())?,
+    };
+    projects::insert(conn, &p)?;
+    Ok(p)
+}
+
+pub fn update_project(conn: &Connection, env: &Env, id: &str, patch: &ProjectPatch, now: i64) -> Result<Project, String> {
+    let mut p = projects::get(conn, id)?;
+    if let Some(n) = &patch.name {
+        p.name = validate::name(n, "project")?;
+    }
+    if let Some(k) = &patch.key {
+        p.key = validate::project_key(k)?;
+    }
+    if let Some(c) = &patch.color {
+        p.color = validate::color(c)?;
+    }
+    if let Some(d) = &patch.description {
+        p.description = validate::description(d.as_deref())?;
+    }
+    if let Some(r) = &patch.root_path {
+        p.root_path = root_path(env, r.as_deref())?;
+    }
+    if let Some(e) = &patch.default_executor {
+        if let Some(e) = e {
+            validate::executor(e)?;
+        }
+        p.default_executor = e.clone();
+    }
+    if let Some(r) = &patch.reviewer {
+        p.reviewer = r.as_deref().map(validate::reviewer).transpose()?;
+    }
+    if let Some(a) = patch.archived {
+        p.archived_at = if a { p.archived_at.or(Some(now)) } else { None };
+    }
+    projects::update(conn, &p)?;
+    Ok(p)
+}
+
+/// Cascade-deletes repos, tasks and sources. Refuses if there are runs in progress or tasks
+/// with a worktree (the folder and the `nodal/*` branch would be orphaned). Returns the ids
+/// of the deleted tasks (to clean up their plans on disk).
+pub fn delete_project(conn: &mut Connection, id: &str) -> Result<Vec<String>, String> {
+    projects::get(conn, id)?;
+    if nodal_store::execution::runs::pending_in_project(conn, id)? > 0 {
+        return Err("The project has queued or running runs: cancel them first.".into());
+    }
+    let tx = conn.transaction().map_err(|e| e.to_string())?;
+    let all = tasks::list(&tx, Some(id))?;
+    let with_wt: Vec<&str> = all.iter().filter(|t| t.worktree.is_some()).map(|t| t.title.as_str()).collect();
+    if !with_wt.is_empty() {
+        return Err(format!(
+            "Clean up the worktree of these tasks first (task → Clean up): {}.",
+            with_wt.join(", ")
+        ));
+    }
+    let task_ids: Vec<String> = all.into_iter().map(|t| t.id).collect();
+    // Unlink the tasks from their sources before the cascade (the `src_link_id` FK doesn't
+    // allow deleting a link with tasks pointing to it, and the cascade order isn't guaranteed).
+    tasks::unlink_project_sources(&tx, id).map_err(|e| e.to_string())?;
+    projects::delete(&tx, id)?;
+    tx.commit().map_err(|e| e.to_string())?;
+    Ok(task_ids)
+}
+
+// ---------- Repos ----------
+
+/// `root`: canonical git root, already resolved (with `Git::require_git_root`).
+pub fn add_repo(conn: &Connection, project_id: &str, input: &NewRepo, root: &Path, now: i64) -> Result<Repo, String> {
+    projects::get(conn, project_id)?;
+    let path = root.to_string_lossy().into_owned();
+    let dir_name = root.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| path.clone());
+    let name = match input.name.as_deref().map(str::trim).filter(|n| !n.is_empty()) {
+        Some(n) => validate::name(n, "repo")?,
+        None => dir_name,
+    };
+    let launch = options::normalize(&input.launch).map_err(|e| e.join("\n"))?;
+    if let Some(e) = &input.default_executor {
+        validate::executor(e)?;
+    }
+    let r = Repo {
+        id: new_id('r', now),
+        project_id: project_id.to_string(),
+        path,
+        name,
+        launch,
+        default_executor: input.default_executor.clone(),
+        default_isolation: input.default_isolation.unwrap_or(Isolation::Worktree),
+        default_finish: input.default_finish.unwrap_or(Finish::Pr),
+        default_review: input.default_review.unwrap_or(true),
+        reviewer: input.reviewer.as_deref().map(str::trim).filter(|s| !s.is_empty()).map(validate::reviewer).transpose()?,
+        position: repos::next_position(conn, project_id)?,
+        created_at: now,
+    };
+    repos::insert(conn, &r)?;
+    Ok(r)
+}
+
+pub fn update_repo(conn: &Connection, id: &str, patch: &RepoPatch) -> Result<Repo, String> {
+    let mut r = repos::get(conn, id)?;
+    if let Some(n) = &patch.name {
+        r.name = validate::name(n, "repo")?;
+    }
+    if let Some(e) = &patch.default_executor {
+        if let Some(e) = e {
+            validate::executor(e)?;
+        }
+        r.default_executor = e.clone();
+    }
+    if let Some(i) = patch.default_isolation {
+        r.default_isolation = i;
+    }
+    if let Some(f) = patch.default_finish {
+        r.default_finish = f;
+    }
+    if let Some(v) = patch.default_review {
+        r.default_review = v;
+    }
+    if let Some(rv) = &patch.reviewer {
+        r.reviewer = rv.as_deref().map(validate::reviewer).transpose()?;
+    }
+    let mut launch = r.launch.clone();
+    if let Some(m) = &patch.model {
+        launch.model = m.clone();
+    }
+    if let Some(e) = &patch.effort {
+        launch.effort = e.clone();
+    }
+    if let Some(p) = &patch.permission_mode {
+        launch.permission_mode = p.clone();
+    }
+    r.launch = options::normalize(&launch).map_err(|e| e.join("\n"))?;
+    if let Some(p) = patch.position {
+        r.position = p;
+    }
+    repos::update(conn, &r)?;
+    Ok(r)
+}
+
+pub fn delete_repo(conn: &Connection, id: &str) -> Result<(), String> {
+    Ok(repos::delete(conn, id)?)
+}
+
+// ---------- Tasks ----------
+
+/// Plan path, to read it or hand it to the executor. A file is validated again (it may have
+/// been moved or replaced by a symlink since the task was created).
+pub fn plan_path(env: &Env, task: &Task, repo: &Repo) -> Result<PathBuf, String> {
+    match &task.plan {
+        PlanRef::Text => {
+            let p = env.text_plan_path(&task.id);
+            if env.plans.is_file(&p) {
+                Ok(p)
+            } else {
+                Err("The saved plan text is missing.".into())
+            }
+        }
+        PlanRef::File { path } => Ok(env.plans.validate_plan_file(Path::new(&repo.path), path)?),
+    }
+}
+
+pub fn read_plan(env: &Env, path: &Path) -> Result<String, String> {
+    Ok(env.plans.read_plan(path)?)
+}
+
+/// Validates the plan. A text is written to `staging` (it's renamed to the final path only
+/// once the database has saved the task).
+fn stage_plan(env: &Env, repo: &Repo, plan: &PlanInput, staging: &Path) -> Result<PlanRef, String> {
+    match plan {
+        PlanInput::Text { text } => {
+            validate::plan_text(text)?;
+            env.plans.write_atomic(staging, text.as_bytes())?;
+            Ok(PlanRef::Text)
+        }
+        PlanInput::File { path } => {
+            let canon = env.plans.validate_plan_file(Path::new(&repo.path), path)?;
+            Ok(PlanRef::File { path: canon.to_string_lossy().into_owned() })
+        }
+    }
+}
+
+/// Outbox rows for a status change made by hand in Nodal, in the caller's transaction
+/// (queue changes go through `apply_task_transition`).
+pub fn push_status(
+    conn: &Connection,
+    task: &Task,
+    status: Option<TaskStatus>,
+    comment: Option<String>,
+    manages_source: Option<&str>,
+    now: i64,
+) -> Result<(), String> {
+    push_ops(conn, task, outbox_ops(task, status, comment, manages_source), now)
+}
+
+fn push_ops(conn: &Connection, task: &Task, ops: Vec<OutboxOp>, now: i64) -> Result<(), String> {
+    for op in ops {
+        let queued = match op {
+            OutboxOp::Status(s) => providers::enqueue_status(conn, &task.id, s, now),
+            OutboxOp::Comment(body) => providers::enqueue_comment(conn, &task.id, &body, now),
+        };
+        queued.map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+pub fn create_task(conn: &mut Connection, env: &Env, input: &NewTask, now: i64) -> Result<Task, String> {
+    let title = validate::title(&input.title)?;
+    let repo = repos::get(conn, &input.repo_id)?;
+    if repo.project_id != input.project_id {
+        return Err("The repo belongs to another project.".into());
+    }
+    if let Some(e) = &input.assignee {
+        validate::executor(e)?;
+    }
+    let labels = validate::labels(input.labels.as_deref().unwrap_or_default())?;
+    let acceptance = validate::acceptance(input.acceptance.as_deref().unwrap_or_default())?;
+    let id = new_id('t', now);
+    let plan_file = env.text_plan_path(&id);
+    let plan = stage_plan(env, &repo, &input.plan, &plan_file)?;
+    let result = (|| -> Result<Task, String> {
+        let tx = conn.transaction().map_err(|e| e.to_string())?;
+        let number = projects::take_task_number(&tx, &input.project_id)?;
+        let status = input.status.unwrap_or(TaskStatus::Todo);
+        let t = Task {
+            id: id.clone(),
+            project_id: input.project_id.clone(),
+            repo_id: repo.id.clone(),
+            number,
+            title,
+            status,
+            priority: input.priority.unwrap_or_default(),
+            labels,
+            position: tasks::next_position(&tx, &input.project_id, status)?,
+            plan,
+            plan_overridden: false,
+            acceptance,
+            assignee: input.assignee.clone(),
+            isolation: input.isolation,
+            finish: input.finish,
+            review: input.review,
+            worktree: None,
+            source: None,
+            created_at: now,
+            updated_at: now,
+            closed_at: matches!(status, TaskStatus::Done | TaskStatus::Canceled).then_some(now),
+        };
+        tasks::insert(&tx, &t)?;
+        tx.commit().map_err(|e| e.to_string())?;
+        Ok(t)
+    })();
+    if result.is_err() {
+        let _ = env.plans.remove_dir_all(&env.plan_dir(&id));
+    }
+    result
+}
+
+/// Applies a patch. Imported tasks only accept plan (sets `planOverridden`), status, repo,
+/// criteria and run options.
+pub fn update_task(conn: &mut Connection, env: &Env, id: &str, patch: &TaskPatch, now: i64) -> Result<Task, String> {
+    let old = tasks::get(conn, id)?;
+    let mut t = old.clone();
+    if t.source.is_some() && (patch.title.is_some() || patch.priority.is_some() || patch.labels.is_some()) {
+        return Err("Imported tasks are read-only: only the plan, status, acceptance criteria and run options can change.".into());
+    }
+    let mut repo = repos::get(conn, &t.repo_id)?;
+    if let Some(new_repo) = patch.repo_id.as_deref().filter(|r| *r != t.repo_id) {
+        let target = repos::get(conn, new_repo)?;
+        if target.project_id != t.project_id {
+            return Err("A task can only move to a repo of its own project.".into());
+        }
+        if !nodal_store::execution::runs::pending_for_task(conn, id)?.is_empty() {
+            return Err("The task has a queued or running run: wait for it or cancel it first.".into());
+        }
+        if t.worktree.is_some() {
+            return Err("Clean up the task's worktree before moving it to another repo.".into());
+        }
+        if let (PlanRef::File { path }, None) = (&t.plan, &patch.plan) {
+            env.plans
+                .validate_plan_file(Path::new(&target.path), path)
+                .map_err(|_| "The plan file is in the old repo: pick a new plan for this task.".to_string())?;
+        }
+        t.repo_id = target.id.clone();
+        repo = target;
+    }
+    if let Some(title) = &patch.title {
+        t.title = validate::title(title)?;
+    }
+    if let Some(p) = patch.priority {
+        t.priority = p;
+    }
+    if let Some(l) = &patch.labels {
+        t.labels = validate::labels(l)?;
+    }
+    if let Some(a) = &patch.acceptance {
+        t.acceptance = validate::acceptance(a)?;
+    }
+    if let Some(a) = &patch.assignee {
+        if let Some(e) = a {
+            validate::executor(e)?;
+        }
+        t.assignee = a.clone();
+    }
+    if let Some(i) = patch.isolation {
+        t.isolation = i;
+    }
+    if let Some(f) = patch.finish {
+        t.finish = f;
+    }
+    if let Some(r) = patch.review {
+        t.review = r;
+    }
+    let text_path = env.text_plan_path(id);
+    let staged = text_path.with_extension("md.new");
+    if let Some(plan) = &patch.plan {
+        t.plan = stage_plan(env, &repo, plan, &staged)?;
+        if t.source.is_some() {
+            t.plan_overridden = true;
+        }
+    }
+    let new_status = patch.status.filter(|s| *s != old.status);
+    if let Some(s) = new_status {
+        t.status = s;
+        t.closed_at = matches!(s, TaskStatus::Done | TaskStatus::Canceled).then(|| old.closed_at.unwrap_or(now));
+        t.position = tasks::next_position(conn, &t.project_id, s)?;
+    }
+    t.updated_at = now;
+    let saved = (|| -> Result<(), String> {
+        let tx = conn.transaction().map_err(|e| e.to_string())?;
+        tasks::update(&tx, &t)?;
+        push_status(&tx, &t, new_status, None, None, now)?;
+        tx.commit().map_err(|e| e.to_string())
+    })();
+    // Only now are the plan files touched: if saving failed, they stay as they were.
+    if let Err(e) = saved {
+        let _ = env.plans.remove_file(&staged);
+        return Err(e);
+    }
+    if env.plans.is_file(&staged) {
+        env.plans.rename(&staged, &text_path).map_err(|e| format!("Couldn't save the plan: {e}"))?;
+    } else if old.plan == PlanRef::Text && t.plan != PlanRef::Text {
+        let _ = env.plans.remove_file(&text_path);
+    }
+    Ok(t)
+}
+
+/// Drag on the board: column and/or position.
+pub fn move_task(conn: &mut Connection, id: &str, status: TaskStatus, position: f64, now: i64) -> Result<Task, String> {
+    if !position.is_finite() {
+        return Err("Invalid position.".into());
+    }
+    let mut t = tasks::get(conn, id)?;
+    let changed = (t.status != status).then_some(status);
+    if let Some(s) = changed {
+        t.closed_at = matches!(s, TaskStatus::Done | TaskStatus::Canceled).then(|| t.closed_at.unwrap_or(now));
+    }
+    t.status = status;
+    t.position = position;
+    t.updated_at = now;
+    let tx = conn.transaction().map_err(|e| e.to_string())?;
+    tasks::update(&tx, &t)?;
+    push_status(&tx, &t, changed, None, None, now)?;
+    tx.commit().map_err(|e| e.to_string())?;
+    Ok(t)
+}
+
+/// New order for the `status` column: renumbers the positions (1, 2, ...) in one
+/// transaction. All tasks must be in that column and in the same project; the column's tasks
+/// not in the list go after, in their current order. Returns the project.
+pub fn reorder_tasks(conn: &mut Connection, status: TaskStatus, ids: &[String], now: i64) -> Result<Option<String>, String> {
+    let mut seen = std::collections::HashSet::new();
+    if let Some(dup) = ids.iter().find(|id| !seen.insert(id.as_str())) {
+        return Err(format!("Task {dup} appears twice in the new order."));
+    }
+    let tx = conn.transaction().map_err(|e| e.to_string())?;
+    let mut project: Option<String> = None;
+    for id in ids {
+        let t = tasks::get(&tx, id)?;
+        if t.status != status {
+            return Err(format!("{} isn't in that column anymore: refresh and try again.", t.title));
+        }
+        match &project {
+            Some(p) if *p != t.project_id => return Err("All tasks must belong to the same project.".into()),
+            _ => project = Some(t.project_id),
+        }
+    }
+    let Some(project_id) = project else { return Ok(None) };
+    let column: Vec<(String, f64)> = tasks::column_positions(&tx, &project_id, status).map_err(|e| e.to_string())?;
+    let old: std::collections::HashMap<&str, f64> = column.iter().map(|(id, p)| (id.as_str(), *p)).collect();
+    let order = ids.iter().map(String::as_str).chain(column.iter().map(|(id, _)| id.as_str()).filter(|id| !seen.contains(id)));
+    // Only the ones that change position are touched (and get a new `updated_at`).
+    for (i, id) in order.enumerate() {
+        let pos = (i + 1) as f64;
+        if old.get(id) == Some(&pos) {
+            continue;
+        }
+        tasks::set_position(&tx, id, pos, now).map_err(|e| e.to_string())?;
+    }
+    tx.commit().map_err(|e| e.to_string())?;
+    Ok(Some(project_id))
+}
+
+/// Changes the task status for a queue transition (respects Done/Canceled) and writes the
+/// outbox rows in the same transaction (including the return to Todo when its only run is
+/// dequeued). Returns the new status if it changed.
+pub fn apply_task_transition(
+    conn: &Connection,
+    task: &Task,
+    next: Option<TaskStatus>,
+    comment: Option<String>,
+    manages_source: Option<&str>,
+    now: i64,
+) -> Result<Option<TaskStatus>, String> {
+    let status = apply_status(task.status, next);
+    if let Some(s) = status {
+        tasks::set_status(conn, &task.id, s, now)?;
+    }
+    if status.is_some() || comment.is_some() {
+        push_status(conn, task, status, comment, manages_source, now)?;
+    }
+    Ok(status)
+}
+
+/// Deletes the task and its text plan. Refuses if it has queued or running runs, or if it
+/// has a worktree: that's cleaned up first with "Clean up" (which checks for unpushed work),
+/// so the folder and the `nodal/*` branch aren't orphaned.
+pub fn delete_task(conn: &Connection, env: &Env, id: &str) -> Result<(), String> {
+    let t = tasks::get(conn, id)?;
+    if !nodal_store::execution::runs::pending_for_task(conn, id)?.is_empty() {
+        return Err("The task has a queued or running run: cancel it first.".into());
+    }
+    if t.worktree.is_some() {
+        return Err("The task has a worktree: clean up the worktree first (Clean up), then delete the task.".into());
+    }
+    tasks::delete(conn, id)?;
+    match env.plans.remove_dir_all(&env.plan_dir(id)) {
+        Err(e) if e.kind() != std::io::ErrorKind::NotFound => {
+            eprintln!("work: couldn't remove the plan of {id}: {e}");
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
+pub fn read_task_plan(conn: &Connection, env: &Env, id: &str) -> Result<String, String> {
+    let t = tasks::get(conn, id)?;
+    let repo = repos::get(conn, &t.repo_id)?;
+    read_plan(env, &plan_path(env, &t, &repo)?)
+}
+
+// ---------- Relations ----------
+
+pub fn add_relation(conn: &Connection, task_id: &str, other_id: &str, kind: RelationKind) -> Result<(), String> {
+    Ok(relations::add(conn, &TaskRelation { task_id: task_id.into(), other_id: other_id.into(), kind })?)
+}
+
+pub fn remove_relation(conn: &Connection, task_id: &str, other_id: &str, kind: RelationKind) -> Result<(), String> {
+    Ok(relations::remove(conn, &TaskRelation { task_id: task_id.into(), other_id: other_id.into(), kind })?)
+}
+
+// ---------- Settings ----------
+
+pub fn set_settings(conn: &mut Connection, s: &Settings) -> Result<Settings, String> {
+    let clean = Settings {
+        concurrency: validate::concurrency(s.concurrency)?,
+        editor: s.editor.as_deref().map(str::trim).filter(|e| !e.is_empty()).map(validate::editor).transpose()?,
+        reviewer: validate::reviewer(&s.reviewer)?,
+        default_executor: match &s.default_executor {
+            Some(e) => {
+                validate::executor(e)?;
+                Some(e.clone())
+            }
+            None => None,
+        },
+    };
+    rows::save_settings(conn, &clean)?;
+    Ok(rows::load_settings(conn)?)
+}
+
+#[cfg(test)]
+mod tests;
