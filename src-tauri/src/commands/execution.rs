@@ -25,14 +25,10 @@ use crate::work::worktree::WorktreeStatus;
 const OPEN_TIMEOUT: Duration = Duration::from_secs(3);
 
 /// `App::run_pump`'s queue loop needs the runs left `launching` from a previous session
-/// closed first (today's first step of `work::init`). This also manages the legacy
-/// `WorkState`/`Inner`: `commands::mcp`/`mcp::server` (not yet migrated to `Arc<App>`) still
-/// read `inner.db`/`inner.env`/`inner.events` to serve MCP tool calls without a pump of their
-/// own — their `pump`/`pump_error`/`cleaning` fields are never read by that code, so they're
-/// fresh, unshared values; the queue's *real* lock and cleaning set live on `Execution`. That
-/// keeps exactly one pump loop running (`App::run_pump`, spawned below).
-pub fn setup(h: &AppHandle, app: &Arc<App>, db: &crate::db::Db) -> Result<(), String> {
-    manage_legacy_inner(h, app, db);
+/// closed first (today's first step of `work::init`). `db` is unused now: `commands::mcp`/
+/// `mcp::server` moved to `Arc<App>` (agent_api, merged concurrently), so this no longer needs
+/// to keep the legacy `WorkState`/`Inner` alive for them.
+pub fn setup(h: &AppHandle, app: &Arc<App>, _db: &crate::db::Db) -> Result<(), String> {
     match app.execution.fail_stale_launches(NOTE_APP_CLOSED) {
         Err(e) => {
             eprintln!("work: {e}");
@@ -44,21 +40,6 @@ pub fn setup(h: &AppHandle, app: &Arc<App>, db: &crate::db::Db) -> Result<(), St
             Ok(())
         }
     }
-}
-
-/// See `setup`'s doc comment. Removed once `mcp::server`/`commands::mcp` no longer need it
-/// (W4 deletes `work::{Inner, WorkState}` entirely).
-fn manage_legacy_inner(h: &AppHandle, app: &Arc<App>, db: &crate::db::Db) {
-    let events = h.try_state::<crate::events::Events>().map(|e| e.inner().clone()).unwrap_or_default();
-    let inner = std::sync::Arc::new(crate::work::Inner {
-        db: db.clone(),
-        env: app.execution.env(),
-        pump: tokio::sync::Mutex::new(()),
-        events,
-        pump_error: std::sync::Mutex::new(None),
-        cleaning: crate::work::Cleaning::default(),
-    });
-    h.manage(crate::work::WorkState(inner));
 }
 
 /// Fires a queue pass in the background (after enqueueing or cancelling), today's

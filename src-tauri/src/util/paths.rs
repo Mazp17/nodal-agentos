@@ -28,7 +28,11 @@ pub use nodal_host::paths::expand_home;
 pub use crate::commands::host::{resolve_git_root, scan_git_repos};
 /// `nodal_mcp_proto::paths` keeps its own copy of `DEV`; this crate's stays, since it's used
 /// well beyond paths: `updates.rs`, `secrets.rs`, `lib.rs`.
-pub use crate::paths::{data_dir, DEV};
+pub use crate::paths::DEV;
+/// Only the bridge is left; `lib.rs` now calls `paths::data_dir` (the `SRC/paths.rs` module)
+/// directly instead of through this re-export (it stopped going through `work::init`).
+#[allow(unused_imports)]
+pub use crate::paths::data_dir;
 
 #[cfg(test)]
 pub(crate) mod tests;

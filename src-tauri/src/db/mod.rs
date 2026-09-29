@@ -12,8 +12,10 @@ pub fn open(path: &std::path::Path) -> Result<Db, DbError> {
     Db::open(path)
 }
 
-/// In-memory database with the schema applied (tests).
+/// In-memory database with the schema applied (tests). Nothing in this crate calls it
+/// directly anymore: ported tests use `nodal_store::Db::open_in_memory()`.
 #[cfg(test)]
+#[allow(dead_code)]
 pub fn open_in_memory() -> Result<Db, DbError> {
     Db::open_in_memory()
 }

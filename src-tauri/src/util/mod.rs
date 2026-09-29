@@ -6,9 +6,14 @@
 pub mod git;
 pub mod paths;
 
+/// Only the bridge is left; `agent_api::tools` and the ported nodal-app facades now reach
+/// `new_id`/`is_valid_id`/`check_id`/`clip_chars` straight from `nodal_domain::util`.
+#[allow(unused_imports)]
 pub use nodal_domain::util::*;
 
 /// Moved to `nodal_host::adapters::SystemClock`; re-exported so current uses don't break.
+/// Nothing in this crate calls it directly anymore (contexts use `core.clock.now_ms()`).
+#[allow(dead_code)]
 pub fn now_ms() -> i64 {
     use nodal_domain::ports::Clock;
     nodal_host::adapters::SystemClock.now_ms()

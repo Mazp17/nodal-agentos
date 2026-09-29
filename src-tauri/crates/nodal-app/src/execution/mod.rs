@@ -30,7 +30,7 @@ use nodal_domain::util::check_id;
 use nodal_store::execution::runs as qruns;
 use nodal_store::{Conn as Connection, StoreError};
 
-use crate::core::{AppError, Core, Env};
+use crate::core::{AppError, Core};
 
 /// Note left on a run that was still `launching` when the app closed (`setup`'s first step,
 /// today's `work::init`). Kept `pub` (unlike the rest of `pump`): the shell passes it to
@@ -82,13 +82,6 @@ impl Execution {
         F: FnOnce(&mut Connection) -> Result<T, String> + Send + 'static,
     {
         Ok(nodal_store::with_db(&self.core.db, move |c| f(c).map_err(StoreError::Invalid)).await?)
-    }
-
-    /// The app's `Env`, cloned out. Used only by the shell's compat `work::Inner`/`WorkState`
-    /// (kept alive so `mcp::server`/`commands::mcp`, not yet migrated to `Arc<App>`, keep
-    /// working without a database of their own): temporary, dropped once that migration lands.
-    pub fn env(&self) -> Env {
-        self.core.env.clone()
     }
 
     /// `project_id` (optional) filters by project in addition to task.
