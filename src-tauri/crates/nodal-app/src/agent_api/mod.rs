@@ -29,9 +29,12 @@ impl AgentApi {
     /// Runs one MCP tool call with the database locked, then notifies `Tasks` for the
     /// project the tool changed, if any.
     pub fn call(&self, tool: &str, args: Value) -> Result<Value, String> {
-        let mut conn = self.core.db.guard();
-        let now = self.core.clock.now_ms();
-        let outcome = tools::call(&mut conn, &self.core.env, tool, args, now)?;
+        // The lock is released before notifying, as before.
+        let outcome = {
+            let mut conn = self.core.db.guard();
+            let now = self.core.clock.now_ms();
+            tools::call(&mut conn, &self.core.env, tool, args, now)?
+        };
         if let Some(project_id) = &outcome.changed {
             self.core
                 .notifier
