@@ -182,3 +182,6 @@ pub async fn stop(run_id: &str) -> Result<(), String> {
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod tests;

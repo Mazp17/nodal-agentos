@@ -279,3 +279,6 @@ pub struct SessionReadout {
     /// Workflow name if Claude Code asked to approve it and it never ran.
     pub blocker: Option<Option<String>>,
 }
+
+#[cfg(test)]
+mod tests;
