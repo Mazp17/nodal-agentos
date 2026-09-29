@@ -4,7 +4,8 @@
 //! Types and parsing live in `nodal_domain::diff`.
 //!
 //! `collect` is cached per `(cwd, base)`: it recomputes only when the worktree changed
-//! (current HEAD oid + a hash of `git status`'s output differ from what's cached). New
+//! (current HEAD oid + a hash of `git status`'s output and of each listed path's size and
+//! mtime differ from what's cached). New
 //! untracked files no longer cost one `git diff --no-index` process each: their patch is
 //! synthesized in Rust from the file's own bytes (see `synth_new_file`).
 
@@ -80,7 +81,8 @@ impl ProcessBudget {
 /// A worktree's `git status`, parsed once: the HEAD oid (from `# branch.oid`, works even
 /// detached), the untracked files (each its own `? path` line, unquoted because `-z`
 /// disables quoting entirely), whether anything changed, and a hash covering every
-/// non-header line (so any tracked or untracked change flips it).
+/// non-header line plus each listed path's size and mtime. The metadata matters: a file
+/// that's already modified keeps the same status line when it's edited again.
 struct StatusSnapshot {
     head: String,
     dirty: bool,
@@ -102,10 +104,33 @@ fn status_snapshot(cwd: &Path, budget: &mut ProcessBudget) -> Result<StatusSnaps
             "-z",
         ],
     )?;
-    Ok(parse_status(&out))
+    Ok(parse_status(cwd, &out))
 }
 
-fn parse_status(raw: &str) -> StatusSnapshot {
+/// Path of a porcelain-v2 entry: the last of a fixed number of space-separated fields
+/// (paths may contain spaces, so only split off the known leading fields).
+fn entry_path(e: &str) -> Option<&str> {
+    let fields = match e.as_bytes().first()? {
+        b'1' => 9,
+        b'2' => 10,
+        b'u' => 11,
+        b'?' => 2,
+        _ => return None,
+    };
+    e.splitn(fields, ' ').nth(fields - 1)
+}
+
+fn hash_metadata(cwd: &Path, path: &str, hasher: &mut DefaultHasher) {
+    match std::fs::symlink_metadata(cwd.join(path)) {
+        Ok(m) => {
+            m.len().hash(hasher);
+            m.modified().ok().hash(hasher);
+        }
+        Err(_) => 0xdead_u64.hash(hasher),
+    }
+}
+
+fn parse_status(cwd: &Path, raw: &str) -> StatusSnapshot {
     let mut head = String::new();
     let mut untracked = Vec::new();
     let mut dirty = false;
@@ -121,6 +146,9 @@ fn parse_status(raw: &str) -> StatusSnapshot {
             continue;
         }
         e.hash(&mut hasher);
+        if let Some(path) = entry_path(e) {
+            hash_metadata(cwd, path, &mut hasher);
+        }
         if let Some(path) = e.strip_prefix("? ") {
             untracked.push(path.to_string());
             dirty = true;

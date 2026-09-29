@@ -110,6 +110,29 @@ fn collect_reuses_the_cached_patch_without_recomputing() {
 }
 
 #[test]
+fn collect_sees_edits_to_files_that_were_already_changed() {
+    if !git_available() {
+        eprintln!("git not available: skipping");
+        return;
+    }
+    let t = TempDir::new("diff-cache-reedit");
+    let repo = t.0.join("repo");
+    init_repo(&repo);
+    std::fs::write(repo.join("README.md"), "ONE\n").unwrap();
+    std::fs::write(repo.join("new.txt"), "NEW1\n").unwrap();
+    let (p1, _) = collect(&repo, None).unwrap();
+    assert!(p1.contains("ONE") && p1.contains("NEW1"));
+
+    // Same porcelain lines as before (still ` M README.md` and `? new.txt`): only the
+    // files' size/mtime tell the cache the content moved on.
+    std::fs::write(repo.join("README.md"), "ONE\nFOUR\n").unwrap();
+    std::fs::write(repo.join("new.txt"), "NEW1\nNEW3\n").unwrap();
+    let (p2, _) = collect(&repo, None).unwrap();
+    assert!(p2.contains("FOUR"), "stale tracked-file diff:\n{p2}");
+    assert!(p2.contains("NEW3"), "stale untracked-file diff:\n{p2}");
+}
+
+#[test]
 fn run_diff_stays_within_its_process_budget_with_many_new_files() {
     if !git_available() {
         eprintln!("git not available: skipping");
@@ -195,15 +218,15 @@ fn parse_status_reads_head_and_untracked_files() {
         "",
     ]
     .join("\0");
-    let snap = parse_status(&raw);
+    let snap = parse_status(Path::new("/nonexistent"), &raw);
     assert_eq!(snap.head, "abc123");
     assert!(snap.dirty);
     assert_eq!(snap.untracked, vec!["root.txt".to_string(), "sub/new.txt".to_string()]);
 
-    let same = parse_status(&raw);
+    let same = parse_status(Path::new("/nonexistent"), &raw);
     assert_eq!(snap.hash, same.hash);
     let changed = raw.replace("root.txt", "root2.txt");
-    assert_ne!(snap.hash, parse_status(&changed).hash);
+    assert_ne!(snap.hash, parse_status(Path::new("/nonexistent"), &changed).hash);
 }
 
 #[test]
