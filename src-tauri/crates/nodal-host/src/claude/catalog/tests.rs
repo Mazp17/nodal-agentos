@@ -140,6 +140,50 @@ fn catalog_merges_user_repo_plugins_and_workflows() {
     ));
 }
 
+#[test]
+fn list_agents_picks_up_an_added_file_without_restarting() {
+    let t = TempDir::new("agents-cache-add");
+    let claude = t.0.join("claude");
+    write(&claude.join("agents/first.md"), "---\nname: first\n---\n");
+    assert_eq!(
+        list_agents(Some(&claude), None).iter().map(|a| a.name.as_str()).collect::<Vec<_>>(),
+        ["first"]
+    );
+    write(&claude.join("agents/second.md"), "---\nname: second\n---\n");
+    assert_eq!(
+        list_agents(Some(&claude), None).iter().map(|a| a.name.as_str()).collect::<Vec<_>>(),
+        ["first", "second"]
+    );
+}
+
+#[test]
+fn list_agents_picks_up_a_removed_file() {
+    let t = TempDir::new("agents-cache-remove");
+    let claude = t.0.join("claude");
+    let path = claude.join("agents/gone.md");
+    write(&path, "---\nname: gone\n---\n");
+    assert_eq!(list_agents(Some(&claude), None).len(), 1);
+    std::fs::remove_file(&path).unwrap();
+    assert!(list_agents(Some(&claude), None).is_empty());
+}
+
+/// The cache key is the file's mtime/size, not just its path: an in-place rewrite (the same
+/// pattern as a plain editor save without an atomic rename) must still invalidate it. The two
+/// descriptions differ in length so the assertion doesn't depend on filesystem mtime
+/// resolution to observe the change.
+#[test]
+fn list_agents_picks_up_an_edited_file() {
+    let t = TempDir::new("agents-cache-edit");
+    let claude = t.0.join("claude");
+    let path = claude.join("agents/edited.md");
+    write(&path, "---\nname: edited\ndescription: old\n---\n");
+    let before = list_agents(Some(&claude), None);
+    assert_eq!(before[0].description.as_deref(), Some("old"));
+    write(&path, "---\nname: edited\ndescription: brand new and longer\n---\n");
+    let after = list_agents(Some(&claude), None);
+    assert_eq!(after[0].description.as_deref(), Some("brand new and longer"));
+}
+
 /// Against this machine's `~/.claude`: `cargo test -- --ignored`.
 #[test]
 #[ignore]
