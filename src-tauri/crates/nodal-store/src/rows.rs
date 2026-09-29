@@ -378,7 +378,46 @@ pub fn insert_run(conn: &Connection, r: &Run) -> Result<(), DbError> {
 }
 
 pub fn get_run(conn: &Connection, id: &str) -> Result<Option<Run>, DbError> {
-    Ok(conn.query_row("SELECT * FROM runs WHERE id = ?1", [id], run_from_row).optional()?)
+    let mut stmt = conn.prepare_cached("SELECT * FROM runs WHERE id = ?1")?;
+    Ok(stmt.query_row([id], run_from_row).optional()?)
+}
+
+/// Explicit columns of `run_from_row`, minus `prompt`/`extra_instructions`: for lists that
+/// map straight to `RunLight` (history, board), so the prompt blob never leaves SQLite.
+pub const RUN_LIGHT_COLUMNS: &str = "r.id, r.task_id, r.repo_id, r.cwd, r.executor_json, r.kind, \
+    r.parent_run_id, r.options_json, r.finish, r.isolation, r.review, r.verdict_json, r.status, \
+    r.queue_position, r.claude_run_id, r.session_id, r.queued_at, r.launched_at, r.finished_at, \
+    r.outcome, r.summary, r.pr_url, r.branch, r.error, r.legacy_label, r.tokens";
+
+pub fn run_light_from_row(row: &Row) -> rusqlite::Result<RunLight> {
+    Ok(RunLight {
+        id: row.get("id")?,
+        task_id: row.get("task_id")?,
+        repo_id: row.get("repo_id")?,
+        cwd: row.get("cwd")?,
+        executor: get_json(row, "executor_json")?,
+        kind: row.get::<_, SqlEnum<RunKind>>("kind")?.0,
+        parent_run_id: row.get("parent_run_id")?,
+        options: get_json(row, "options_json")?,
+        finish: row.get::<_, SqlEnum<Finish>>("finish")?.0,
+        isolation: row.get::<_, Option<SqlEnum<Isolation>>>("isolation")?.map(|s| s.0),
+        review: row.get("review")?,
+        verdict: get_opt_json(row, "verdict_json")?,
+        status: row.get::<_, SqlEnum<RunStatus>>("status")?.0,
+        queue_position: row.get("queue_position")?,
+        claude_run_id: row.get("claude_run_id")?,
+        session_id: row.get("session_id")?,
+        queued_at: row.get("queued_at")?,
+        launched_at: row.get("launched_at")?,
+        finished_at: row.get("finished_at")?,
+        outcome: row.get::<_, Option<SqlEnum<RunOutcome>>>("outcome")?.map(|s| s.0),
+        summary: row.get("summary")?,
+        pr_url: row.get("pr_url")?,
+        branch: row.get("branch")?,
+        error: row.get("error")?,
+        legacy_label: row.get("legacy_label")?,
+        tokens: row.get("tokens")?,
+    })
 }
 
 // ---------- SourceLink ----------

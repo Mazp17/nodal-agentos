@@ -23,11 +23,21 @@ pub fn get_link(conn: &Connection, id: &str) -> Result<SourceLink, DbError> {
     rows::get_source_link(conn, id)?.ok_or_else(|| DbError::Invalid("Source not found.".into()))
 }
 
+/// Two fixed queries (rather than a `?1 IS NULL OR project_id = ?1` filter) so a present
+/// `project_id` can use an index instead of forcing a full scan.
 pub fn list_links(conn: &Connection, project_id: Option<&str>) -> Result<Vec<SourceLink>, DbError> {
-    let mut stmt = conn.prepare(
-        "SELECT * FROM source_links WHERE ?1 IS NULL OR project_id = ?1 ORDER BY project_id, created_at, id",
-    )?;
-    let out = stmt.query_map([project_id], source_link_from_row)?.collect::<rusqlite::Result<_>>()?;
+    let out: Vec<SourceLink> = match project_id {
+        Some(p) => {
+            let mut stmt = conn.prepare_cached("SELECT * FROM source_links WHERE project_id = ?1 ORDER BY project_id, created_at, id")?;
+            let rows = stmt.query_map([p], source_link_from_row)?.collect::<rusqlite::Result<Vec<_>>>()?;
+            rows
+        }
+        None => {
+            let mut stmt = conn.prepare_cached("SELECT * FROM source_links ORDER BY project_id, created_at, id")?;
+            let rows = stmt.query_map([], source_link_from_row)?.collect::<rusqlite::Result<Vec<_>>>()?;
+            rows
+        }
+    };
     Ok(out)
 }
 
@@ -114,16 +124,27 @@ pub fn task_by_external(conn: &Connection, provider: &str, external_id: &str) ->
 pub const PULL_CLOSED_WINDOW_MS: i64 = 7 * 24 * 3_600_000;
 
 /// Tasks imported by a link (or by any link with `None`) that the pull refreshes: open, or
-/// closed less than `PULL_CLOSED_WINDOW_MS` ago.
+/// closed less than `PULL_CLOSED_WINDOW_MS` ago. Two fixed queries (rather than a
+/// `?1 IS NULL OR src_link_id = ?1` filter) so a present `link_id` can use an index instead
+/// of forcing a full scan.
 pub fn linked_tasks(conn: &Connection, link_id: Option<&str>, now: i64) -> Result<Vec<Task>, DbError> {
-    let mut stmt = conn.prepare(
-        "SELECT * FROM tasks WHERE src_link_id IS NOT NULL AND (?1 IS NULL OR src_link_id = ?1)
-           AND (closed_at IS NULL OR closed_at > ?2)
-         ORDER BY id",
-    )?;
-    let out = stmt
-        .query_map(params![link_id, now - PULL_CLOSED_WINDOW_MS], task_from_row)?
-        .collect::<rusqlite::Result<_>>()?;
+    let cutoff = now - PULL_CLOSED_WINDOW_MS;
+    let out: Vec<Task> = match link_id {
+        Some(id) => {
+            let mut stmt = conn.prepare_cached(
+                "SELECT * FROM tasks WHERE src_link_id = ?1 AND (closed_at IS NULL OR closed_at > ?2) ORDER BY id",
+            )?;
+            let rows = stmt.query_map(params![id, cutoff], task_from_row)?.collect::<rusqlite::Result<Vec<_>>>()?;
+            rows
+        }
+        None => {
+            let mut stmt = conn.prepare_cached(
+                "SELECT * FROM tasks WHERE src_link_id IS NOT NULL AND (closed_at IS NULL OR closed_at > ?1) ORDER BY id",
+            )?;
+            let rows = stmt.query_map([cutoff], task_from_row)?.collect::<rusqlite::Result<Vec<_>>>()?;
+            rows
+        }
+    };
     Ok(out)
 }
 
@@ -306,11 +327,22 @@ pub fn tag_rule(conn: &Connection, link_id: &str, rule_id: &str, repo_id: &str, 
     Ok(())
 }
 
-/// Tasks with an undecided project change (for the "need you" counter).
+/// Tasks with an undecided project change (for the "need you" counter). Two fixed queries
+/// (rather than a `?1 IS NULL OR project_id = ?1` filter) so a present `project_id` can use
+/// an index instead of forcing a full scan.
 pub fn moved_ids(conn: &Connection, project_id: Option<&str>) -> Result<Vec<String>, DbError> {
-    let mut stmt =
-        conn.prepare("SELECT id FROM tasks WHERE src_moved IS NOT NULL AND (?1 IS NULL OR project_id = ?1)")?;
-    let out = stmt.query_map([project_id], |r| r.get::<_, String>(0))?.collect::<rusqlite::Result<_>>()?;
+    let out: Vec<String> = match project_id {
+        Some(p) => {
+            let mut stmt = conn.prepare_cached("SELECT id FROM tasks WHERE src_moved IS NOT NULL AND project_id = ?1")?;
+            let rows = stmt.query_map([p], |r| r.get::<_, String>(0))?.collect::<rusqlite::Result<Vec<_>>>()?;
+            rows
+        }
+        None => {
+            let mut stmt = conn.prepare_cached("SELECT id FROM tasks WHERE src_moved IS NOT NULL")?;
+            let rows = stmt.query_map([], |r| r.get::<_, String>(0))?.collect::<rusqlite::Result<Vec<_>>>()?;
+            rows
+        }
+    };
     Ok(out)
 }
 

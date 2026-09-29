@@ -53,8 +53,14 @@ fn bench_queries(c: &mut Criterion) {
     c.bench_function("runs::list_filtered(project, 10k runs)", |b| {
         b.iter(|| runs::list_filtered(conn, Some("p1"), None).unwrap());
     });
+    c.bench_function("runs::list_filtered_light(project, 10k runs)", |b| {
+        b.iter(|| runs::list_filtered_light(conn, Some("p1"), None).unwrap());
+    });
     c.bench_function("runs::latest_by_task(project, 10k runs)", |b| {
         b.iter(|| runs::latest_by_task(conn, Some("p1")).unwrap());
+    });
+    c.bench_function("runs::latest_by_task_light(project, 10k runs)", |b| {
+        b.iter(|| runs::latest_by_task_light(conn, Some("p1")).unwrap());
     });
     c.bench_function("runs::pending_of(project, 10k runs)", |b| {
         b.iter(|| runs::pending_of(conn, Some("p1")).unwrap());
