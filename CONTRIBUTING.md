@@ -77,12 +77,22 @@ cargo llvm-cov --workspace --lib --summary-only
 
 Tests that hit real services or real local data are `#[ignore]`. Linear live tests read `LINEAR_API_KEY` from the environment and only read data. Never commit a key.
 
+**Benchmarks.** Perf-sensitive code (`git::run`, `run_diff`, transcript parsing, the executor catalog, `nodal-store` queries) has `criterion` benches in `benches/`, gated behind the `test-support` feature (they reuse test-only helpers like in-memory DBs and temp git repos):
+
+```bash
+cargo bench -p nodal-host --features test-support
+cargo bench -p nodal-store --features test-support
+```
+
+**Profiling.** `cargo build --profile profiling` builds release codegen (LTO, `codegen-units=1`) with debug symbols kept (`strip = false`, `debug = 1`), for a release-shaped binary a sampling profiler (Instruments, `samply`) can symbolicate.
+
 ## Guidelines
 
 - **No real data.** Fixtures, examples, screenshots and tests must use made-up names (`acme`, `Jane Doe`, `/Users/me/...`). No company names, real people, real paths or real issue ids.
 - **Claude Code internals.** Nodal reads files that Claude Code writes but does not document. Keep that parsing inside `src-tauri/src/runs/claude_fs.rs`, `src-tauri/src/runs/stream_json.rs` (the `-p` stream-json protocol chats speak) and `src-tauri/src/activity/claude_sessions.rs`, with fixtures, so a format change is fixed in one place.
 - **No shells.** External commands (`claude`, `git`, `gh`, `osascript`) are spawned with argument arrays, never through a shell, and user input is validated before it becomes an argument.
 - **Database changes** are additive migrations: bump `PRAGMA user_version` and add a migration test from the previous version.
+- **Logging.** Crates use `tracing`, not `println!`/`eprintln!`, for anything new (ADR-007); the shell installs the only subscriber (`src-tauri/src/telemetry.rs`), env-filtered by `RUST_LOG` (default `info`), writing to stderr with per-span close timing. Every Tauri command is `#[tracing::instrument(skip_all, level = "info")]`d, so p50/p95 per command comes from those spans (either parsed from the log or, in-process, `telemetry::command_latency_snapshot()`). `nodal-host` also counts `claude`/`git` spawns (`nodal_host::metrics`), and the shell counts `Events::notify`/chat emits (`telemetry::record_ipc_notify`/`record_chat_emit`); both are logged periodically and exposed via `telemetry::log_metrics_snapshot()`, not a new IPC command (an unused one fails `check-commands.sh`).
 - **Native dialogs don't work under Tauri.** Don't use `window.confirm`, `alert` or `prompt`; use `useConfirm()` from `src/ui/ConfirmDialog.tsx`. `pnpm build` fails if you do.
 - **Links** to external sites open through the opener plugin (`src/ui/ExternalLink.tsx`), never by navigating the webview.
 - **English only.** UI text, code, comments and test data are in English.
