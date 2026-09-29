@@ -16,6 +16,12 @@ tracing = { workspace = true }
 [dev-dependencies]
 nodal-domain = { workspace = true, features = ["test-support"] }
 tokio = { workspace = true, features = ["rt-multi-thread"] }
+criterion = { version = "0.8", default-features = false }
 
 [features]
 test-support = ["nodal-domain/test-support"]
+
+[[bench]]
+name = "queries"
+harness = false
+required-features = ["test-support"]

@@ -18,6 +18,27 @@ tracing = { workspace = true }
 [dev-dependencies]
 nodal-domain = { workspace = true, features = ["test-support"] }
 tokio = { workspace = true, features = ["rt-multi-thread"] }
+criterion = { version = "0.8", default-features = false }
 
 [features]
 test-support = ["nodal-domain/test-support"]
+
+[[bench]]
+name = "git_run"
+harness = false
+required-features = ["test-support"]
+
+[[bench]]
+name = "run_diff"
+harness = false
+required-features = ["test-support"]
+
+[[bench]]
+name = "transcript"
+harness = false
+required-features = ["test-support"]
+
+[[bench]]
+name = "catalog"
+harness = false
+required-features = ["test-support"]
