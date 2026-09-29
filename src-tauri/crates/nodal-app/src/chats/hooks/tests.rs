@@ -7,10 +7,14 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+use std::path::Path;
+
+use nodal_domain::error::HostError;
+use nodal_domain::model::activity::{AgentSession, AppRuns, ExternalSessions};
 use nodal_domain::model::chat::{ChatEnvelope, ChatEvent, ChatLive, ChatSpec, HostEvent, RunState, StreamEvent};
-use nodal_domain::model::claude::TranscriptItem;
+use nodal_domain::model::claude::{LaunchBlocker, RunDetail, SessionReadout, Transcript, TranscriptItem};
 use nodal_domain::model::{Chat, LaunchOptions};
-use nodal_domain::ports::{ChatHooks, ChatRuntime, ChatSink};
+use nodal_domain::ports::{ChatHooks, ChatRuntime, ChatSink, SessionFiles};
 use nodal_domain::testutil::project_of;
 use nodal_host::adapters::HostSessionFiles;
 use nodal_host::claude::chats::ChatProcesses;
@@ -354,4 +358,122 @@ fn real_chat_asks_then_resumes() {
         assert!(text.contains(r#""entrypoint":"nodal""#), "the `claude --resume` picker hides SDK entrypoints");
         assert!(!text.contains(r#""entrypoint":"sdk-cli""#));
     });
+}
+
+// ---------- ChatHooksImpl, directly ----------
+//
+// The tests above exercise `ChatHooksImpl` only through a real `ChatProcesses`, with no
+// `claude_dir` (so `turn_ended` always takes its early-return branch). These call the hooks
+// directly, with a fake `SessionFiles`, to cover the title-refresh path too.
+
+#[derive(Default)]
+struct FakeSessionFiles {
+    jsonl: Option<std::path::PathBuf>,
+    title: Option<String>,
+}
+
+impl SessionFiles for FakeSessionFiles {
+    fn read_session(&self, _session_id: &str, _cwd: &str) -> SessionReadout {
+        unimplemented!()
+    }
+    fn session_tokens(&self, _session_id: &str, _cwd: &str) -> Option<i64> {
+        unimplemented!()
+    }
+    fn run_detail(&self, _session_id: &str, _cwd: &str) -> Result<Option<RunDetail>, HostError> {
+        unimplemented!()
+    }
+    fn launch_blocker(&self, _session_id: &str, _cwd: &str) -> Result<Option<LaunchBlocker>, HostError> {
+        unimplemented!()
+    }
+    fn agent_transcript(
+        &self,
+        _session_id: &str,
+        _cwd: &str,
+        _run_id: &str,
+        _agent_id: &str,
+        _limit: usize,
+    ) -> Result<Option<Transcript>, HostError> {
+        unimplemented!()
+    }
+    fn find_session_jsonl(&self, _projects: &Path, _cwd: &str, _session_id: &str) -> Option<std::path::PathBuf> {
+        self.jsonl.clone()
+    }
+    fn read_session_transcript(
+        &self,
+        _path: &Path,
+        _id: &str,
+        _label: Option<String>,
+        _model: Option<String>,
+        _limit: usize,
+    ) -> Result<Option<Transcript>, HostError> {
+        unimplemented!()
+    }
+    fn session_title(&self, _path: &Path) -> Option<String> {
+        self.title.clone()
+    }
+    fn external_sessions(
+        &self,
+        _repos: &[(String, std::path::PathBuf)],
+        _agents: &[AgentSession],
+        _app: &AppRuns,
+        _now: i64,
+    ) -> Result<ExternalSessions, HostError> {
+        unimplemented!()
+    }
+}
+
+fn seeded_db(session_id: Option<&str>) -> Db {
+    let db = Db::open_in_memory().unwrap();
+    let c = db.lock().unwrap();
+    rows::insert_project(&c, &project_of("p1", "PAY")).unwrap();
+    rows::insert_chat(
+        &c,
+        &Chat {
+            id: "c1".into(),
+            project_id: "p1".into(),
+            repo_id: None,
+            title: None,
+            session_title: None,
+            session_id: session_id.map(String::from),
+            launch: LaunchOptions::default(),
+            created_at: 1,
+            updated_at: 1,
+        },
+    )
+    .unwrap();
+    drop(c);
+    db
+}
+
+#[test]
+fn turn_ended_saves_the_title_session_files_reports_and_notifies() {
+    let db = seeded_db(Some(SESSION));
+    let sessions: Arc<dyn SessionFiles> = Arc::new(FakeSessionFiles {
+        jsonl: Some(std::path::PathBuf::from("/x/s.jsonl")),
+        title: Some("Checkout flow".into()),
+    });
+    let hooks = ChatHooksImpl::new(db.clone(), Arc::new(NoopNotifier), sessions, Some(std::path::PathBuf::from("/claude")), rt());
+    hooks.turn_ended("c1", std::path::PathBuf::from("/repo"), "p1".into());
+
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while chats::get(&db.lock().unwrap(), "c1").unwrap().session_title.is_none() {
+        assert!(Instant::now() < deadline, "title never saved");
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert_eq!(chats::get(&db.lock().unwrap(), "c1").unwrap().session_title.as_deref(), Some("Checkout flow"));
+}
+
+#[test]
+fn turn_ended_does_nothing_without_a_claude_dir_or_a_saved_session_id() {
+    // No `claude_dir`: the real fixture above already covers this (every non-real test uses
+    // `claude_dir: None`); this covers the other early return, a chat with no session id yet.
+    let db = seeded_db(None);
+    let sessions: Arc<dyn SessionFiles> = Arc::new(FakeSessionFiles {
+        jsonl: Some(std::path::PathBuf::from("/x/s.jsonl")),
+        title: Some("Should not be saved".into()),
+    });
+    let hooks = ChatHooksImpl::new(db.clone(), Arc::new(NoopNotifier), sessions, Some(std::path::PathBuf::from("/claude")), rt());
+    hooks.turn_ended("c1", std::path::PathBuf::from("/repo"), "p1".into());
+    block_on(async { tokio::time::sleep(Duration::from_millis(50)).await });
+    assert_eq!(chats::get(&db.lock().unwrap(), "c1").unwrap().session_title, None);
 }
