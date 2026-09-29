@@ -68,10 +68,6 @@ const WHITELIST: &[(&str, &[&str], &[&str])] = &[
             "serde",
             "serde_json",
             "tokio",
-            // `commands/linear.rs`'s `LinearState` holds a `reqwest::Client` directly
-            // (real code, not a bridge); `deny.toml` lists `nodal` as a legitimate
-            // `reqwest` wrapper for the same reason.
-            "reqwest",
         ],
     ),
 ];
@@ -80,7 +76,7 @@ const WHITELIST: &[(&str, &[&str], &[&str])] = &[
 const EXCLUSIVE_EXTERNAL: &[(&str, &[&str])] = &[
     ("tauri", &["nodal"]),
     ("rusqlite", &["nodal-store"]),
-    ("reqwest", &["nodal-linear", "nodal"]),
+    ("reqwest", &["nodal-linear"]),
     ("keyring", &["nodal-host"]),
     ("portable-pty", &["nodal-host"]),
 ];

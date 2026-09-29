@@ -19,7 +19,7 @@ const PROVIDER: &str = "linear";
 /// HTTP client shared with the sources hub's Linear provider (built once, before the hub, so
 /// both sides reuse the same connection pool).
 pub struct LinearState {
-    http: reqwest::Client,
+    http: nodal_linear::HttpClient,
 }
 
 impl LinearState {
@@ -32,7 +32,7 @@ impl LinearState {
     }
 
     /// For the hub's provider registry (built with the same client): same HTTP client.
-    pub(crate) fn http(&self) -> &reqwest::Client {
+    pub(crate) fn http(&self) -> &nodal_linear::HttpClient {
         &self.http
     }
 }

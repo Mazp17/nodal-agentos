@@ -8,6 +8,8 @@ mod model;
 pub mod provider;
 
 pub use client::{http_client, LinearClient};
+/// The shared HTTP client type, so the shell can hold one without depending on `reqwest`.
+pub use reqwest::Client as HttpClient;
 pub use detail::IssueDetail;
 pub use error::LinearError;
 pub use provider::{LinearFactory, LinearProvider};

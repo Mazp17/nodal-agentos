@@ -1,7 +1,5 @@
 # Keeps the domain/store/host/linear/proto/app crates free of the shell's own
 # dependencies (tauri) and each I/O crate confined to the one crate that owns it.
-# `nodal` still depends on `reqwest` directly (`commands/linear.rs`'s `LinearState`
-# holds a `reqwest::Client`), so it stays a wrapper for that entry.
 [graph]
 targets = ["aarch64-apple-darwin", "x86_64-apple-darwin"]
 exclude-dev = true
@@ -24,7 +22,7 @@ deny = [
   # tauri-plugin-updater depends on a separate reqwest 0.13 (untouched, out of scope
   # per ADR-020); it is listed here only so it isn't flagged as an unexpected
   # direct dependent of the "reqwest" crate name.
-  { crate = "reqwest", wrappers = ["nodal-linear", "nodal", "tauri-plugin-updater"] },
+  { crate = "reqwest", wrappers = ["nodal-linear", "tauri-plugin-updater"] },
   { crate = "keyring", wrappers = ["nodal-host"] },
   { crate = "portable-pty", wrappers = ["nodal-host"] },
   # libc is NOT banned: `cargo tree -i libc -e normal --depth 1` lists ~30 direct

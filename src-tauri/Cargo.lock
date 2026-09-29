@@ -2381,7 +2381,6 @@ dependencies = [
  "nodal-linear",
  "nodal-mcp-proto",
  "nodal-store",
- "reqwest 0.12.28",
  "serde",
  "serde_json",
  "tauri",
