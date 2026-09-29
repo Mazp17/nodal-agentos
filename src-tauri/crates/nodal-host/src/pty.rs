@@ -185,7 +185,10 @@ impl PtySessions {
 
     /// Hands `data` to the session's writer thread; never blocks on the actual write.
     pub fn write(&self, id: u32, data: Vec<u8>) -> Result<(), String> {
-        match self.lock().sessions.get(&id).map(|s| s.writer_tx.clone()) {
+        // Taken before the match (not in its scrutinee) so the lock is released here instead
+        // of being held for the match's whole body.
+        let tx = self.lock().sessions.get(&id).map(|s| s.writer_tx.clone());
+        match tx {
             Some(tx) => {
                 // A send failure means the writer thread already ended (the session is gone or
                 // going): nothing left to write to, but not the caller's problem.
