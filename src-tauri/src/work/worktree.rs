@@ -6,4 +6,7 @@
 //! moved to `nodal_host::git::worktree`; both re-exported here so current uses don't break.
 
 pub use nodal_domain::execution::worktree::*;
+/// Wave 3c's `Execution::{worktree_status,cleanup_worktree,merge_worktree}` call `env.git`
+/// (the port) directly; nothing in this crate reaches the bridge anymore.
+#[allow(unused_imports)]
 pub use nodal_host::git::worktree::{cleanup, current_base, ensure, status};

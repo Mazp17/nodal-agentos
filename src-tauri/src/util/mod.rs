@@ -20,4 +20,7 @@ pub async fn blocking<T: Send + 'static>(f: impl FnOnce() -> Result<T, String> +
 }
 
 /// Moved to `nodal_host::plans::write_atomic`; re-exported so current uses don't break.
+/// Wave 3c's `Execution::cancel_run` calls `env.plans.write_atomic` (the port) directly;
+/// nothing in this crate reaches the bridge anymore.
+#[allow(unused_imports)]
 pub use nodal_host::plans::write_atomic;
