@@ -94,3 +94,5 @@ impl ChatHooks for ChatHooksImpl {
     }
 }
 
+#[cfg(test)]
+mod tests;

@@ -1,13 +1,23 @@
-//! Drives `Chats` against a fake `claude` that speaks the fixtures' stream-json.
+//! Drives a real `ChatProcesses` (with `ChatHooksImpl` wired to an in-memory database) against
+//! a fake `claude` that speaks the fixtures' stream-json (was `chats::process::tests`, through
+//! the old bridge `Chats` wrapper).
+#![allow(clippy::disallowed_methods)] // spins up a fake `claude` script on disk
 
-use std::path::Path;
+use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
-use super::*;
-use crate::db::open_in_memory;
-use crate::db::queries::chats;
-use crate::db::rows::{insert_chat, insert_project};
-use crate::domain::{Chat, LaunchOptions};
-use crate::work::testutil::project_of;
+use nodal_domain::model::chat::{ChatEnvelope, ChatEvent, ChatLive, ChatSpec, HostEvent, RunState, StreamEvent};
+use nodal_domain::model::claude::TranscriptItem;
+use nodal_domain::model::{Chat, LaunchOptions};
+use nodal_domain::ports::{ChatHooks, ChatRuntime, ChatSink};
+use nodal_domain::testutil::project_of;
+use nodal_host::adapters::HostSessionFiles;
+use nodal_host::claude::chats::ChatProcesses;
+use nodal_store::{chats, rows, Db};
+
+use crate::chats::hooks::ChatHooksImpl;
+use crate::testutil::{block_on, rt, NoopNotifier};
 
 const SESSION: &str = "00000000-0000-4000-8000-000000000009";
 
@@ -44,8 +54,16 @@ while IFS= read -r line; do
 done
 "#;
 
+struct RecordingSink(Arc<Mutex<Vec<ChatEnvelope>>>);
+
+impl ChatSink for RecordingSink {
+    fn emit(&self, ev: ChatEnvelope) {
+        self.0.lock().unwrap().push(ev);
+    }
+}
+
 struct Fixture {
-    chats: Chats,
+    chats: Arc<ChatProcesses>,
     db: Db,
     events: Arc<Mutex<Vec<ChatEnvelope>>>,
     dir: PathBuf,
@@ -63,10 +81,10 @@ impl Fixture {
             use std::os::unix::fs::PermissionsExt;
             std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o755)).unwrap();
         }
-        let db = open_in_memory().unwrap();
+        let db = Db::open_in_memory().unwrap();
         {
             let c = db.lock().unwrap();
-            insert_project(&c, &project_of("p1", "PAY")).unwrap();
+            rows::insert_project(&c, &project_of("p1", "PAY")).unwrap();
             let chat = Chat {
                 id: "c1".into(),
                 project_id: "p1".into(),
@@ -78,17 +96,18 @@ impl Fixture {
                 created_at: 1,
                 updated_at: 1,
             };
-            insert_chat(&c, &chat).unwrap();
+            rows::insert_chat(&c, &chat).unwrap();
         }
         let events = Arc::new(Mutex::new(Vec::new()));
-        let sink = events.clone();
-        let emit: Emit = Arc::new(move |e| sink.lock().unwrap().push(e));
-        let chats = Chats::with_program(db.clone(), Events::default(), emit, Some(program), None);
+        let sink: Arc<dyn ChatSink> = Arc::new(RecordingSink(events.clone()));
+        let hooks: Arc<dyn ChatHooks> =
+            Arc::new(ChatHooksImpl::new(db.clone(), Arc::new(NoopNotifier), Arc::new(HostSessionFiles), None, rt()));
+        let chats = ChatProcesses::with_program(sink, hooks, rt(), Some(program));
         Fixture { chats, db, events, dir }
     }
 
-    fn spec(&self, args: &[&str]) -> Spec {
-        Spec { cwd: self.dir.clone(), args: args.iter().map(|s| s.to_string()).collect() }
+    fn spec(&self, args: &[&str]) -> ChatSpec {
+        ChatSpec { cwd: self.dir.clone(), args: args.iter().map(|s| s.to_string()).collect() }
     }
 
     fn events(&self) -> Vec<ChatEvent> {
@@ -128,15 +147,14 @@ impl Drop for Fixture {
     }
 }
 
-fn is_item(e: &ChatEvent, pred: impl Fn(&crate::runs::types::TranscriptItem) -> bool) -> bool {
+fn is_item(e: &ChatEvent, pred: impl Fn(&TranscriptItem) -> bool) -> bool {
     matches!(e, ChatEvent::Stream(StreamEvent::Item { item }) if pred(item))
 }
 
 #[test]
 fn streams_a_turn_saves_the_session_and_resumes_after_idle() {
-    use crate::runs::types::TranscriptItem;
     let f = Fixture::new("resume");
-    tauri::async_runtime::block_on(async {
+    block_on(async {
         f.chats.send("c1", "p1", None, f.spec(&["--model", "haiku"]), "Hello").unwrap();
         assert_eq!(f.chats.live("c1").state, RunState::Busy);
         f.wait_turn_end(1).await;
@@ -178,9 +196,8 @@ fn streams_a_turn_saves_the_session_and_resumes_after_idle() {
 
 #[test]
 fn permission_requests_are_answered_from_the_host() {
-    use crate::runs::types::TranscriptItem;
     let f = Fixture::new("permission");
-    tauri::async_runtime::block_on(async {
+    block_on(async {
         f.chats.send("c1", "p1", None, f.spec(&[]), "please write a.txt").unwrap();
         f.wait_for(1, "permission request", |e| matches!(e, ChatEvent::Stream(StreamEvent::PermissionRequest(_)))).await;
         let live = f.chats.live("c1");
@@ -189,7 +206,7 @@ fn permission_requests_are_answered_from_the_host() {
         assert_eq!(live.pending[0].request_id, "req-1");
         assert_eq!(live.pending[0].summary.as_deref(), Some("/Users/me/Code/acme/a.txt"));
 
-        assert!(f.chats.respond("c1", "nope", true, None).unwrap_err().contains("no longer pending"));
+        assert!(f.chats.respond("c1", "nope", true, None).unwrap_err().to_string().contains("no longer pending"));
         f.chats.respond("c1", "req-1", true, None).unwrap();
         f.wait_turn_end(1).await;
         let ev = f.events();
@@ -205,13 +222,13 @@ fn permission_requests_are_answered_from_the_host() {
         assert!(f.events().iter().any(|e| matches!(e, ChatEvent::Stream(StreamEvent::ToolResult { result, .. }) if result.is_error)));
         assert_eq!(f.args().len(), 1, "one process for the whole chat");
     });
-    assert!(f.chats.respond("missing", "req-1", true, None).unwrap_err().contains("isn't running"));
+    assert!(f.chats.respond("missing", "req-1", true, None).unwrap_err().to_string().contains("isn't running"));
 }
 
 #[test]
 fn interrupt_ends_the_turn_and_keeps_the_process() {
     let f = Fixture::new("interrupt");
-    tauri::async_runtime::block_on(async {
+    block_on(async {
         f.chats.interrupt("c1").unwrap();
         f.chats.send("c1", "p1", None, f.spec(&[]), "slow essay").unwrap();
         f.wait_for(1, "replayed message", |e| matches!(e, ChatEvent::Stream(StreamEvent::Item { .. }))).await;
@@ -229,7 +246,7 @@ fn interrupt_ends_the_turn_and_keeps_the_process() {
 #[test]
 fn new_settings_restart_an_idle_process() {
     let f = Fixture::new("restart");
-    tauri::async_runtime::block_on(async {
+    block_on(async {
         f.chats.send("c1", "p1", None, f.spec(&["--model", "haiku"]), "Hello").unwrap();
         f.wait_turn_end(1).await;
         f.chats.send("c1", "p1", Some(SESSION), f.spec(&["--model", "opus"]), "Hello").unwrap();
@@ -251,7 +268,7 @@ fn new_settings_restart_an_idle_process() {
 #[test]
 fn a_crash_mid_turn_is_reported() {
     let f = Fixture::new("crash");
-    tauri::async_runtime::block_on(async {
+    block_on(async {
         f.chats.send("c1", "p1", None, f.spec(&[]), "crash now").unwrap();
         f.wait_stopped(1).await;
         let err = f.events().into_iter().find_map(|e| match e {
@@ -266,10 +283,10 @@ fn a_crash_mid_turn_is_reported() {
 #[test]
 fn refuses_a_missing_folder_and_a_bad_session() {
     let f = Fixture::new("refuse");
-    let missing = Spec { cwd: Path::new("/Users/me/does-not-exist").into(), args: vec![] };
-    assert!(f.chats.send("c1", "p1", None, missing, "Hello").unwrap_err().contains("doesn't exist"));
-    let err = tauri::async_runtime::block_on(async { f.chats.send("c1", "p1", Some("../x"), f.spec(&[]), "Hello") });
-    assert!(err.unwrap_err().contains("Invalid session id"));
+    let missing = ChatSpec { cwd: std::path::Path::new("/Users/me/does-not-exist").into(), args: vec![] };
+    assert!(f.chats.send("c1", "p1", None, missing, "Hello").unwrap_err().to_string().contains("doesn't exist"));
+    let err = block_on(async { f.chats.send("c1", "p1", Some("../x"), f.spec(&[]), "Hello") });
+    assert!(err.unwrap_err().to_string().contains("Invalid session id"));
     assert_eq!(f.chats.live("c1").state, RunState::Stopped);
     assert!(f.events().is_empty());
 }
@@ -291,13 +308,13 @@ fn event_payload_shape() {
 #[ignore]
 fn real_chat_asks_then_resumes() {
     let mut f = Fixture::new("real");
-    f.chats = Chats::new(f.db.clone(), Events::default(), {
-        let sink = f.events.clone();
-        Arc::new(move |e| sink.lock().unwrap().push(e))
-    });
+    let sink: Arc<dyn ChatSink> = Arc::new(RecordingSink(f.events.clone()));
+    let hooks: Arc<dyn ChatHooks> =
+        Arc::new(ChatHooksImpl::new(f.db.clone(), Arc::new(NoopNotifier), Arc::new(HostSessionFiles), None, rt()));
+    f.chats = ChatProcesses::new(sink, hooks, rt());
     let dir = f.dir.canonicalize().unwrap();
-    let spec = Spec { cwd: dir.clone(), args: vec!["--model".into(), "haiku".into()] };
-    tauri::async_runtime::block_on(async {
+    let spec = ChatSpec { cwd: dir.clone(), args: vec!["--model".into(), "haiku".into()] };
+    block_on(async {
         f.chats.send("c1", "p1", None, spec.clone(), "Use the Write tool to create note.txt containing 'x'. Then reply DONE.").unwrap();
         let deadline = Instant::now() + Duration::from_secs(120);
         loop {
@@ -330,9 +347,9 @@ fn real_chat_asks_then_resumes() {
         assert_eq!(sid, session);
         assert!(result.unwrap_or_default().contains("note.txt"));
 
-        let projects = crate::runs::claude_fs::claude_config_dir().unwrap().join("projects");
+        let projects = nodal_host::claude::fs::paths::claude_config_dir().unwrap().join("projects");
         let session = session.unwrap();
-        let jsonl = crate::runs::claude_fs::find_session_jsonl(&projects, &dir.to_string_lossy(), &session).unwrap();
+        let jsonl = nodal_host::claude::fs::paths::find_session_jsonl(&projects, &dir.to_string_lossy(), &session).unwrap();
         let text = std::fs::read_to_string(jsonl).unwrap();
         assert!(text.contains(r#""entrypoint":"nodal""#), "the `claude --resume` picker hides SDK entrypoints");
         assert!(!text.contains(r#""entrypoint":"sdk-cli""#));
