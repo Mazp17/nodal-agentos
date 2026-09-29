@@ -3,7 +3,6 @@
 //! `js_script`, `last_tool`, `transcript`, `usage`, `review_denial`, `readout`);
 //! re-exported here so current uses don't break.
 
-pub use nodal_domain::sessions::transcript::{is_valid_session_id, user_item, TRANSCRIPT_DEFAULT_LIMIT, TRANSCRIPT_MAX_LIMIT};
 /// Only the bridge is left; nothing in this crate calls it directly anymore
 /// (`nodal_app::sessions::SessionReader` validates workflow/agent ids itself now).
 #[allow(unused_imports)]
@@ -12,7 +11,9 @@ pub use nodal_domain::sessions::transcript::is_valid_path_id;
 #[allow(unused_imports)]
 pub use nodal_domain::sessions::transcript::{clip, TEXT_MAX};
 
-pub use nodal_host::claude::fs::paths::{claude_config_dir, find_session_jsonl};
+pub use nodal_host::claude::fs::paths::claude_config_dir;
+#[cfg(test)]
+pub use nodal_domain::sessions::transcript::is_valid_session_id;
 /// Only `runs::get_run_detail` (`#[cfg(test)]`, above) still calls this directly.
 #[cfg(test)]
 pub use nodal_host::claude::fs::paths::find_session_dir;
@@ -21,7 +22,6 @@ pub use nodal_host::claude::fs::paths::find_session_dir;
 /// `fs::review_denial` module directly).
 #[allow(unused_imports)]
 pub use nodal_host::claude::fs::review_denial::read_workflow_review_denial;
-pub use nodal_host::claude::fs::transcript::{read_session_transcript, session_title};
 /// Only the bridge is left; nothing in this crate calls it directly anymore
 /// (`nodal_host::adapters::HostSessionFiles::agent_transcript` calls the underlying
 /// `fs::transcript` module directly).
