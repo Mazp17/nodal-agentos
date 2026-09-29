@@ -5,7 +5,7 @@
 use criterion::{criterion_group, criterion_main, Criterion};
 
 use nodal_host::claude::fs::paths::project_slug;
-use nodal_host::claude::fs::readout::read_session_close;
+use nodal_host::claude::fs::readout::{read_session, read_session_close, session_tokens};
 use nodal_host::claude::fs::transcript::{count_new_tool_calls, read_session_transcript};
 use nodal_host::testutil::TempDir;
 
@@ -89,6 +89,10 @@ fn bench_session_close(c: &mut Criterion) {
     group.sample_size(10);
     group.bench_function(format!("read_session_close ({} MB)", text.len() / (1024 * 1024)), |b| {
         b.iter(|| read_session_close(SESSION_ID, CWD));
+    });
+    // `finish_run`'s calls before it was routed through `session_close`.
+    group.bench_function(format!("session_tokens + read_session ({} MB)", text.len() / (1024 * 1024)), |b| {
+        b.iter(|| (session_tokens(SESSION_ID, CWD), read_session(SESSION_ID, CWD)));
     });
     group.finish();
     unsafe { std::env::remove_var("CLAUDE_CONFIG_DIR") };
