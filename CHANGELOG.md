@@ -18,6 +18,21 @@ All notable changes to Nodal are documented here. The project uses [Semantic Ver
 
 Before, coverage counted inline test code; the tests now live in their own files and aren't counted. Idle CPU/RSS needs a GUI session and wasn't measured.
 
+### Performance
+
+* **backend:** CPU, memory, child-process and IPC optimizations across `nodal-host`/`nodal-app`/`nodal-store` (P01–P18 from the backend perf pass): a shared, single-flight `LiveSessions` cache instead of up to 4 independent `claude agents` spawns per tick; `run_diff` synthesizes new-file diffs in Rust instead of one `git diff --no-index` per file, capped and cached by worktree state; run progress (`toolCalls`) and a run's closing transcript read incrementally/once instead of on every 5s poll; chat streaming uses typed `stream-json` structs, a dedicated `ipc::Channel` per chat and batched deltas; `git::run` and the MCP socket no longer poll on a fixed interval; explicit-column, `prepare_cached` queries in `nodal-store`; a single `reqwest` version workspace-wide; `panic = "unwind"` in release so a worker panic (pump/sync/a chat) fails only that task, not the app. Representative before/after (full list in the vault's "04 Optimizaciones de rendimiento y memoria" note):
+
+| Metric | Before | After |
+| --- | --- | --- |
+| `claude agents` spawns (5 reads within the cache's TTL) | 5 | 1 |
+| `run_diff`, 50 new files (p95) | 2.05 s, ~56 `git` processes | 76 ms cold / 35 ms cached, ≤5 processes |
+| `git::run` ×1000 | 19.67 s | 8.20 s (-58%) |
+| MCP socket idle wakeups / 5 s | 49 | 0 |
+| `reqwest` versions in the workspace | 2 (0.12 + 0.13) | 1 (0.13.5) |
+| Release binary size (`panic = "unwind"` for P18) | 14,545,424 B | 18,645,376 B (+28.2%) |
+
+P10 (a reader-connection pool ahead of the single-mutex `Db`) was evaluated with a synthetic contention bench and **reverted**: it regressed read p95 latency (64.97 ms → 94.87 ms) under real parallel CPU contention on this hardware, even though it fixed write latency (57.88 ms → 0.37 ms), which was already under its own threshold. Live S0–S3 CPU/RSS/spawn numbers with the packaged app need a GUI session and `sudo` (dtrace/powermetrics) and are still pending manual measurement (script and steps in the vault note and NOD-12's final report).
+
 ## [0.5.0](https://github.com/Mazp17/nodal-agentos/compare/v0.4.0...v0.5.0) (2026-09-26)
 
 
