@@ -1,5 +1,37 @@
 use super::*;
 
+use tokio::io::AsyncWriteExt;
+
+/// P08, offline: `forward_lines` forwards only the first `MAX_LAUNCH_OUTPUT_LINES` (the
+/// `cfg(test)` value, 5) and still drains the rest instead of leaving it unread (the writer
+/// finishes without blocking on a full pipe).
+#[test]
+fn forward_lines_caps_what_it_forwards_but_drains_the_rest() {
+    crate::testutil::block_on(async {
+        let (mut writer, reader) = tokio::io::duplex(64 * 1024);
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        forward_lines(reader, tx, &Handle::current());
+
+        let total = MAX_LAUNCH_OUTPUT_LINES * 3;
+        let mut sent = String::new();
+        for i in 0..total {
+            sent.push_str(&format!("line {i}\n"));
+        }
+        tokio::time::timeout(Duration::from_secs(5), writer.write_all(sent.as_bytes()))
+            .await
+            .expect("writer blocked: the reader isn't draining past the cap")
+            .unwrap();
+        drop(writer);
+
+        let mut forwarded = Vec::new();
+        while let Some(line) = rx.recv().await {
+            forwarded.push(line);
+        }
+        assert_eq!(forwarded.len() as u64, MAX_LAUNCH_OUTPUT_LINES);
+        assert_eq!(forwarded[0], "line 0");
+    });
+}
+
 /// Against the real `claude` and this machine's data: `cargo test -- --ignored`.
 /// Read-only (`claude agents` + files); doesn't launch runs.
 #[test]
