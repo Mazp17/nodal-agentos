@@ -8,7 +8,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use nodal_domain::error::HostError;
-use nodal_domain::model::chat::{ChatEnvelope, ChatEvent, ChatSpec, HostEvent, StreamEvent};
+use nodal_domain::model::chat::{ChatEnvelope, ChatEvent, ChatSpec, HostEvent, RunState, StreamEvent};
 use nodal_domain::ports::{ChatHooks, ChatSink};
 
 use super::ChatProcesses;
@@ -146,4 +146,36 @@ fn a_kind_change_and_a_crash_both_flush_the_buffer() {
     });
 }
 
+/// More lines than `MAX_STDOUT_LINES` (the `cfg(test)` value, 100): the reader stops parsing
+/// past the cap, reports why and the process is stopped — not left running forever.
+const FLOODS_OUTPUT: &str = r#"#!/bin/sh
+echo '{"type":"system","subtype":"init","session_id":"00000000-0000-4000-8000-000000000003","cwd":"/tmp"}'
+i=0
+while [ $i -lt 150 ]; do
+  echo "{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"line $i\"}]},\"parent_tool_use_id\":null}"
+  i=$((i + 1))
+done
+"#;
 
+#[test]
+fn a_flood_of_lines_is_capped_reported_and_stops_the_process() {
+    let f = Fixture::new("flood", FLOODS_OUTPUT);
+    block_on(async {
+        send(&f.chats, f.spec()).unwrap();
+        f.wait_for(1, "overflow error", |e| matches!(e, ChatEvent::Host(HostEvent::Error { .. }))).await;
+        f.wait_for(1, "stopped", |e| *e == ChatEvent::Host(HostEvent::State { state: RunState::Stopped })).await;
+
+        let items = f
+            .events()
+            .into_iter()
+            .filter(|e| matches!(e, ChatEvent::Stream(StreamEvent::Item { .. })))
+            .count();
+        // The cap counts every line, including `init`: 99 `assistant` lines fit under it.
+        assert_eq!(items, 99, "{:#?}", f.events());
+        let message = f.events().into_iter().find_map(|e| match e {
+            ChatEvent::Host(HostEvent::Error { message }) => Some(message),
+            _ => None,
+        });
+        assert!(message.unwrap().contains("exceeded"));
+    });
+}

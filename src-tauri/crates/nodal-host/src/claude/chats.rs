@@ -51,6 +51,13 @@ const STDERR_TAIL: usize = 2000;
 /// (an item, a permission request, the turn ending…) flushes whatever is buffered first, so
 /// ordering on the wire matches the order `claude` printed things in.
 const DELTA_FLUSH_INTERVAL: Duration = Duration::from_millis(17);
+/// P08: a misbehaving (or malicious) `claude` process could keep stdout open and noisy
+/// forever; past this many lines in one process's lifetime, further lines are no longer
+/// parsed/emitted and the process is stopped and reported. Real turns are nowhere near this.
+#[cfg(not(test))]
+const MAX_STDOUT_LINES: u64 = 200_000;
+#[cfg(test)]
+const MAX_STDOUT_LINES: u64 = 100;
 
 enum DeltaKind {
     Text,
@@ -252,7 +259,13 @@ impl ChatProcesses {
         let id = chat_id.to_string();
         let reader = self.0.rt.spawn(async move {
             let mut lines = BufReader::new(stdout).lines();
+            let mut n: u64 = 0;
             while let Ok(Some(line)) = lines.next_line().await {
+                n += 1;
+                if n > MAX_STDOUT_LINES {
+                    me.on_stdout_overflow(&id, gen);
+                    break;
+                }
                 me.on_line(&id, gen, &line);
             }
         });
@@ -381,6 +394,31 @@ impl ChatProcesses {
         self.emit(chat_id, ChatEvent::Stream(ev));
         if idle {
             self.emit_state(chat_id, RunState::Idle);
+        }
+    }
+
+    /// P08: the reader hit `MAX_STDOUT_LINES` without ever reaching a clean turn end — stops
+    /// the process (like `ChatRuntime::stop`) and reports why, since `on_exit` won't (it only
+    /// reports a failure for the process it still finds current).
+    fn on_stdout_overflow(&self, chat_id: &str, gen: u64) {
+        let removed = {
+            let mut procs = self.procs();
+            if procs.get(chat_id).is_some_and(|p| p.gen == gen) {
+                procs.remove(chat_id);
+                true
+            } else {
+                false
+            }
+        };
+        if removed {
+            self.emit(
+                chat_id,
+                ChatEvent::Host(HostEvent::Error {
+                    message: format!(
+                        "Claude's output exceeded {MAX_STDOUT_LINES} lines without ending the turn and was stopped."
+                    ),
+                }),
+            );
         }
     }
 
