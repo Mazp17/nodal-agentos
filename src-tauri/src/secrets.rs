@@ -7,9 +7,8 @@
 //! `Secrets::keychain()`, kept here because this crate is the one that knows about
 //! `nodal_host::keychain::Keychain` (nodal-app doesn't depend on nodal-host).
 //!
-//! There is a single instance (`secrets::keychain()`, created in `lib.rs`): it is registered
-//! as Tauri state (`State<Secrets>`, used by the providers) and `linear::LinearState` keeps a
-//! clone (same cache) for the `linear_*` commands.
+//! There is a single instance (`secrets::keychain()`, created in `lib.rs`), shared by the
+//! sources hub (`nodal_app::sources::SourcesHub`), which also serves the Linear key.
 
 use std::sync::Arc;
 
