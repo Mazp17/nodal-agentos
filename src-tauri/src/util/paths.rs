@@ -3,8 +3,9 @@
 //! `DEV` and `data_dir` moved to `SRC/paths.rs`; `resolve_git_root` and `scan_git_repos`
 //! moved to `SRC/commands/host.rs`. Both are re-exported so current uses don't break.
 
-/// Moved to `nodal_mcp_proto::paths` (W1), which keeps its own copy of `DEV` (this crate's
-/// `DEV` below stays, since it's used well beyond paths: `updates.rs`, `secrets.rs`, `lib.rs`).
+/// Only the bridge is left; nothing in this crate calls it directly anymore
+/// (`adapters::mcp_socket` now imports it straight from `nodal_mcp_proto::paths`).
+#[allow(unused_imports)]
 pub use nodal_mcp_proto::paths::mcp_socket;
 /// Only the bridge is left; nothing in this crate calls it directly anymore (`nodal_home`
 /// and the other host-side path functions now use `nodal_host::paths::home` instead).
@@ -25,6 +26,8 @@ pub use nodal_host::paths::expand_home;
 /// Only the bridge is left; nothing in this crate calls them directly anymore.
 #[allow(unused_imports)]
 pub use crate::commands::host::{resolve_git_root, scan_git_repos};
+/// `nodal_mcp_proto::paths` keeps its own copy of `DEV`; this crate's stays, since it's used
+/// well beyond paths: `updates.rs`, `secrets.rs`, `lib.rs`.
 pub use crate::paths::{data_dir, DEV};
 
 #[cfg(test)]

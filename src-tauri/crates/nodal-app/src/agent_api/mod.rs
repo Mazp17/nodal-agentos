@@ -2,6 +2,7 @@
 //! UI with the database locked, then the same `nodal://changed` the Tauri commands emit (was
 //! `mcp::server::respond`).
 
+use std::path::Path;
 use std::sync::Arc;
 
 use nodal_domain::model::events::ChangeKind;
@@ -18,6 +19,11 @@ pub struct AgentApi {
 impl AgentApi {
     pub(crate) fn new(core: Arc<Core>) -> Self {
         Self { core }
+    }
+
+    /// Where the MCP socket adapter binds `mcp.sock` (`Env::data_dir`).
+    pub fn data_dir(&self) -> &Path {
+        &self.core.env.data_dir
     }
 
     /// Runs one MCP tool call with the database locked, then notifies `Tasks` for the
