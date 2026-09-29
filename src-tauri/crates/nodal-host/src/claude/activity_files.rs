@@ -81,8 +81,19 @@ pub fn find_session_jsonl(projects: &Path, cwd: Option<&str>, session_id: &str) 
         .find(|p| p.is_file())
 }
 
+#[cfg(test)]
+thread_local! {
+    /// Calls to `read_tail` on the current thread, test-only (P07): thread-local so a test
+    /// can count its own reads (each `#[test]` fn runs on its own thread) without
+    /// interference from other tests running in parallel, and prove a transcript was read
+    /// once across every repo instead of once per repo.
+    pub(crate) static READ_TAIL_CALLS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 /// Last `window` bytes of the file, without the first line if it was cut off.
 pub fn read_tail(path: &Path, window: u64) -> Option<String> {
+    #[cfg(test)]
+    READ_TAIL_CALLS.with(|c| c.set(c.get() + 1));
     let mut file = fs::File::open(path).ok()?;
     let len = file.metadata().ok()?.len();
     let start = len.saturating_sub(window);
