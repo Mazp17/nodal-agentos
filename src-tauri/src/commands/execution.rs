@@ -29,17 +29,14 @@ const OPEN_TIMEOUT: Duration = Duration::from_secs(3);
 /// `mcp::server` moved to `Arc<App>` (agent_api, merged concurrently), so this no longer needs
 /// to keep the legacy `WorkState`/`Inner` alive for them.
 pub fn setup(h: &AppHandle, app: &Arc<App>, _db: &crate::db::Db) -> Result<(), String> {
-    match app.execution.fail_stale_launches(NOTE_APP_CLOSED) {
-        Err(e) => {
-            eprintln!("work: {e}");
-            Err(e)
-        }
-        Ok(_) => {
-            tauri::async_runtime::spawn(app.clone().run_pump());
-            crate::commands::mcp::setup(h, app);
-            Ok(())
-        }
+    // A `launching` from a previous session may or may not have actually launched. Like
+    // today, a failure here is only logged: the pump and the MCP socket still start.
+    if let Err(e) = app.execution.fail_stale_launches(NOTE_APP_CLOSED) {
+        eprintln!("work: {e}");
     }
+    tauri::async_runtime::spawn(app.clone().run_pump());
+    crate::commands::mcp::setup(h, app);
+    Ok(())
 }
 
 /// Fires a queue pass in the background (after enqueueing or cancelling), today's
