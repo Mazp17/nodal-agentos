@@ -97,12 +97,12 @@ impl Execution {
         self.db(move |c| Ok(qruns::list_filtered(c, project_id.as_deref(), task_id.as_deref())?)).await
     }
 
-    /// Like `list_task_runs`, without `prompt` or `extraInstructions`.
+    /// Like `list_task_runs`, without `prompt` or `extraInstructions`: `prompt` never leaves
+    /// SQLite for this list.
     pub async fn list_runs_light(&self, project_id: Option<String>, task_id: Option<String>) -> Result<Vec<RunLight>, AppError> {
         let task_id = opt_id(task_id, "task")?;
         let project_id = opt_id(project_id, "project")?;
-        let runs = self.db(move |c| Ok(qruns::list_filtered(c, project_id.as_deref(), task_id.as_deref())?)).await?;
-        Ok(runs.into_iter().map(RunLight::from).collect())
+        self.db(move |c| Ok(qruns::list_filtered_light(c, project_id.as_deref(), task_id.as_deref())?)).await
     }
 
     pub async fn get_run(&self, run_id: String) -> Result<Run, AppError> {
@@ -113,8 +113,7 @@ impl Execution {
     /// The last run of each task (no history limit), lightweight.
     pub async fn latest_runs_by_task(&self, project_id: Option<String>) -> Result<Vec<RunLight>, AppError> {
         let project_id = opt_id(project_id, "project")?;
-        let runs = self.db(move |c| Ok(qruns::latest_by_task(c, project_id.as_deref())?)).await?;
-        Ok(runs.into_iter().map(RunLight::from).collect())
+        self.db(move |c| Ok(qruns::latest_by_task_light(c, project_id.as_deref())?)).await
     }
 
     pub async fn list_queue(&self) -> Result<Vec<Run>, AppError> {
