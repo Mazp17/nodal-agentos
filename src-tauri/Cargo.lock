@@ -2375,17 +2375,13 @@ dependencies = [
 name = "nodal"
 version = "0.5.0"
 dependencies = [
- "keyring",
- "libc",
  "nodal-app",
  "nodal-domain",
  "nodal-host",
  "nodal-linear",
  "nodal-mcp-proto",
  "nodal-store",
- "portable-pty",
  "reqwest 0.12.28",
- "rusqlite",
  "serde",
  "serde_json",
  "tauri",
