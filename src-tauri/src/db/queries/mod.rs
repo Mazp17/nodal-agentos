@@ -4,5 +4,7 @@
 pub use nodal_store::board::{projects, repos, tasks};
 pub use nodal_store::execution::runs;
 
-/// Moved to `nodal_domain::serde_util`; re-exported so current uses don't break.
+/// Only the bridge is left; nothing in this crate calls it directly anymore
+/// (`agent_api::tools` now imports it straight from `nodal_domain::serde_util`).
+#[allow(unused_imports)]
 pub use nodal_domain::serde_util::double_option;

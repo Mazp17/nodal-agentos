@@ -1,9 +1,33 @@
+#![allow(clippy::disallowed_methods)] // builds fixture folders/files directly on disk
+
+use std::path::PathBuf;
+use std::sync::Arc;
+
+use nodal_domain::board::dto::{NewProject, NewRepo};
+use nodal_domain::testutil::run_of;
+use nodal_host::adapters::{HostClaudeConfig, HostGit, HostLocalFs, HostPlanFiles};
+use nodal_host::testutil::TempDir;
+use nodal_store::execution::runs as qruns;
+use nodal_store::Db;
+use serde_json::json;
+
 use super::*;
-use crate::db::open_in_memory;
-use crate::db::queries::runs as qruns;
-use crate::util::paths::tests::TempDir;
-use crate::work::dto::{NewProject, NewRepo};
-use crate::work::testutil::run_of;
+
+/// `Env` for tests: real (blocking, synchronous) host adapters rooted at `data_dir`/
+/// `worktrees_root`, so callers keep their own `TempDir` and path names. Local copy of the
+/// old `work::test_env` helper (agent_api owns its own tests; it doesn't reach into
+/// `nodal_app::testutil`).
+fn test_env(data_dir: PathBuf, worktrees_root: PathBuf, claude_dir: Option<PathBuf>) -> Env {
+    Env {
+        data_dir,
+        worktrees_root,
+        claude_dir,
+        plans: Arc::new(HostPlanFiles),
+        fs: Arc::new(HostLocalFs),
+        git: Arc::new(HostGit),
+        claude_config: Arc::new(HostClaudeConfig),
+    }
+}
 
 struct Fx {
     t: TempDir,
@@ -12,7 +36,7 @@ struct Fx {
 
 fn fx(name: &str) -> Fx {
     let t = TempDir::new(name);
-    let env = crate::work::test_env(t.0.join("data"), t.0.join("wt"), None);
+    let env = test_env(t.0.join("data"), t.0.join("wt"), None);
     Fx { t, env }
 }
 
@@ -48,7 +72,7 @@ fn call_ok(c: &mut Connection, f: &Fx, name: &str, args: Value) -> Outcome {
 #[test]
 fn create_task_numbers_validates_and_reports_the_project() {
     let f = fx("mcp-create");
-    let db = open_in_memory().unwrap();
+    let db = Db::open_in_memory().unwrap();
     let mut c = db.lock().unwrap();
     let (p, web, api) = seed(&c, &f);
 
@@ -131,7 +155,7 @@ fn create_task_numbers_validates_and_reports_the_project() {
 #[test]
 fn list_get_and_update_tasks_by_key() {
     let f = fx("mcp-update");
-    let db = open_in_memory().unwrap();
+    let db = Db::open_in_memory().unwrap();
     let mut c = db.lock().unwrap();
     let (p, _, api) = seed(&c, &f);
     for title in ["One", "Two"] {
@@ -236,7 +260,7 @@ fn list_get_and_update_tasks_by_key() {
 #[test]
 fn get_run_reports_the_review_result() {
     let f = fx("mcp-run");
-    let db = open_in_memory().unwrap();
+    let db = Db::open_in_memory().unwrap();
     let mut c = db.lock().unwrap();
     seed(&c, &f);
     let t = call_ok(
@@ -337,7 +361,7 @@ fn definitions_cover_every_tool_and_nothing_launches() {
 #[test]
 fn propose_task_validates_and_creates_nothing() {
     let f = fx("mcp-propose");
-    let db = open_in_memory().unwrap();
+    let db = Db::open_in_memory().unwrap();
     let mut c = db.lock().unwrap();
     let (p, web, _) = seed(&c, &f);
 
@@ -425,7 +449,7 @@ fn only_chats_list_propose_task() {
 
 #[test]
 fn the_skill_describes_every_tool_and_value() {
-    let skill = include_str!("../../../../skills/nodal-tasks/SKILL.md");
+    let skill = include_str!("../../../../../../skills/nodal-tasks/SKILL.md");
     assert!(skill.starts_with("---\nname: nodal-tasks\ndescription: "));
     let defs = chat_definitions();
     let tools = defs

@@ -16,7 +16,11 @@ pub use nodal_mcp_proto::paths::home;
 pub use nodal_mcp_proto::paths::{data_dir_standalone, APP_IDENTIFIER};
 
 /// Moved to `nodal_host::paths`; re-exported so current uses don't break.
-pub use nodal_host::paths::{expand_home, git_repos_under, git_root_of, nodal_home};
+pub use nodal_host::paths::{git_repos_under, git_root_of, nodal_home};
+/// Only the bridge is left; nothing in this crate calls it directly anymore
+/// (`agent_api::tools::resolve_repo` now reaches it through `Env::fs`, its injected port).
+#[allow(unused_imports)]
+pub use nodal_host::paths::expand_home;
 
 /// Only the bridge is left; nothing in this crate calls them directly anymore.
 #[allow(unused_imports)]
