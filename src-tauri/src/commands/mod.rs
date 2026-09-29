@@ -43,5 +43,11 @@ impl From<String> for CommandError {
     }
 }
 
+/// Runs `f` on a blocking thread (disk, git) without stalling the runtime. Shell-only: it
+/// wraps `tauri::async_runtime::spawn_blocking`, which nodal-app/nodal-domain can't depend on.
+pub(crate) async fn blocking<T: Send + 'static>(f: impl FnOnce() -> Result<T, String> + Send + 'static) -> Result<T, String> {
+    tauri::async_runtime::spawn_blocking(f).await.map_err(|e| format!("Internal error: {e}"))?
+}
+
 #[cfg(test)]
 mod tests;

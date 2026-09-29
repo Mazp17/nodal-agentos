@@ -1,6 +1,6 @@
 #[test]
 fn git_version_reports_git() {
-    if !crate::util::paths::tests::git_available() {
+    if !nodal_host::testutil::git_available() {
         return;
     }
     let v = tauri::async_runtime::block_on(super::git_version()).unwrap();
@@ -12,7 +12,7 @@ fn git_version_reports_git() {
 /// unit tests live in that crate now).
 #[test]
 fn resolve_git_root_finds_the_repo_root_or_none() {
-    use crate::util::paths::tests::{git_available, init_repo, TempDir};
+    use nodal_host::testutil::{git_available, init_repo, TempDir};
 
     if !git_available() {
         return;
@@ -35,7 +35,7 @@ fn resolve_git_root_finds_the_repo_root_or_none() {
 /// Wrapper-level coverage for `scan_git_repos`, on top of `nodal_host::paths::git_repos_under`.
 #[test]
 fn scan_git_repos_finds_repos_under_the_root() {
-    use crate::util::paths::tests::{git_available, init_repo, TempDir};
+    use nodal_host::testutil::{git_available, init_repo, TempDir};
 
     if !git_available() {
         return;

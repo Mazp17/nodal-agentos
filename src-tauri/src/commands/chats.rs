@@ -13,10 +13,10 @@ use nodal_domain::model::chat::{ChatLive, ClaudeDefaults};
 use nodal_domain::model::claude::Transcript;
 use nodal_domain::model::Chat;
 use nodal_domain::ports::{ChangeNotifier, ChatHooks, ChatRuntime, ChatSink, SessionFiles};
+use nodal_store::Db;
 
 use crate::adapters::chat_sink::TauriChatSink;
 use crate::adapters::events::Events;
-use crate::db::Db;
 
 use super::CommandError;
 

@@ -7,10 +7,11 @@ use tauri::State;
 
 use nodal_app::App;
 
+use nodal_domain::board::dto::*;
+use nodal_domain::model::executors::ExecutorInfo;
+use nodal_domain::model::*;
+
 use crate::commands::CommandError;
-use crate::domain::*;
-use crate::work::dto::*;
-use crate::work::executors::ExecutorInfo;
 
 // ---------- Projects ----------
 

@@ -10,17 +10,16 @@ use tauri::{AppHandle, State};
 
 use nodal_app::execution::NOTE_APP_CLOSED;
 use nodal_app::App;
+use nodal_domain::board::dto::{LaunchInput, MergeInput};
+use nodal_domain::board::validate;
+use nodal_domain::diff::RunDiff;
+use nodal_domain::execution::queue::WorkSummary;
+use nodal_domain::execution::worktree::{MergeReport, WorktreeStatus};
+use nodal_domain::model::*;
+use nodal_host::claude::bin as claude_bin;
 
+use crate::commands::blocking;
 use crate::commands::CommandError;
-use crate::domain::*;
-use crate::runs::claude_bin;
-use crate::util::blocking;
-use crate::work::diff::RunDiff;
-use crate::work::dto::{LaunchInput, MergeInput};
-use crate::work::merge::MergeReport;
-use crate::work::queue::WorkSummary;
-use crate::work::validate;
-use crate::work::worktree::WorktreeStatus;
 
 const OPEN_TIMEOUT: Duration = Duration::from_secs(3);
 
@@ -28,7 +27,7 @@ const OPEN_TIMEOUT: Duration = Duration::from_secs(3);
 /// closed first (today's first step of `work::init`). `db` is unused now: `commands::mcp`/
 /// `mcp::server` moved to `Arc<App>` (agent_api, merged concurrently), so this no longer needs
 /// to keep the legacy `WorkState`/`Inner` alive for them.
-pub fn setup(h: &AppHandle, app: &Arc<App>, _db: &crate::db::Db) -> Result<(), String> {
+pub fn setup(h: &AppHandle, app: &Arc<App>, _db: &nodal_store::Db) -> Result<(), String> {
     // A `launching` from a previous session may or may not have actually launched. Like
     // today, a failure here is only logged: the pump and the MCP socket still start.
     if let Err(e) = app.execution.fail_stale_launches(NOTE_APP_CLOSED) {

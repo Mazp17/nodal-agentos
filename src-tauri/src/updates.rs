@@ -5,7 +5,7 @@
 use tauri::menu::{Menu, MenuEvent, MenuItem};
 use tauri::{AppHandle, Emitter, Runtime};
 
-use crate::util::paths::DEV;
+use nodal_domain::DEV;
 
 pub const MENU_ID: &str = "check-for-updates";
 pub const CHECK_EVENT: &str = "nodal://check-updates";

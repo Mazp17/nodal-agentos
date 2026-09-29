@@ -1,20 +1,8 @@
-mod activity;
 mod adapters;
-mod chats;
 pub mod commands;
-mod db;
-mod domain;
-mod events;
-mod linear;
-pub mod mcp;
-mod migrate;
 mod paths;
-mod providers;
-mod runs;
 mod secrets;
 mod updates;
-mod util;
-mod work;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -33,15 +21,15 @@ pub fn run() {
             // patches modules in place), so it doesn't help with that case.
             if let tauri::webview::PageLoadEvent::Started = payload.event() {
                 use tauri::Manager;
-                if let Some(sessions) = webview.try_state::<runs::pty::PtySessions>() {
+                if let Some(sessions) = webview.try_state::<nodal_host::pty::PtySessions>() {
                     sessions.close_owned_by(webview.label());
                 }
             }
         })
-        .manage(linear::LinearState::new(secrets.clone()))
+        .manage(commands::linear::LinearState::new(secrets.clone()))
         .manage(secrets)
-        .manage(mcp::commands::McpState::default())
-        .manage(runs::pty::PtySessions::default())
+        .manage(commands::mcp::McpState::default())
+        .manage(nodal_host::pty::PtySessions::default())
         .setup(|app| {
             use std::sync::Arc;
 
@@ -57,7 +45,7 @@ pub fn run() {
 
             // Shared between the legacy states and the hub/app: one `http::Client` and one
             // `Secrets` cache (already built above, before `.manage`).
-            let http = app.state::<linear::LinearState>().http().clone();
+            let http = app.state::<commands::linear::LinearState>().http().clone();
             let events = app.state::<adapters::events::Events>().inner().clone();
             let secrets = app.state::<secrets::Secrets>().inner().clone();
             let clock: Arc<dyn nodal_domain::ports::Clock> = Arc::new(nodal_host::adapters::SystemClock);
@@ -68,7 +56,7 @@ pub fn run() {
             let data_dir = paths::data_dir(&handle)?;
             let providers: Vec<Arc<dyn nodal_domain::ports::ProviderFactory>> =
                 vec![Arc::new(nodal_linear::LinearFactory::new(http))];
-            let opened = db::open(&data_dir.join(db::DB_FILE));
+            let opened = nodal_store::Db::open(&data_dir.join(nodal_store::DB_FILE));
             let hub = nodal_app::sources::SourcesHub::new(nodal_app::HubDeps {
                 db: opened.as_ref().ok().cloned(),
                 data_dir: data_dir.clone(),
@@ -88,7 +76,7 @@ pub fn run() {
             match opened {
                 Ok(db) => {
                     app.manage(db.clone());
-                    let claude_dir = runs::claude_fs::claude_config_dir();
+                    let claude_dir = nodal_host::claude::fs::paths::claude_config_dir();
                     let sessions: Arc<dyn nodal_domain::ports::SessionFiles> = Arc::new(nodal_host::adapters::HostSessionFiles);
                     let claude: Arc<dyn nodal_domain::ports::ClaudeCli> = Arc::new(nodal_host::adapters::HostClaudeCli::new(rt.clone()));
                     // Builds the one `ChatProcesses` instance, manages it as the legacy
@@ -99,7 +87,7 @@ pub fn run() {
                     let env_built = (|| -> Result<nodal_app::Env, String> {
                         Ok(nodal_app::Env {
                             data_dir: data_dir.clone(),
-                            worktrees_root: util::paths::nodal_home()?.join("worktrees"),
+                            worktrees_root: nodal_host::paths::nodal_home()?.join("worktrees"),
                             claude_dir,
                             plans: Arc::new(nodal_host::adapters::HostPlanFiles),
                             fs: Arc::new(nodal_host::adapters::HostLocalFs),
@@ -247,7 +235,7 @@ pub fn run() {
             // child processes would outlive the app.
             if let tauri::RunEvent::Exit = event {
                 use tauri::Manager;
-                if let Some(sessions) = app_handle.try_state::<runs::pty::PtySessions>() {
+                if let Some(sessions) = app_handle.try_state::<nodal_host::pty::PtySessions>() {
                     sessions.close_all();
                 }
             }
