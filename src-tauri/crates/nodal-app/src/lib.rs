@@ -54,10 +54,19 @@ impl App {
         })
     }
 
-    /// Filled in wave 3c: today's `work::init` queue loop (pump, `eprintln!("work: {e}")`,
-    /// sleep 5s).
-    pub async fn run_pump(self: Arc<Self>) {}
+    /// Today's `work::init` queue loop: a pass (`Execution::pump`), `eprintln!("work: {e}")`
+    /// on error, then sleep 5s, forever.
+    pub async fn run_pump(self: Arc<Self>) {
+        loop {
+            if let Err(e) = self.execution.pump().await {
+                eprintln!("work: {e}");
+            }
+            tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+        }
+    }
 
-    /// Filled in wave 3c: fires one queue pass in the background.
-    pub fn kick(self: &Arc<Self>) {}
+    /// Fires one queue pass in the background (today's `work::kick`).
+    pub fn kick(self: &Arc<Self>) {
+        self.execution.kick();
+    }
 }
