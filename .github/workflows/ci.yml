@@ -101,11 +101,8 @@ jobs:
         working-directory: src-tauri
         run: cargo build --workspace --lib --bins --locked
 
-      # Warn-only for now: becomes blocking in W4 once "nodal" is dropped from the
-      # wrapper lists in src-tauri/deny.toml.
       - name: cargo-deny (bans)
         run: cargo deny --manifest-path src-tauri/Cargo.toml check bans
-        continue-on-error: true
 
       - name: Coverage threshold
         run: |
