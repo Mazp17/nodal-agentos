@@ -385,3 +385,39 @@ fn sync_now_without_a_database_reports_the_message() {
     let err = block_on(hub.sync_now(None)).unwrap_err();
     assert_eq!(err.to_string(), "The database is not available.");
 }
+
+/// P15: a pass with nothing to pull/push/import and no errors/notices doesn't emit `Sources`
+/// (`last_synced_at` still moves in the DB; only the change-notify event is gated).
+#[test]
+fn sync_now_without_changes_does_not_notify() {
+    let f = fx("sync-no-changes");
+    seed_project(&f.hub);
+    block_on(f.hub.secrets.set("fake", "k")).unwrap();
+    let _link = linked(&f.hub); // already notifies once (Sources), unrelated to the sync pass
+    let before = f.notifier.kinds().len();
+    let report = block_on(f.hub.sync_now(None)).unwrap();
+    assert_eq!(report.pulled + report.pushed + report.imported, 0);
+    assert!(report.errors.is_empty());
+    assert!(report.notices.is_empty());
+    assert_eq!(f.notifier.kinds().len(), before, "a no-op sync pass should not emit a Sources event");
+}
+
+/// A pass that actually imports something still notifies (`Sources` + `Tasks`).
+#[test]
+fn sync_now_with_changes_notifies() {
+    let f = fx("sync-with-changes");
+    seed_project(&f.hub);
+    seed_repo(&f.hub, "r1", "p1");
+    block_on(f.hub.secrets.set("fake", "k")).unwrap();
+    f.fake.data().items.insert("uuid-1".into(), item(1));
+    let link = linked(&f.hub);
+    block_on(f.hub.update_source_link(
+        link.id.clone(),
+        serde_json::from_value(serde_json::json!({"defaultRepoId": "r1", "autoImport": true})).unwrap(),
+    ))
+    .unwrap();
+    let before = f.notifier.kinds().len();
+    let report = block_on(f.hub.sync_now(None)).unwrap();
+    assert_eq!(report.imported, 1);
+    assert!(f.notifier.kinds().len() > before, "an importing sync pass should emit a Sources event");
+}
