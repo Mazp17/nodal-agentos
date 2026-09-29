@@ -68,8 +68,9 @@ pub fn run() {
             let data_dir = paths::data_dir(&handle)?;
             let providers: Vec<Arc<dyn nodal_domain::ports::ProviderFactory>> =
                 vec![Arc::new(nodal_linear::LinearFactory::new(http))];
+            let opened = db::open(&data_dir.join(db::DB_FILE));
             let hub = nodal_app::sources::SourcesHub::new(nodal_app::HubDeps {
-                db: None,
+                db: opened.as_ref().ok().cloned(),
                 data_dir: data_dir.clone(),
                 rt: rt.clone(),
                 clock: clock.clone(),
@@ -84,7 +85,7 @@ pub fn run() {
             // the chat runtime (`commands::chats::runtime`). Without a database the app still
             // opens (to show the error): there is no pump, chats don't run and those commands
             // fail.
-            match db::open(&data_dir.join(db::DB_FILE)) {
+            match opened {
                 Ok(db) => {
                     app.manage(db.clone());
                     let claude_dir = runs::claude_fs::claude_config_dir();
