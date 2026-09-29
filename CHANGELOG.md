@@ -25,6 +25,8 @@ Before, coverage counted inline test code; the tests now live in their own files
 | Metric | Before | After |
 | --- | --- | --- |
 | `claude agents` spawns (5 reads within the cache's TTL) | 5 | 1 |
+| `claude agents` spawns per 5 s with Runs open (S1, fake `claude`) | 4 | 1 (2 when the pump runs 2–3 s after the UI poll) |
+| Chat deliveries, 2 chats × 500 deltas | 2,000 (1,000 for the other chat) | 1,000 (0) |
 | `run_diff`, 50 new files (p95) | 2.05 s, ~56 `git` processes | 76 ms cold / 35 ms cached, ≤5 processes |
 | `git::run` ×1000 | 19.67 s | 8.20 s (-58%) |
 | `external_sessions` transcript reads, 5-repo fixture | 54 | 13 |
