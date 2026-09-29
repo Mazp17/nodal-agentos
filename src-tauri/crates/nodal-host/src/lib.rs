@@ -4,6 +4,7 @@
 
 pub mod adapters;
 pub mod keychain;
+pub mod metrics;
 pub mod paths;
 pub mod plans;
 pub mod pty;

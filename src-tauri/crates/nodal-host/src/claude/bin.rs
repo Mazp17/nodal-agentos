@@ -71,14 +71,18 @@ pub fn augmented_path() -> OsString {
     std::env::join_paths(dirs).unwrap_or_default()
 }
 
-/// `claude` ready to configure: no stdin and an extended PATH.
+/// `claude` ready to configure: no stdin and an extended PATH. The chokepoint every `claude`
+/// spawn goes through in production (cli.rs, activity.rs, chats.rs); counted here so the
+/// counter survives whatever P06/P14 rewrite this into.
 pub fn claude_command() -> Result<Command, String> {
     let mut cmd = Command::new(resolve_claude()?);
     cmd.env("PATH", augmented_path()).stdin(Stdio::null());
+    crate::metrics::record_claude_spawn();
     Ok(cmd)
 }
 
 /// Runs and waits for the full output; if `limit` passes, kills the process.
+#[tracing::instrument(skip(cmd, limit), level = "info")]
 pub async fn output_with_timeout(
     mut cmd: Command,
     limit: Duration,

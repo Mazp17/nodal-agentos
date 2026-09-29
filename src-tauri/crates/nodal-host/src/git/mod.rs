@@ -28,7 +28,9 @@ fn git_bin() -> Result<PathBuf, String> {
 }
 
 /// Runs `git -C <dir> <args>` and returns the output even if it fails. Errors only if it
-/// couldn't run or the timeout passed.
+/// couldn't run or the timeout passed. The chokepoint every `git` spawn goes through; the
+/// counter/span here must survive P06's rewrite of this function.
+#[tracing::instrument(skip(dir, args), fields(git.subcommand = args.first().copied().unwrap_or("")), level = "info")]
 pub fn run(dir: &Path, args: &[&str]) -> Result<GitOutput, String> {
     let mut cmd = Command::new(git_bin()?);
     cmd.arg("-C")
@@ -41,6 +43,7 @@ pub fn run(dir: &Path, args: &[&str]) -> Result<GitOutput, String> {
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
     let what = format!("git {}", args.first().copied().unwrap_or(""));
+    crate::metrics::record_git_spawn();
     let mut child = cmd.spawn().map_err(|e| format!("Couldn't run {what}: {e}"))?;
     // Both streams are read in parallel: a large diff would fill the pipe and hang git.
     let mut out = child.stdout.take();
