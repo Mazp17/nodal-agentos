@@ -1,7 +1,7 @@
 use crate::board::{hidden_executors, projects, repos, tasks};
 use crate::execution::runs;
 use crate::rows::{insert_project, insert_repo, insert_task};
-use crate::{chats, Db};
+use crate::{chats, sources, Db};
 use nodal_domain::model::*;
 use nodal_domain::testutil::{project_of, repo_of, run_of, task_of};
 
@@ -125,9 +125,101 @@ fn runs_filtered_by_project_and_latest_by_task() {
     assert_eq!(ids(runs::latest_by_task(&c, None).unwrap()), ["d", "b", "c"]);
     assert_eq!(ids(runs::latest_by_task(&c, Some("p1")).unwrap()), ["b", "c"]);
 
+    // P09: the `_light` queries (explicit columns, no `prompt`) return the same rows, in the
+    // same order, as their `Run` counterparts.
+    let light_ids = |v: Vec<RunLight>| v.into_iter().map(|r| r.id).collect::<Vec<_>>();
+    assert_eq!(light_ids(runs::list_filtered_light(&c, None, None).unwrap()), ["e", "d", "b", "c", "a"]);
+    assert_eq!(light_ids(runs::list_filtered_light(&c, Some("p1"), None).unwrap()), ["b", "c", "a"]);
+    assert_eq!(light_ids(runs::list_filtered_light(&c, Some("p2"), None).unwrap()), ["e", "d"]);
+    assert_eq!(light_ids(runs::list_filtered_light(&c, Some("p1"), Some("t2")).unwrap()), ["c"]);
+    assert!(runs::list_filtered_light(&c, Some("p2"), Some("t1")).unwrap().is_empty());
+    assert_eq!(light_ids(runs::latest_by_task_light(&c, None).unwrap()), ["d", "b", "c"]);
+    assert_eq!(light_ids(runs::latest_by_task_light(&c, Some("p1")).unwrap()), ["b", "c"]);
+    assert_eq!(runs::list_filtered_light(&c, Some("p1"), Some("t2")).unwrap()[0], RunLight::from(runs::get(&c, "c").unwrap()));
+
     let light = serde_json::to_value(RunLight::from(runs::get(&c, "b").unwrap())).unwrap();
     assert!(light.get("prompt").is_none() && light.get("extraInstructions").is_none());
     assert_eq!(light["taskId"], "t1");
+}
+
+/// P09: the project-filtered list queries (`board::tasks::list`, `board::repos::list`,
+/// `sources::list_links`/`linked_tasks`/`moved_ids`) now branch into a query with a fixed
+/// `project_id = ?1` (or equivalent) rather than a single `?1 IS NULL OR ...` one; both
+/// branches must return the same rows the unfiltered/filtered call did before.
+#[test]
+fn project_scoped_lists_with_and_without_a_filter() {
+    let db = Db::open_in_memory().unwrap();
+    let c = db.lock().unwrap();
+    insert_project(&c, &project_of("p1", "PAY")).unwrap();
+    insert_project(&c, &project_of("p2", "WEB")).unwrap();
+    insert_repo(&c, &repo_of("r1", "p1", "/r1")).unwrap();
+    insert_repo(&c, &repo_of("r2", "p2", "/r2")).unwrap();
+
+    let link = SourceLink {
+        id: "s1".into(),
+        project_id: "p1".into(),
+        provider: "linear".into(),
+        scope: ScopeRef { kind: "team".into(), id: "team-x".into(), name: "X".into() },
+        default_repo_id: None,
+        repo_rules: vec![],
+        state_map: StateMap::default(),
+        auto_import: false,
+        created_at: 1,
+        last_synced_at: None,
+        last_sync_error: None,
+        pending_state_changes: None,
+    };
+    crate::rows::insert_source_link(&c, &link).unwrap();
+
+    let mut t1 = task_of("t1");
+    t1.source = Some(TaskSource {
+        provider: "linear".into(),
+        link_id: Some("s1".into()),
+        external_id: "ext-1".into(),
+        identifier: "ENG-1".into(),
+        url: "https://example.com/ENG-1".into(),
+        external_state: None,
+        last_synced_at: None,
+        sync_error: None,
+        unmapped: false,
+        project: None,
+        rule_id: None,
+        moved: Some(MovedInfo {
+            from_project: ExtProject { id: "proj-a".into(), name: "A".into() },
+            to_project: None,
+            suggested_repo_id: None,
+        }),
+    });
+    insert_task(&c, &t1).unwrap();
+    let mut t2 = task_of("t2");
+    t2.project_id = "p2".into();
+    t2.repo_id = "r2".into();
+    t2.number = 1;
+    insert_task(&c, &t2).unwrap();
+
+    let ids = |v: Vec<Task>| v.into_iter().map(|t| t.id).collect::<Vec<_>>();
+    assert_eq!(ids(tasks::list(&c, None).unwrap()), ["t1", "t2"]);
+    assert_eq!(ids(tasks::list(&c, Some("p1")).unwrap()), ["t1"]);
+    assert_eq!(ids(tasks::list(&c, Some("p2")).unwrap()), ["t2"]);
+    assert!(tasks::list(&c, Some("nope")).unwrap().is_empty());
+
+    let repo_ids = |v: Vec<Repo>| v.into_iter().map(|r| r.id).collect::<Vec<_>>();
+    assert_eq!(repo_ids(repos::list(&c, None).unwrap()), ["r1", "r2"]);
+    assert_eq!(repo_ids(repos::list(&c, Some("p1")).unwrap()), ["r1"]);
+
+    let link_ids = |v: Vec<SourceLink>| v.into_iter().map(|l| l.id).collect::<Vec<_>>();
+    assert_eq!(link_ids(sources::list_links(&c, None).unwrap()), ["s1"]);
+    assert_eq!(link_ids(sources::list_links(&c, Some("p1")).unwrap()), ["s1"]);
+    assert!(sources::list_links(&c, Some("p2")).unwrap().is_empty());
+
+    let linked_ids = |v: Vec<Task>| v.into_iter().map(|t| t.id).collect::<Vec<_>>();
+    assert_eq!(linked_ids(sources::linked_tasks(&c, None, 1_000_000).unwrap()), ["t1"]);
+    assert_eq!(linked_ids(sources::linked_tasks(&c, Some("s1"), 1_000_000).unwrap()), ["t1"]);
+    assert!(sources::linked_tasks(&c, Some("nope"), 1_000_000).unwrap().is_empty());
+
+    assert_eq!(sources::moved_ids(&c, None).unwrap(), ["t1"]);
+    assert_eq!(sources::moved_ids(&c, Some("p1")).unwrap(), ["t1"]);
+    assert!(sources::moved_ids(&c, Some("p2")).unwrap().is_empty());
 }
 
 #[test]

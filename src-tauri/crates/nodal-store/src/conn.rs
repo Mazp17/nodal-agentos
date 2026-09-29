@@ -46,6 +46,18 @@ impl Conn {
         self.0.prepare(sql)
     }
 
+    /// Like `prepare`, cached by SQL text on the connection (capacity: rusqlite's default,
+    /// 16). Frequent, fixed-text queries (list/pending/queue passes) use this instead of
+    /// `prepare` so they skip re-parsing/re-planning on every call.
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn prepare_cached(&self, sql: &str) -> rusqlite::Result<rusqlite::CachedStatement<'_>> {
+        self.0.prepare_cached(sql)
+    }
+    #[cfg(not(any(test, feature = "test-support")))]
+    pub(crate) fn prepare_cached(&self, sql: &str) -> rusqlite::Result<rusqlite::CachedStatement<'_>> {
+        self.0.prepare_cached(sql)
+    }
+
     #[cfg(any(test, feature = "test-support"))]
     pub fn execute<P: rusqlite::Params>(&self, sql: &str, params: P) -> rusqlite::Result<usize> {
         self.0.execute(sql, params)

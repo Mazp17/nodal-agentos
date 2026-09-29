@@ -7,13 +7,23 @@ use crate::Conn as Connection;
 use crate::{DbError, SqliteError};
 use nodal_domain::model::{PlanRef, Task, TaskStatus};
 
-/// `None`: all of them. Order: project, status, position.
+/// `None`: all of them. Order: project, status, position. Two fixed queries (rather than a
+/// `?1 IS NULL OR project_id = ?1` filter) so a present `project_id` can use `tasks_board`'s
+/// leading column instead of forcing a full scan.
 pub fn list(conn: &Connection, project_id: Option<&str>) -> Result<Vec<Task>, DbError> {
-    let mut stmt = conn.prepare(
-        "SELECT * FROM tasks WHERE ?1 IS NULL OR project_id = ?1 ORDER BY project_id, status, position, number",
-    )?;
-    let rows = stmt.query_map([project_id], task_from_row)?;
-    Ok(rows.collect::<rusqlite::Result<_>>()?)
+    let rows: Vec<Task> = match project_id {
+        Some(p) => {
+            let mut stmt = conn.prepare_cached("SELECT * FROM tasks WHERE project_id = ?1 ORDER BY project_id, status, position, number")?;
+            let out = stmt.query_map([p], task_from_row)?.collect::<rusqlite::Result<Vec<_>>>()?;
+            out
+        }
+        None => {
+            let mut stmt = conn.prepare_cached("SELECT * FROM tasks ORDER BY project_id, status, position, number")?;
+            let out = stmt.query_map([], task_from_row)?.collect::<rusqlite::Result<Vec<_>>>()?;
+            out
+        }
+    };
+    Ok(rows)
 }
 
 pub fn get(conn: &Connection, id: &str) -> Result<Task, DbError> {
@@ -97,9 +107,19 @@ pub fn next_position(conn: &Connection, project_id: &str, status: TaskStatus) ->
 
 /// Ids of the project's blocked tasks (`None`: all projects).
 pub fn blocked_ids(conn: &Connection, project_id: Option<&str>) -> Result<Vec<String>, DbError> {
-    let mut stmt = conn.prepare("SELECT id FROM tasks WHERE status = 'blocked' AND (?1 IS NULL OR project_id = ?1)")?;
-    let rows = stmt.query_map([project_id], |r| r.get::<_, String>(0))?;
-    Ok(rows.collect::<rusqlite::Result<_>>()?)
+    let rows: Vec<String> = match project_id {
+        Some(p) => {
+            let mut stmt = conn.prepare_cached("SELECT id FROM tasks WHERE status = 'blocked' AND project_id = ?1")?;
+            let out = stmt.query_map([p], |r| r.get::<_, String>(0))?.collect::<rusqlite::Result<Vec<_>>>()?;
+            out
+        }
+        None => {
+            let mut stmt = conn.prepare_cached("SELECT id FROM tasks WHERE status = 'blocked'")?;
+            let out = stmt.query_map([], |r| r.get::<_, String>(0))?.collect::<rusqlite::Result<Vec<_>>>()?;
+            out
+        }
+    };
+    Ok(rows)
 }
 
 /// Unlinks the project's tasks from their sources (used before the cascade delete: the
