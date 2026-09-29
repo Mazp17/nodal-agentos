@@ -4,7 +4,7 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use tauri::{AppHandle, Manager, State};
+use tauri::{AppHandle, State};
 use tokio::runtime::Handle;
 
 use nodal_app::chats::{ChatPatch, NewChat};
@@ -48,13 +48,6 @@ pub fn runtime(
 /// Nothing to do yet: `runtime` already starts the reaper. Kept for the frozen setup order
 /// (`execution::setup` → `mcp::setup` → `chats::setup`).
 pub fn setup(_h: &AppHandle, _app: &Arc<App>) {}
-
-/// Stops every process of the project's chats (today's `board::delete_project` hook).
-pub fn stop_project(h: &AppHandle, project_id: &str) {
-    if let Some(app) = h.try_state::<Arc<App>>() {
-        app.chats.stop_project(project_id);
-    }
-}
 
 /// A project's chats, or every project's with no `project_id`.
 #[tauri::command]

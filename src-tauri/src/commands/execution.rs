@@ -6,7 +6,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use tauri::{AppHandle, Manager, State};
+use tauri::{AppHandle, State};
 
 use nodal_app::execution::NOTE_APP_CLOSED;
 use nodal_app::App;
@@ -37,14 +37,6 @@ pub fn setup(h: &AppHandle, app: &Arc<App>, _db: &crate::db::Db) -> Result<(), S
     tauri::async_runtime::spawn(app.clone().run_pump());
     crate::commands::mcp::setup(h, app);
     Ok(())
-}
-
-/// Fires a queue pass in the background (after enqueueing or cancelling), today's
-/// `work::kick`, now through `App::kick`.
-pub fn kick(h: &AppHandle) {
-    if let Some(app) = h.try_state::<Arc<App>>() {
-        app.kick();
-    }
 }
 
 #[tauri::command]

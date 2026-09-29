@@ -192,7 +192,7 @@ pub fn spec(chat: &Chat, project: &Project, repos: &[Repo], mcp: Option<&Path>) 
 }
 
 /// Chats context: 11 Tauri commands plus `stop_project`, a cross-context hook called when the
-/// project is deleted (`board::delete_project` → `commands::chats::stop_project`).
+/// project is deleted (`App::delete_project`, `flows.rs`).
 pub struct Chats {
     core: Arc<Core>,
 }
@@ -355,7 +355,7 @@ impl Chats {
     }
 
     /// Stops every process of the project's chats (called when the project is deleted, through
-    /// `commands::chats::stop_project`). Not a Tauri command.
+    /// `App::delete_project`). Not a Tauri command.
     pub fn stop_project(&self, project_id: &str) {
         self.core.chats.stop_project(project_id);
     }
