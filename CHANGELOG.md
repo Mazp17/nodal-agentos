@@ -20,13 +20,14 @@ Before, coverage counted inline test code; the tests now live in their own files
 
 ### Performance
 
-* **backend:** CPU, memory, child-process and IPC optimizations across `nodal-host`/`nodal-app`/`nodal-store` (P01–P18 from the backend perf pass): a shared, single-flight `LiveSessions` cache instead of up to 4 independent `claude agents` spawns per tick; `run_diff` synthesizes new-file diffs in Rust instead of one `git diff --no-index` per file, capped and cached by worktree state; run progress (`toolCalls`) and a run's closing transcript read incrementally/once instead of on every 5s poll; chat streaming uses typed `stream-json` structs, a dedicated `ipc::Channel` per chat and batched deltas; `git::run` and the MCP socket no longer poll on a fixed interval; explicit-column, `prepare_cached` queries in `nodal-store`; a single `reqwest` version workspace-wide; `panic = "unwind"` in release so a worker panic (pump/sync/a chat) fails only that task, not the app. Representative before/after (full list in the vault's "04 Optimizaciones de rendimiento y memoria" note):
+* **backend:** CPU, memory, child-process and IPC optimizations across `nodal-host`/`nodal-app`/`nodal-store` (P01–P18 from the backend perf pass): a shared, single-flight `LiveSessions` cache instead of up to 4 independent `claude agents` spawns per tick; `run_diff` synthesizes new-file diffs in Rust instead of one `git diff --no-index` per file, capped and cached by worktree state; run progress (`toolCalls`) and a run's closing transcript read incrementally/once instead of on every 5s poll; chat streaming uses typed `stream-json` structs, a dedicated `ipc::Channel` per chat and batched deltas; `external_sessions` resolves each transcript once across repos instead of once per repo; `git::run` and the MCP socket no longer poll on a fixed interval; explicit-column, `prepare_cached` queries in `nodal-store`; a single `reqwest` version workspace-wide; `panic = "unwind"` in release so a worker panic (pump/sync/a chat) fails only that task, not the app. Representative before/after (full list in the vault's "04 Optimizaciones de rendimiento y memoria" note):
 
 | Metric | Before | After |
 | --- | --- | --- |
 | `claude agents` spawns (5 reads within the cache's TTL) | 5 | 1 |
 | `run_diff`, 50 new files (p95) | 2.05 s, ~56 `git` processes | 76 ms cold / 35 ms cached, ≤5 processes |
 | `git::run` ×1000 | 19.67 s | 8.20 s (-58%) |
+| `external_sessions` transcript reads, 5-repo fixture | 54 | 13 |
 | MCP socket idle wakeups / 5 s | 49 | 0 |
 | `reqwest` versions in the workspace | 2 (0.12 + 0.13) | 1 (0.13.5) |
 | Release binary size (`panic = "unwind"` for P18) | 14,545,424 B | 18,645,376 B (+28.2%) |
