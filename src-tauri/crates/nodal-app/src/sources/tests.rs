@@ -421,3 +421,37 @@ fn sync_now_with_changes_notifies() {
     assert_eq!(report.imported, 1);
     assert!(f.notifier.kinds().len() > before, "an importing sync pass should emit a Sources event");
 }
+
+/// P18: a panic inside a sync pass (the exact task `spawn_sync_worker` awaits every tick)
+/// must not take the runtime down with it — with `panic = "unwind"`, tokio catches it and
+/// reports it as a `JoinError`; the hub's `sync_lock` (a `tokio::sync::Mutex`, which just
+/// unlocks on drop, unwind or not) isn't left stuck either.
+#[test]
+fn a_panic_in_a_sync_pass_only_fails_that_task() {
+    let f = fx("sync-panic");
+    seed_project(&f.hub);
+    block_on(f.hub.secrets.set("fake", "k")).unwrap();
+    let _link = linked(&f.hub);
+    f.fake.data().panic_on_states = true;
+
+    let hub = f.hub.clone();
+    let handle = f.hub.rt.spawn(async move { hub.sync_now(None).await });
+    let joined = block_on(handle);
+    let panic_payload = joined.expect_err("a panicking sync pass must surface as Err");
+    assert!(panic_payload.is_panic(), "{panic_payload:?}");
+
+    // The runtime is still healthy: unrelated work submitted right after still completes.
+    let ok = f.hub.rt.spawn(async { 1 + 1 });
+    assert_eq!(block_on(ok).unwrap(), 2);
+
+    // `FakeProvider`'s inner `std::sync::Mutex` is now poisoned (the panic happened while its
+    // guard was held); `FakeProvider::data()` recovers it the same way production `Mutex`es do
+    // (`.unwrap_or_else(|p| p.into_inner())`) instead of propagating the poison forever.
+    assert!(f.fake.0.lock().is_err(), "the fixture's mutex should be poisoned at this point");
+    f.fake.data().panic_on_states = false;
+
+    // The hub itself recovers once the fault clears: a normal pass isn't stuck behind the
+    // panicking one's lock.
+    let report = block_on(f.hub.sync_now(None)).unwrap();
+    assert_eq!(report.pulled + report.pushed + report.imported, 0);
+}

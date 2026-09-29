@@ -6,6 +6,7 @@
 #![allow(clippy::disallowed_methods)] // TempDir-rooted fixtures touch the real filesystem
 
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 
 use serde_json::json;
@@ -106,10 +107,16 @@ impl Git for FakeGit {
 struct FakeClaude {
     sessions: Mutex<Vec<RunSummary>>,
     stopped: Mutex<Vec<String>>,
+    /// P18: when set, `list_sessions` panics instead of returning — lets a test force a
+    /// panic inside a real `Execution::pump()` pass, the same call `kick()` spawns.
+    panic_on_list: AtomicBool,
 }
 
 impl ClaudeCli for FakeClaude {
     fn list_sessions(&self) -> BoxFut<'_, Result<Vec<RunSummary>, HostError>> {
+        if self.panic_on_list.load(Ordering::SeqCst) {
+            panic!("intentional test panic: FakeClaude::list_sessions");
+        }
         let v = self.sessions.lock().unwrap().clone();
         Box::pin(async move { Ok(v) })
     }
@@ -469,5 +476,31 @@ fn merge_worktree_marks_the_task_done() {
         // The project row still exists (sanity: `apply_task_transition` didn't error out).
         let _ = projects::get(&f.db.lock().unwrap(), &task.project_id).unwrap();
         let _ = repos::get(&f.db.lock().unwrap(), &task.repo_id).unwrap();
+    });
+}
+
+/// P18: a panic inside a pump pass (the exact task `Execution::kick` spawns on `core.rt`)
+/// must not take the runtime down with it — with `panic = "unwind"`, tokio catches it and
+/// reports it as a `JoinError`; the fixture's other work keeps running afterwards.
+#[test]
+fn a_panic_in_a_pump_task_only_fails_that_task() {
+    let f = fx("pump-panic");
+    block_on(async {
+        let task = task_fixture(&f, &f._t.0.join("web"));
+        f.exec.launch_task(task.id.clone(), None).await.unwrap();
+        f.claude.panic_on_list.store(true, Ordering::SeqCst);
+
+        let exec = f.exec.clone();
+        let handle = rt().spawn(async move { exec.pump().await });
+        let joined = handle.await;
+        let panic_payload = joined.expect_err("a panicking pump pass must surface as Err");
+        assert!(panic_payload.is_panic(), "{panic_payload:?}");
+
+        // The runtime is still healthy: unrelated work submitted right after still completes.
+        assert_eq!(rt().spawn(async { 1 + 1 }).await.unwrap(), 2);
+
+        // And the fixture itself recovers once the fault clears: pump runs clean again.
+        f.claude.panic_on_list.store(false, Ordering::SeqCst);
+        f.exec.pump().await.unwrap();
     });
 }
