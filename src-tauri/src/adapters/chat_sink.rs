@@ -16,6 +16,7 @@ impl TauriChatSink {
 
 impl ChatSink for TauriChatSink {
     fn emit(&self, ev: ChatEnvelope) {
+        crate::telemetry::record_chat_emit();
         if let Err(e) = self.0.emit(CHAT_EVENT, ev) {
             eprintln!("chats: {e}");
         }

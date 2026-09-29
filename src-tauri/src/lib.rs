@@ -2,10 +2,12 @@ mod adapters;
 pub mod commands;
 mod paths;
 mod secrets;
+pub(crate) mod telemetry;
 mod updates;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    telemetry::init();
     let secrets = secrets::keychain();
     tauri::Builder::default()
         .plugin(tauri_plugin_notification::init())
@@ -37,6 +39,19 @@ pub fn run() {
 
             let handle = app.handle().clone();
             app.manage(adapters::events::Events::new(handle.clone()));
+
+            // Ola 0 instrumentation: one `info` log line a minute with the latency/spawn/IPC
+            // counters (negligible against the S0 budget of < 2 wakeups/s), so a profiling
+            // session doesn't need to wait for app exit to see a snapshot.
+            tauri::async_runtime::spawn(async {
+                let mut tick = tokio::time::interval(std::time::Duration::from_secs(60));
+                tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+                loop {
+                    tick.tick().await;
+                    telemetry::log_metrics_snapshot();
+                }
+            });
+
             if paths::DEV {
                 if let Some(w) = app.get_webview_window("main") {
                     let _ = w.set_title("Nodal Dev");
@@ -234,6 +249,7 @@ pub fn run() {
             // Nothing else reaps embedded terminals on exit: without this, `claude attach`
             // child processes would outlive the app.
             if let tauri::RunEvent::Exit = event {
+                telemetry::log_metrics_snapshot();
                 use tauri::Manager;
                 if let Some(sessions) = app_handle.try_state::<nodal_host::pty::PtySessions>() {
                     sessions.close_all();
