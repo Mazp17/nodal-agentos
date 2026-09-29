@@ -40,3 +40,6 @@ impl AgentApi {
         Ok(outcome.value)
     }
 }
+
+#[cfg(test)]
+mod tests;
