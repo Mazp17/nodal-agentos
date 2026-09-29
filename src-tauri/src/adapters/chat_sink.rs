@@ -9,18 +9,18 @@ use std::collections::HashMap;
 use std::sync::Mutex;
 
 use tauri::ipc::Channel;
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Runtime, Wry};
 
 use nodal_domain::model::chat::{ChatEnvelope, CHAT_EVENT};
 use nodal_domain::ports::ChatSink;
 
-pub struct TauriChatSink {
-    app: AppHandle,
+pub struct TauriChatSink<R: Runtime = Wry> {
+    app: AppHandle<R>,
     channels: Mutex<HashMap<String, Channel<ChatEnvelope>>>,
 }
 
-impl TauriChatSink {
-    pub fn new(app: AppHandle) -> Self {
+impl<R: Runtime> TauriChatSink<R> {
+    pub fn new(app: AppHandle<R>) -> Self {
         Self {
             app,
             channels: Mutex::new(HashMap::new()),
@@ -44,7 +44,7 @@ impl TauriChatSink {
     }
 }
 
-impl ChatSink for TauriChatSink {
+impl<R: Runtime> ChatSink for TauriChatSink<R> {
     fn emit(&self, ev: ChatEnvelope) {
         crate::telemetry::record_chat_emit();
         let channel = self
@@ -67,3 +67,6 @@ impl ChatSink for TauriChatSink {
         }
     }
 }
+
+#[cfg(test)]
+mod tests;
