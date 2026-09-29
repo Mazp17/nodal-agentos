@@ -99,3 +99,29 @@ fn real_launch_with_append_system_prompt() {
         }
     });
 }
+
+/// P08 before/after: a `claude --bg` that floods its output while `launch_bg` hasn't drained
+/// the channel yet. Lines and bytes left queued in the unbounded channel = what the flood costs
+/// in memory. `cargo test -p nodal-host --lib measure_forward_lines -- --ignored --nocapture`.
+#[test]
+#[ignore]
+fn measure_forward_lines_queued_under_a_flood() {
+    use tokio::io::AsyncWriteExt;
+    const LINES: usize = 20_000;
+    crate::testutil::block_on(async {
+        let (mut writer, reader) = tokio::io::duplex(64 * 1024);
+        let (tx, mut rx) = mpsc::unbounded_channel::<String>();
+        forward_lines(reader, tx, &Handle::current());
+        let line = format!("{}\n", "x".repeat(63));
+        for _ in 0..LINES {
+            writer.write_all(line.as_bytes()).await.unwrap();
+        }
+        drop(writer);
+        let (mut queued, mut bytes) = (0usize, 0usize);
+        while let Some(l) = rx.recv().await {
+            queued += 1;
+            bytes += l.len();
+        }
+        eprintln!("P08 forward_lines: {LINES} lines written -> {queued} lines / {bytes} B queued");
+    });
+}

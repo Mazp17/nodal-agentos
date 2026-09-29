@@ -247,3 +247,37 @@ fn a_panic_in_one_chats_reader_does_not_affect_another_chat() {
     chats.clear();
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// Never stops printing `assistant` lines; writes its pid next to itself first.
+const ENDLESS_FLOOD: &str = r#"#!/bin/sh
+echo $$ > "$(dirname "$0")/pid"
+echo '{"type":"system","subtype":"init","session_id":"00000000-0000-4000-8000-000000000009","cwd":"/tmp"}'
+while true; do
+  echo '{"type":"assistant","message":{"content":[{"type":"text","text":"flood"}]},"parent_tool_use_id":null}'
+done
+"#;
+
+/// P08 before/after: a `claude` that floods stdout forever. Lines parsed and emitted in a 2 s
+/// window, and whether the process is still running at the end of it.
+/// `cargo test -p nodal-host --lib measure_endless_flood -- --ignored --nocapture`.
+#[test]
+#[ignore]
+fn measure_endless_flood_lines_parsed() {
+    let f = Fixture::new("endless-flood", ENDLESS_FLOOD);
+    block_on(async {
+        send(&f.chats, f.spec()).unwrap();
+        tokio::time::sleep(Duration::from_secs(2)).await;
+    });
+    let parsed = f
+        .events()
+        .iter()
+        .filter(|e| matches!(e, ChatEvent::Stream(StreamEvent::Item { .. })))
+        .count();
+    let pid = std::fs::read_to_string(f.dir.join("pid")).unwrap();
+    let alive = std::process::Command::new("kill")
+        .args(["-0", pid.trim()])
+        .status()
+        .unwrap()
+        .success();
+    eprintln!("P08 chat stdout: endless flood, 2 s -> {parsed} lines parsed/emitted, process alive: {alive}");
+}
