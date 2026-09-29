@@ -2,17 +2,16 @@
 
 use std::sync::{Arc, Mutex};
 
+use nodal_app::App;
 use serde::Serialize;
 use tauri::{AppHandle, Manager, State};
 
-use crate::mcp::server::{self, Listening};
-use crate::work::{Inner, WorkState};
+use crate::adapters::mcp_socket::{self, Listening};
 
-/// Starts the MCP socket over the legacy `WorkState` (today's `McpState.start(WorkState.0)`,
-/// called once `work::init` succeeded). `app` isn't used yet; wave 3c switches this to
-/// `Arc<App>`.
-pub fn setup(h: &AppHandle, _app: &Arc<nodal_app::App>) {
-    h.state::<McpState>().start(h.state::<WorkState>().0.clone());
+/// Starts the MCP socket once the app opened its database (today's `McpState.start(app)`,
+/// called from `commands::execution::setup` on success).
+pub fn setup(h: &AppHandle, app: &Arc<App>) {
+    h.state::<McpState>().start(app.clone());
 }
 
 const NO_DB: &str = "Nodal's database didn't open, so there is nothing to serve.";
@@ -23,7 +22,7 @@ pub struct McpState(Mutex<Slot>);
 
 #[derive(Default)]
 struct Slot {
-    inner: Option<Arc<Inner>>,
+    app: Option<Arc<App>>,
     listening: Option<Listening>,
     error: Option<String>,
 }
@@ -40,9 +39,9 @@ pub struct McpStatus {
 
 impl McpState {
     /// Called once at startup; the error, if any, is kept for the status.
-    pub fn start(&self, inner: Arc<Inner>) {
+    pub fn start(&self, app: Arc<App>) {
         let mut slot = self.lock();
-        slot.inner = Some(inner);
+        slot.app = Some(app);
         slot.restart();
     }
 
@@ -61,10 +60,10 @@ impl Slot {
 
     fn restart(&mut self) {
         self.stop();
-        let Some(inner) = self.inner.clone() else {
+        let Some(app) = self.app.clone() else {
             return;
         };
-        match server::start(inner) {
+        match mcp_socket::start(app) {
             Ok(l) => self.listening = Some(l),
             Err(e) => {
                 eprintln!("mcp: {e}");
@@ -75,10 +74,10 @@ impl Slot {
 
     fn status(&self) -> McpStatus {
         McpStatus {
-            available: self.inner.is_some(),
+            available: self.app.is_some(),
             running: self.listening.is_some(),
             socket: self.listening.as_ref().map(|l| l.path().display().to_string()),
-            error: self.error.clone().or_else(|| self.inner.is_none().then(|| NO_DB.to_string())),
+            error: self.error.clone().or_else(|| self.app.is_none().then(|| NO_DB.to_string())),
         }
     }
 }
