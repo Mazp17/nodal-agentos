@@ -422,6 +422,38 @@ fn sync_now_with_changes_notifies() {
     assert!(f.notifier.kinds().len() > before, "an importing sync pass should emit a Sources event");
 }
 
+/// A pass that clears a link's `last_sync_error` (the provider recovered) has no errors, pulls
+/// or notices, yet still notifies: the frontend only refetches links on `Sources`.
+#[test]
+fn sync_now_that_clears_a_link_error_notifies() {
+    let f = fx("sync-clears-error");
+    seed_project(&f.hub);
+    block_on(f.hub.secrets.set("fake", "k")).unwrap();
+    let link = linked(&f.hub);
+    f.fake.data().fail_states =
+        Some(ProviderError { kind: nodal_domain::model::providers::ErrorKind::Transient, message: "boom".into() });
+    let failed = block_on(f.hub.sync_now(None)).unwrap();
+    assert!(!failed.errors.is_empty());
+    let stored = |hub: &SourcesHub| {
+        let db = hub.db.clone().unwrap();
+        let id = link.id.clone();
+        block_on(nodal_store::with_db(&db, move |c| store::get_link(c, &id))).unwrap().last_sync_error
+    };
+    assert!(stored(&f.hub).is_some());
+
+    f.fake.data().fail_states = None;
+    let before = f.notifier.kinds().len();
+    let recovered = block_on(f.hub.sync_now(None)).unwrap();
+    assert!(recovered.errors.is_empty() && recovered.notices.is_empty());
+    assert_eq!(recovered.pulled + recovered.pushed + recovered.imported, 0);
+    assert!(stored(&f.hub).is_none());
+    assert!(f.notifier.kinds()[before..].contains(&ChangeKind::Sources), "a cleared link error must reach the UI");
+
+    let before = f.notifier.kinds().len();
+    block_on(f.hub.sync_now(None)).unwrap();
+    assert_eq!(f.notifier.kinds().len(), before, "the next no-op pass stays silent");
+}
+
 /// P18: a panic inside a sync pass (the exact task `spawn_sync_worker` awaits every tick)
 /// must not take the runtime down with it — with `panic = "unwind"`, tokio catches it and
 /// reports it as a `JoinError`; the hub's `sync_lock` (a `tokio::sync::Mutex`, which just
