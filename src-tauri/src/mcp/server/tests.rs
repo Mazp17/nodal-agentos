@@ -123,6 +123,14 @@ fn stale_socket_is_replaced_and_other_files_are_kept() {
     let t = crate::util::paths::tests::TempDir::new("mcpst");
     let path = t.0.join("s.sock");
     drop(UnixListener::bind(&path).unwrap());
+    // A child spawned meanwhile by a parallel test (git) can inherit the listener for a moment
+    // (no atomic CLOEXEC on macOS); wait until the socket is really stale.
+    for _ in 0..500 {
+        if UnixStream::connect(&path).is_err() {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
     assert!(path.exists());
     let l = bind_private(&path).unwrap();
     assert!(UnixStream::connect(&path).is_ok());
