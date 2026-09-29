@@ -95,17 +95,24 @@ jobs:
         working-directory: src-tauri
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
 
+      # nodal-domain and nodal-app must stay free of direct I/O (fs/process/env/clock):
+      # all of it goes through nodal_domain::ports. See their clippy.toml for the list.
+      - name: Clippy (disallowed methods)
+        working-directory: src-tauri
+        run: cargo clippy -p nodal-domain -p nodal-app --lib --locked -- -D clippy::disallowed_methods
+
+      - name: Architecture test
+        working-directory: src-tauri
+        run: cargo test -p nodal --test architecture --locked
+
       # Resolver 2 can merge dev-dependency features (e.g. test-support) into the
       # normal build graph; building lib+bins without dev-deps catches that leak.
       - name: Build without dev-dependencies
         working-directory: src-tauri
         run: cargo build --workspace --lib --bins --locked
 
-      # Warn-only for now: becomes blocking in W4 once "nodal" is dropped from the
-      # wrapper lists in src-tauri/deny.toml.
       - name: cargo-deny (bans)
         run: cargo deny --manifest-path src-tauri/Cargo.toml check bans
-        continue-on-error: true
 
       - name: Coverage threshold
         run: |

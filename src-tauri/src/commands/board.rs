@@ -3,14 +3,15 @@
 
 use std::sync::Arc;
 
-use tauri::{AppHandle, State};
+use tauri::State;
 
 use nodal_app::App;
 
+use nodal_domain::board::dto::*;
+use nodal_domain::model::executors::ExecutorInfo;
+use nodal_domain::model::*;
+
 use crate::commands::CommandError;
-use crate::domain::*;
-use crate::work::dto::*;
-use crate::work::executors::ExecutorInfo;
 
 // ---------- Projects ----------
 
@@ -30,8 +31,8 @@ pub async fn update_project(state: State<'_, Arc<App>>, id: String, patch: Proje
 }
 
 #[tauri::command]
-pub async fn delete_project(state: State<'_, Arc<App>>, app: AppHandle, id: String) -> Result<(), CommandError> {
-    Ok(state.board.delete_project(id, |pid| crate::commands::chats::stop_project(&app, pid)).await?)
+pub async fn delete_project(state: State<'_, Arc<App>>, id: String) -> Result<(), CommandError> {
+    Ok(state.delete_project(id).await?)
 }
 
 // ---------- Repos ----------
@@ -157,9 +158,6 @@ pub async fn get_settings(state: State<'_, Arc<App>>) -> Result<Settings, Comman
 }
 
 #[tauri::command]
-pub async fn set_settings(state: State<'_, Arc<App>>, app: AppHandle, settings: Settings) -> Result<Settings, CommandError> {
-    let s = state.board.set_settings(settings).await?;
-    // More concurrency may free up room for queued runs.
-    crate::commands::execution::kick(&app);
-    Ok(s)
+pub async fn set_settings(state: State<'_, Arc<App>>, settings: Settings) -> Result<Settings, CommandError> {
+    Ok(state.inner().set_settings(settings).await?)
 }

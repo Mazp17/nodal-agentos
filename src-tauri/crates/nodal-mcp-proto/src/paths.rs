@@ -1,5 +1,5 @@
-//! Paths `nodal-mcp` needs without an `AppHandle`: `$HOME` and the app's data folder. No
-//! tauri dependency, so this crate compiles without pulling it in.
+//! Paths `nodal-mcp` needs without a running Tauri app: `$HOME` and the app's data folder.
+//! No tauri dependency, so this crate compiles without pulling it in.
 
 use std::path::{Path, PathBuf};
 
@@ -15,7 +15,7 @@ pub const DEV: bool = cfg!(debug_assertions);
 /// `identifier` of `tauri.conf.json`: names the app data folder.
 pub const APP_IDENTIFIER: &str = "io.github.mazp17.nodal";
 
-/// `data_dir` without an `AppHandle`, for `nodal-mcp`. Same folder Tauri resolves on macOS.
+/// `data_dir` without a running Tauri app, for `nodal-mcp`. Same folder Tauri resolves on macOS.
 pub fn data_dir_standalone() -> Result<PathBuf, String> {
     let home = home().ok_or_else(|| "$HOME is not set.".to_string())?;
     let dir = home

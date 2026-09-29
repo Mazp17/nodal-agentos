@@ -4,9 +4,8 @@
 use tauri::ipc::{Channel, InvokeResponseBody};
 use tauri::{State, Webview};
 
+use nodal_domain::execution::worktree::is_valid_run_id;
 pub use nodal_host::pty::PtySessions;
-
-use crate::runs::terminal::is_valid_run_id;
 
 /// Attaches to a background session: opens a pty of `cols`×`rows`, spawns `claude attach
 /// <run_id>` into it and streams its output through `on_data` until it exits (reported once on

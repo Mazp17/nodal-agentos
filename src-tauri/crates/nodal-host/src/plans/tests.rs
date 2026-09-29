@@ -52,3 +52,13 @@ fn plan_file_symlink_escaping_repo_is_rejected() {
         .unwrap_err()
         .contains("not a file"));
 }
+
+#[test]
+fn write_plan_only_when_changed() {
+    let t = TempDir::new("plan-write");
+    let path = plan_path(&t.0, "t1");
+    assert!(write_plan(&path, "a").unwrap());
+    assert!(!write_plan(&path, "a").unwrap());
+    assert!(write_plan(&path, "b").unwrap());
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), "b");
+}

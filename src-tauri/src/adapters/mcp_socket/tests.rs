@@ -25,9 +25,9 @@ use nodal_host::testutil::TempDir;
 use nodal_store::board::projects;
 use nodal_store::Db;
 
-use crate::mcp::stdio::{forward, OPEN_NODAL};
 use nodal_app::board::ops;
 use nodal_domain::board::dto::{NewProject, NewRepo};
+use nodal_mcp_proto::stdio::{forward, OPEN_NODAL};
 
 use super::*;
 
@@ -210,7 +210,7 @@ fn test_app(root: &Path) -> (Arc<App>, Db, Env) {
 
 #[test]
 fn socket_is_private_and_serves_the_same_ops_as_the_ui() {
-    let t = crate::util::paths::tests::TempDir::new("mcps");
+    let t = TempDir::new("mcps");
     let (app, db, env) = test_app(&t.0);
     let repo_dir = t.0.join("web");
     fs::create_dir_all(&repo_dir).unwrap();

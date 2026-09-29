@@ -3,9 +3,10 @@
 
 use std::path::{Path, PathBuf};
 
-use crate::runs::claude_trust::repo_trust_blocking;
-use crate::util::blocking;
-use crate::util::paths::{git_repos_under, git_root_of};
+use nodal_host::claude::trust::repo_trust_blocking;
+use nodal_host::paths::{git_repos_under, git_root_of};
+
+use crate::commands::blocking;
 
 /// Version of the `claude` CLI: minimal proof that the core can invoke it.
 /// Uses the same resolver as runs, so it also works when opened from Finder.

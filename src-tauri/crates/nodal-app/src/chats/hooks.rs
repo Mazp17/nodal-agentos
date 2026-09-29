@@ -43,6 +43,8 @@ impl ChatHooksImpl {
 }
 
 impl ChatHooks for ChatHooksImpl {
+    /// Precondition: `session_id` is already validated by the caller (`ChatProcesses`); this
+    /// stores it as-is.
     fn session_started(&self, chat_id: &str, session_id: String, project_id: String) {
         let (db, notifier, chat_id) = (self.db.clone(), self.notifier.clone(), chat_id.to_string());
         self.rt.spawn_blocking(move || {
