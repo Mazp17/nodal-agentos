@@ -25,6 +25,7 @@ use super::CommandError;
 /// onto `core.claude`/`SessionReader`, this can switch to `State<'_, Arc<SessionReader>>` like
 /// the rest and return `CommandError`.
 #[tauri::command]
+#[tracing::instrument(skip_all, level = "info")]
 pub async fn list_runs() -> Result<Vec<RunSummary>, String> {
     nodal_host::claude::cli::list_runs().await
 }
@@ -32,6 +33,7 @@ pub async fn list_runs() -> Result<Vec<RunSummary>, String> {
 /// Detail of the session's most recent workflow. `None` if the session has no folder on
 /// disk yet or didn't launch any workflow.
 #[tauri::command]
+#[tracing::instrument(skip_all, level = "info")]
 pub async fn get_run_detail(
     state: State<'_, Arc<SessionReader>>,
     session_id: String,
@@ -44,6 +46,7 @@ pub async fn get_run_detail(
 /// approve it ("Review dynamic workflow before running"). `None` if there's no transcript or
 /// that rejection doesn't show up. Reads at most the first 4 MB of the main transcript.
 #[tauri::command]
+#[tracing::instrument(skip_all, level = "info")]
 pub async fn get_launch_blocker(
     state: State<'_, Arc<SessionReader>>,
     session_id: String,
@@ -56,6 +59,7 @@ pub async fn get_launch_blocker(
 /// `limit`: max number of items to return, the most recent ones (default 200, max 2000).
 /// `None` if the agent has no file yet.
 #[tauri::command]
+#[tracing::instrument(skip_all, level = "info")]
 pub async fn get_agent_transcript(
     state: State<'_, Arc<SessionReader>>,
     session_id: String,
@@ -71,6 +75,7 @@ pub async fn get_agent_transcript(
 /// agent: `get_agent_transcript`. `None` if the session has no file yet. `limit`: most recent
 /// items (default 200, max 2000).
 #[tauri::command]
+#[tracing::instrument(skip_all, level = "info")]
 pub async fn get_run_transcript(
     state: State<'_, Arc<App>>,
     run_id: String,
@@ -82,6 +87,7 @@ pub async fn get_run_transcript(
 /// Claude Code sessions started outside the app in the project's repos (`None`: every
 /// project's), with a single `claude agents`.
 #[tauri::command]
+#[tracing::instrument(skip_all, level = "info")]
 pub async fn external_sessions(app: AppHandle, project_id: Option<String>) -> Result<ExternalSessions, CommandError> {
     if let Some(id) = &project_id {
         nodal_domain::util::check_id(id, "project")?;

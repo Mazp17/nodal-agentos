@@ -15,6 +15,7 @@ pub use nodal_host::pty::PtySessions;
 // choice, so each one is a separate JS argument.
 #[allow(clippy::too_many_arguments)]
 #[tauri::command]
+#[tracing::instrument(skip_all, level = "info")]
 pub async fn pty_attach(
     webview: Webview,
     state: State<'_, PtySessions>,
@@ -46,12 +47,14 @@ pub async fn pty_attach(
 
 /// Hands `data` to the session's writer thread; never blocks on the actual write.
 #[tauri::command]
+#[tracing::instrument(skip_all, level = "info")]
 pub async fn pty_write(state: State<'_, PtySessions>, session: u32, data: Vec<u8>) -> Result<(), String> {
     state.write(session, data)
 }
 
 /// Resizes the pty; `claude attach`'s TUI redraws on `SIGWINCH`, which this triggers.
 #[tauri::command]
+#[tracing::instrument(skip_all, level = "info")]
 pub async fn pty_resize(state: State<'_, PtySessions>, session: u32, cols: u16, rows: u16) -> Result<(), String> {
     state.resize(session, cols, rows)
 }
@@ -59,6 +62,7 @@ pub async fn pty_resize(state: State<'_, PtySessions>, session: u32, cols: u16, 
 /// Detaches a session (idempotent: `Ok` even if `session` is unknown, e.g. it already exited).
 /// This only detaches `claude attach`; the background session survives (see the module docs).
 #[tauri::command]
+#[tracing::instrument(skip_all, level = "info")]
 pub async fn pty_close(state: State<'_, PtySessions>, session: u32) -> Result<(), String> {
     state.close(session);
     Ok(())
