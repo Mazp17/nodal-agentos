@@ -26,9 +26,19 @@ pub mod transcript;
 pub mod usage;
 pub mod workflow_detail;
 
+use std::io;
+use std::path::Path;
+
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Deserializer};
 use serde_json::Value;
+
+/// Reads a whole file in one pass, tolerating invalid byte sequences (matches this tree's
+/// tolerance for odd data: `transcript::read_transcript_text` does the same). Used where a
+/// file used to be opened once per field and is now read once and scanned in memory (P12).
+pub(crate) fn read_to_string_lossy(path: &Path) -> io::Result<String> {
+    std::fs::read(path).map(|b| String::from_utf8_lossy(&b).into_owned())
+}
 
 /// Deserializes an optional field without failing if the type isn't the expected one.
 pub(crate) fn lenient<'de, D, T>(d: D) -> Result<Option<T>, D::Error>

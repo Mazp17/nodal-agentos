@@ -160,6 +160,7 @@ pub fn run() {
             commands::sessions::get_agent_transcript,
             commands::sessions::get_launch_blocker,
             commands::sessions::get_run_transcript,
+            commands::sessions::run_progress,
             commands::sessions::external_sessions,
             commands::host::attach_run,
             commands::host::open_terminal_at,

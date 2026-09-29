@@ -13,8 +13,10 @@ use super::transcript::{read_transcript_text, tool_result_text};
 /// or changed and nobody approved it in `/workflows`. In a `--bg` session there's nobody to
 /// ask: it stays as a `tool_result` with `is_error` and the session ends without a workflow.
 pub const WORKFLOW_REVIEW_TEXT: &str = "Review dynamic workflow before running";
-/// How much of the transcript's head is read: the `Workflow` call comes early on.
-const BLOCKER_SCAN_BYTES: u64 = 4 * 1024 * 1024;
+/// How much of the transcript's head is scanned: the `Workflow` call comes early on. Also
+/// used by `readout::read_session_close`, which slices its already-read text to the same
+/// window instead of scanning all of it.
+pub(crate) const BLOCKER_SCAN_BYTES: u64 = 4 * 1024 * 1024;
 
 /// Cap on the returned last message (the final JSON block goes at the end).
 const LAST_TEXT_MAX: usize = 64 * 1024;

@@ -39,7 +39,7 @@ import type {
   TaskRelation,
   TaskStatus,
 } from "./types";
-import type { ToolResultInfo, Transcript, TranscriptItem } from "../features/runs/types";
+import type { RunProgress, ToolResultInfo, Transcript, TranscriptItem } from "../features/runs/types";
 
 // ---------- DTOs ----------
 
@@ -448,6 +448,11 @@ export const runDiff = (runId: string) => invoke<RunDiff>("run_diff", { runId })
  */
 export const getRunTranscript = (runId: string, limit?: number) =>
   invoke<Transcript | null>("get_run_transcript", { runId, limit: limit ?? null });
+/**
+ * Tool calls of a live, non-workflow run so far, read with an incremental cursor instead of
+ * re-parsing the whole transcript on every poll. `null` if the run has no session yet.
+ */
+export const runProgress = (runId: string) => invoke<RunProgress | null>("run_progress", { runId });
 /** Opens the run's folder (or `file` inside it) in the editor from Settings. */
 export const openInEditor = (runId: string, file: string | null = null) =>
   invoke<void>("open_in_editor", { runId, file });

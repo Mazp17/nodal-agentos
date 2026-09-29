@@ -84,6 +84,12 @@ export interface Transcript {
   bytes: number;
 }
 
+/** Tool calls of a live run so far (`runProgress`), read with an incremental cursor instead
+ * of re-parsing the whole transcript on every poll. */
+export interface RunProgress {
+  toolCalls: number;
+}
+
 export type DetailSource = "final" | "live";
 
 export interface PhaseInfo {

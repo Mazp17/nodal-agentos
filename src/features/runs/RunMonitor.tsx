@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from "react";
-import { getRunTranscript } from "../../domain/api";
+import { runProgress } from "../../domain/api";
 import { projectIdOf, useQueueSummary, useRuns, type RunsState } from "../../domain/hooks/runs";
 import { POLL, usePolled } from "../../domain/hooks/store";
 import { formatDuration } from "../../lib/format";
@@ -184,7 +184,7 @@ function AgentProgress({ v, repo }: { v: RunView; repo: string | null }) {
   const live = v.run.status === "launched" && v.run.sessionId != null;
   const q = usePolled<number | null>(
     live ? `run-tool-calls:${v.run.id}` : null,
-    () => getRunTranscript(v.run.id, 1).then((t) => t?.toolCalls ?? null),
+    () => runProgress(v.run.id).then((p) => p?.toolCalls ?? null),
     [],
     POLL.live,
   );

@@ -1,7 +1,7 @@
 //! Full subagent/session transcript parsing, and the session title Claude Code assigns.
 
 use std::fs;
-use std::io::{Read, Seek, SeekFrom};
+use std::io::{self, Read, Seek, SeekFrom};
 use std::path::Path;
 
 use serde::Deserialize;
@@ -590,6 +590,57 @@ pub fn read_session_transcript(
         partial,
         bytes,
     }))
+}
+
+/// `tool_use` blocks (with a `name`, like `assistant_item` requires) of one main-thread
+/// assistant line. Cheap substring filter before parsing, like the rest of this module.
+fn tool_use_count_in_line(line: &str) -> u32 {
+    if line.contains("\"isSidechain\":true") || !line.contains("\"assistant\"") || !line.contains("\"tool_use\"") {
+        return 0;
+    }
+    let Ok(entry) = serde_json::from_str::<RawTranscriptLine>(line) else {
+        return 0;
+    };
+    if entry.kind.as_deref() != Some("assistant") {
+        return 0;
+    }
+    let Some(Value::Array(blocks)) = entry.message.as_ref().and_then(|m| m.get("content")) else {
+        return 0;
+    };
+    blocks
+        .iter()
+        .filter(|b| {
+            b.get("type").and_then(Value::as_str) == Some("tool_use")
+                && b.get("name").and_then(Value::as_str).is_some()
+        })
+        .count() as u32
+}
+
+/// New tool calls appended to the main transcript since byte offset `from` (`0`: count the
+/// whole file), and the offset to resume from next time: an incremental cursor for polling
+/// an active run's progress instead of re-parsing the transcript on every poll (P03). Only
+/// complete lines are counted; a concurrent partial write at the tail is left for the next
+/// call. `from` past the file's current length restarts from the beginning (the file was
+/// replaced). `Ok((0, from))` if there's no file yet.
+pub fn count_new_tool_calls(path: &Path, from: u64) -> io::Result<(u32, u64)> {
+    let mut file = match fs::File::open(path) {
+        Ok(f) => f,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok((0, from)),
+        Err(e) => return Err(e),
+    };
+    let len = file.metadata()?.len();
+    let start = from.min(len);
+    file.seek(SeekFrom::Start(start))?;
+    let mut buf = Vec::new();
+    file.read_to_end(&mut buf)?;
+    let Some(last_nl) = buf.iter().rposition(|&b| b == b'\n') else {
+        return Ok((0, start));
+    };
+    let count = String::from_utf8_lossy(&buf[..last_nl])
+        .lines()
+        .map(tool_use_count_in_line)
+        .sum();
+    Ok((count, start + last_nl as u64 + 1))
 }
 
 #[cfg(test)]
