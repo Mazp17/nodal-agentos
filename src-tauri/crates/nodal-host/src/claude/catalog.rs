@@ -9,8 +9,10 @@
 //!   `installPath`);
 //! - agents: `<installPath>/agents/*.md`, which Claude Code names `<plugin>:<agent>`.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
+use std::sync::{Mutex, OnceLock};
+use std::time::SystemTime;
 
 use serde_json::Value;
 
@@ -220,26 +222,79 @@ fn read_agents_dir(dir: &Path, source: AgentSource, prefix: Option<&str>) -> Vec
     paths.sort();
     paths
         .into_iter()
-        .filter(|p| std::fs::metadata(p).is_ok_and(|m| m.len() <= AGENT_FILE_MAX))
         .filter_map(|path| {
-            let fm = std::fs::read_to_string(&path)
-                .ok()
-                .and_then(|s| parse_frontmatter(&s))?;
-            let stem = path.file_stem()?.to_string_lossy().into_owned();
-            let base = fm.name.clone().unwrap_or(stem);
-            let name = match prefix {
-                Some(p) => format!("{p}:{base}"),
-                None => base,
-            };
-            is_valid_agent_name(&name).then(|| AgentDef {
-                name,
-                source,
-                description: fm.description.as_deref().map(short_description),
-                tools: fm.tools,
-                path,
-            })
+            let meta = std::fs::metadata(&path).ok()?;
+            if meta.len() > AGENT_FILE_MAX {
+                return None;
+            }
+            cached_agent(&path, &meta, source, prefix)
         })
         .collect()
+}
+
+fn parse_agent_file(path: &Path, source: AgentSource, prefix: Option<&str>) -> Option<AgentDef> {
+    let fm = std::fs::read_to_string(path).ok().and_then(|s| parse_frontmatter(&s))?;
+    let stem = path.file_stem()?.to_string_lossy().into_owned();
+    let base = fm.name.clone().unwrap_or(stem);
+    let name = match prefix {
+        Some(p) => format!("{p}:{base}"),
+        None => base,
+    };
+    is_valid_agent_name(&name).then(|| AgentDef {
+        name,
+        source,
+        description: fm.description.as_deref().map(short_description),
+        tools: fm.tools,
+        path: path.to_path_buf(),
+    })
+}
+
+/// Enough of a file's identity to detect an edit (rewrite, resave, add/remove) without
+/// reading its content. `source`/`prefix` are included too so a path scanned under a
+/// different role (shouldn't happen in practice, since each root is fixed) still busts.
+#[derive(Debug, Clone, PartialEq)]
+struct FileStamp {
+    mtime: Option<SystemTime>,
+    len: u64,
+    source: AgentSource,
+    prefix: Option<String>,
+}
+
+struct CachedAgentFile {
+    stamp: FileStamp,
+    agent: Option<AgentDef>,
+}
+
+/// P14: process-wide cache of parsed agent files, keyed by path. Unbounded but small in
+/// practice (bounded by the number of distinct `.md` files ever scanned in this run).
+fn agent_file_cache() -> &'static Mutex<HashMap<PathBuf, CachedAgentFile>> {
+    static CACHE: OnceLock<Mutex<HashMap<PathBuf, CachedAgentFile>>> = OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// [`parse_agent_file`], skipped when `path`'s mtime/size (and role) match the last scan.
+/// `read_dir` + `metadata` still run on every call (cheap); what this avoids is reading and
+/// YAML-parsing every agent file's content on every catalog listing, which is what P14's
+/// bench shows dominates at scale (hundreds of agents).
+fn cached_agent(path: &Path, meta: &std::fs::Metadata, source: AgentSource, prefix: Option<&str>) -> Option<AgentDef> {
+    let stamp = FileStamp {
+        mtime: meta.modified().ok(),
+        len: meta.len(),
+        source,
+        prefix: prefix.map(str::to_string),
+    };
+    let cache = agent_file_cache();
+    if let Some(hit) = cache.lock().unwrap_or_else(|p| p.into_inner()).get(path) {
+        if hit.stamp == stamp {
+            return hit.agent.clone();
+        }
+    }
+    let agent = parse_agent_file(path, source, prefix);
+    cache
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .insert(path.to_path_buf(), CachedAgentFile { stamp, agent: agent.clone() });
+    agent
 }
 
 fn read_json(path: &Path) -> Option<Value> {
