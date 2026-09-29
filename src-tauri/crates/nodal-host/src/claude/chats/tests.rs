@@ -179,3 +179,71 @@ fn a_flood_of_lines_is_capped_reported_and_stops_the_process() {
         assert!(message.unwrap().contains("exceeded"));
     });
 }
+
+/// A `ChatSink` that panics for one poisoned chat id and records every other chat's events
+/// normally — for P18: a panic in a chat's reader task (the sink is called from `on_line`,
+/// same as production) must not affect any other chat sharing the same `ChatProcesses`.
+struct PanicOnChatSink {
+    poison_chat_id: &'static str,
+    events: Arc<Mutex<Vec<ChatEnvelope>>>,
+}
+
+impl ChatSink for PanicOnChatSink {
+    fn emit(&self, ev: ChatEnvelope) {
+        // Only `Stream` events, which `on_line`/`dispatch` emit from inside the reader task:
+        // `send()` itself synchronously emits a `Host(State::Busy)` on the caller's own task
+        // before the process even starts, which isn't the panic this test means to isolate.
+        if ev.chat_id == self.poison_chat_id && matches!(ev.event, ChatEvent::Stream(_)) {
+            panic!("intentional test panic: PanicOnChatSink for chat {}", self.poison_chat_id);
+        }
+        self.events.lock().unwrap().push(ev);
+    }
+}
+
+/// P18: a panic inside one chat's reader task — with `panic = "unwind"`, tokio catches it
+/// (it's swallowed by the `let _ = tokio::time::timeout(..., reader.await).await` the
+/// supervising task already has) — must not affect a second, healthy chat running on the
+/// same `ChatProcesses`.
+#[test]
+fn a_panic_in_one_chats_reader_does_not_affect_another_chat() {
+    let dir = std::env::temp_dir().join(format!("nodal-chats-panic-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let program = dir.join("claude");
+    std::fs::write(&program, BURST_DELTAS).unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    let events = Arc::new(Mutex::new(Vec::new()));
+    let sink: Arc<dyn ChatSink> = Arc::new(PanicOnChatSink { poison_chat_id: "boom", events: events.clone() });
+    let hooks: Arc<dyn ChatHooks> = Arc::new(NoopHooks);
+    let chats = ChatProcesses::with_program(sink, hooks, rt(), Some(program));
+
+    block_on(async {
+        use nodal_domain::ports::ChatRuntime;
+        let spec = ChatSpec { cwd: dir.clone(), args: vec![] };
+        // Its reader panics on the very first line (`system init`).
+        chats.send("boom", "p1", None, spec.clone(), "hi").unwrap();
+        // A second, unrelated chat on the same `ChatProcesses` must run to completion.
+        chats.send("ok", "p1", None, spec, "hi").unwrap();
+
+        let deadline = Instant::now() + Duration::from_secs(10);
+        loop {
+            let done = events.lock().unwrap().iter().any(|e| {
+                e.chat_id == "ok" && matches!(e.event, ChatEvent::Stream(StreamEvent::TurnEnd { .. }))
+            });
+            if done {
+                break;
+            }
+            assert!(Instant::now() < deadline, "the healthy chat never finished its turn: {:#?}", events.lock().unwrap());
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        // No *stream* event recorded for the poisoned chat: every one of those panicked in the
+        // sink (only its synchronous, pre-process `Host(State::Busy)` from `send()` got through).
+        assert!(events.lock().unwrap().iter().all(|e| e.chat_id != "boom" || !matches!(e.event, ChatEvent::Stream(_))));
+    });
+    chats.clear();
+    let _ = std::fs::remove_dir_all(&dir);
+}
