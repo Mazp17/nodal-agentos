@@ -28,13 +28,10 @@ use std::collections::HashSet;
 #[cfg(test)]
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
 
 use tauri::{AppHandle, Manager};
 
 use crate::db::Db;
-
-const TICK: Duration = Duration::from_secs(5);
 
 /// Moved to `nodal_app::Env` (same field names and methods, plus the ports the old code
 /// reached directly); re-exported so current uses don't break.
@@ -98,13 +95,21 @@ impl Drop for CleaningGuard {
     }
 }
 
-/// `enqueue_work` error for a marked task.
+/// `enqueue_work` error for a marked task. Superseded by
+/// `nodal_app::execution::cleaning::CLEANING_ERR`, which every real caller uses now; kept
+/// (unused) next to the rest of this legacy type.
+#[allow(dead_code)]
 pub const CLEANING_ERR: &str = "The task's worktree is being cleaned up: wait for it to finish.";
 
 #[derive(Clone)]
 pub struct WorkState(pub Arc<Inner>);
 
-/// Registers the state and starts the queue.
+/// Registers the state (today's queue loop and stale-launch check moved to
+/// `App::run_pump`/`commands::execution::setup`, which manage `WorkState` themselves so
+/// `mcp::server`/`commands::mcp` — not yet migrated to `Arc<App>` — keep compiling and
+/// working). Superseded; never called. Kept defined (`Inner`/`WorkState`'s shape stays next
+/// to their last free-standing constructor) until W4 deletes it.
+#[allow(dead_code)]
 pub fn init(app: &AppHandle, db: Db) -> Result<(), String> {
     let data_dir = crate::util::paths::data_dir(app)?;
     let env = Env {
@@ -116,12 +121,6 @@ pub fn init(app: &AppHandle, db: Db) -> Result<(), String> {
         git: Arc::new(nodal_host::adapters::HostGit),
         claude_config: Arc::new(nodal_host::adapters::HostClaudeConfig),
     };
-    // A `launching` from a previous session may or may not have actually launched.
-    if let Ok(mut conn) = db.lock() {
-        if let Err(e) = pump::fail_stale_launches(&mut conn, pump::NOTE_APP_CLOSED, crate::util::now_ms()) {
-            eprintln!("work: {e}");
-        }
-    }
     let events = app.try_state::<crate::events::Events>().map(|e| e.inner().clone()).unwrap_or_default();
     let inner = Arc::new(Inner {
         db,
@@ -131,24 +130,10 @@ pub fn init(app: &AppHandle, db: Db) -> Result<(), String> {
         pump_error: Mutex::new(None),
         cleaning: Cleaning::default(),
     });
-    app.manage(WorkState(inner.clone()));
-    tauri::async_runtime::spawn(async move {
-        loop {
-            if let Err(e) = pump::pump(&inner).await {
-                eprintln!("work: {e}");
-            }
-            tokio::time::sleep(TICK).await;
-        }
-    });
+    app.manage(WorkState(inner));
     Ok(())
 }
 
-/// Fires a queue pass in the background (after enqueueing or cancelling).
-pub fn kick(inner: &Arc<Inner>) {
-    let inner = inner.clone();
-    tauri::async_runtime::spawn(async move {
-        if let Err(e) = pump::pump(&inner).await {
-            eprintln!("work: {e}");
-        }
-    });
-}
+/// Superseded by `Execution::kick`/`App::kick`. Never called.
+#[allow(dead_code)]
+pub fn kick(_inner: &Arc<Inner>) {}

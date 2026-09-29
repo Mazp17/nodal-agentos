@@ -1,16 +1,28 @@
-use super::*;
-use crate::db::open_in_memory;
-use crate::db::queries::tasks;
-use crate::domain::*;
-use crate::util::paths::tests::TempDir;
-use crate::work::dto::{NewProject, NewRepo, NewTask};
-use crate::work::report::ReportStatus;
+#![allow(clippy::disallowed_methods)] // builds fixture folders/files directly on disk
+
+use std::path::Path;
+
 use serde_json::json;
+
+use nodal_domain::board::dto::{NewProject, NewRepo, NewTask};
+use nodal_domain::execution::prompts::review_isolation;
+use nodal_domain::execution::report::ReportStatus;
+use nodal_domain::model::*;
+use nodal_domain::testutil::run_of;
+use nodal_host::testutil::TempDir;
+use nodal_store::board::tasks;
+use nodal_store::Db;
+
+use crate::board::ops;
+use crate::execution::cleaning::{Cleaning, CLEANING_ERR};
+use crate::execution::enqueue::{confirm_legacy, enqueue_review, enqueue_work};
+
+use super::*;
 
 struct Fx {
     _t: TempDir,
     env: Env,
-    db: crate::db::Db,
+    db: Db,
     task: Task,
 }
 
@@ -24,8 +36,8 @@ fn fx(name: &str) -> Fx {
         "---\nname: code-reviewer\ntools: Read\n---\n",
     )
     .unwrap();
-    let env = crate::work::test_env(t.0.join("data"), t.0.join("wt"), Some(t.0.join("claude")));
-    let db = open_in_memory().unwrap();
+    let env = crate::testutil::env_for(&t.0, Some(t.0.join("claude")));
+    let db = Db::open_in_memory().unwrap();
     let task = {
         let mut c = db.lock().unwrap();
         let p = ops::create_project(
@@ -50,17 +62,12 @@ fn fx(name: &str) -> Fx {
         .unwrap();
         ops::create_task(&mut c, &env, &nt, 2).unwrap()
     };
-    Fx {
-        _t: t,
-        env,
-        db,
-        task,
-    }
+    Fx { _t: t, env, db, task }
 }
 
 fn launched_run(f: &Fx, executor: Executor, kind: RunKind, review: bool) -> Run {
     let c = f.db.lock().unwrap();
-    let mut r = crate::work::testutil::run_of(executor, kind, review);
+    let mut r = run_of(executor, kind, review);
     r.id = format!("u-{}", qruns::next_queue_position(&c).unwrap());
     r.task_id = Some(f.task.id.clone());
     r.repo_id = Some(f.task.repo_id.clone());
@@ -70,9 +77,7 @@ fn launched_run(f: &Fx, executor: Executor, kind: RunKind, review: bool) -> Run 
 }
 
 fn task_status(f: &Fx) -> TaskStatus {
-    tasks::get(&f.db.lock().unwrap(), &f.task.id)
-        .unwrap()
-        .status
+    tasks::get(&f.db.lock().unwrap(), &f.task.id).unwrap().status
 }
 
 fn done_readout(msg: &str) -> SessionReadout {
@@ -354,8 +359,6 @@ fn friendly_trust_error() {
 
 #[test]
 fn step_comment_lists_findings_and_work_branch() {
-    use crate::runs::SessionReadout;
-    use crate::work::testutil::run_of;
     let reviewer = Executor::Agent {
         name: "code-reviewer".into(),
         source: AgentSource::User,
@@ -383,7 +386,7 @@ fn confirming_a_migrated_queued_run_requeues_it_from_the_task() {
     let f = fx("confirm-legacy");
     let legacy = {
         let c = f.db.lock().unwrap();
-        let mut r = crate::work::testutil::run_of(Executor::Claude, RunKind::Work, false);
+        let mut r = run_of(Executor::Claude, RunKind::Work, false);
         r.id = "lrun_1".into();
         r.task_id = Some(f.task.id.clone());
         r.repo_id = Some(f.task.repo_id.clone());
@@ -393,8 +396,8 @@ fn confirming_a_migrated_queued_run_requeues_it_from_the_task() {
         qruns::insert(&c, &r).unwrap();
         r
     };
-    let cleaning = crate::work::Cleaning::default();
-    let run = launch::confirm_legacy(&f.db, &f.env, &cleaning, &legacy.id, 10).unwrap();
+    let cleaning = Cleaning::default();
+    let run = confirm_legacy(&f.db, &f.env, &cleaning, &legacy.id, 10).unwrap();
     let c = f.db.lock().unwrap();
     assert_eq!(
         (run.status, run.legacy_label.as_deref()),
@@ -413,12 +416,12 @@ fn confirming_a_migrated_queued_run_requeues_it_from_the_task() {
     );
     // No longer awaiting confirmation: confirming again fails.
     drop(c);
-    assert!(launch::confirm_legacy(&f.db, &f.env, &cleaning, &legacy.id, 11).is_err());
+    assert!(confirm_legacy(&f.db, &f.env, &cleaning, &legacy.id, 11).is_err());
 }
 
 fn legacy_queued(f: &Fx) -> Run {
     let c = f.db.lock().unwrap();
-    let mut r = crate::work::testutil::run_of(Executor::Claude, RunKind::Work, false);
+    let mut r = run_of(Executor::Claude, RunKind::Work, false);
     r.id = "lrun_2".into();
     r.task_id = Some(f.task.id.clone());
     r.repo_id = Some(f.task.repo_id.clone());
@@ -432,10 +435,10 @@ fn legacy_queued(f: &Fx) -> Run {
 fn confirm_legacy_is_atomic_when_the_requeue_fails() {
     let f = fx("confirm-atomic");
     let legacy = legacy_queued(&f);
-    let cleaning = crate::work::Cleaning::default();
+    let cleaning = Cleaning::default();
     let _guard = cleaning.mark(&f.task.id).unwrap();
-    let err = launch::confirm_legacy(&f.db, &f.env, &cleaning, &legacy.id, 10).unwrap_err();
-    assert_eq!(err, crate::work::CLEANING_ERR);
+    let err = confirm_legacy(&f.db, &f.env, &cleaning, &legacy.id, 10).unwrap_err();
+    assert_eq!(err, CLEANING_ERR);
     let c = f.db.lock().unwrap();
     let old = qruns::get(&c, &legacy.id).unwrap();
     assert!(
@@ -448,25 +451,25 @@ fn confirm_legacy_is_atomic_when_the_requeue_fails() {
 #[test]
 fn enqueue_is_rejected_while_the_worktree_is_being_cleaned() {
     let f = fx("enqueue-cleaning");
-    let cleaning = crate::work::Cleaning::default();
-    let input = crate::work::dto::LaunchInput::default();
+    let cleaning = Cleaning::default();
+    let input = nodal_domain::board::dto::LaunchInput::default();
     {
         let _guard = cleaning.mark(&f.task.id).unwrap();
         assert!(cleaning.mark(&f.task.id).is_none(), "one cleanup at a time");
-        let err = launch::enqueue_work(&f.db, &f.env, &cleaning, &f.task.id, &input, false, 10)
+        let err = enqueue_work(&f.db, &f.env, &cleaning, &f.task.id, &input, false, 10)
             .unwrap_err();
-        assert_eq!(err, crate::work::CLEANING_ERR);
+        assert_eq!(err, CLEANING_ERR);
         let err =
-            launch::enqueue_review(&f.db, &f.env, &cleaning, &f.task.id, None, 10).unwrap_err();
-        assert_eq!(err, crate::work::CLEANING_ERR);
+            enqueue_review(&f.db, &f.env, &cleaning, &f.task.id, None, 10).unwrap_err();
+        assert_eq!(err, CLEANING_ERR);
     }
     // Once the mark is released, it enqueues; and a second attempt sees the pending one.
     let run =
-        launch::enqueue_work(&f.db, &f.env, &cleaning, &f.task.id, &input, false, 11).unwrap();
+        enqueue_work(&f.db, &f.env, &cleaning, &f.task.id, &input, false, 11).unwrap();
     assert!(run.queue_position > 0.0);
     assert_eq!(task_status(&f), TaskStatus::InProgress);
     let err =
-        launch::enqueue_work(&f.db, &f.env, &cleaning, &f.task.id, &input, false, 12).unwrap_err();
+        enqueue_work(&f.db, &f.env, &cleaning, &f.task.id, &input, false, 12).unwrap_err();
     assert!(err.contains("already has a queued run"), "{err}");
 }
 
@@ -474,10 +477,10 @@ fn enqueue_is_rejected_while_the_worktree_is_being_cleaned() {
 fn failed_launch_blocks_the_task_with_a_comment() {
     let f = fx("pump-launch-fail");
     link_task(&f);
-    let cleaning = crate::work::Cleaning::default();
-    let input = crate::work::dto::LaunchInput::default();
+    let cleaning = Cleaning::default();
+    let input = nodal_domain::board::dto::LaunchInput::default();
     let run =
-        launch::enqueue_work(&f.db, &f.env, &cleaning, &f.task.id, &input, false, 10).unwrap();
+        enqueue_work(&f.db, &f.env, &cleaning, &f.task.id, &input, false, 10).unwrap();
     assert_eq!(task_status(&f), TaskStatus::InProgress);
     let mut c = f.db.lock().unwrap();
     // Without `launching` it does nothing.
@@ -530,11 +533,11 @@ fn stale_launching_runs_are_failed_and_adopted_ones_launched() {
 #[test]
 fn reviewer_isolation_follows_its_cwd() {
     assert_eq!(
-        launch::review_isolation("/r/web", "/r/web/"),
+        review_isolation("/r/web", "/r/web/"),
         Isolation::InPlace
     );
     assert_eq!(
-        launch::review_isolation("/wt/web/pay-1", "/r/web"),
+        review_isolation("/wt/web/pay-1", "/r/web"),
         Isolation::Worktree
     );
     // The work ran "in worktree" but the task has no live one: the reviewer runs in the
