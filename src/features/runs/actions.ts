@@ -18,8 +18,11 @@ export interface RunActions {
   confirm: (v: RunView, name: string) => Promise<boolean>;
   /** Opens the "Attached session" drawer (`claude attach` in an embedded terminal). */
   attach: (v: RunView) => Promise<void>;
-  /** Queues another run of the task with the same executor, isolation, finish and review (no launch popover). */
-  runAgain: (v: RunView, task: Task | undefined, name: string) => Promise<boolean>;
+  /**
+   * Queues another run of the task with the same executor, isolation, finish and review (no
+   * launch popover). Resolves to the new run, or `null` if it couldn't be created.
+   */
+  runAgain: (v: RunView, task: Task | undefined, name: string) => Promise<Run | null>;
   /** New global queue order: ids of every `queued` run. */
   reorder: (ids: string[]) => Promise<void>;
 }
@@ -106,7 +109,7 @@ export function useRunActions(): RunActions {
   const runAgain = useCallback(
     async (v: RunView, task: Task | undefined, name: string) => {
       const taskId = v.run.taskId;
-      if (!taskId) return false;
+      if (!taskId) return null;
       setBusy(true);
       try {
         // A reviewer's settings must not be relaunched as work: fall back to the defaults.
@@ -114,17 +117,17 @@ export function useRunActions(): RunActions {
         void refreshRuns();
         if (run.status === "failed") {
           toast(`Couldn't launch ${name}`, launchErrorHint(run.error, run.cwd), "danger");
-          return false;
+          return run;
         }
         toast(
           run.status === "queued" ? `${name} queued` : `${name} launched`,
           run.status === "queued" ? "It starts when a slot frees up." : task?.title,
           run.status === "queued" ? "muted" : "ok",
         );
-        return true;
+        return run;
       } catch (e) {
         toast(`Couldn't launch ${name}`, String(e), "danger");
-        return false;
+        return null;
       } finally {
         setBusy(false);
       }
