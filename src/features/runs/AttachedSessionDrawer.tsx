@@ -2,7 +2,7 @@ import { useRuns, projectIdOf } from "../../domain/hooks/runs";
 import { useToast } from "../../ui/Toasts";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../../ui/Tooltip";
 import { useFocusTrap } from "../../ui/useFocusTrap";
-import { attachRun } from "./api";
+import { attachRun, openTerminalAt } from "./api";
 import type { AttachTarget } from "./attachStore";
 import { executorLabel, runTaskRef } from "./status";
 import { useAttachedTerminal } from "./useAttachedTerminal";
@@ -16,7 +16,8 @@ export interface AttachedSessionDrawerProps {
 
 /**
  * "Attached session": `claude attach` in an embedded terminal. Closing only detaches;
- * ↗ opens the same session in Terminal.app.
+ * ↗ opens the same session in Terminal.app. Without `claudeId` it runs a plain `claude` in
+ * the run's folder, to accept the workspace trust dialog.
  */
 export function AttachedSessionDrawer({ target, onClose }: AttachedSessionDrawerProps) {
   const ref = useFocusTrap<HTMLDivElement>(onClose);
@@ -32,9 +33,12 @@ export function AttachedSessionDrawer({ target, onClose }: AttachedSessionDrawer
   const model = run?.options.model ?? null;
   const branch = run?.branch ?? task?.worktree?.branch ?? null;
 
+  const trust = target.claudeId === null;
+  const externalHint = trust ? `claude in ${target.cwd ?? "the folder"}` : `claude attach ${target.claudeId}`;
   const openExternal = async () => {
     try {
-      await attachRun(target.claudeId);
+      if (target.claudeId) await attachRun(target.claudeId);
+      else if (target.cwd) await openTerminalAt(target.cwd, true);
     } catch (e) {
       toast("Couldn't open Terminal", String(e), "danger");
     }
@@ -43,9 +47,9 @@ export function AttachedSessionDrawer({ target, onClose }: AttachedSessionDrawer
   const exitNote = term.exitCode !== null && term.exitCode !== 0 ? ` (exit code ${term.exitCode})` : "";
   const banner =
     term.status === "ended"
-      ? { text: `Detached from the session.${exitNote}`, error: exitNote !== "" }
+      ? { text: `${trust ? "Claude exited." : "Detached from the session."}${exitNote}`, error: exitNote !== "" }
       : term.status === "error"
-        ? { text: term.error ?? "Couldn't attach to the session.", error: true }
+        ? { text: term.error ?? (trust ? "Couldn't start Claude." : "Couldn't attach to the session."), error: true }
         : null;
 
   return (
@@ -63,10 +67,16 @@ export function AttachedSessionDrawer({ target, onClose }: AttachedSessionDrawer
               )}
               {taskRef?.key && <span className="as-key">{taskRef.key}</span>}
               <h2 id="as-title" className="as-title ellipsis">
-                {taskRef?.title ?? `Session ${target.claudeId}`}
+                {trust ? "Trust workspace" : (taskRef?.title ?? `Session ${target.claudeId}`)}
               </h2>
             </div>
-            {run && (
+            {trust ? (
+              <div className="as-sub">
+                <span>Accept the trust dialog in</span>
+                <span className="as-mono ellipsis">{target.cwd}</span>
+                <span>then close and run again.</span>
+              </div>
+            ) : run && (
               <div className="as-sub">
                 <span className="as-mono as-exec">{executorLabel(run.executor)}</span>
                 {model && (
@@ -90,7 +100,7 @@ export function AttachedSessionDrawer({ target, onClose }: AttachedSessionDrawer
                 ↗
               </button>
             </TooltipTrigger>
-            <TooltipContent>Open in Terminal.app · claude attach {target.claudeId}</TooltipContent>
+            <TooltipContent>Open in Terminal.app · {externalHint}</TooltipContent>
           </Tooltip>
           <button type="button" className="icon-btn" aria-label="Close" onClick={onClose}>
             ✕
@@ -110,7 +120,7 @@ export function AttachedSessionDrawer({ target, onClose }: AttachedSessionDrawer
             <div className={`as-banner ${banner.error ? "as-banner-error" : ""}`}>
               <p className="as-banner-text">{banner.text}</p>
               <button type="button" className="btn btn-sm btn-primary" autoFocus onClick={term.reattach}>
-                Reattach
+                {trust ? "Restart" : "Reattach"}
               </button>
             </div>
           )}
@@ -124,7 +134,7 @@ export function AttachedSessionDrawer({ target, onClose }: AttachedSessionDrawer
         <footer className="as-foot">
           <span className="ellipsis">Esc goes to Claude · ⇧Esc to close</span>
           <span className="as-foot-size">
-            pty {term.cols ?? "–"}×{term.rows ?? "–"} · {target.claudeId}
+            pty {term.cols ?? "–"}×{term.rows ?? "–"} · {target.claudeId ?? "claude"}
           </span>
         </footer>
       </div>

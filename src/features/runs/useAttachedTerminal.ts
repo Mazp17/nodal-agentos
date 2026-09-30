@@ -6,7 +6,7 @@ import { Channel } from "@tauri-apps/api/core";
 import { Terminal, type IDisposable, type ITheme } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebglAddon } from "@xterm/addon-webgl";
-import { ptyAttach, ptyClose, ptyResize, ptyWrite } from "./api";
+import { ptyAttach, ptyClose, ptyOpenClaude, ptyResize, ptyWrite } from "./api";
 
 export type AttachStatus = "connecting" | "attached" | "ended" | "error";
 
@@ -118,10 +118,11 @@ const CONNECTING: AttachState = { status: "connecting", error: null, exitCode: n
 
 /**
  * Attaches to the background session `claudeId` in an embedded terminal. Unmounting (or
- * changing the id) detaches; the run keeps going. `onRequestClose` runs on Shift+Esc
- * inside the terminal.
+ * changing the id) detaches; the run keeps going. With `claudeId` null it starts an
+ * interactive `claude` in `cwd` instead (ended on unmount). `onRequestClose` runs on
+ * Shift+Esc inside the terminal.
  */
-export function useAttachedTerminal(claudeId: string, cwd: string | null, onRequestClose?: () => void): AttachedTerminal {
+export function useAttachedTerminal(claudeId: string | null, cwd: string | null, onRequestClose?: () => void): AttachedTerminal {
   const hostRef = useRef<HTMLDivElement>(null);
   const closeRef = useRef(onRequestClose);
   useLayoutEffect(() => {
@@ -247,7 +248,9 @@ export function useAttachedTerminal(claudeId: string, cwd: string | null, onRequ
 
       let id: number;
       try {
-        id = await ptyAttach(claudeId, cwd, sent.cols, sent.rows, onData, onExit);
+        id = claudeId
+          ? await ptyAttach(claudeId, cwd, sent.cols, sent.rows, onData, onExit)
+          : await ptyOpenClaude(cwd ?? "", sent.cols, sent.rows, onData, onExit);
       } catch (e) {
         if (!disposed) setState({ status: "error", error: String(e), exitCode: null });
         return;

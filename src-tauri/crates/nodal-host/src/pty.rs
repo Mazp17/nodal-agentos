@@ -264,7 +264,31 @@ impl PtySessions {
         on_exit: OnExit,
     ) -> Result<u32, String> {
         let claude = claude_bin::resolve_claude()?;
-        let req = AttachRequest { owner, generation, claude, run_id, cwd, cols, rows };
+        let args = vec!["attach".to_string(), run_id];
+        let req = AttachRequest { owner, generation, claude, args, cwd, cols, rows };
+        spawn_session(self.clone(), req, on_data, on_exit)
+    }
+
+    /// Starts an interactive `claude` in `dir` (an existing directory): used to accept the
+    /// workspace trust dialog of a repo from inside the app. Closing the session ends that
+    /// `claude` (unlike `attach`, nothing keeps running in the background).
+    #[allow(clippy::too_many_arguments)]
+    pub fn open_claude(
+        &self,
+        owner: String,
+        generation: u64,
+        dir: String,
+        cols: u16,
+        rows: u16,
+        on_data: OnData,
+        on_exit: OnExit,
+    ) -> Result<u32, String> {
+        let path = Path::new(&dir);
+        if !path.is_absolute() || !path.is_dir() {
+            return Err(format!("The folder doesn't exist or isn't a directory: {dir}"));
+        }
+        let claude = claude_bin::resolve_claude()?;
+        let req = AttachRequest { owner, generation, claude, args: Vec::new(), cwd: Some(dir), cols, rows };
         spawn_session(self.clone(), req, on_data, on_exit)
     }
 }
@@ -456,13 +480,14 @@ struct AttachRequest {
     /// `owner`'s reload generation when the attach started (see `PtySessions::insert_current`).
     generation: u64,
     claude: PathBuf,
-    run_id: String,
+    /// Arguments to `claude` (`attach <run_id>`, or none for an interactive session).
+    args: Vec<String>,
     cwd: Option<String>,
     cols: u16,
     rows: u16,
 }
 
-/// Opens the pty, spawns `claude attach <run_id>` into it and starts the session's threads.
+/// Opens the pty, spawns `claude <args>` into it and starts the session's threads.
 /// Synchronous (`portable_pty` is): called from `PtySessions::attach` via `spawn_blocking`
 /// by the shell.
 ///
@@ -474,21 +499,20 @@ struct AttachRequest {
 /// means the child is always properly reaped, even if the owning webview reloaded while this
 /// was setting up (in which case an error is returned instead of the id).
 fn spawn_session(sessions: PtySessions, req: AttachRequest, on_data: OnData, on_exit: OnExit) -> Result<u32, String> {
-    let AttachRequest { owner, generation, claude, run_id, cwd, cols, rows } = req;
+    let AttachRequest { owner, generation, claude, args, cwd, cols, rows } = req;
     let pair = native_pty_system()
         .openpty(PtySize { rows, cols, pixel_width: 0, pixel_height: 0 })
         .map_err(|e| format!("Couldn't open a pty: {e}"))?;
 
     let mut builder = CommandBuilder::new(&claude);
-    builder.arg("attach");
-    builder.arg(&run_id);
+    builder.args(&args);
     configure_env(&mut builder);
     builder.cwd(resolve_cwd(cwd.as_deref()));
 
     let child = pair
         .slave
         .spawn_command(builder)
-        .map_err(|e| format!("Couldn't start `claude attach {run_id}`: {e}"))?;
+        .map_err(|e| format!("Couldn't start `{}`: {e}", ["claude"].into_iter().chain(args.iter().map(String::as_str)).collect::<Vec<_>>().join(" ")))?;
     // The reader only sees EOF once every open handle to the slave is closed; ours must go now
     // (verified in the spike: macOS doesn't deliver EOF to the master otherwise).
     drop(pair.slave);

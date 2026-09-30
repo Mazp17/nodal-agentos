@@ -165,6 +165,7 @@ pub fn run() {
             commands::host::attach_run,
             commands::host::open_terminal_at,
             commands::pty::pty_attach,
+            commands::pty::pty_open_claude,
             commands::pty::pty_write,
             commands::pty::pty_resize,
             commands::pty::pty_close,
