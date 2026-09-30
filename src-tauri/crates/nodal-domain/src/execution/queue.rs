@@ -40,27 +40,15 @@ pub fn is_active(r: &Run, live: Option<&[RunSummary]>, now: i64) -> bool {
     }
 }
 
-/// Occupied slots: every `working` background session (ours or not), plus ours that are
-/// launching or were launched recently and aren't listed yet.
-/// `blocked` (waiting for permission/input) doesn't take a slot: if nobody answers it would
-/// stall the queue.
+/// Occupied slots: our own runs that are launching or launched and still in progress
+/// (`working`, `blocked` waiting on the user, or launched recently and not listed yet).
+/// Sessions Nodal didn't launch (another Nodal, a manual `claude --bg`) take no slot, and
+/// ended runs never do.
 pub fn occupied_slots(runs: &[Run], live: &[RunSummary], now: i64) -> usize {
-    let working = live
-        .iter()
-        .filter(|s| s.state.as_deref() == Some("working"))
-        .count();
-    let pending = runs
-        .iter()
-        .filter(|r| match r.status {
-            RunStatus::Launching => true,
-            RunStatus::Launched => {
-                live_of(r, live).is_none()
-                    && r.launched_at.is_some_and(|t| now - t < LAUNCH_GRACE_MS)
-            }
-            _ => false,
-        })
-        .count();
-    working + pending
+    runs.iter()
+        .filter(|r| matches!(r.status, RunStatus::Launching | RunStatus::Launched))
+        .filter(|r| is_active(r, Some(live), now))
+        .count()
 }
 
 /// Queue summary for the UI.
@@ -87,9 +75,9 @@ fn waiting(s: &RunSummary) -> bool {
 }
 
 /// `runs`: the pending ones in scope (`pending`/`pending_of`); `blocked_tasks`: ids of the
-/// Blocked tasks in scope. `global`: no project filter, so foreign sessions count too
-/// (working ones take a slot; waiting ones need the user). With a project, `running` is
-/// only our own runs that take a slot.
+/// tasks in scope waiting on the user. `global`: no project filter, so foreign sessions
+/// waiting on the user count in `need_you` too. `running` is always our own runs that take
+/// a slot.
 pub fn work_summary(
     runs: &[Run],
     blocked_tasks: &[String],
@@ -98,20 +86,7 @@ pub fn work_summary(
     global: bool,
     now: i64,
 ) -> WorkSummary {
-    let running = if global {
-        occupied_slots(runs, live, now)
-    } else {
-        runs.iter()
-            .filter(|r| match r.status {
-                RunStatus::Launching => true,
-                RunStatus::Launched => match live_of(r, live) {
-                    Some(s) => s.state.as_deref() == Some("working"),
-                    None => r.launched_at.is_some_and(|t| now - t < LAUNCH_GRACE_MS),
-                },
-                _ => false,
-            })
-            .count()
-    };
+    let running = occupied_slots(runs, live, now);
     let queued = runs
         .iter()
         .filter(|r| r.status == RunStatus::Queued && !awaiting_confirmation(r))
