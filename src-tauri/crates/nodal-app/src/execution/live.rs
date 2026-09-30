@@ -20,7 +20,12 @@ use nodal_domain::model::claude::{ExtraFlags, LaunchError, RunRef, RunSummary};
 use nodal_domain::model::LaunchOptions;
 use nodal_domain::ports::{BoxFut, ClaudeCli};
 
-const TTL: Duration = Duration::from_secs(2);
+/// Must stay `> half` the pump's and the UI's shared 5 s tick: since the two run on
+/// independent timers, any relative phase between them must still leave at least one inside
+/// the other's cached window. A 2 s TTL left a `pump_offset` band of [2 s, 3 s) where both
+/// missed the cache and each spawned its own `claude agents`, failing S1 (see ADR-013). 3 s
+/// still leaked under timer jitter at a 2.5 s offset; 4 s leaves 1.5 s of margin.
+const TTL: Duration = Duration::from_secs(4);
 
 struct Slot<T> {
     at: Instant,
