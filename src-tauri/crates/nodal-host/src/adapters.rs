@@ -19,6 +19,7 @@ use nodal_domain::model::executors::{AgentDef, ExecutorInfo};
 use nodal_domain::model::{LaunchOptions, WorktreeRef};
 use nodal_domain::ports::{BoxFut, ClaudeCli, ClaudeConfig, Clock, Git, LocalFs, PlanFiles, SessionFiles};
 
+use crate::claude::live::AgentsRaw;
 use crate::claude::{activity, catalog, cli, fs, settings};
 use crate::git;
 use crate::{paths, plans, repo};
@@ -32,24 +33,33 @@ impl Clock for SystemClock {
     }
 }
 
-/// The `claude` CLI (`nodal_domain::ports::ClaudeCli`).
+/// The `claude` CLI (`nodal_domain::ports::ClaudeCli`). `agents`: the single-flight cache
+/// (P01) `list_sessions`/`list_agent_sessions` share instead of each spawning `claude agents`;
+/// `launch_bg`/`stop` invalidate it, since either can change the live set.
 pub struct HostClaudeCli {
     rt: Handle,
+    agents: AgentsRaw,
 }
 
 impl HostClaudeCli {
     pub fn new(rt: Handle) -> Self {
-        Self { rt }
+        Self { rt, agents: AgentsRaw::new() }
+    }
+
+    /// `claude agents` served by a fake `program` instead of the real `claude`.
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn with_program(rt: Handle, program: std::path::PathBuf) -> Self {
+        Self { rt, agents: AgentsRaw::with_program(program) }
     }
 }
 
 impl ClaudeCli for HostClaudeCli {
     fn list_sessions(&self) -> BoxFut<'_, Result<Vec<RunSummary>, HostError>> {
-        Box::pin(async move { Ok(cli::list_runs().await?) })
+        Box::pin(async move { Ok(cli::list_runs(&self.agents).await?) })
     }
 
     fn list_agent_sessions(&self) -> BoxFut<'_, Result<Vec<AgentSession>, HostError>> {
-        Box::pin(async move { Ok(activity::list_agents().await?) })
+        Box::pin(async move { Ok(activity::list_agents(&self.agents).await?) })
     }
 
     fn launch_bg<'a>(
@@ -59,11 +69,19 @@ impl ClaudeCli for HostClaudeCli {
         opts: &'a LaunchOptions,
         extra: &'a ExtraFlags,
     ) -> BoxFut<'a, Result<RunRef, LaunchError>> {
-        Box::pin(async move { cli::launch_bg(cwd, prompt, opts, extra, &self.rt).await })
+        Box::pin(async move {
+            let r = cli::launch_bg(cwd, prompt, opts, extra, &self.rt).await;
+            self.agents.invalidate().await;
+            r
+        })
     }
 
     fn stop<'a>(&'a self, short_id: &'a str) -> BoxFut<'a, Result<(), HostError>> {
-        Box::pin(async move { Ok(cli::stop(short_id).await?) })
+        Box::pin(async move {
+            let r = cli::stop(short_id).await;
+            self.agents.invalidate().await;
+            Ok(r?)
+        })
     }
 }
 
@@ -77,6 +95,10 @@ impl SessionFiles for HostSessionFiles {
 
     fn session_tokens(&self, session_id: &str, cwd: &str) -> Option<i64> {
         fs::readout::session_tokens(session_id, cwd)
+    }
+
+    fn session_close(&self, session_id: &str, cwd: &str) -> (SessionReadout, Option<i64>) {
+        fs::readout::read_session_close(session_id, cwd)
     }
 
     fn run_detail(&self, session_id: &str, cwd: &str) -> Result<Option<RunDetail>, HostError> {
@@ -121,6 +143,10 @@ impl SessionFiles for HostSessionFiles {
 
     fn session_title(&self, path: &Path) -> Option<String> {
         fs::transcript::session_title(path)
+    }
+
+    fn count_new_tool_calls(&self, path: &Path, from: u64) -> io::Result<(u32, u64)> {
+        fs::transcript::count_new_tool_calls(path, from)
     }
 
     fn external_sessions(

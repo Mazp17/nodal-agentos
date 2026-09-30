@@ -18,6 +18,39 @@ All notable changes to Nodal are documented here. The project uses [Semantic Ver
 
 Before, coverage counted inline test code; the tests now live in their own files and aren't counted. Idle CPU/RSS needs a GUI session and wasn't measured.
 
+### Performance
+
+* **backend:** CPU, memory, child-process and IPC optimizations across `nodal-host`/`nodal-app`/`nodal-store` (P01–P18 from the backend perf pass): a shared, single-flight `LiveSessions` cache instead of up to 4 independent `claude agents` spawns per tick; `run_diff` synthesizes new-file diffs in Rust instead of one `git diff --no-index` per file, capped and cached by worktree state; run progress (`toolCalls`) and a run's closing transcript read incrementally/once instead of on every 5s poll; chat streaming uses typed `stream-json` structs, a dedicated `ipc::Channel` per chat and batched deltas; `external_sessions` resolves each transcript once across repos instead of once per repo; `git::run` and the MCP socket no longer poll on a fixed interval; explicit-column, `prepare_cached` queries in `nodal-store`; a single `reqwest` version workspace-wide; `panic = "unwind"` in release so a worker panic (pump/sync/a chat) fails only that task, not the app. Representative before/after (full list in the vault's "04 Optimizaciones de rendimiento y memoria" note):
+
+| Metric | Before | After |
+| --- | --- | --- |
+| `claude agents` spawns (5 reads within the cache's TTL) | 5 | 1 |
+| `claude agents` spawns per 5 s with Runs open (S1, fake `claude`) | 4 | 1 |
+| Chat deliveries, 2 chats × 500 deltas | 2,000 (1,000 for the other chat) | 1,000 (0) |
+| `run_diff`, 50 new files (p95) | 2.05 s, ~56 `git` processes | 76 ms cold / 35 ms cached, ≤5 processes |
+| `git::run` ×1000 | 19.67 s | 8.20 s (-58%) |
+| `external_sessions` transcript reads, 5-repo fixture | 54 | 13 |
+| MCP socket idle wakeups / 5 s | 49 | 0 |
+| `reqwest` versions in the workspace | 2 (0.12 + 0.13) | 1 (0.13.5) |
+| Release binary size (`panic = "unwind"` for P18) | 14,545,424 B | 18,645,376 B (+28.2%) |
+
+Live measurements with the app running (release builds of `main` and this branch on the dev DB, exact spawn counts through a `git`/`claude` PATH wrapper, 2–3 min per scenario, one repetition):
+
+| Scenario | `main` | This branch | Target |
+| --- | --- | --- | --- |
+| S0 Board idle: backend CPU | 0.13% | 0.13% | < 0.5% ✅ |
+| S0 Board idle: `claude agents` spawns / 3 min | 50 | 26 | 0 ❌ |
+| S1 Runs open: `claude agents` per 5 s | 3.9 | 1.0 | ≤ 1 ✅ |
+| S1 Runs open: backend CPU | 0.32% | 0.26% | < 3% ✅ |
+| S2 diff drawer, 50 new files: `git` per `run_diff` | 56 | 3 | ≤ 5 ✅ |
+| S2 diff drawer: `run_diff` latency | ~1.0 s | p95 67 ms | < 150 ms ✅ |
+
+S0 still spawns `claude agents` because the Board polls `list_runs` every 5 s even with no live runs; idle wakeups (`top`, no `powermetrics`) weren't stable enough to compare. S3 (chat streaming) wasn't measured live.
+
+P10 (a reader-connection pool ahead of the single-mutex `Db`) was evaluated with a synthetic contention bench and **reverted**: it regressed read p95 latency (64.97 ms → 94.87 ms) under real parallel CPU contention on this hardware, even though it fixed write latency (57.88 ms → 0.37 ms), which was already under its own threshold. Live S0–S3 CPU/RSS/spawn numbers with the packaged app need a GUI session and `sudo` (dtrace/powermetrics) and are still pending manual measurement (script and steps in the vault note and NOD-12's final report).
+
+ADR-013 (replace the 5 s poll with push) was re-evaluated after S1's re-measurement (`measure_s1_claude_agents_spawns_per_5s`) found the pump's and the UI's independent 5 s timers still missed `LiveSessions`' cache at both ends of a `pump_offset` ∈ [2 s, 3 s) phase band, spawning `claude agents` twice per window there instead of once. Root cause was the cache's 2 s TTL being less than half the shared 5 s tick, not the polling model itself, so push was **discarded**: raising the TTL to 4 s (`> half` of 5 s, so any phase still leaves at least one side inside the other's cache, with 1.5 s of margin for timer jitter) closes the band instead. Re-measured across the same offsets (0, 1.5 s, 2.5 s, 4 s), 6 runs: 1 spawn / 5 s in 24/24 samples, meeting S1 (a 3 s TTL gave 23/24: one 5/15 s at offset 2.5 s). Push (ADR-013) remains a valid alternative fix — it would close the same gap by leaving only one reader — but is unneeded scope for a target this fix already meets.
+
 ## [0.5.0](https://github.com/Mazp17/nodal-agentos/compare/v0.4.0...v0.5.0) (2026-09-26)
 
 

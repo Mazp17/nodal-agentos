@@ -7,6 +7,7 @@
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::process::{Output, Stdio};
+use std::sync::OnceLock;
 use std::time::Duration;
 
 use tokio::process::Command;
@@ -53,32 +54,59 @@ pub fn resolve_bin(name: &str) -> Option<PathBuf> {
 }
 
 /// Path of the `claude` binary: PATH first, then `~/.local/bin/claude` and the like.
+/// Resolved once per process (P06): the PATH walk below does a `metadata` call per
+/// candidate, and PATH doesn't change while the app is running.
 pub fn resolve_claude() -> Result<PathBuf, String> {
-    resolve_bin("claude").ok_or_else(|| {
-        "Couldn't find the `claude` executable in PATH or ~/.local/bin. Is Claude Code installed?".to_string()
-    })
+    static CLAUDE_BIN: OnceLock<Result<PathBuf, String>> = OnceLock::new();
+    CLAUDE_BIN
+        .get_or_init(|| {
+            resolve_bin("claude").ok_or_else(|| {
+                "Couldn't find the `claude` executable in PATH or ~/.local/bin. Is Claude Code installed?"
+                    .to_string()
+            })
+        })
+        .clone()
 }
 
+/// Path of the `git` binary, resolved once per process the same way as [`resolve_claude`]
+/// (used by `git::run`, P06's other chokepoint).
+pub fn resolve_git() -> Result<PathBuf, String> {
+    static GIT_BIN: OnceLock<Result<PathBuf, String>> = OnceLock::new();
+    GIT_BIN
+        .get_or_init(|| resolve_bin("git").ok_or_else(|| "Couldn't find `git` in PATH.".to_string()))
+        .clone()
+}
+
+/// `PATH` extended with [`extra_dirs`], built once per process: every `claude` and `git`
+/// spawn sets this as the child's `PATH`, and it doesn't change while the app is running.
 pub fn augmented_path() -> OsString {
-    let mut dirs: Vec<PathBuf> = std::env::var_os("PATH")
-        .map(|p| std::env::split_paths(&p).collect())
-        .unwrap_or_default();
-    for d in extra_dirs() {
-        if !dirs.contains(&d) {
-            dirs.push(d);
-        }
-    }
-    std::env::join_paths(dirs).unwrap_or_default()
+    static AUGMENTED: OnceLock<OsString> = OnceLock::new();
+    AUGMENTED
+        .get_or_init(|| {
+            let mut dirs: Vec<PathBuf> = std::env::var_os("PATH")
+                .map(|p| std::env::split_paths(&p).collect())
+                .unwrap_or_default();
+            for d in extra_dirs() {
+                if !dirs.contains(&d) {
+                    dirs.push(d);
+                }
+            }
+            std::env::join_paths(dirs).unwrap_or_default()
+        })
+        .clone()
 }
 
-/// `claude` ready to configure: no stdin and an extended PATH.
+/// `claude` ready to configure: no stdin and an extended PATH. The chokepoint every `claude`
+/// spawn goes through in production (cli.rs, activity.rs, chats.rs).
 pub fn claude_command() -> Result<Command, String> {
     let mut cmd = Command::new(resolve_claude()?);
     cmd.env("PATH", augmented_path()).stdin(Stdio::null());
+    crate::metrics::record_claude_spawn();
     Ok(cmd)
 }
 
 /// Runs and waits for the full output; if `limit` passes, kills the process.
+#[tracing::instrument(skip(cmd, limit), level = "info")]
 pub async fn output_with_timeout(
     mut cmd: Command,
     limit: Duration,
@@ -110,3 +138,6 @@ pub fn error_text(out: &Output) -> String {
         err
     }
 }
+
+#[cfg(test)]
+mod tests;

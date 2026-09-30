@@ -2,10 +2,12 @@ mod adapters;
 pub mod commands;
 mod paths;
 mod secrets;
+pub(crate) mod telemetry;
 mod updates;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    telemetry::init();
     let secrets = secrets::keychain();
     tauri::Builder::default()
         .plugin(tauri_plugin_notification::init())
@@ -37,6 +39,19 @@ pub fn run() {
 
             let handle = app.handle().clone();
             app.manage(adapters::events::Events::new(handle.clone()));
+
+            // Ola 0 instrumentation: one `info` log line a minute with the latency/spawn/IPC
+            // counters (negligible against the S0 budget of < 2 wakeups/s), so a profiling
+            // session doesn't need to wait for app exit to see a snapshot.
+            tauri::async_runtime::spawn(async {
+                let mut tick = tokio::time::interval(std::time::Duration::from_secs(60));
+                tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+                loop {
+                    tick.tick().await;
+                    telemetry::log_metrics_snapshot();
+                }
+            });
+
             if paths::DEV {
                 if let Some(w) = app.get_webview_window("main") {
                     let _ = w.set_title("Nodal Dev");
@@ -50,6 +65,14 @@ pub fn run() {
             let secrets = app.state::<secrets::Secrets>().inner().clone();
             let clock: Arc<dyn nodal_domain::ports::Clock> = Arc::new(nodal_host::adapters::SystemClock);
             let rt = tauri::async_runtime::handle().inner().clone();
+
+            // P01: one `HostClaudeCli` (its own single-flight `claude agents` cache), wrapped
+            // by `LiveSessions` (a second, typed-result cache). Both `Deps.claude` (the queue
+            // pump, `work_summary`, `cancel_run`) and `SessionReader` (`list_runs`) below share
+            // this same instance, so `external_sessions` (also `Deps.claude`, via `App::sessions`)
+            // reads it too — no more of the two independent `HostClaudeCli`s today's code had.
+            let claude: Arc<dyn nodal_domain::ports::ClaudeCli> =
+                nodal_app::execution::LiveSessions::new(Arc::new(nodal_host::adapters::HostClaudeCli::new(rt.clone())));
 
             // The hub works without a database: provider, key and live-session commands do
             // too. Registered before the database opens, and always.
@@ -78,7 +101,6 @@ pub fn run() {
                     app.manage(db.clone());
                     let claude_dir = nodal_host::claude::fs::paths::claude_config_dir();
                     let sessions: Arc<dyn nodal_domain::ports::SessionFiles> = Arc::new(nodal_host::adapters::HostSessionFiles);
-                    let claude: Arc<dyn nodal_domain::ports::ClaudeCli> = Arc::new(nodal_host::adapters::HostClaudeCli::new(rt.clone()));
                     // Builds the one `ChatProcesses` instance and starts its reaper (today's
                     // chats setup) — unconditionally, like today, regardless of whether the env
                     // below can be built.
@@ -102,7 +124,7 @@ pub fn run() {
                                 env,
                                 rt: rt.clone(),
                                 clock: clock.clone(),
-                                claude,
+                                claude: claude.clone(),
                                 sessions,
                                 notifier: Arc::new(events),
                                 chats: chat_runtime,
@@ -122,7 +144,7 @@ pub fn run() {
             // (`SourcesHub`, `SessionReader`) still work.
             app.manage(hub.clone());
             app.manage(nodal_app::sessions::SessionReader::new(
-                Arc::new(nodal_host::adapters::HostClaudeCli::new(rt)),
+                claude,
                 Arc::new(nodal_host::adapters::HostSessionFiles),
             ));
 
@@ -138,6 +160,7 @@ pub fn run() {
             commands::sessions::get_agent_transcript,
             commands::sessions::get_launch_blocker,
             commands::sessions::get_run_transcript,
+            commands::sessions::run_progress,
             commands::sessions::external_sessions,
             commands::host::attach_run,
             commands::host::open_terminal_at,
@@ -227,6 +250,8 @@ pub fn run() {
             commands::chats::stop_chat,
             commands::chats::get_chat_live,
             commands::chats::get_chat_transcript,
+            commands::chats::attach_chat_channel,
+            commands::chats::detach_chat_channel,
         ])
         .build(tauri::generate_context!())
         .expect("error while running tauri application")
@@ -234,6 +259,7 @@ pub fn run() {
             // Nothing else reaps embedded terminals on exit: without this, `claude attach`
             // child processes would outlive the app.
             if let tauri::RunEvent::Exit = event {
+                telemetry::log_metrics_snapshot();
                 use tauri::Manager;
                 if let Some(sessions) = app_handle.try_state::<nodal_host::pty::PtySessions>() {
                     sessions.close_all();

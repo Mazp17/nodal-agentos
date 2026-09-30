@@ -24,7 +24,7 @@ const WHITELIST: &[(&str, &[&str], &[&str])] = &[
     (
         "nodal-store",
         &["nodal-domain"],
-        &["rusqlite", "serde", "serde_json", "thiserror", "tokio"],
+        &["rusqlite", "serde", "serde_json", "thiserror", "tokio", "tracing"],
     ),
     (
         "nodal-host",
@@ -37,6 +37,7 @@ const WHITELIST: &[(&str, &[&str], &[&str])] = &[
             "serde",
             "serde_json",
             "thiserror",
+            "tracing",
         ],
     ),
     (
@@ -47,7 +48,7 @@ const WHITELIST: &[(&str, &[&str], &[&str])] = &[
     (
         "nodal-app",
         &["nodal-domain", "nodal-store", "nodal-mcp-proto"],
-        &["tokio", "serde", "serde_json", "thiserror"],
+        &["tokio", "serde", "serde_json", "thiserror", "tracing"],
     ),
     (
         "nodal",
@@ -68,6 +69,8 @@ const WHITELIST: &[(&str, &[&str], &[&str])] = &[
             "serde",
             "serde_json",
             "tokio",
+            "tracing",
+            "tracing-subscriber",
         ],
     ),
 ];
@@ -79,6 +82,8 @@ const EXCLUSIVE_EXTERNAL: &[(&str, &[&str])] = &[
     ("reqwest", &["nodal-linear"]),
     ("keyring", &["nodal-host"]),
     ("portable-pty", &["nodal-host"]),
+    // ADR-007: only the shell installs a `tracing` subscriber; other crates just emit spans/events.
+    ("tracing-subscriber", &["nodal"]),
 ];
 
 struct Dep {

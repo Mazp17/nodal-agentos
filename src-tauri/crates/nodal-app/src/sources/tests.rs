@@ -385,3 +385,105 @@ fn sync_now_without_a_database_reports_the_message() {
     let err = block_on(hub.sync_now(None)).unwrap_err();
     assert_eq!(err.to_string(), "The database is not available.");
 }
+
+/// P15: a pass with nothing to pull/push/import and no errors/notices doesn't emit `Sources`
+/// (`last_synced_at` still moves in the DB; only the change-notify event is gated).
+#[test]
+fn sync_now_without_changes_does_not_notify() {
+    let f = fx("sync-no-changes");
+    seed_project(&f.hub);
+    block_on(f.hub.secrets.set("fake", "k")).unwrap();
+    let _link = linked(&f.hub); // already notifies once (Sources), unrelated to the sync pass
+    let before = f.notifier.kinds().len();
+    let report = block_on(f.hub.sync_now(None)).unwrap();
+    assert_eq!(report.pulled + report.pushed + report.imported, 0);
+    assert!(report.errors.is_empty());
+    assert!(report.notices.is_empty());
+    assert_eq!(f.notifier.kinds().len(), before, "a no-op sync pass should not emit a Sources event");
+}
+
+/// A pass that actually imports something still notifies (`Sources` + `Tasks`).
+#[test]
+fn sync_now_with_changes_notifies() {
+    let f = fx("sync-with-changes");
+    seed_project(&f.hub);
+    seed_repo(&f.hub, "r1", "p1");
+    block_on(f.hub.secrets.set("fake", "k")).unwrap();
+    f.fake.data().items.insert("uuid-1".into(), item(1));
+    let link = linked(&f.hub);
+    block_on(f.hub.update_source_link(
+        link.id.clone(),
+        serde_json::from_value(serde_json::json!({"defaultRepoId": "r1", "autoImport": true})).unwrap(),
+    ))
+    .unwrap();
+    let before = f.notifier.kinds().len();
+    let report = block_on(f.hub.sync_now(None)).unwrap();
+    assert_eq!(report.imported, 1);
+    assert!(f.notifier.kinds().len() > before, "an importing sync pass should emit a Sources event");
+}
+
+/// A pass that clears a link's `last_sync_error` (the provider recovered) has no errors, pulls
+/// or notices, yet still notifies: the frontend only refetches links on `Sources`.
+#[test]
+fn sync_now_that_clears_a_link_error_notifies() {
+    let f = fx("sync-clears-error");
+    seed_project(&f.hub);
+    block_on(f.hub.secrets.set("fake", "k")).unwrap();
+    let link = linked(&f.hub);
+    f.fake.data().fail_states =
+        Some(ProviderError { kind: nodal_domain::model::providers::ErrorKind::Transient, message: "boom".into() });
+    let failed = block_on(f.hub.sync_now(None)).unwrap();
+    assert!(!failed.errors.is_empty());
+    let stored = |hub: &SourcesHub| {
+        let db = hub.db.clone().unwrap();
+        let id = link.id.clone();
+        block_on(nodal_store::with_db(&db, move |c| store::get_link(c, &id))).unwrap().last_sync_error
+    };
+    assert!(stored(&f.hub).is_some());
+
+    f.fake.data().fail_states = None;
+    let before = f.notifier.kinds().len();
+    let recovered = block_on(f.hub.sync_now(None)).unwrap();
+    assert!(recovered.errors.is_empty() && recovered.notices.is_empty());
+    assert_eq!(recovered.pulled + recovered.pushed + recovered.imported, 0);
+    assert!(stored(&f.hub).is_none());
+    assert!(f.notifier.kinds()[before..].contains(&ChangeKind::Sources), "a cleared link error must reach the UI");
+
+    let before = f.notifier.kinds().len();
+    block_on(f.hub.sync_now(None)).unwrap();
+    assert_eq!(f.notifier.kinds().len(), before, "the next no-op pass stays silent");
+}
+
+/// P18: a panic inside a sync pass (the exact task `spawn_sync_worker` awaits every tick)
+/// must not take the runtime down with it — with `panic = "unwind"`, tokio catches it and
+/// reports it as a `JoinError`; the hub's `sync_lock` (a `tokio::sync::Mutex`, which just
+/// unlocks on drop, unwind or not) isn't left stuck either.
+#[test]
+fn a_panic_in_a_sync_pass_only_fails_that_task() {
+    let f = fx("sync-panic");
+    seed_project(&f.hub);
+    block_on(f.hub.secrets.set("fake", "k")).unwrap();
+    let _link = linked(&f.hub);
+    f.fake.data().panic_on_states = true;
+
+    let hub = f.hub.clone();
+    let handle = f.hub.rt.spawn(async move { hub.sync_now(None).await });
+    let joined = block_on(handle);
+    let panic_payload = joined.expect_err("a panicking sync pass must surface as Err");
+    assert!(panic_payload.is_panic(), "{panic_payload:?}");
+
+    // The runtime is still healthy: unrelated work submitted right after still completes.
+    let ok = f.hub.rt.spawn(async { 1 + 1 });
+    assert_eq!(block_on(ok).unwrap(), 2);
+
+    // `FakeProvider`'s inner `std::sync::Mutex` is now poisoned (the panic happened while its
+    // guard was held); `FakeProvider::data()` recovers it the same way production `Mutex`es do
+    // (`.unwrap_or_else(|p| p.into_inner())`) instead of propagating the poison forever.
+    assert!(f.fake.0.lock().is_err(), "the fixture's mutex should be poisoned at this point");
+    f.fake.data().panic_on_states = false;
+
+    // The hub itself recovers once the fault clears: a normal pass isn't stuck behind the
+    // panicking one's lock.
+    let report = block_on(f.hub.sync_now(None)).unwrap();
+    assert_eq!(report.pulled + report.pushed + report.imported, 0);
+}

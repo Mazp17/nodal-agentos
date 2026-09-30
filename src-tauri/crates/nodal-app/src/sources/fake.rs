@@ -27,14 +27,20 @@ pub struct FakeData {
     pub now: i64,
     /// Queries received by `list_importable`.
     pub queries: Vec<ImportQuery>,
+    /// P18: `states` panics instead of returning, so a test can force a panic inside a real
+    /// sync pass (the same call `SourcesHub::spawn_sync_worker` awaits).
+    pub panic_on_states: bool,
 }
 
 #[derive(Clone, Default)]
 pub struct FakeProvider(pub Arc<Mutex<FakeData>>);
 
 impl FakeProvider {
+    /// P18: recovers like the rest of the codebase's `Mutex`es do (e.g. `ChatProcesses::procs`)
+    /// — `panic_on_states` intentionally poisons this lock from inside a test, and the test
+    /// still needs to read/reset the fixture's data afterwards.
     pub fn data(&self) -> MutexGuard<'_, FakeData> {
-        self.0.lock().unwrap()
+        self.0.lock().unwrap_or_else(|p| p.into_inner())
     }
 }
 
@@ -57,6 +63,9 @@ impl TaskProvider for FakeProvider {
         Box::pin(async move {
             let mut d = self.data();
             d.states_calls += 1;
+            if d.panic_on_states {
+                panic!("intentional test panic: FakeProvider::states");
+            }
             match &d.fail_states {
                 Some(e) => Err(e.clone()),
                 None => Ok(d.states.clone()),

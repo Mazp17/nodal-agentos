@@ -5,7 +5,6 @@
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
-use std::time::Duration;
 
 use nodal_domain::model::activity::{
     AgentSession, AppRuns, ExternalSessions, RepoActivity, RepoSessions, SessionActivity,
@@ -13,9 +12,8 @@ use nodal_domain::model::activity::{
 };
 
 use super::activity_files::{self, SubagentFile};
-use super::bin as claude_bin;
+use super::live::AgentsRaw;
 
-const LIST_TIMEOUT: Duration = Duration::from_secs(15);
 /// Tail read from each transcript.
 const TAIL_BYTES: u64 = 64 * 1024;
 /// An unfinished subagent that hasn't written in this long is considered hung/inactive.
@@ -50,17 +48,29 @@ struct Owner {
     kind: String,
     cwd: Option<String>,
     alive: bool,
-    in_repo: bool,
     is_app_run: bool,
     dir: Option<PathBuf>,
 }
 
+/// Whether `path` falls under each of `roots`, one flag per repo.
+fn mask_for(roots: &[RepoRoots], path: &str) -> Vec<bool> {
+    roots.iter().map(|r| r.contains(path)).collect()
+}
+
+fn any(mask: &[bool]) -> bool {
+    mask.iter().any(|&m| m)
+}
+
+/// Like the old single-repo check, evaluated against every repo's roots at once (P07): reads
+/// the subagent's transcript once and returns which repos it belongs to instead of a bool for
+/// one repo, so a caller with several repos doesn't re-read it once per matching one.
 fn subagent_of(
     owner: &Owner,
+    owner_mask: &[bool],
     f: &SubagentFile,
-    roots: &RepoRoots,
+    roots: &[RepoRoots],
     now: i64,
-) -> Option<SubagentActivity> {
+) -> Option<(SubagentActivity, Vec<bool>)> {
     let mtime = activity_files::mtime_ms(&f.transcript)?;
     // No recent activity: neither active nor "recent"; not worth reading.
     if now - mtime > RECENT_SUBAGENT_MS {
@@ -82,50 +92,66 @@ fn subagent_of(
         .worktree_path
         .clone()
         .or(meta.inherited_worktree_path.clone());
-    let in_repo = owner.in_repo
-        || [worktree.as_deref(), tail.cwd.as_deref()]
-            .into_iter()
-            .flatten()
-            .any(|p| roots.contains(p))
-        || tail.touched_paths.iter().any(|p| roots.contains(p));
-    if !in_repo {
+    let own_paths: Vec<&str> = [worktree.as_deref(), tail.cwd.as_deref()]
+        .into_iter()
+        .flatten()
+        .collect();
+    let mut mask = owner_mask.to_vec();
+    for (i, r) in roots.iter().enumerate() {
+        if mask[i] {
+            continue;
+        }
+        if own_paths.iter().any(|p| r.contains(p))
+            || tail.touched_paths.iter().any(|p| r.contains(p))
+        {
+            mask[i] = true;
+        }
+    }
+    if !any(&mask) {
         return None;
     }
     let active = owner.alive && !tail.finished && now - mtime < STALE_MS;
-    Some(SubagentActivity {
-        session_id: owner.session_id.clone(),
-        agent_id: f.agent_id.clone(),
-        description: meta.description,
-        agent_type: meta.agent_type,
-        cwd: worktree.clone().or(tail.cwd).or(owner.cwd.clone()),
-        worktree,
-        parent_agent_id: meta.parent_agent_id,
-        workflow_id: f.workflow_id.clone(),
-        workflow_phase: meta.workflow_phase,
-        model: meta.model,
-        active,
-        finished: tail.finished,
-        last_activity_at: Some(mtime),
-        last_tool: tail.last_tool,
-        last_tool_summary: tail.last_tool_summary,
-        session_name: owner.name.clone(),
-        session_kind: owner.kind.clone(),
-        session_cwd: owner.cwd.clone(),
-        session_is_app_run: owner.is_app_run,
-    })
+    Some((
+        SubagentActivity {
+            session_id: owner.session_id.clone(),
+            agent_id: f.agent_id.clone(),
+            description: meta.description,
+            agent_type: meta.agent_type,
+            cwd: worktree.clone().or(tail.cwd).or(owner.cwd.clone()),
+            worktree,
+            parent_agent_id: meta.parent_agent_id,
+            workflow_id: f.workflow_id.clone(),
+            workflow_phase: meta.workflow_phase,
+            model: meta.model,
+            active,
+            finished: tail.finished,
+            last_activity_at: Some(mtime),
+            last_tool: tail.last_tool,
+            last_tool_summary: tail.last_tool_summary,
+            session_name: owner.name.clone(),
+            session_kind: owner.kind.clone(),
+            session_cwd: owner.cwd.clone(),
+            session_is_app_run: owner.is_app_run,
+        },
+        mask,
+    ))
 }
 
-/// Builds the repo activity. Pure except for reads of `projects` (testable with fixtures).
-pub fn assemble(
-    repo_paths: &[PathBuf],
+/// Builds the repo activity for every repo in `repo_paths_list` at once (P07): a session or
+/// subagent whose path falls under more than one repo's roots (nested repos, a repo and its
+/// own `.claude/worktrees/…`) has its transcript read once here, no matter how many of them
+/// it matches, instead of once per matching repo. Pure except for reads of `projects`
+/// (testable with fixtures).
+fn assemble_all(
+    repo_paths_list: &[Vec<PathBuf>],
     agents: &[AgentSession],
     projects: &Path,
     app: &AppRuns,
     now: i64,
-) -> RepoActivity {
-    let roots = RepoRoots(repo_paths.to_vec());
-    let mut sessions = Vec::new();
-    let mut owners = Vec::new();
+) -> Vec<RepoActivity> {
+    let roots: Vec<RepoRoots> = repo_paths_list.iter().cloned().map(RepoRoots).collect();
+    let mut sessions: Vec<Vec<SessionActivity>> = vec![Vec::new(); roots.len()];
+    let mut owners: Vec<(Owner, Vec<bool>)> = Vec::new();
     let listed: HashSet<&str> = agents
         .iter()
         .filter_map(|a| a.session_id.as_deref())
@@ -135,11 +161,16 @@ pub fn assemble(
         let Some(sid) = a.session_id.clone() else {
             continue;
         };
-        let in_repo = a.cwd.as_deref().is_some_and(|c| roots.contains(c));
+        let mask = a
+            .cwd
+            .as_deref()
+            .map(|c| mask_for(&roots, c))
+            .unwrap_or_else(|| vec![false; roots.len()]);
+        let in_repo_any = any(&mask);
         let alive = a.alive();
         let started_at = a.started_at.map(|n| n as i64);
-        // Subagents: look at live sessions (from any cwd) and the repo's own.
-        if !alive && !in_repo {
+        // Subagents: look at live sessions (from any cwd) and the repos' own.
+        if !alive && !in_repo_any {
             continue;
         }
         // A single lookup per session: the transcript at `<slug(cwd)>/<sid>.jsonl`; only if
@@ -154,146 +185,195 @@ pub fn assemble(
             continue;
         }
         let is_app_run = app.contains(a.id.as_deref(), &sid);
-        owners.push(Owner {
+        let owner = Owner {
             session_id: sid.clone(),
             name: a.name.clone(),
             kind: a.kind.clone().unwrap_or_else(|| "unknown".into()),
             cwd: a.cwd.clone(),
             alive,
-            in_repo,
             is_app_run,
             dir: jsonl
                 .as_deref()
                 .map(|p| p.with_extension(""))
                 .filter(|d| d.is_dir()),
-        });
-        if !in_repo {
-            continue;
-        }
-        let tail = if alive {
-            jsonl
-                .as_deref()
-                .and_then(|p| activity_files::read_tail(p, TAIL_BYTES))
-                .map(|t| activity_files::parse_tail(&t))
-        } else {
-            None
         };
-        let tail = tail.unwrap_or_default();
-        sessions.push(SessionActivity {
-            session_id: sid,
-            id: a.id.clone(),
-            kind: a.kind.clone().unwrap_or_else(|| "unknown".into()),
-            name: a.name.clone(),
-            cwd: a.cwd.clone(),
-            status: a.status.clone(),
-            state: a.state.clone(),
-            waiting_for: a.waiting_for.clone(),
-            started_at,
-            pid: a.pid,
-            alive,
-            is_app_run,
-            last_activity_at: last_activity,
-            last_tool: tail.last_tool,
-            last_tool_summary: tail.last_tool_summary,
-            entrypoint: tail.entrypoint,
-        });
-    }
-
-    // Sessions `claude agents` doesn't list (headless `claude -p`, SDK, old CLIs):
-    // freshly written transcripts in the projects of the repo and its worktrees.
-    for root in &roots.0 {
-        let Some(root) = root.to_str() else { continue };
-        let prefix = super::fs::paths::project_slug(root);
-        for (sid, path, mtime) in
-            activity_files::recent_session_transcripts(projects, &prefix, now - UNLISTED_ACTIVE_MS)
-        {
-            if listed.contains(sid.as_str()) || sessions.iter().any(|s| s.session_id == sid) {
-                continue;
-            }
-            let tail = activity_files::read_tail(&path, TAIL_BYTES)
-                .map(|t| activity_files::parse_tail(&t))
-                .unwrap_or_default();
-            if !tail.cwd.as_deref().is_some_and(|c| roots.contains(c)) {
-                continue;
-            }
-            let is_app_run = app.contains(None, &sid);
-            owners.push(Owner {
+        if in_repo_any {
+            let tail = if alive {
+                jsonl
+                    .as_deref()
+                    .and_then(|p| activity_files::read_tail(p, TAIL_BYTES))
+                    .map(|t| activity_files::parse_tail(&t))
+            } else {
+                None
+            };
+            let tail = tail.unwrap_or_default();
+            let sess = SessionActivity {
                 session_id: sid.clone(),
-                name: None,
-                kind: "unlisted".into(),
-                cwd: tail.cwd.clone(),
-                alive: true,
-                in_repo: true,
+                id: a.id.clone(),
+                kind: a.kind.clone().unwrap_or_else(|| "unknown".into()),
+                name: a.name.clone(),
+                cwd: a.cwd.clone(),
+                status: a.status.clone(),
+                state: a.state.clone(),
+                waiting_for: a.waiting_for.clone(),
+                started_at,
+                pid: a.pid,
+                alive,
                 is_app_run,
-                dir: Some(path.with_extension("")).filter(|d| d.is_dir()),
-            });
-            sessions.push(SessionActivity {
-                session_id: sid,
-                id: None,
-                kind: "unlisted".into(),
-                name: None,
-                cwd: tail.cwd,
-                status: Some(if tail.finished { "idle" } else { "busy" }.into()),
-                state: None,
-                waiting_for: None,
-                started_at: None,
-                pid: None,
-                alive: true,
-                is_app_run,
-                last_activity_at: Some(mtime),
+                last_activity_at: last_activity,
                 last_tool: tail.last_tool,
                 last_tool_summary: tail.last_tool_summary,
                 entrypoint: tail.entrypoint,
-            });
+            };
+            for (i, &m) in mask.iter().enumerate() {
+                if m {
+                    sessions[i].push(sess.clone());
+                }
+            }
+        }
+        owners.push((owner, mask));
+    }
+
+    // Sessions `claude agents` doesn't list (headless `claude -p`, SDK, old CLIs): freshly
+    // written transcripts in the projects of the repos and their worktrees. Each distinct root
+    // (across every repo) is scanned once, and each transcript found is read once even if more
+    // than one repo's slug prefix matched its directory (nested repos, worktrees).
+    let mut scanned_roots: HashSet<&str> = HashSet::new();
+    let mut found_sids: HashSet<String> = HashSet::new();
+    let mut found: Vec<(String, PathBuf, i64)> = Vec::new();
+    for r in &roots {
+        for root in &r.0 {
+            let Some(root) = root.to_str() else { continue };
+            if !scanned_roots.insert(root) {
+                continue;
+            }
+            let prefix = super::fs::paths::project_slug(root);
+            for (sid, path, mtime) in activity_files::recent_session_transcripts(
+                projects,
+                &prefix,
+                now - UNLISTED_ACTIVE_MS,
+            ) {
+                if found_sids.insert(sid.clone()) {
+                    found.push((sid, path, mtime));
+                }
+            }
+        }
+    }
+    for (sid, path, mtime) in found {
+        if listed.contains(sid.as_str()) || owners.iter().any(|(o, _)| o.session_id == sid) {
+            continue;
+        }
+        let tail = activity_files::read_tail(&path, TAIL_BYTES)
+            .map(|t| activity_files::parse_tail(&t))
+            .unwrap_or_default();
+        let mask = tail
+            .cwd
+            .as_deref()
+            .map(|c| mask_for(&roots, c))
+            .unwrap_or_else(|| vec![false; roots.len()]);
+        if !any(&mask) {
+            continue;
+        }
+        let is_app_run = app.contains(None, &sid);
+        let owner = Owner {
+            session_id: sid.clone(),
+            name: None,
+            kind: "unlisted".into(),
+            cwd: tail.cwd.clone(),
+            alive: true,
+            is_app_run,
+            dir: Some(path.with_extension("")).filter(|d| d.is_dir()),
+        };
+        let sess = SessionActivity {
+            session_id: sid.clone(),
+            id: None,
+            kind: "unlisted".into(),
+            name: None,
+            cwd: tail.cwd.clone(),
+            status: Some(if tail.finished { "idle" } else { "busy" }.into()),
+            state: None,
+            waiting_for: None,
+            started_at: None,
+            pid: None,
+            alive: true,
+            is_app_run,
+            last_activity_at: Some(mtime),
+            last_tool: tail.last_tool,
+            last_tool_summary: tail.last_tool_summary,
+            entrypoint: tail.entrypoint,
+        };
+        for (i, &m) in mask.iter().enumerate() {
+            if m {
+                sessions[i].push(sess.clone());
+            }
+        }
+        owners.push((owner, mask));
+    }
+
+    let mut subagents: Vec<Vec<SubagentActivity>> = vec![Vec::new(); roots.len()];
+    for (owner, owner_mask) in &owners {
+        let Some(dir) = owner.dir.as_deref() else {
+            continue;
+        };
+        for f in activity_files::subagent_files(dir) {
+            let Some((sub, mask)) = subagent_of(owner, owner_mask, &f, &roots, now) else {
+                continue;
+            };
+            for (i, &m) in mask.iter().enumerate() {
+                if m {
+                    subagents[i].push(sub.clone());
+                }
+            }
         }
     }
 
-    let mut subagents: Vec<SubagentActivity> = owners
+    repo_paths_list
         .iter()
-        .filter_map(|o| {
-            o.dir
-                .as_deref()
-                .map(|d| (o, activity_files::subagent_files(d)))
+        .enumerate()
+        .map(|(i, repo_paths)| {
+            let mut sess = std::mem::take(&mut sessions[i]);
+            let mut subs = std::mem::take(&mut subagents[i]);
+            sess.sort_by_key(|s| {
+                (
+                    !s.alive,
+                    std::cmp::Reverse(s.last_activity_at.or(s.started_at)),
+                )
+            });
+            subs.sort_by_key(|s| (!s.active, std::cmp::Reverse(s.last_activity_at)));
+            subs.truncate(MAX_SUBAGENTS);
+            RepoActivity {
+                repo_path: repo_paths
+                    .first()
+                    .map(|p| p.to_string_lossy().into_owned())
+                    .unwrap_or_default(),
+                sessions: sess,
+                subagents: subs,
+                generated_at: now,
+            }
         })
-        .flat_map(|(o, files)| {
-            files
-                .into_iter()
-                .filter_map(|f| subagent_of(o, &f, &roots, now))
-                .collect::<Vec<_>>()
-        })
-        .collect();
-
-    sessions.sort_by_key(|s| {
-        (
-            !s.alive,
-            std::cmp::Reverse(s.last_activity_at.or(s.started_at)),
-        )
-    });
-    subagents.sort_by_key(|s| (!s.active, std::cmp::Reverse(s.last_activity_at)));
-    subagents.truncate(MAX_SUBAGENTS);
-    RepoActivity {
-        repo_path: repo_paths
-            .first()
-            .map(|p| p.to_string_lossy().into_owned())
-            .unwrap_or_default(),
-        sessions,
-        subagents,
-        generated_at: now,
-    }
+        .collect()
 }
 
-/// Background and interactive sessions (`claude agents --json --all`, unfiltered).
-pub async fn list_agents() -> Result<Vec<AgentSession>, String> {
-    let mut cmd = claude_bin::claude_command()?;
-    cmd.args(["agents", "--json", "--all"]);
-    let out = claude_bin::output_with_timeout(cmd, LIST_TIMEOUT, "`claude agents`").await?;
-    if !out.status.success() {
-        return Err(format!(
-            "`claude agents` failed: {}",
-            claude_bin::error_text(&out)
-        ));
-    }
-    activity_files::parse_agents(&String::from_utf8_lossy(&out.stdout))
+/// Builds one repo's activity. Kept for callers that only ever look at a single repo (tests);
+/// `external_sessions_of` uses `assemble_all` directly to share reads across every repo (P07).
+pub fn assemble(
+    repo_paths: &[PathBuf],
+    agents: &[AgentSession],
+    projects: &Path,
+    app: &AppRuns,
+    now: i64,
+) -> RepoActivity {
+    assemble_all(&[repo_paths.to_vec()], agents, projects, app, now)
+        .into_iter()
+        .next()
+        .expect("assemble_all returns one RepoActivity per input repo")
+}
+
+/// Background and interactive sessions (`claude agents --json --all`, unfiltered). `cache`:
+/// the single-flight cache shared with `cli::list_runs` (P01) — neither spawns its own
+/// `claude agents` anymore.
+pub async fn list_agents(cache: &AgentsRaw) -> Result<Vec<AgentSession>, String> {
+    activity_files::parse_agents(&cache.get().await?)
 }
 
 /// Existing paths, each one as is and canonicalized, without duplicates.
@@ -345,17 +425,25 @@ pub fn external_sessions_of(
     now: i64,
     roots: impl Fn(Vec<PathBuf>) -> Vec<PathBuf>,
 ) -> ExternalSessions {
-    let per_repo: Vec<(&String, Vec<PathBuf>, RepoActivity)> = repos
+    // One shared pass over every repo's session/subagent transcripts (P07) instead of one
+    // `assemble` call per repo: a session or subagent that falls under more than one repo's
+    // roots (nested repos, worktrees) is read once here, then scored below like before.
+    let repo_roots: Vec<(&String, Vec<PathBuf>)> = repos
         .iter()
         .filter_map(|(id, path)| {
             let roots = roots(vec![path.clone()]);
-            if roots.is_empty() {
-                return None;
-            }
-            let mut act = assemble(&roots, agents, projects, app, now);
+            (!roots.is_empty()).then_some((id, roots))
+        })
+        .collect();
+    let root_paths: Vec<Vec<PathBuf>> = repo_roots.iter().map(|(_, r)| r.clone()).collect();
+    let acts = assemble_all(&root_paths, agents, projects, app, now);
+    let per_repo: Vec<(&String, Vec<PathBuf>, RepoActivity)> = repo_roots
+        .into_iter()
+        .zip(acts)
+        .map(|((id, roots), mut act)| {
             act.sessions.retain(|s| !s.is_app_run);
             act.subagents.retain(|s| !s.session_is_app_run);
-            Some((id, roots, act))
+            (id, roots, act)
         })
         .collect();
 

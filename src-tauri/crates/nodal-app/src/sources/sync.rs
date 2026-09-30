@@ -58,6 +58,9 @@ pub struct SyncMemo {
     /// (the user saved it) invalidates the entry: a freshly mapped target is not taken as
     /// vanished.
     states: HashMap<String, (i64, StateMap, Vec<ExternalState>)>,
+    /// Set when a pass wrote a `last_sync_error` different from the link's previous one
+    /// (including clearing it): the UI must hear about it even if nothing else changed.
+    pub link_errors_changed: bool,
 }
 
 /// Sends the comment of row `id` unless it is already in the provider: if an earlier attempt
@@ -203,6 +206,9 @@ pub async fn sync_run(
                 }
             }
             let msg = (!errors.is_empty()).then(|| errors.join("\n"));
+            if link.last_sync_error != msg {
+                memo.link_errors_changed = true;
+            }
             let id = link.id.clone();
             if let Err(e) = with_db(db, move |c| store::set_link_sync(c, &id, now, msg.as_deref())).await {
                 report.errors.push(err(e));

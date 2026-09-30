@@ -1,6 +1,5 @@
 //! Tokens spent in a session, computed from the transcript's `usage` fields.
 
-use std::fs;
 use std::path::Path;
 
 use serde_json::Value;
@@ -47,16 +46,11 @@ pub fn usage_tokens_in<'a>(lines: impl IntoIterator<Item = &'a str>) -> Option<i
     total
 }
 
-/// `usage_tokens_in` over the whole file, line by line (without loading it into memory).
+/// `usage_tokens_in` over the whole file, read once (P12: no longer buffers the matching
+/// lines into a `Vec<String>` first).
 pub fn read_usage_tokens(path: &Path) -> Option<i64> {
-    use std::io::BufRead;
-    let file = fs::File::open(path).ok()?;
-    let lines: Vec<String> = std::io::BufReader::new(file)
-        .lines()
-        .map_while(Result::ok)
-        .filter(|l| l.contains("\"usage\""))
-        .collect();
-    usage_tokens_in(lines.iter().map(String::as_str))
+    let text = super::read_to_string_lossy(path).ok()?;
+    usage_tokens_in(text.lines())
 }
 
 #[cfg(test)]

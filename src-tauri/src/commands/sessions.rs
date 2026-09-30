@@ -13,25 +13,23 @@ use nodal_app::sessions::SessionReader;
 use nodal_app::sources::SourcesHub;
 use nodal_app::App;
 use nodal_domain::model::activity::ExternalSessions;
-use nodal_domain::model::claude::{LaunchBlocker, RunDetail, RunSummary, Transcript};
+use nodal_domain::model::claude::{LaunchBlocker, RunDetail, RunProgress, RunSummary, Transcript};
 
 use super::CommandError;
 
-/// Background sessions (`claude agents --json --all`), most recent first.
-///
-/// Kept without a `State` (unlike the other three DB-free session commands, below):
-/// `commands::execution::work_summary` and `work::pump` still call this as a plain function,
-/// with no `State` argument (see the report for wave 3a). Once wave 3c moves those call sites
-/// onto `core.claude`/`SessionReader`, this can switch to `State<'_, Arc<SessionReader>>` like
-/// the rest and return `CommandError`.
+/// Background sessions (`claude agents --json --all`), most recent first. Goes through
+/// `SessionReader` (P01's `LiveSessions` cache underneath), like the other DB-free session
+/// commands, instead of spawning its own `claude agents`.
 #[tauri::command]
-pub async fn list_runs() -> Result<Vec<RunSummary>, String> {
-    nodal_host::claude::cli::list_runs().await
+#[tracing::instrument(skip_all, level = "info")]
+pub async fn list_runs(state: State<'_, Arc<SessionReader>>) -> Result<Vec<RunSummary>, CommandError> {
+    Ok(state.list_runs().await?)
 }
 
 /// Detail of the session's most recent workflow. `None` if the session has no folder on
 /// disk yet or didn't launch any workflow.
 #[tauri::command]
+#[tracing::instrument(skip_all, level = "info")]
 pub async fn get_run_detail(
     state: State<'_, Arc<SessionReader>>,
     session_id: String,
@@ -44,6 +42,7 @@ pub async fn get_run_detail(
 /// approve it ("Review dynamic workflow before running"). `None` if there's no transcript or
 /// that rejection doesn't show up. Reads at most the first 4 MB of the main transcript.
 #[tauri::command]
+#[tracing::instrument(skip_all, level = "info")]
 pub async fn get_launch_blocker(
     state: State<'_, Arc<SessionReader>>,
     session_id: String,
@@ -56,6 +55,7 @@ pub async fn get_launch_blocker(
 /// `limit`: max number of items to return, the most recent ones (default 200, max 2000).
 /// `None` if the agent has no file yet.
 #[tauri::command]
+#[tracing::instrument(skip_all, level = "info")]
 pub async fn get_agent_transcript(
     state: State<'_, Arc<SessionReader>>,
     session_id: String,
@@ -71,6 +71,7 @@ pub async fn get_agent_transcript(
 /// agent: `get_agent_transcript`. `None` if the session has no file yet. `limit`: most recent
 /// items (default 200, max 2000).
 #[tauri::command]
+#[tracing::instrument(skip_all, level = "info")]
 pub async fn get_run_transcript(
     state: State<'_, Arc<App>>,
     run_id: String,
@@ -79,9 +80,18 @@ pub async fn get_run_transcript(
     Ok(state.sessions.get_run_transcript(run_id, limit).await?)
 }
 
+/// Tool calls of a live, non-workflow run so far, read with an incremental cursor instead of
+/// re-parsing the whole transcript on every poll (P03). `null` if the run has no session yet.
+#[tauri::command]
+#[tracing::instrument(skip_all, level = "info")]
+pub async fn run_progress(state: State<'_, Arc<App>>, run_id: String) -> Result<Option<RunProgress>, CommandError> {
+    Ok(state.sessions.run_progress(run_id).await?)
+}
+
 /// Claude Code sessions started outside the app in the project's repos (`None`: every
 /// project's), with a single `claude agents`.
 #[tauri::command]
+#[tracing::instrument(skip_all, level = "info")]
 pub async fn external_sessions(app: AppHandle, project_id: Option<String>) -> Result<ExternalSessions, CommandError> {
     if let Some(id) = &project_id {
         nodal_domain::util::check_id(id, "project")?;

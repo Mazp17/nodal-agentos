@@ -39,6 +39,7 @@ pub fn setup(h: &AppHandle, app: &Arc<App>, _db: &nodal_store::Db) -> Result<(),
 }
 
 #[tauri::command]
+#[tracing::instrument(skip_all, level = "info")]
 pub async fn worktree_status(state: State<'_, Arc<App>>, task_id: String) -> Result<WorktreeStatus, CommandError> {
     Ok(state.execution.worktree_status(task_id).await?)
 }
@@ -46,6 +47,7 @@ pub async fn worktree_status(state: State<'_, Arc<App>>, task_id: String) -> Res
 /// "Clean up": deletes the task's worktree and branch. Refuses with runs in progress and,
 /// without `force`, if there are unpushed commits or uncommitted changes.
 #[tauri::command]
+#[tracing::instrument(skip_all, level = "info")]
 pub async fn cleanup_worktree(state: State<'_, Arc<App>>, task_id: String, force: Option<bool>) -> Result<Task, CommandError> {
     Ok(state.execution.cleanup_worktree(task_id, force).await?)
 }
@@ -53,12 +55,14 @@ pub async fn cleanup_worktree(state: State<'_, Arc<App>>, task_id: String, force
 /// "Merge into <base> & done": lands the task branch on its base, marks the task Done and, if
 /// asked, pushes the base and cleans up the worktree.
 #[tauri::command]
+#[tracing::instrument(skip_all, level = "info")]
 pub async fn merge_worktree(state: State<'_, Arc<App>>, task_id: String, input: MergeInput) -> Result<MergeReport, CommandError> {
     Ok(state.execution.merge_worktree(task_id, input).await?)
 }
 
 /// `project_id` (optional) filters by project in addition to task.
 #[tauri::command]
+#[tracing::instrument(skip_all, level = "info")]
 pub async fn list_task_runs(
     state: State<'_, Arc<App>>,
     task_id: Option<String>,
@@ -69,6 +73,7 @@ pub async fn list_task_runs(
 
 /// Like `list_task_runs`, without `prompt` or `extraInstructions`.
 #[tauri::command]
+#[tracing::instrument(skip_all, level = "info")]
 pub async fn list_runs_light(
     state: State<'_, Arc<App>>,
     project_id: Option<String>,
@@ -78,12 +83,14 @@ pub async fn list_runs_light(
 }
 
 #[tauri::command]
+#[tracing::instrument(skip_all, level = "info")]
 pub async fn get_run(state: State<'_, Arc<App>>, run_id: String) -> Result<Run, CommandError> {
     Ok(state.execution.get_run(run_id).await?)
 }
 
 /// The last run of each task (no history limit), lightweight.
 #[tauri::command]
+#[tracing::instrument(skip_all, level = "info")]
 pub async fn latest_runs_by_task(state: State<'_, Arc<App>>, project_id: Option<String>) -> Result<Vec<RunLight>, CommandError> {
     Ok(state.execution.latest_runs_by_task(project_id).await?)
 }
@@ -92,21 +99,25 @@ pub async fn latest_runs_by_task(state: State<'_, Arc<App>>, project_id: Option<
 /// everything, including foreign sessions). If `claude agents` fails, it's computed without
 /// the live sessions.
 #[tauri::command]
+#[tracing::instrument(skip_all, level = "info")]
 pub async fn work_summary(state: State<'_, Arc<App>>, project_id: Option<String>) -> Result<WorkSummary, CommandError> {
     Ok(state.execution.work_summary(project_id).await?)
 }
 
 #[tauri::command]
+#[tracing::instrument(skip_all, level = "info")]
 pub async fn list_queue(state: State<'_, Arc<App>>) -> Result<Vec<Run>, CommandError> {
     Ok(state.execution.list_queue().await?)
 }
 
 #[tauri::command]
+#[tracing::instrument(skip_all, level = "info")]
 pub async fn launch_task(state: State<'_, Arc<App>>, task_id: String, input: Option<LaunchInput>) -> Result<Run, CommandError> {
     Ok(state.execution.launch_task(task_id, input).await?)
 }
 
 #[tauri::command]
+#[tracing::instrument(skip_all, level = "info")]
 pub async fn hand_off(
     state: State<'_, Arc<App>>,
     task_id: String,
@@ -117,12 +128,14 @@ pub async fn hand_off(
 }
 
 #[tauri::command]
+#[tracing::instrument(skip_all, level = "info")]
 pub async fn review_now(state: State<'_, Arc<App>>, task_id: String, reviewer: Option<String>) -> Result<Run, CommandError> {
     Ok(state.execution.review_now(task_id, reviewer).await?)
 }
 
 /// Confirms a migrated run that was left queued (it doesn't launch on its own).
 #[tauri::command]
+#[tracing::instrument(skip_all, level = "info")]
 pub async fn confirm_run(state: State<'_, Arc<App>>, run_id: String) -> Result<Run, CommandError> {
     Ok(state.execution.confirm_run(run_id).await?)
 }
@@ -130,16 +143,19 @@ pub async fn confirm_run(state: State<'_, Arc<App>>, run_id: String) -> Result<R
 /// Dequeues a `queued` run, or stops a launched one: saves whatever it left half-done as a
 /// patch and the task moves to Blocked.
 #[tauri::command]
+#[tracing::instrument(skip_all, level = "info")]
 pub async fn cancel_run(state: State<'_, Arc<App>>, run_id: String) -> Result<Run, CommandError> {
     Ok(state.execution.cancel_run(run_id).await?)
 }
 
 #[tauri::command]
+#[tracing::instrument(skip_all, level = "info")]
 pub async fn reorder_queue(state: State<'_, Arc<App>>, run_ids: Vec<String>) -> Result<(), CommandError> {
     Ok(state.execution.reorder_queue(run_ids).await?)
 }
 
 #[tauri::command]
+#[tracing::instrument(skip_all, level = "info")]
 pub async fn run_diff(state: State<'_, Arc<App>>, run_id: String) -> Result<RunDiff, CommandError> {
     Ok(state.execution.run_diff(run_id).await?)
 }
@@ -174,6 +190,7 @@ async fn spawn_open(mut cmd: tokio::process::Command, what: &str) -> Result<(), 
 
 /// Opens the run's folder in Finder.
 #[tauri::command]
+#[tracing::instrument(skip_all, level = "info")]
 pub async fn open_worktree(state: State<'_, Arc<App>>, run_id: String) -> Result<(), CommandError> {
     if !cfg!(target_os = "macos") {
         return Err("Opening Finder is only available on macOS.".to_string().into());
@@ -187,6 +204,7 @@ pub async fn open_worktree(state: State<'_, Arc<App>>, run_id: String) -> Result
 /// Opens the run's folder (or `file` inside it) in the Settings editor. Without one set,
 /// uses the first known editor whose CLI is installed, and only then the system text editor.
 #[tauri::command]
+#[tracing::instrument(skip_all, level = "info")]
 pub async fn open_in_editor(state: State<'_, Arc<App>>, run_id: String, file: Option<String>) -> Result<(), CommandError> {
     let dir = state.execution.run_cwd(run_id).await?;
     let target = match file.as_deref().map(str::trim).filter(|f| !f.is_empty()) {

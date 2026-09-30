@@ -51,6 +51,7 @@ impl Events {
     }
 
     pub fn notify(&self, kind: Kind, project_id: Option<&str>) {
+        crate::telemetry::record_ipc_notify();
         let Some(app) = self.app.clone() else { return };
         let c = Changed { kind, project_id: project_id.map(str::to_string) };
         let schedule = match self.pending.lock() {

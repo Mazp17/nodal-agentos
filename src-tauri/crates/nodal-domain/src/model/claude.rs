@@ -184,6 +184,14 @@ pub struct ToolPatch {
     pub truncated: bool,
 }
 
+/// Tool calls of a live run so far (`run_progress`), read with an incremental cursor
+/// instead of re-parsing the whole transcript on every poll (P03).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RunProgress {
+    pub tool_calls: u32,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Transcript {

@@ -262,6 +262,47 @@ fn external_sessions_skip_app_runs_and_land_in_the_deepest_repo() {
     std::fs::remove_dir_all(&projects).unwrap();
 }
 
+/// P07: with several repos whose roots overlap (nested worktrees), a session or subagent
+/// transcript relevant to more than one of them must be read once total, not once per repo
+/// that matches it — the property `external_sessions_of`'s single `assemble_all` pass relies
+/// on instead of looping `assemble` per repo.
+#[test]
+fn external_sessions_reads_each_transcript_once_across_repos() {
+    let (projects, now) = setup("external-once");
+    let mut app = AppRuns::default();
+    app.add(Some("99999999".into()), None);
+    let repo = PathBuf::from("/Users/me/Code/repo");
+    let repo_paths = vec![
+        repo.clone(),
+        repo.join(".claude/worktrees/feature-x"),
+        repo.join(".claude/worktrees/agent-alive0000000001"),
+        PathBuf::from("/Users/me/Code/repo-sandbox"),
+        PathBuf::from("/Users/me/Code/elsewhere"),
+    ];
+    let agents = agents(now);
+
+    // A repo-at-a-time baseline: one `assemble` call per repo, like `external_sessions_of`
+    // did before P07.
+    activity_files::READ_TAIL_CALLS.with(|c| c.set(0));
+    for p in &repo_paths {
+        let _ = assemble(std::slice::from_ref(p), &agents, &projects, &app, now);
+    }
+    let per_repo_reads = activity_files::READ_TAIL_CALLS.with(|c| c.get());
+
+    // The shared pass every repo goes through together.
+    activity_files::READ_TAIL_CALLS.with(|c| c.set(0));
+    let repo_roots: Vec<Vec<PathBuf>> = repo_paths.iter().map(|p| vec![p.clone()]).collect();
+    let _ = assemble_all(&repo_roots, &agents, &projects, &app, now);
+    let shared_reads = activity_files::READ_TAIL_CALLS.with(|c| c.get());
+
+    assert!(
+        shared_reads < per_repo_reads,
+        "shared pass read {shared_reads} transcripts, one `assemble` per repo read {per_repo_reads}"
+    );
+
+    std::fs::remove_dir_all(&projects).unwrap();
+}
+
 #[test]
 fn match_depth_picks_the_deepest_containing_root() {
     let roots = vec![PathBuf::from("/a"), PathBuf::from("/a/b")];
@@ -324,7 +365,7 @@ fn repo_prefix_is_not_containment() {
 #[test]
 #[ignore]
 fn real_repo_activity() {
-    let agents = block_on(list_agents()).expect("claude agents");
+    let agents = block_on(list_agents(&AgentsRaw::new())).expect("claude agents");
     let projects = crate::paths::claude_config_dir().unwrap().join("projects");
     let repo = std::env::var("ACTIVITY_REPO").expect("ACTIVITY_REPO=<path to a repo>");
     let now = std::time::SystemTime::now()

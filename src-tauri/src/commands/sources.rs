@@ -32,12 +32,14 @@ pub fn setup(h: &AppHandle, hub: &Arc<SourcesHub>) -> Result<(), String> {
 // ---------- Keys and status ----------
 
 #[tauri::command]
+#[tracing::instrument(skip_all, level = "info")]
 pub async fn provider_status(state: State<'_, Arc<SourcesHub>>, provider: String) -> Result<ProviderStatus, CommandError> {
     Ok(state.provider_status(provider).await?)
 }
 
 /// Validates the key against the provider and stores it only if valid. `None` deletes it.
 #[tauri::command]
+#[tracing::instrument(skip_all, level = "info")]
 pub async fn provider_set_key(
     state: State<'_, Arc<SourcesHub>>,
     provider: String,
@@ -47,11 +49,13 @@ pub async fn provider_set_key(
 }
 
 #[tauri::command]
+#[tracing::instrument(skip_all, level = "info")]
 pub async fn provider_clear_key(state: State<'_, Arc<SourcesHub>>, provider: String) -> Result<ProviderStatus, CommandError> {
     Ok(state.provider_clear_key(provider).await?)
 }
 
 #[tauri::command]
+#[tracing::instrument(skip_all, level = "info")]
 pub async fn provider_scopes(state: State<'_, Arc<SourcesHub>>, provider: String) -> Result<Vec<ScopeRef>, CommandError> {
     Ok(state.provider_scopes(provider).await?)
 }
@@ -59,6 +63,7 @@ pub async fn provider_scopes(state: State<'_, Arc<SourcesHub>>, provider: String
 // ---------- Source links ----------
 
 #[tauri::command]
+#[tracing::instrument(skip_all, level = "info")]
 pub async fn list_source_links(state: State<'_, Arc<App>>, project_id: Option<String>) -> Result<Vec<SourceLink>, CommandError> {
     Ok(state.sources.list_source_links(project_id).await?)
 }
@@ -67,11 +72,13 @@ pub async fn list_source_links(state: State<'_, Arc<App>>, project_id: Option<St
 /// provider does not respond, the link is created anyway with an empty mapping and the
 /// proposal is built later in `source_states`.
 #[tauri::command]
+#[tracing::instrument(skip_all, level = "info")]
 pub async fn create_source_link(state: State<'_, Arc<App>>, input: NewSourceLink) -> Result<SourceLink, CommandError> {
     Ok(state.sources.create_source_link(input).await?)
 }
 
 #[tauri::command]
+#[tracing::instrument(skip_all, level = "info")]
 pub async fn update_source_link(
     state: State<'_, Arc<App>>,
     id: String,
@@ -82,12 +89,14 @@ pub async fn update_source_link(
 
 /// Disconnect: the link's tasks become local and the link is deleted (one transaction).
 #[tauri::command]
+#[tracing::instrument(skip_all, level = "info")]
 pub async fn delete_source_link(state: State<'_, Arc<App>>, id: String) -> Result<(), CommandError> {
     Ok(state.sources.delete_source_link(id).await?)
 }
 
 /// Unlink: the task becomes local.
 #[tauri::command]
+#[tracing::instrument(skip_all, level = "info")]
 pub async fn unlink_task(state: State<'_, Arc<App>>, task_id: String) -> Result<Task, CommandError> {
     Ok(state.sources.unlink_task(task_id).await?)
 }
@@ -95,12 +104,14 @@ pub async fn unlink_task(state: State<'_, Arc<App>>, task_id: String) -> Result<
 // ---------- State mapping ----------
 
 #[tauri::command]
+#[tracing::instrument(skip_all, level = "info")]
 pub async fn source_states(state: State<'_, Arc<App>>, link_id: String) -> Result<SourceStatesReport, CommandError> {
     Ok(state.sources.source_states(link_id).await?)
 }
 
 /// Saves and confirms the mapping: sets `confirmed_at` and `known_states` to the current states.
 #[tauri::command]
+#[tracing::instrument(skip_all, level = "info")]
 pub async fn save_state_map(
     state: State<'_, Arc<App>>,
     link_id: String,
@@ -114,6 +125,7 @@ pub async fn save_state_map(
 /// Items in the link's scope (up to 100), with suggested repo and an already-imported flag.
 /// Empty or missing `state_kinds` = open (triage, backlog, unstarted, started).
 #[tauri::command]
+#[tracing::instrument(skip_all, level = "info")]
 pub async fn provider_list_importable(
     state: State<'_, Arc<App>>,
     link_id: String,
@@ -124,6 +136,7 @@ pub async fn provider_list_importable(
 }
 
 #[tauri::command]
+#[tracing::instrument(skip_all, level = "info")]
 pub async fn import_tasks(
     state: State<'_, Arc<App>>,
     project_id: String,
@@ -137,6 +150,7 @@ pub async fn import_tasks(
 
 /// Provider projects eligible as a link rule (in Linear: the active ones of its team).
 #[tauri::command]
+#[tracing::instrument(skip_all, level = "info")]
 pub async fn source_rule_projects(state: State<'_, Arc<App>>, link_id: String) -> Result<Vec<ScopeRef>, CommandError> {
     Ok(state.sources.source_rule_projects(link_id).await?)
 }
@@ -144,6 +158,7 @@ pub async fn source_rule_projects(state: State<'_, Arc<App>>, link_id: String) -
 /// How many items the rule's backfill would bring (open + closed in the last 14 days), how
 /// many are already in its repo and how many in another one (those are not moved).
 #[tauri::command]
+#[tracing::instrument(skip_all, level = "info")]
 pub async fn preview_rule_import(state: State<'_, Arc<App>>, link_id: String, rule_id: String) -> Result<RulePreview, CommandError> {
     Ok(state.sources.preview_rule_import(link_id, rule_id).await?)
 }
@@ -153,6 +168,7 @@ pub async fn preview_rule_import(state: State<'_, Arc<App>>, link_id: String, ru
 /// in another repo are not moved: they come back in `skipped`. Runs under the sync lock so
 /// it does not race the auto-import.
 #[tauri::command]
+#[tracing::instrument(skip_all, level = "info")]
 pub async fn import_rule(state: State<'_, Arc<App>>, link_id: String, rule_id: String) -> Result<ImportResult, CommandError> {
     Ok(state.sources.import_rule(link_id, rule_id).await?)
 }
@@ -160,6 +176,7 @@ pub async fn import_rule(state: State<'_, Arc<App>>, link_id: String, rule_id: S
 /// Resolves the "moved to another project in the provider" notice: `move` moves it to the
 /// suggested repo (rejects with an active run or a worktree), `keep` leaves it where it is.
 #[tauri::command]
+#[tracing::instrument(skip_all, level = "info")]
 pub async fn resolve_moved_task(state: State<'_, Arc<App>>, task_id: String, action: MovedAction) -> Result<Task, CommandError> {
     Ok(state.sources.resolve_moved_task(task_id, action).await?)
 }
@@ -168,6 +185,7 @@ pub async fn resolve_moved_task(state: State<'_, Arc<App>>, task_id: String, act
 
 /// One sync pass now (all sources, or only `link_id`).
 #[tauri::command]
+#[tracing::instrument(skip_all, level = "info")]
 pub async fn sync_now(state: State<'_, Arc<SourcesHub>>, link_id: Option<String>) -> Result<SyncReport, CommandError> {
     Ok(state.sync_now(link_id).await?)
 }

@@ -3,8 +3,10 @@
 //! the `SessionFiles` port for the session title and running on the injected `rt` instead of
 //! `tauri::async_runtime`).
 
+use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 use tokio::runtime::Handle;
 
@@ -12,6 +14,13 @@ use nodal_domain::model::events::ChangeKind;
 use nodal_domain::ports::{ChangeNotifier, ChatHooks, SessionFiles};
 use nodal_domain::sessions::transcript::is_valid_session_id;
 use nodal_store::{chats, Db};
+
+/// P11: once a chat already has a title, `session_title` (which streams the whole `.jsonl`,
+/// `fs::transcript`'s doc says "read after every turn") is re-run at most this often per chat,
+/// not on every turn — Claude Code rarely changes a title after its first couple of turns, and
+/// a rapid back-and-forth would otherwise re-scan an ever-growing file every time. A chat with
+/// no title yet always refreshes right away (below), so a new chat is still named promptly.
+const TITLE_REFRESH_INTERVAL: Duration = Duration::from_secs(20);
 
 /// `session_started`/`turn_ended` run on `rt`, guarding `db` directly (`db.guard()`), and
 /// notify through `notifier`. The caller (`ChatProcesses`) already validated `session_id`
@@ -22,6 +31,7 @@ pub struct ChatHooksImpl {
     sessions: Arc<dyn SessionFiles>,
     claude_dir: Option<PathBuf>,
     rt: Handle,
+    title_refreshed_at: Arc<Mutex<HashMap<String, Instant>>>,
 }
 
 impl ChatHooksImpl {
@@ -38,8 +48,21 @@ impl ChatHooksImpl {
             sessions,
             claude_dir,
             rt,
+            title_refreshed_at: Arc::new(Mutex::new(HashMap::new())),
         }
     }
+}
+
+/// `true` at most once per `TITLE_REFRESH_INTERVAL` per chat id; only consulted (and only
+/// consumes a slot) for a chat that already has a title — see `turn_ended`.
+fn due_for_title_refresh(gate: &Mutex<HashMap<String, Instant>>, chat_id: &str) -> bool {
+    let mut m = gate.lock().unwrap_or_else(|p| p.into_inner());
+    let now = Instant::now();
+    let due = m.get(chat_id).is_none_or(|last| now.duration_since(*last) >= TITLE_REFRESH_INTERVAL);
+    if due {
+        m.insert(chat_id.to_string(), now);
+    }
+    due
 }
 
 impl ChatHooks for ChatHooksImpl {
@@ -65,18 +88,27 @@ impl ChatHooks for ChatHooksImpl {
         let Some(projects) = self.claude_dir.as_ref().map(|d| d.join("projects")) else {
             return;
         };
-        let (db, notifier, sessions, chat_id) = (
+        let (db, notifier, sessions, gate, chat_id) = (
             self.db.clone(),
             self.notifier.clone(),
             self.sessions.clone(),
+            self.title_refreshed_at.clone(),
             chat_id.to_string(),
         );
         self.rt.spawn_blocking(move || {
-            let sid = {
+            let chat = {
                 let conn = db.guard();
-                chats::get(&conn, &chat_id).ok().and_then(|c| c.session_id)
+                chats::get(&conn, &chat_id).ok()
             };
-            let Some(sid) = sid.filter(|s| is_valid_session_id(s)) else {
+            let Some(chat) = chat else {
+                return;
+            };
+            // P11: a chat that already has a title only re-scans the transcript when due — a
+            // brand new one (no title yet) always tries, so it still gets named promptly.
+            if chat.session_title.is_some() && !due_for_title_refresh(&gate, &chat_id) {
+                return;
+            }
+            let Some(sid) = chat.session_id.filter(|s| is_valid_session_id(s)) else {
                 return;
             };
             let Some(path) = sessions.find_session_jsonl(&projects, &cwd.to_string_lossy(), &sid)

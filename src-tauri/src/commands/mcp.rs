@@ -83,12 +83,14 @@ impl Slot {
 }
 
 #[tauri::command]
+#[tracing::instrument(skip_all, level = "info")]
 pub fn mcp_status(state: State<'_, McpState>) -> McpStatus {
     state.lock().status()
 }
 
 /// Starts the server, or stops and starts it again if it was running.
 #[tauri::command]
+#[tracing::instrument(skip_all, level = "info")]
 pub fn mcp_restart(state: State<'_, McpState>) -> McpStatus {
     let mut slot = state.lock();
     slot.restart();
@@ -96,6 +98,7 @@ pub fn mcp_restart(state: State<'_, McpState>) -> McpStatus {
 }
 
 #[tauri::command]
+#[tracing::instrument(skip_all, level = "info")]
 pub fn mcp_stop(state: State<'_, McpState>) -> McpStatus {
     let mut slot = state.lock();
     slot.stop();

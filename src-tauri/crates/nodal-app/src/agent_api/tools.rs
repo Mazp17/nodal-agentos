@@ -229,10 +229,9 @@ fn get_task(conn: &Connection, env: &Env, a: GetTask) -> Result<Value, String> {
     let t = resolve_task(conn, &a.task)?;
     let mut v = task_value(&t, &key_of(conn, &t)?)?;
     let plan = ops::read_task_plan(conn, env, &t.id);
-    let runs: Vec<RunLight> = qruns::list_filtered(conn, None, Some(&t.id))?
+    let runs: Vec<RunLight> = qruns::list_filtered_light(conn, None, Some(&t.id))?
         .into_iter()
         .take(RUNS_IN_TASK)
-        .map(RunLight::from)
         .collect();
     if let Value::Object(m) = &mut v {
         match plan {
@@ -428,15 +427,15 @@ fn get_run(conn: &Connection, a: GetRun) -> Result<Value, String> {
         _ => return Err("Pass either `runId` or `task`.".into()),
     };
     let review = match (run.kind, &run.task_id) {
-        (RunKind::Review, _) => Some(run.clone()),
-        (RunKind::Work, Some(task_id)) => qruns::list_filtered(conn, None, Some(task_id))?
+        (RunKind::Review, _) => Some(RunLight::from(run.clone())),
+        (RunKind::Work, Some(task_id)) => qruns::list_filtered_light(conn, None, Some(task_id))?
             .into_iter()
             .find(|r| {
                 r.kind == RunKind::Review && r.parent_run_id.as_deref() == Some(run.id.as_str())
             }),
         (RunKind::Work, None) => None,
     }
-    .or_else(|| run.verdict.is_some().then(|| run.clone()));
+    .or_else(|| run.verdict.is_some().then(|| RunLight::from(run.clone())));
     let review = review.map(
         |r| json!({"runId": r.id, "status": r.status, "outcome": r.outcome, "verdict": r.verdict}),
     );

@@ -1,6 +1,7 @@
+use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
 
 use nodal_domain::error::HostError;
 use nodal_domain::model::activity::{AgentSession, AppRuns, ExternalSessions};
@@ -73,6 +74,9 @@ struct FakeFiles {
     external: Option<ExternalSessions>,
     panic: bool,
     last_limit: AtomicUsize,
+    /// Canned `count_new_tool_calls` results, popped in order; `(0, from)` once exhausted.
+    progress_responses: Mutex<VecDeque<(u32, u64)>>,
+    last_progress_from: AtomicU64,
 }
 
 impl SessionFiles for FakeFiles {
@@ -133,6 +137,16 @@ impl SessionFiles for FakeFiles {
 
     fn session_title(&self, _path: &Path) -> Option<String> {
         None
+    }
+
+    fn count_new_tool_calls(&self, _path: &Path, from: u64) -> std::io::Result<(u32, u64)> {
+        self.last_progress_from.store(from, Ordering::SeqCst);
+        Ok(self
+            .progress_responses
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .pop_front()
+            .unwrap_or((0, from)))
     }
 
     fn external_sessions(
@@ -555,6 +569,128 @@ fn get_run_transcript_reads_the_session_transcript() {
         block_on(sessions.get_run_transcript(run.id.clone(), None)).unwrap(),
         Some(transcript)
     );
+}
+
+// ---------- run_progress (P03) ----------
+
+#[test]
+fn run_progress_rejects_invalid_run_ids() {
+    let tmp = TempDir::new("sessions-progress-invalid-id");
+    let core = test_core(
+        &tmp.0,
+        Arc::new(FakeClaude::default()),
+        Arc::new(FakeFiles::default()),
+        None,
+    );
+    let sessions = Sessions::new(core);
+    let err = block_on(sessions.run_progress("../nope".into())).unwrap_err();
+    assert_eq!(err.to_string(), "Invalid run id: \"../nope\".");
+}
+
+#[test]
+fn run_progress_errors_for_workflow_runs() {
+    let tmp = TempDir::new("sessions-progress-workflow");
+    let core = test_core(
+        &tmp.0,
+        Arc::new(FakeClaude::default()),
+        Arc::new(FakeFiles::default()),
+        None,
+    );
+    let mut run = run_of(
+        Executor::Workflow { name: "wf".into() },
+        RunKind::Work,
+        false,
+    );
+    run.task_id = None;
+    run.repo_id = None;
+    seed_run(&core, &run);
+    let sessions = Sessions::new(core);
+    let err = block_on(sessions.run_progress(run.id.clone())).unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "Workflow runs report progress per phase: open the run detail instead."
+    );
+}
+
+#[test]
+fn run_progress_returns_none_without_a_valid_session_id() {
+    let tmp = TempDir::new("sessions-progress-no-session");
+    let core = test_core(
+        &tmp.0,
+        Arc::new(FakeClaude::default()),
+        Arc::new(FakeFiles::default()),
+        None,
+    );
+    let mut run = run_of(Executor::Claude, RunKind::Work, false);
+    run.task_id = None;
+    run.repo_id = None;
+    run.session_id = None;
+    seed_run(&core, &run);
+    let sessions = Sessions::new(core);
+    assert_eq!(
+        block_on(sessions.run_progress(run.id.clone())).unwrap(),
+        None
+    );
+}
+
+#[test]
+fn run_progress_errors_without_a_claude_dir() {
+    let tmp = TempDir::new("sessions-progress-no-claude-dir");
+    let core = test_core(
+        &tmp.0,
+        Arc::new(FakeClaude::default()),
+        Arc::new(FakeFiles::default()),
+        None,
+    );
+    let mut run = run_of(Executor::Claude, RunKind::Work, false);
+    run.task_id = None;
+    run.repo_id = None;
+    run.session_id = Some("sess-1".into());
+    seed_run(&core, &run);
+    let sessions = Sessions::new(core);
+    let err = block_on(sessions.run_progress(run.id.clone())).unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "Couldn't locate the Claude Code folder ($HOME is not set)."
+    );
+}
+
+/// The point of the incremental cursor: each poll passes the offset the previous one left
+/// off at, and the returned count is cumulative, not the delta.
+#[test]
+fn run_progress_reads_from_the_cursor_and_accumulates() {
+    let tmp = TempDir::new("sessions-progress-happy");
+    let files = Arc::new(FakeFiles {
+        jsonl: Some(tmp.0.join("s.jsonl")),
+        progress_responses: Mutex::new(VecDeque::from([(3, 100), (0, 100), (2, 250)])),
+        ..Default::default()
+    });
+    let core = test_core(
+        &tmp.0,
+        Arc::new(FakeClaude::default()),
+        files.clone(),
+        Some(tmp.0.clone()),
+    );
+    let mut run = run_of(Executor::Claude, RunKind::Work, false);
+    run.task_id = None;
+    run.repo_id = None;
+    run.session_id = Some("sess-1".into());
+    seed_run(&core, &run);
+    let sessions = Sessions::new(core);
+
+    let p1 = block_on(sessions.run_progress(run.id.clone())).unwrap().unwrap();
+    assert_eq!(p1.tool_calls, 3);
+    assert_eq!(files.last_progress_from.load(Ordering::SeqCst), 0);
+
+    // Steady state: no new data, the count doesn't change and the cursor isn't rewound.
+    let p2 = block_on(sessions.run_progress(run.id.clone())).unwrap().unwrap();
+    assert_eq!(p2.tool_calls, 3);
+    assert_eq!(files.last_progress_from.load(Ordering::SeqCst), 100);
+
+    // New data: the delta is added on top, not replacing the running total.
+    let p3 = block_on(sessions.run_progress(run.id.clone())).unwrap().unwrap();
+    assert_eq!(p3.tool_calls, 5);
+    assert_eq!(files.last_progress_from.load(Ordering::SeqCst), 100);
 }
 
 #[test]

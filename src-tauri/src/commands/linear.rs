@@ -40,6 +40,7 @@ impl LinearState {
 /// Full detail of an issue for the side panel. `issue_id` accepts a UUID or an
 /// identifier ("ACME-8").
 #[tauri::command]
+#[tracing::instrument(skip_all, level = "info")]
 pub async fn linear_issue_detail(
     state: State<'_, LinearState>,
     hub: State<'_, Arc<SourcesHub>>,

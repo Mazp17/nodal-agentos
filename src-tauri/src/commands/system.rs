@@ -10,6 +10,7 @@ use nodal_app::App;
 use crate::commands::CommandError;
 
 #[tauri::command]
+#[tracing::instrument(skip_all, level = "info")]
 pub async fn import_legacy_data(
     db: State<'_, Arc<App>>,
     folder: String,

@@ -593,8 +593,18 @@ impl SourcesHub {
         // Only what changed in this pass: a new key saved while it ran (which lifted an
         // earlier pause) does not get it back through the copy the pass took.
         self.merge_paused(&before, &memo.paused);
-        if !providers.is_empty() {
-            // Link state changes on every pass; tasks only if something moved.
+        // P15: `last_synced_at` moves on every pass (`set_link_sync`, above), but that alone
+        // isn't worth a `Sources` event every tick (60 s) when nothing else did: only pulls,
+        // pushes, imports, errors/notices, a pause change or a link's `last_sync_error`
+        // changing (a cleared error has no `errors` entry, yet the UI must drop "Sync failed").
+        let link_errors_changed = std::mem::take(&mut memo.link_errors_changed);
+        let changed = report.pulled + report.pushed + report.imported > 0
+            || !report.errors.is_empty()
+            || !report.notices.is_empty()
+            || memo.paused != before
+            || link_errors_changed;
+        if !providers.is_empty() && changed {
+            // Tasks only if something moved.
             let kinds: &[ChangeKind] = if report.pulled + report.pushed + report.imported > 0 {
                 &[ChangeKind::Sources, ChangeKind::Tasks]
             } else {

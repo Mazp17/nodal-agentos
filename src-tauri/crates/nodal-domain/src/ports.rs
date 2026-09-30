@@ -50,6 +50,15 @@ pub trait ClaudeCli: Send + Sync {
 pub trait SessionFiles: Send + Sync {
     fn read_session(&self, session_id: &str, cwd: &str) -> SessionReadout; // runs::read_session
     fn session_tokens(&self, session_id: &str, cwd: &str) -> Option<i64>; // runs::session_tokens
+    /// `read_session` + `session_tokens` together (run closing needs both), from a single
+    /// read of the main transcript instead of one open per field (P12). Default: the two
+    /// calls above, for implementations that don't need the merged read.
+    fn session_close(&self, session_id: &str, cwd: &str) -> (SessionReadout, Option<i64>) {
+        (
+            self.read_session(session_id, cwd),
+            self.session_tokens(session_id, cwd),
+        )
+    }
     fn run_detail(&self, session_id: &str, cwd: &str) -> Result<Option<RunDetail>, HostError>; // get_run_detail closure body
     fn launch_blocker(
         &self,
@@ -74,6 +83,15 @@ pub trait SessionFiles: Send + Sync {
         limit: usize,
     ) -> Result<Option<Transcript>, HostError>;
     fn session_title(&self, path: &Path) -> Option<String>;
+    /// Tool calls in the main transcript's complete lines from byte offset `from` (`0`: the
+    /// whole file) to the current end, and the offset to resume from next poll (P03): an
+    /// incremental cursor instead of re-parsing the transcript on every poll. A concurrent
+    /// partial write is left for the next call. Default: no progress (only `HostSessionFiles`
+    /// implements the real incremental read).
+    fn count_new_tool_calls(&self, path: &Path, from: u64) -> io::Result<(u32, u64)> {
+        let _ = path;
+        Ok((0, from))
+    }
     /// external_sessions closure body: projects dir lookup + external_sessions_of(.., existing_roots).
     fn external_sessions(
         &self,

@@ -18,6 +18,7 @@ mod cancel;
 pub mod cleaning;
 mod diff;
 mod enqueue;
+mod live;
 mod pump;
 mod summary;
 mod worktrees;
@@ -36,6 +37,11 @@ use crate::core::{AppError, Core};
 /// today's `work::init`). Kept `pub` (unlike the rest of `pump`): the shell passes it to
 /// `fail_stale_launches`.
 pub use pump::NOTE_APP_CLOSED;
+
+/// `claude agents` single-flight cache (P01), shared by `App::new`'s `Deps.claude` and
+/// `SessionReader` so pump, `list_runs`, `work_summary` and `external_sessions` read the same
+/// cache instead of each spawning their own `claude agents`.
+pub use live::LiveSessions;
 
 /// What changes when a run is enqueued, launched or cancelled.
 const RUN_KINDS: &[ChangeKind] = &[ChangeKind::Runs, ChangeKind::Queue, ChangeKind::Tasks];
@@ -91,12 +97,12 @@ impl Execution {
         self.db(move |c| Ok(qruns::list_filtered(c, project_id.as_deref(), task_id.as_deref())?)).await
     }
 
-    /// Like `list_task_runs`, without `prompt` or `extraInstructions`.
+    /// Like `list_task_runs`, without `prompt` or `extraInstructions`: `prompt` never leaves
+    /// SQLite for this list.
     pub async fn list_runs_light(&self, project_id: Option<String>, task_id: Option<String>) -> Result<Vec<RunLight>, AppError> {
         let task_id = opt_id(task_id, "task")?;
         let project_id = opt_id(project_id, "project")?;
-        let runs = self.db(move |c| Ok(qruns::list_filtered(c, project_id.as_deref(), task_id.as_deref())?)).await?;
-        Ok(runs.into_iter().map(RunLight::from).collect())
+        self.db(move |c| Ok(qruns::list_filtered_light(c, project_id.as_deref(), task_id.as_deref())?)).await
     }
 
     pub async fn get_run(&self, run_id: String) -> Result<Run, AppError> {
@@ -107,8 +113,7 @@ impl Execution {
     /// The last run of each task (no history limit), lightweight.
     pub async fn latest_runs_by_task(&self, project_id: Option<String>) -> Result<Vec<RunLight>, AppError> {
         let project_id = opt_id(project_id, "project")?;
-        let runs = self.db(move |c| Ok(qruns::latest_by_task(c, project_id.as_deref())?)).await?;
-        Ok(runs.into_iter().map(RunLight::from).collect())
+        self.db(move |c| Ok(qruns::latest_by_task_light(c, project_id.as_deref())?)).await
     }
 
     pub async fn list_queue(&self) -> Result<Vec<Run>, AppError> {

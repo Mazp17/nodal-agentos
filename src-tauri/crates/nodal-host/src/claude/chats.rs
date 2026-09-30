@@ -46,6 +46,37 @@ const EXIT_GRACE: Duration = Duration::from_secs(3);
 pub const DENY_MESSAGE: &str = "The user denied this in Nodal.";
 const DENY_MESSAGE_MAX: usize = 2000;
 const STDERR_TAIL: usize = 2000;
+/// P05: caps `TextDelta`/`ThinkingDelta` emits at under 60/s per chat. Consecutive deltas of
+/// the same kind arriving inside one window are merged into a single emit; anything else
+/// (an item, a permission request, the turn ending…) flushes whatever is buffered first, so
+/// ordering on the wire matches the order `claude` printed things in.
+const DELTA_FLUSH_INTERVAL: Duration = Duration::from_millis(17);
+/// P08: a misbehaving (or malicious) `claude` process could keep stdout open and noisy
+/// forever; past this many lines in one process's lifetime, further lines are no longer
+/// parsed/emitted and the process is stopped and reported. Real turns are nowhere near this.
+#[cfg(not(test))]
+const MAX_STDOUT_LINES: u64 = 200_000;
+#[cfg(test)]
+const MAX_STDOUT_LINES: u64 = 100;
+
+enum DeltaKind {
+    Text,
+    Thinking,
+}
+
+struct PendingDelta {
+    kind: DeltaKind,
+    text: String,
+}
+
+impl PendingDelta {
+    fn into_event(self) -> StreamEvent {
+        match self.kind {
+            DeltaKind::Text => StreamEvent::TextDelta { text: self.text },
+            DeltaKind::Thinking => StreamEvent::ThinkingDelta { text: self.text },
+        }
+    }
+}
 
 struct Proc {
     gen: u64,
@@ -59,6 +90,8 @@ struct Proc {
     pending: Vec<PermissionRequest>,
     last_active: Instant,
     interrupts: u64,
+    delta: Option<PendingDelta>,
+    delta_last_flush: Instant,
 }
 
 impl Proc {
@@ -226,7 +259,13 @@ impl ChatProcesses {
         let id = chat_id.to_string();
         let reader = self.0.rt.spawn(async move {
             let mut lines = BufReader::new(stdout).lines();
+            let mut n: u64 = 0;
             while let Ok(Some(line)) = lines.next_line().await {
+                n += 1;
+                if n > MAX_STDOUT_LINES {
+                    me.on_stdout_overflow(&id, gen);
+                    break;
+                }
                 me.on_line(&id, gen, &line);
             }
         });
@@ -259,44 +298,127 @@ impl ChatProcesses {
             pending: vec![],
             last_active: Instant::now(),
             interrupts: 0,
+            delta: None,
+            delta_last_flush: Instant::now(),
         })
+    }
+
+    /// Buffers a `TextDelta`/`ThinkingDelta`, merging it into whatever's already buffered when
+    /// it's the same kind, and emits at most one delta event per `DELTA_FLUSH_INTERVAL` (P05:
+    /// keeps a chat under 60 emits/s from deltas alone even when `claude` prints them faster).
+    fn on_delta(&self, chat_id: &str, gen: u64, kind: DeltaKind, text: &str) {
+        let mut to_flush = None;
+        {
+            let mut procs = self.procs();
+            let Some(p) = procs.get_mut(chat_id).filter(|p| p.gen == gen) else {
+                return;
+            };
+            p.last_active = Instant::now();
+            match &mut p.delta {
+                Some(pending) if matches!((&pending.kind, &kind), (DeltaKind::Text, DeltaKind::Text) | (DeltaKind::Thinking, DeltaKind::Thinking)) => {
+                    pending.text.push_str(text);
+                }
+                Some(_) => {
+                    to_flush = p.delta.take();
+                    p.delta = Some(PendingDelta { kind, text: text.to_string() });
+                    p.delta_last_flush = Instant::now();
+                }
+                None => {
+                    p.delta = Some(PendingDelta { kind, text: text.to_string() });
+                }
+            }
+            if to_flush.is_none() && p.delta_last_flush.elapsed() >= DELTA_FLUSH_INTERVAL {
+                to_flush = p.delta.take();
+                p.delta_last_flush = Instant::now();
+            }
+        }
+        if let Some(pending) = to_flush {
+            self.emit(chat_id, ChatEvent::Stream(pending.into_event()));
+        }
+    }
+
+    /// Emits whatever delta is buffered, if any — called before any non-delta event so the
+    /// wire order still matches what `claude` printed.
+    fn flush_delta(&self, chat_id: &str, gen: u64) {
+        let pending = self
+            .procs()
+            .get_mut(chat_id)
+            .filter(|p| p.gen == gen)
+            .and_then(|p| p.delta.take());
+        if let Some(pending) = pending {
+            self.emit(chat_id, ChatEvent::Stream(pending.into_event()));
+        }
     }
 
     fn on_line(&self, chat_id: &str, gen: u64, line: &str) {
         for ev in stream_json::parse_line(line) {
-            let mut idle = false;
-            let mut session = None;
-            let mut title_from = None;
-            if let Some(p) = self.procs().get_mut(chat_id).filter(|p| p.gen == gen) {
-                p.last_active = Instant::now();
-                match &ev {
-                    StreamEvent::PermissionRequest(r) => p.pending.push(r.clone()),
-                    StreamEvent::TurnEnd { .. } => {
-                        title_from = Some((p.spec.cwd.clone(), p.project_id.clone()));
-                        p.turns = p.turns.saturating_sub(1);
-                        idle = p.turns == 0;
-                        if idle {
-                            p.pending.clear();
-                        }
+            match ev {
+                StreamEvent::TextDelta { text } => self.on_delta(chat_id, gen, DeltaKind::Text, &text),
+                StreamEvent::ThinkingDelta { text } => self.on_delta(chat_id, gen, DeltaKind::Thinking, &text),
+                ev => self.dispatch(chat_id, gen, ev),
+            }
+        }
+    }
+
+    fn dispatch(&self, chat_id: &str, gen: u64, ev: StreamEvent) {
+        self.flush_delta(chat_id, gen);
+        let mut idle = false;
+        let mut session = None;
+        let mut title_from = None;
+        if let Some(p) = self.procs().get_mut(chat_id).filter(|p| p.gen == gen) {
+            p.last_active = Instant::now();
+            match &ev {
+                StreamEvent::PermissionRequest(r) => p.pending.push(r.clone()),
+                StreamEvent::TurnEnd { .. } => {
+                    title_from = Some((p.spec.cwd.clone(), p.project_id.clone()));
+                    p.turns = p.turns.saturating_sub(1);
+                    idle = p.turns == 0;
+                    if idle {
+                        p.pending.clear();
                     }
-                    StreamEvent::Init { session_id, .. } => {
-                        session = Some((session_id.clone(), p.project_id.clone()))
-                    }
-                    _ => {}
                 }
-            }
-            if let Some((sid, project_id)) = session {
-                if is_valid_session_id(&sid) {
-                    self.0.hooks.session_started(chat_id, sid, project_id);
+                StreamEvent::Init { session_id, .. } => {
+                    session = Some((session_id.clone(), p.project_id.clone()))
                 }
+                _ => {}
             }
-            if let Some((cwd, project_id)) = title_from {
-                self.0.hooks.turn_ended(chat_id, cwd, project_id);
+        }
+        if let Some((sid, project_id)) = session {
+            if is_valid_session_id(&sid) {
+                self.0.hooks.session_started(chat_id, sid, project_id);
             }
-            self.emit(chat_id, ChatEvent::Stream(ev));
-            if idle {
-                self.emit_state(chat_id, RunState::Idle);
+        }
+        if let Some((cwd, project_id)) = title_from {
+            self.0.hooks.turn_ended(chat_id, cwd, project_id);
+        }
+        self.emit(chat_id, ChatEvent::Stream(ev));
+        if idle {
+            self.emit_state(chat_id, RunState::Idle);
+        }
+    }
+
+    /// P08: the reader hit `MAX_STDOUT_LINES` without ever reaching a clean turn end — stops
+    /// the process (like `ChatRuntime::stop`) and reports why, since `on_exit` won't (it only
+    /// reports a failure for the process it still finds current).
+    fn on_stdout_overflow(&self, chat_id: &str, gen: u64) {
+        let removed = {
+            let mut procs = self.procs();
+            if procs.get(chat_id).is_some_and(|p| p.gen == gen) {
+                procs.remove(chat_id);
+                true
+            } else {
+                false
             }
+        };
+        if removed {
+            self.emit(
+                chat_id,
+                ChatEvent::Host(HostEvent::Error {
+                    message: format!(
+                        "Claude's output exceeded {MAX_STDOUT_LINES} lines without ending the turn and was stopped."
+                    ),
+                }),
+            );
         }
     }
 
@@ -308,6 +430,8 @@ impl ChatProcesses {
         stopped: bool,
         stderr: &str,
     ) {
+        // A delta buffered right before the process exited would otherwise never reach the UI.
+        self.flush_delta(chat_id, gen);
         let mut procs = self.procs();
         let current = procs.get(chat_id).is_some_and(|p| p.gen == gen);
         let mid_turn = current && procs.get(chat_id).is_some_and(|p| p.turns > 0);
@@ -518,3 +642,6 @@ fn drain_stderr<R: AsyncRead + Unpin + Send + 'static>(
         }
     })
 }
+
+#[cfg(test)]
+mod tests;

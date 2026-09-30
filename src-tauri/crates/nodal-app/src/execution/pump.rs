@@ -376,13 +376,11 @@ impl Execution {
         let sessions = self.core.sessions.clone();
         let (readout, (reviews, manages), tokens) = blocking(move || {
             // Workflows split the work into subagents with their own transcripts: no tokens.
-            let tokens = match (&executor, &session) {
-                (Executor::Workflow { .. }, _) | (_, None) => None,
-                (_, Some(sid)) => sessions.session_tokens(sid, &cwd),
-            };
-            let readout = match (signal, session) {
-                (EndSignal::Done, Some(sid)) => sessions.read_session(&sid, &cwd),
-                _ => SessionReadout::default(),
+            let is_workflow = matches!(&executor, Executor::Workflow { .. });
+            let (readout, tokens) = match (signal, &session) {
+                (EndSignal::Done, Some(sid)) if !is_workflow => sessions.session_close(sid, &cwd),
+                (_, Some(sid)) if !is_workflow => (SessionReadout::default(), sessions.session_tokens(sid, &cwd)),
+                _ => (SessionReadout::default(), None),
             };
             Ok((readout, workflow_meta(&env2, repo_path.as_deref(), &executor), tokens))
         })

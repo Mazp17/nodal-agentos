@@ -143,3 +143,6 @@ impl From<ProviderError> for AppError {
         AppError::Provider(e)
     }
 }
+
+#[cfg(test)]
+mod tests;

@@ -7,13 +7,23 @@ use crate::Conn as Connection;
 use crate::DbError;
 use nodal_domain::model::Repo;
 
-/// `None`: all of them. Order: project, position.
+/// `None`: all of them. Order: project, position. Two fixed queries (rather than a
+/// `?1 IS NULL OR project_id = ?1` filter) so a present `project_id` can use `repos_project`'s
+/// leading column instead of forcing a full scan.
 pub fn list(conn: &Connection, project_id: Option<&str>) -> Result<Vec<Repo>, DbError> {
-    let mut stmt = conn.prepare(
-        "SELECT * FROM repos WHERE ?1 IS NULL OR project_id = ?1 ORDER BY project_id, position, created_at, id",
-    )?;
-    let rows = stmt.query_map([project_id], repo_from_row)?;
-    Ok(rows.collect::<rusqlite::Result<_>>()?)
+    let rows: Vec<Repo> = match project_id {
+        Some(p) => {
+            let mut stmt = conn.prepare_cached("SELECT * FROM repos WHERE project_id = ?1 ORDER BY project_id, position, created_at, id")?;
+            let out = stmt.query_map([p], repo_from_row)?.collect::<rusqlite::Result<Vec<_>>>()?;
+            out
+        }
+        None => {
+            let mut stmt = conn.prepare_cached("SELECT * FROM repos ORDER BY project_id, position, created_at, id")?;
+            let out = stmt.query_map([], repo_from_row)?.collect::<rusqlite::Result<Vec<_>>>()?;
+            out
+        }
+    };
+    Ok(rows)
 }
 
 pub fn get(conn: &Connection, id: &str) -> Result<Repo, DbError> {

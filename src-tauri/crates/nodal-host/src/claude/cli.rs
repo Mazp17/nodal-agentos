@@ -15,12 +15,20 @@ use nodal_domain::model::LaunchOptions;
 use super::bin as claude_bin;
 use super::fs::agents_json::parse_agents_json;
 use super::fs::bg_output::{parse_bare_id, parse_bg_line};
+use super::live::AgentsRaw;
 
 const LAUNCH_TIMEOUT: Duration = Duration::from_secs(30);
-const LIST_TIMEOUT: Duration = Duration::from_secs(15);
 const STOP_TIMEOUT: Duration = Duration::from_secs(20);
+/// P08: `--bg`'s handshake (the `backgrounded · <id>` line) is expected within the first few
+/// lines; past this many, a misbehaving process (or one whose background session inherited the
+/// pipe and keeps writing to it) stops growing `launch_bg`'s `seen` buffer. The pipe is still
+/// drained past the cap (so the write end never blocks on EPIPE), just no longer forwarded.
+#[cfg(not(test))]
+const MAX_LAUNCH_OUTPUT_LINES: u64 = 5_000;
+#[cfg(test)]
+const MAX_LAUNCH_OUTPUT_LINES: u64 = 5;
 
-/// Forwards each line of a child stream to the channel.
+/// Forwards each line of a child stream to the channel, up to `MAX_LAUNCH_OUTPUT_LINES`.
 fn forward_lines<R: AsyncRead + Unpin + Send + 'static>(
     stream: R,
     tx: mpsc::UnboundedSender<String>,
@@ -28,10 +36,14 @@ fn forward_lines<R: AsyncRead + Unpin + Send + 'static>(
 ) {
     rt.spawn(async move {
         let mut lines = BufReader::new(stream).lines();
+        let mut n: u64 = 0;
         // Drain until EOF even if nobody listens anymore: closing the pipe would give EPIPE to
         // `claude` (or to the background session, if it inherited the pipe).
         while let Ok(Some(line)) = lines.next_line().await {
-            let _ = tx.send(line);
+            n += 1;
+            if n <= MAX_LAUNCH_OUTPUT_LINES {
+                let _ = tx.send(line);
+            }
         }
     });
 }
@@ -152,18 +164,11 @@ pub async fn version() -> Result<String, String> {
     Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
 }
 
-/// Background sessions (`claude agents --json --all`), most recent first.
-pub async fn list_runs() -> Result<Vec<RunSummary>, String> {
-    let mut cmd = claude_bin::claude_command()?;
-    cmd.args(["agents", "--json", "--all"]);
-    let out = claude_bin::output_with_timeout(cmd, LIST_TIMEOUT, "`claude agents`").await?;
-    if !out.status.success() {
-        return Err(format!(
-            "`claude agents` failed: {}",
-            claude_bin::error_text(&out)
-        ));
-    }
-    parse_agents_json(&String::from_utf8_lossy(&out.stdout))
+/// Background sessions (`claude agents --json --all`), most recent first. `cache`: the
+/// single-flight cache shared with `activity::list_agents` (P01) — neither spawns its own
+/// `claude agents` anymore.
+pub async fn list_runs(cache: &AgentsRaw) -> Result<Vec<RunSummary>, String> {
+    parse_agents_json(&cache.get().await?)
 }
 
 /// `claude stop <id>`.

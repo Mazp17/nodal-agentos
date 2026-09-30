@@ -8,6 +8,7 @@ pub mod catalog;
 pub mod chats;
 pub mod cli;
 pub mod fs;
+pub mod live;
 pub mod settings;
 pub mod stream_json;
 #[cfg(test)]
