@@ -11,7 +11,7 @@ export interface StatusMeta {
 export const STATUS_META: Record<TaskStatus, StatusMeta> = {
   backlog: { label: "Backlog", color: "var(--text-disabled)", dashed: true },
   todo: { label: "Todo", color: "var(--gray)", dashed: false },
-  in_progress: { label: "In Progress", color: "var(--accent)", dashed: true },
+  in_progress: { label: "In Progress", color: "var(--st-in-progress)", dashed: true },
   in_review: { label: "In Review", color: "var(--amber)", dashed: false },
   blocked: { label: "Blocked", color: "var(--red)", dashed: false },
   done: { label: "Done", color: "var(--green)", dashed: false },

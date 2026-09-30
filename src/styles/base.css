@@ -70,7 +70,7 @@ input:focus-visible, textarea:focus-visible, select:focus-visible { outline-offs
 .btn-danger { border-color: var(--red-tint-35); background: var(--red-tint-10); color: var(--red); }
 .btn-danger:hover:not(:disabled) { background: var(--red-tint-16); }
 .btn-ghost { border-color: transparent; background: transparent; color: var(--text-muted); padding: 0 var(--sp-4); }
-.btn-ghost:hover:not(:disabled) { background: transparent; color: var(--text); }
+.btn-ghost:hover:not(:disabled) { background: var(--fill-4); color: var(--text); }
 .btn-sm { height: var(--h-md); padding: 0 9px; font-size: var(--fs-sm); border-radius: var(--r-md); }
 .btn-xs { height: var(--h-sm); padding: 0 9px; font-size: var(--fs-sm); border-radius: var(--r-md); }
 .btn-lg { height: var(--h-2xl); }
@@ -213,7 +213,7 @@ input:focus-visible, textarea:focus-visible, select:focus-visible { outline-offs
 .dot-ring { background: transparent; border: 2px solid currentColor; width: 8px; height: 8px; }
 .pulse { animation: var(--pulse); }
 .dot[class*="tone-"] { color: var(--tone); }
-.project-dot { width: 8px; height: 8px; flex: none; border-radius: 3px; background: var(--project-color, var(--text-dim)); }
+.project-dot { width: 8px; height: 8px; flex: none; border-radius: 2px; background: var(--project-color, var(--text-dim)); }
 
 .badge {
   display: inline-flex;

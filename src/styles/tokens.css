@@ -77,20 +77,20 @@
   --text-muted: #9a938a;
   --text-subtle: #9a938a;
   --text-faint: #857e75;
-  --text-dim: #6d665e;
+  --text-dim: #857e75;
   --text-disabled: #5f5850;
 
   /* ---- Task states (Nodal) ---- */
   --st-backlog: var(--gray-dim);
   --st-todo: var(--gray);
-  --st-in-progress: var(--accent);
+  --st-in-progress: var(--info);
   --st-in-review: var(--amber);
   --st-blocked: var(--red);
   --st-done: var(--green);
   --st-canceled: var(--gray-dim);
 
   /* ---- Run states ---- */
-  --run-running: var(--accent);
+  --run-running: var(--info);
   --run-queued: var(--gray);
   --run-done: var(--green);
   --run-warn: var(--amber);
@@ -109,14 +109,14 @@
   /* ---- Typography ---- */
   --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", Helvetica, Arial, sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
-  --fs-2xs: 12.5px;
-  --fs-xs: 13px;
-  --fs-sm: 13.5px;
-  --fs-md: 14px;
-  --fs-base: 14.5px;
+  --fs-2xs: 12px;
+  --fs-xs: 12px;
+  --fs-sm: 13px;
+  --fs-md: 13px;
+  --fs-base: 14px;
   --fs-lg: 15px;
-  --fs-xl: 16px;
-  --fs-2xl: 17px;
+  --fs-xl: 15px;
+  --fs-2xl: 18px;
   --fs-3xl: 18px;
   --fs-4xl: 22px;
   --fw-regular: 400;
@@ -144,11 +144,11 @@
   --sp-10: 26px;
 
   /* ---- Control sizes ---- */
-  --h-xs: 20px;
+  --h-xs: 22px;
   --h-sm: 22px;
-  --h-md: 24px;
+  --h-md: 22px;
   --h-lg: 26px;
-  --h-xl: 28px;
+  --h-xl: 26px;
   --h-2xl: 30px;
   --h-titlebar: 44px;
   --h-bar: 46px;
@@ -161,14 +161,14 @@
   --w-palette: 600px;
 
   /* ---- Radii ---- */
-  --r-xs: 3px;
+  --r-xs: 4px;
   --r-sm: 4px;
-  --r-md: 5px;
+  --r-md: 4px;
   --r-lg: 6px;
-  --r-card: 7px;
+  --r-card: 8px;
   --r-xl: 8px;
-  --r-panel: 9px;
-  --r-2xl: 10px;
+  --r-panel: 8px;
+  --r-2xl: 12px;
   --r-3xl: 12px;
   --r-pill: 999px;
 
