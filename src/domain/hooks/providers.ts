@@ -16,7 +16,7 @@ import {
   type SourceStatesReport,
 } from "../api";
 import type { ScopeRef, SourceLink } from "../types";
-import { registerResource } from "./store";
+import { POLL, registerResource } from "./store";
 
 /** Commands reject with a string ready to display; anything else is normalized. */
 export function errorText(err: unknown): string {
@@ -59,10 +59,11 @@ export interface Loaded<T> {
 }
 
 /**
- * Runs `load` when `key` changes (or when `topic` is invalidated). `key === null` doesn't load.
- * Discards stale responses if the key changed in the meantime.
+ * Runs `load` when `key` changes (or when `topic` is invalidated, or every `pollMs` while the
+ * window is visible). `key === null` doesn't load. Discards stale responses if the key changed
+ * in the meantime.
  */
-function useLoad<T>(key: string | null, load: () => Promise<T>, topic?: ProviderTopic): Loaded<T> {
+function useLoad<T>(key: string | null, load: () => Promise<T>, topic?: ProviderTopic, pollMs?: number): Loaded<T> {
   const [state, setState] = useState<{ key: string | null; data: T | null; error: string | null; loading: boolean }>({
     key,
     data: null,
@@ -75,6 +76,14 @@ function useLoad<T>(key: string | null, load: () => Promise<T>, topic?: Provider
   const reload = useCallback(() => setTick((n) => n + 1), []);
 
   useEffect(() => (topic ? subscribeTopic(topic, reload) : undefined), [topic, reload]);
+
+  useEffect(() => {
+    if (key === null || !pollMs) return;
+    const id = window.setInterval(() => {
+      if (!document.hidden) reload();
+    }, pollMs);
+    return () => window.clearInterval(id);
+  }, [key, pollMs, reload]);
 
   useEffect(() => {
     if (key === null) {
@@ -220,9 +229,12 @@ export function useProviderStatus(provider = "linear"): ProviderStatusView {
 
 // ---------- Links, scopes, states, importables ----------
 
-/** A project's sources (or all with `null`). Refreshes when `"links"` is invalidated. */
+/**
+ * A project's sources (or all with `null`). Refreshes when `"links"` is invalidated and on a
+ * slow timer: a no-op sync pass moves `lastSyncedAt` without emitting `sources`.
+ */
 export function useSourceLinks(projectId: string | null): Loaded<SourceLink[]> {
-  return useLoad(`links:${projectId ?? "*"}`, () => listSourceLinks(projectId), "links");
+  return useLoad(`links:${projectId ?? "*"}`, () => listSourceLinks(projectId), "links", POLL.slow);
 }
 
 /** The provider's teams and projects. `enabled: false` doesn't query (no key). */
