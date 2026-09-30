@@ -1,7 +1,7 @@
 /* Full-screen onboarding: 520px column with three steps. */
 
 .onboarding { position: fixed; inset: 0; z-index: 70; background: var(--bg-sidebar); display: flex; flex-direction: column; }
-.onboarding-scroll { flex: 1; overflow: auto; display: flex; justify-content: center; padding: 56px 24px 36px; }
+.onboarding-scroll { flex: 1; overflow: auto; display: flex; justify-content: center; padding: 36px 24px; }
 .onboarding-col { width: 100%; max-width: 520px; display: flex; flex-direction: column; gap: var(--sp-9); }
 
 .onboarding-hero { display: flex; align-items: center; gap: var(--sp-5); }
@@ -23,7 +23,7 @@
 .onboarding-repos { display: flex; flex-direction: column; gap: var(--sp-2); }
 .onboarding-empty {
   padding: var(--sp-6);
-  border-radius: var(--r-card);
+  border-radius: var(--r-lg);
   border: 1px dashed var(--border-3);
   font-size: var(--fs-md);
   color: var(--text-dim);

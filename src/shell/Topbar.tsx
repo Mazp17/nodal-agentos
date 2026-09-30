@@ -39,14 +39,14 @@ export function Topbar(p: Props) {
       <span className="spacer" />
       <button
         type="button"
-        className="status-pill"
+        className={`status-pill ${p.monitorOpen ? "on" : ""}`}
         onClick={p.onToggleMonitor}
         aria-label={`${pillLabel}. ${p.monitorOpen ? "Close" : "Open"} run monitor`}
         aria-expanded={p.monitorOpen}
         aria-haspopup="dialog"
       >
         <span className="status-pill-running">
-          <span className={`dot dot-sm tone-accent ${p.running ? "pulse" : ""}`} aria-hidden />
+          <span className={`dot dot-sm tone-info ${p.running ? "pulse" : ""}`} aria-hidden />
           {runningLabel}
         </span>
         {p.needYou > 0 && (
@@ -58,12 +58,12 @@ export function Topbar(p: Props) {
         {p.queued > 0 && <span className="status-pill-queued">{p.queued} queued</span>}
       </button>
       {p.showImport && (
-        <button type="button" className="btn btn-sm topbar-btn" onClick={p.onImport}>
+        <button type="button" className="btn" onClick={p.onImport}>
           Import
         </button>
       )}
       {p.showNewTask && (
-        <button type="button" className="btn btn-primary btn-sm topbar-btn" onClick={p.onNewTask}>
+        <button type="button" className="btn btn-primary" onClick={p.onNewTask}>
           New task
         </button>
       )}
