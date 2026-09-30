@@ -51,6 +51,16 @@ P10 (a reader-connection pool ahead of the single-mutex `Db`) was evaluated with
 
 ADR-013 (replace the 5 s poll with push) was re-evaluated after S1's re-measurement (`measure_s1_claude_agents_spawns_per_5s`) found the pump's and the UI's independent 5 s timers still missed `LiveSessions`' cache at both ends of a `pump_offset` ∈ [2 s, 3 s) phase band, spawning `claude agents` twice per window there instead of once. Root cause was the cache's 2 s TTL being less than half the shared 5 s tick, not the polling model itself, so push was **discarded**: raising the TTL to 4 s (`> half` of 5 s, so any phase still leaves at least one side inside the other's cache, with 1.5 s of margin for timer jitter) closes the band instead. Re-measured across the same offsets (0, 1.5 s, 2.5 s, 4 s), 6 runs: 1 spawn / 5 s in 24/24 samples, meeting S1 (a 3 s TTL gave 23/24: one 5/15 s at offset 2.5 s). Push (ADR-013) remains a valid alternative fix — it would close the same gap by leaving only one reader — but is unneeded scope for a target this fix already meets.
 
+## [0.6.1](https://github.com/Mazp17/nodal-agentos/compare/v0.6.0...v0.6.1) (2026-09-30)
+
+
+### Bug Fixes
+
+* **queue:** count only Nodal's own runs as occupied slots ([#59](https://github.com/Mazp17/nodal-agentos/issues/59)) ([76f2a4f](https://github.com/Mazp17/nodal-agentos/commit/76f2a4f09d2c5d3c62f02b30a108861853bc6c96))
+* **queue:** stop counting Blocked tasks in "need you" ([#60](https://github.com/Mazp17/nodal-agentos/issues/60)) ([960e7f9](https://github.com/Mazp17/nodal-agentos/commit/960e7f91839171b4a3d7e212d29712bd7e76d06c))
+* **runs:** accept workspace trust in the embedded terminal ([#58](https://github.com/Mazp17/nodal-agentos/issues/58)) ([e441c07](https://github.com/Mazp17/nodal-agentos/commit/e441c073014f79645dc254b7363175a9bd1a0fbc))
+* **runs:** open the new run after "Run again" ([#61](https://github.com/Mazp17/nodal-agentos/issues/61)) ([d0ec008](https://github.com/Mazp17/nodal-agentos/commit/d0ec008c61cbec78487fd1629e6e6cb9de581c78))
+
 ## [0.6.0](https://github.com/Mazp17/nodal-agentos/compare/v0.5.0...v0.6.0) (2026-09-30)
 
 
