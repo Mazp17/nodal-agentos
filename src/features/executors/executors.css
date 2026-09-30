@@ -80,3 +80,23 @@
 .ex-chip { color: var(--text); min-width: 0; }
 .ex-chip:disabled { cursor: default; opacity: 0.5; }
 .ex-chip:disabled:hover { background: var(--fill-1); }
+
+/* Composer pill ("Executor · name ▾"): the task detail's launch bar and the New task footer. */
+.ex-pill {
+  max-width: 100%;
+  height: var(--h-lg);
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: 0 var(--sp-3);
+  border-radius: var(--r-lg);
+  border: 1px solid var(--border-2);
+  background: transparent;
+  font-size: var(--fs-sm);
+  color: var(--text);
+  white-space: nowrap;
+}
+.ex-pill:hover:not(:disabled) { background: var(--fill-5); }
+.ex-pill:disabled { opacity: 0.5; }
+.ex-pill-caption { font-size: var(--fs-xs); color: var(--text-dim); }
+.ex-caret-sm { font-size: var(--fs-xs); color: var(--text-dim); flex: none; }

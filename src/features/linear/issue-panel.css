@@ -43,6 +43,7 @@
   gap: var(--sp-8);
 }
 .ip-section { display: flex; flex-direction: column; gap: var(--sp-2); }
+.ip-section:has(.ip-comment) { gap: var(--sp-4); }
 .ip-empty { font-size: var(--fs-md); color: var(--text-dim); }
 
 .ip-hist {
@@ -144,7 +145,7 @@
 }
 .ip-error > span { flex: 1; }
 
-.ip-count { font-weight: var(--fw-regular); color: var(--text-disabled); margin-left: var(--sp-1); }
+.ip-count { font-weight: var(--fw-regular); color: var(--text-dim); margin-left: var(--sp-1); }
 
 .ip-rel {
   display: flex;
@@ -156,25 +157,19 @@
   border-radius: var(--r-md);
   font-size: var(--fs-base);
   text-align: left;
-  color: var(--text-3);
+  color: var(--text);
 }
 .ip-rel-link:hover { background: var(--fill-4); }
-.ip-rel .dot-ring-state { flex: none; width: 8px; height: 8px; }
-.ip-rel-id { font-family: var(--font-mono); font-size: var(--fs-xs); color: var(--text-muted); flex: none; }
+.ip-rel .dot-ring-state { flex: none; width: 7px; height: 7px; border: 0; background: currentColor; }
+.ip-rel-id { font-family: var(--font-mono); font-size: var(--fs-xs); color: var(--text-dim); flex: none; }
 .ip-rel-title { flex: 1; }
 .ip-rel-state { font-size: var(--fs-xs); color: var(--text-dim); flex: none; max-width: 40%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ip-rel-group { display: flex; align-items: flex-start; gap: var(--sp-4); }
-.ip-rel-kind { width: 86px; flex: none; padding-top: 4px; font-size: var(--fs-md); color: var(--tone); }
+.ip-rel-kind { width: 74px; flex: none; padding-top: 4px; font-size: var(--fs-sm); color: var(--tone); }
 .ip-rel-list { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 
-.ip-comment {
-  display: flex;
-  flex-direction: column;
-  gap: var(--sp-1);
-  padding: var(--sp-3) var(--sp-4);
-  border-radius: var(--r-lg);
-  background: var(--fill-1);
-  border: 1px solid var(--border-faint);
-}
-.ip-comment-head { display: flex; align-items: baseline; gap: var(--sp-3); font-size: var(--fs-sm); color: var(--text-dim); }
-.ip-comment-author { color: var(--text-2); font-weight: var(--fw-medium); }
+.ip-comment { display: flex; gap: var(--sp-4); }
+.ip-comment-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.ip-comment-head { display: flex; align-items: baseline; gap: var(--sp-3); font-size: var(--fs-md); color: var(--text-dim); }
+.ip-comment-author { color: var(--text); font-weight: var(--fw-medium); }
+.ip-comment-body { font-size: var(--fs-base); line-height: 1.5; color: var(--text-4); }
