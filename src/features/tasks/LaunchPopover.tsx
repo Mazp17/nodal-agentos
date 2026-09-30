@@ -42,10 +42,13 @@ type AskLaunch = (opts: AskLaunchOptions) => Promise<RunConfig | null>;
 const FINISHES: Finish[] = ["changes", "commit", "pr"];
 const ISOLATIONS: Isolation[] = ["worktree", "in_place"];
 
-/** Preselection: the repo defaults only; per-task values are deliberately ignored. */
+/**
+ * Preselection: the repo defaults only; per-task values are deliberately ignored. Review always
+ * starts off; turn it on per run.
+ */
 export function launchPreset(repo: Repo | null | undefined, executor: Executor): RunConfig {
   const finish = repo?.defaultFinish ?? "pr";
-  const review = repo?.defaultReview ?? true;
+  const review = false;
   return executor.kind === "workflow" ? { finish, review } : { isolation: repo?.defaultIsolation ?? "worktree", finish, review };
 }
 
