@@ -23,7 +23,7 @@ nodal-app = { path = "crates/nodal-app" }
 
 [package]
 name = "nodal"
-version = "0.5.0"
+version = "0.6.0"
 description = "Nodal — Agent OS for Claude"
 authors = ["Nodal contributors"]
 license = "MIT"

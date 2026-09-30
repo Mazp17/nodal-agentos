@@ -51,6 +51,36 @@ P10 (a reader-connection pool ahead of the single-mutex `Db`) was evaluated with
 
 ADR-013 (replace the 5 s poll with push) was re-evaluated after S1's re-measurement (`measure_s1_claude_agents_spawns_per_5s`) found the pump's and the UI's independent 5 s timers still missed `LiveSessions`' cache at both ends of a `pump_offset` ∈ [2 s, 3 s) phase band, spawning `claude agents` twice per window there instead of once. Root cause was the cache's 2 s TTL being less than half the shared 5 s tick, not the polling model itself, so push was **discarded**: raising the TTL to 4 s (`> half` of 5 s, so any phase still leaves at least one side inside the other's cache, with 1.5 s of margin for timer jitter) closes the band instead. Re-measured across the same offsets (0, 1.5 s, 2.5 s, 4 s), 6 runs: 1 spawn / 5 s in 24/24 samples, meeting S1 (a 3 s TTL gave 23/24: one 5/15 s at offset 2.5 s). Push (ADR-013) remains a valid alternative fix — it would close the same gap by leaving only one reader — but is unneeded scope for a target this fix already meets.
 
+## [0.6.0](https://github.com/Mazp17/nodal-agentos/compare/v0.5.0...v0.6.0) (2026-09-30)
+
+
+### Features
+
+* **chats:** markers in the conversation and notices for new answers ([#47](https://github.com/Mazp17/nodal-agentos/issues/47)) ([df38cf0](https://github.com/Mazp17/nodal-agentos/commit/df38cf0c21b02a33016bab088b7d57fb11450afb))
+* **projects:** hide agents & workflows per project ([#44](https://github.com/Mazp17/nodal-agentos/issues/44)) ([e64e94d](https://github.com/Mazp17/nodal-agentos/commit/e64e94d04a7bacb40184ef928b2e80fe0a663a56))
+* **projects:** let a project have a root folder of repos ([#39](https://github.com/Mazp17/nodal-agentos/issues/39)) ([1b0d854](https://github.com/Mazp17/nodal-agentos/commit/1b0d8548b1ee8e899997ed695b45fbe48170b6ce))
+* **runs:** ask workflow runs to close with a single status line ([#45](https://github.com/Mazp17/nodal-agentos/issues/45)) ([ba81280](https://github.com/Mazp17/nodal-agentos/commit/ba81280b8b3f53de252aa76c2b447c408976626a))
+* **runs:** attach to sessions in an in-app terminal ([#54](https://github.com/Mazp17/nodal-agentos/issues/54)) ([c1cd9ef](https://github.com/Mazp17/nodal-agentos/commit/c1cd9ef44d794f0c11f9ea8914fb4fb9e2c38bc5))
+* **runs:** choose isolation, finish and review when launching a run ([#43](https://github.com/Mazp17/nodal-agentos/issues/43)) ([b6c9203](https://github.com/Mazp17/nodal-agentos/commit/b6c920385ef74ea95eab09eb8cc58374428c5b40))
+* **runs:** redesign Runs and remove the Activity view ([#53](https://github.com/Mazp17/nodal-agentos/issues/53)) ([82ea3db](https://github.com/Mazp17/nodal-agentos/commit/82ea3dbe99a79f1db59b500980d3a88766d35eb7))
+* **shell:** zoom the app with ⌘+ / ⌘- / ⌘0 ([#36](https://github.com/Mazp17/nodal-agentos/issues/36)) ([8d0fed1](https://github.com/Mazp17/nodal-agentos/commit/8d0fed1e6f904852dde7e99c9cec14f96b2a8fcd))
+* **ui:** add a Kbd component for shortcut hints ([#42](https://github.com/Mazp17/nodal-agentos/issues/42)) ([c26cb0a](https://github.com/Mazp17/nodal-agentos/commit/c26cb0a9f2ba8e9eecfa6adbc1cf9a9ce6cfd278))
+* **ui:** add an EmptyState component ([#49](https://github.com/Mazp17/nodal-agentos/issues/49)) ([9a85c05](https://github.com/Mazp17/nodal-agentos/commit/9a85c056c7b9492b21b030a91b0c2c173092a06d))
+* **ui:** apply the new Nodal design ([#57](https://github.com/Mazp17/nodal-agentos/issues/57)) ([06970d0](https://github.com/Mazp17/nodal-agentos/commit/06970d09cc1018cbf8f7ec631605629b5591935a))
+* **ui:** bump the type scale so body text is 15px ([#37](https://github.com/Mazp17/nodal-agentos/issues/37)) ([8d12ef3](https://github.com/Mazp17/nodal-agentos/commit/8d12ef3e41a0668a3c8d28e759ec859687252db6))
+* **ui:** replace toasts with shadcn's sonner ([#48](https://github.com/Mazp17/nodal-agentos/issues/48)) ([aa81b58](https://github.com/Mazp17/nodal-agentos/commit/aa81b5879297433023aee415423fcf3d15c9c29c))
+
+
+### Bug Fixes
+
+* **board:** match card badges to the design and truncate long labels ([#40](https://github.com/Mazp17/nodal-agentos/issues/40)) ([ec25a6f](https://github.com/Mazp17/nodal-agentos/commit/ec25a6fabcabd5073f7d869e93450cb5c418d9b0))
+* **projects:** list agent & workflow sources with the most entries first ([#51](https://github.com/Mazp17/nodal-agentos/issues/51)) ([cec73ae](https://github.com/Mazp17/nodal-agentos/commit/cec73ae8f9e8f793d4e97621711e6390041832bc))
+
+
+### Performance Improvements
+
+* **backend:** cut child processes, CPU and IPC on the hot paths ([#56](https://github.com/Mazp17/nodal-agentos/issues/56)) ([26d42d4](https://github.com/Mazp17/nodal-agentos/commit/26d42d4467ea125bd05c0046f0a133c80792c7f9))
+
 ## [0.5.0](https://github.com/Mazp17/nodal-agentos/compare/v0.4.0...v0.5.0) (2026-09-26)
 
 
