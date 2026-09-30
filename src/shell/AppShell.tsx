@@ -26,7 +26,7 @@ import {
 } from "../features/runs";
 import { useLegacyImport } from "../features/settings/legacyImport";
 import { SettingsView } from "../features/settings/SettingsView";
-import { NewTaskDialog, TaskPanel, TasksView, useAskLaunch, useLaunch } from "../features/tasks";
+import { NewTaskDialog, TaskPanel, useAskLaunch, useLaunch } from "../features/tasks";
 import { useUpdates } from "../features/updates/useUpdates";
 import { CommandPalette, type PaletteItem } from "./palette/CommandPalette";
 import { Sidebar, type ProviderFoot } from "./Sidebar";
@@ -46,8 +46,8 @@ const isEditable = (t: EventTarget | null) =>
   t instanceof HTMLElement && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName));
 
 /** ⌘1–3, as in the design. */
-const SHORTCUT_PAGES: Record<string, ProjectPage> = { "1": "board", "2": "tasks", "3": "runs" };
-const PROJECT_PAGES: ReadonlySet<Page> = new Set(["board", "chat", "tasks", "runs", "project-settings"]);
+const SHORTCUT_PAGES: Record<string, ProjectPage> = { "1": "board", "2": "chat", "3": "runs" };
+const PROJECT_PAGES: ReadonlySet<Page> = new Set(["board", "chat", "runs", "project-settings"]);
 
 export function AppShell() {
   const ctx = useProjects();
@@ -117,6 +117,7 @@ export function AppShell() {
   useEffect(() => {
     if (route.projectId) lastProjectId.current = route.projectId;
   }, [route.projectId]);
+
 
   // Current project's sources with Linear connected: they enable "Import".
   const projectId = project?.id ?? null;
@@ -205,7 +206,7 @@ export function AppShell() {
           return;
         }
         const page = SHORTCUT_PAGES[e.key]!;
-        const needsProject = page === "tasks";
+        const needsProject = page === "chat";
         const pid = needsProject ? (fallbackProject()?.id ?? null) : (visible.projectId ?? null);
         if (needsProject && !pid) return;
         go(page, pid);
@@ -343,7 +344,7 @@ export function AppShell() {
 
   // ---- Content ----
   // The board handles its own "no repos" state; Tasks and Chat delegate it here.
-  const noRepos = project !== null && projectRepos.length === 0 && (route.page === "tasks" || route.page === "chat");
+  const noRepos = project !== null && projectRepos.length === 0 && route.page === "chat";
   let content: ReactNode;
   if (noRepos && project) {
     content = (
@@ -387,9 +388,6 @@ export function AppShell() {
           />
         );
         break;
-      case "tasks":
-        content = project && <TasksView projectId={project.id} onOpenTask={openTask} />;
-        break;
       case "runs":
         content = <RunsView key={route.projectId ?? "all"} projectId={route.projectId} onOpenRun={openRun} onGoToBoard={() => go("board", route.projectId)} />;
         break;
@@ -419,7 +417,7 @@ export function AppShell() {
     route.page === "run" ? PAGE_TITLE.run : visible.page === "board" && !visible.projectId ? "All projects" : PAGE_TITLE[visible.page];
   const crumbProject = visible.projectId ? (ctx.projectById.get(visible.projectId) ?? null) : null;
   const showNewTask =
-    (route.page === "board" || route.page === "tasks") && (project ? projectRepos.length > 0 : ctx.repos.length > 0);
+    route.page === "board" && (project ? projectRepos.length > 0 : ctx.repos.length > 0);
 
   const foot: ProviderFoot =
     provider.connection === "connected"
@@ -446,15 +444,16 @@ export function AppShell() {
         checkingUpdates={updates.checking}
         onUpdate={updates.check}
         onGo={(page, pid) => go(page, pid)}
-        onToggleProject={(pid) => {
-          // As in the design: picking another project opens it on the same page; the current one collapses.
+        onPickProject={(pid) => {
+          // As in the design: picking another project opens it on the same page; the current one just expands.
           if (visible.projectId === pid) {
-            nav.toggleProject(pid);
+            nav.setExpanded(pid, true);
           } else {
             const page = PROJECT_PAGES.has(visible.page) && visible.projectId ? visible.page : "board";
             go(page, pid);
           }
         }}
+        onToggleProject={nav.toggleProject}
         onNewProject={() => setCreateProject(true)}
         onOpenPalette={() => setPaletteOpen(true)}
       />
