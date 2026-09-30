@@ -246,7 +246,7 @@ export function AppShell() {
     for (const p of ctx.projects) {
       items.push({ id: `open-${p.id}`, kind: "Action", label: `Open ${p.name}`, keywords: p.key, run: () => go("board", p.id) });
     }
-    // `needYou` from `work_summary` already includes Blocked tasks (without counting them twice).
+    // `needYou` from `work_summary`: sessions waiting on input, moved tasks and migrated runs.
     if (queue.needYou > 0) {
       items.push({
         id: "need-you",
