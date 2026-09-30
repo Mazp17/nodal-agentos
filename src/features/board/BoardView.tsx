@@ -1,18 +1,23 @@
-import { useEffect, useMemo, useState, type DragEvent, type ReactNode } from "react";
-import { moveTask, reorderTasks } from "../../domain/api";
+import { useCallback, useEffect, useMemo, useState, type DragEvent, type ReactNode } from "react";
+import { deleteTask, moveTask, reorderTasks, updateTask } from "../../domain/api";
 import { useAllRuns, useLatestRunByTask } from "../../domain/hooks/runs";
 import { invalidate, useProjectList, useRepos, useSettings, useTasks } from "../../domain/hooks/store";
-import { taskKey, type Task, type TaskStatus } from "../../domain/types";
+import { taskKey, type Priority, type Task, type TaskStatus } from "../../domain/types";
+import { useConfirm } from "../../ui/ConfirmDialog";
 import { EmptyState } from "../../ui/EmptyState";
+import { readPref, writePref } from "../../shell/storage";
 import { useToast } from "../../ui/Toasts";
 import { resolveExecutor } from "../executors";
 import { NewTaskDialog } from "../tasks/NewTaskDialog";
 import { StatusRing } from "../tasks/bits";
-import { BOARD_COLUMNS, HIDDEN_COLUMNS, providerLabel, STATUS_META } from "../tasks/status";
+import { BOARD_COLUMNS, HIDDEN_COLUMNS, PRIORITY_LABEL, providerLabel, STATUS_META } from "../tasks/status";
 import { useAskLaunch } from "../tasks/LaunchPopover";
 import { useLaunch } from "../tasks/useLaunch";
+import { CardMenu } from "./CardMenu";
 import { FilterMenu } from "./FilterMenu";
-import { TaskCard, type CardAction, type CardModel } from "./TaskCard";
+import { SortMenu, type BoardSort } from "./SortMenu";
+import { TaskList } from "./TaskList";
+import { cardAction, TaskCard, type CardAction, type CardModel } from "./TaskCard";
 import { useRunPhases } from "./usePhases";
 import "./board.css";
 
@@ -38,12 +43,25 @@ const NO_FILTERS: Filters = { q: "", repo: null, source: null, status: null, lab
 
 const DRAG_TYPE = "text/x-nodal-task";
 
+/** Every status, in board order; Backlog and Canceled start collapsed into rails. */
+const ALL_COLUMNS: TaskStatus[] = [HIDDEN_COLUMNS[0], ...BOARD_COLUMNS, HIDDEN_COLUMNS[1]];
+const DEFAULT_COLLAPSED: Partial<Record<TaskStatus, boolean>> = { backlog: true, canceled: true };
+
+type View = "board" | "list";
+const VIEWS: [View, string][] = [
+  ["board", "Board"],
+  ["list", "List"],
+];
+const VIEW_PREF = "boardView";
+const SORT_PREF = "boardSort";
+
 /** Same order as the backend (`position, created_at, id`). */
 const byPosition = (a: Task, b: Task) =>
   a.position - b.position || a.createdAt - b.createdAt || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
 
 export function BoardView({ projectId, onOpenTask, onOpenRun, onNewProject, onOpenProjectSettings }: BoardViewProps) {
   const push = useToast();
+  const ask = useConfirm();
   const launch = useLaunch();
   const askLaunch = useAskLaunch();
   const projects = useProjectList();
@@ -53,16 +71,20 @@ export function BoardView({ projectId, onOpenTask, onOpenRun, onNewProject, onOp
   const globalExecutor = useSettings().data?.defaultExecutor ?? null;
 
   const [filters, setFilters] = useState<Filters>(NO_FILTERS);
-  const [showHidden, setShowHidden] = useState<Record<string, boolean>>({});
+  const [view, setView] = useState<View>(() => (readPref(VIEW_PREF) === "list" ? "list" : "board"));
+  const [sort, setSort] = useState<BoardSort>(() => (readPref(SORT_PREF) === "manual" ? "manual" : "last-run"));
+  const [collapsed, setCollapsed] = useState(DEFAULT_COLLAPSED);
+  const [menu, setMenu] = useState<{ taskId: string; at: { x: number; y: number } } | null>(null);
   const [newTask, setNewTask] = useState(false);
   const [busy, setBusy] = useState<Set<string>>(new Set());
   // Local changes (drag) until polling brings something equal or newer.
   const [patched, setPatched] = useState<Map<string, Task>>(new Map());
-  const [drag, setDrag] = useState<{ id: string; status: TaskStatus; index: number } | null>(null);
+  const [drag, setDrag] = useState<{ id: string; status: TaskStatus; index: number; height: number } | null>(null);
 
   useEffect(() => {
     setFilters(NO_FILTERS);
-    setShowHidden({});
+    setCollapsed(DEFAULT_COLLAPSED);
+    setMenu(null);
     setPatched(new Map());
   }, [projectId]);
 
@@ -118,21 +140,16 @@ export function BoardView({ projectId, onOpenTask, onOpenRun, onNewProject, onOp
     return true;
   });
 
-  const columns: TaskStatus[] = filters.status
-    ? [filters.status as TaskStatus]
-    : [
-        ...(showHidden.backlog ? (["backlog"] as TaskStatus[]) : []),
-        ...BOARD_COLUMNS,
-        ...(showHidden.canceled ? (["canceled"] as TaskStatus[]) : []),
-      ];
-  /** Most recently run first; tasks that never ran go after, in board order. */
+  /** Board layout: a status filter shows just that column, expanded. */
+  const layout: TaskStatus[] = filters.status ? [filters.status as TaskStatus] : ALL_COLUMNS;
+  const isRail = (s: TaskStatus) => !filters.status && !!collapsed[s];
+  /** Expanded columns (keyboard moves go between these). */
+  const columns = layout.filter((s) => !isRail(s));
+  /** "Last run": most recently run first; tasks that never ran go after, in board order. */
   const lastRunAt = (t: Task) => latest.get(t.id)?.queuedAt ?? -Infinity;
-  const byColumn = (s: TaskStatus) =>
-    visible.filter((t) => t.status === s).sort((a, b) => lastRunAt(b) - lastRunAt(a) || byPosition(a, b));
-  const hiddenCounts = HIDDEN_COLUMNS.filter((s) => !filters.status && !showHidden[s]).map((s) => ({
-    status: s,
-    count: visible.filter((t) => t.status === s).length,
-  }));
+  const order =
+    sort === "manual" ? byPosition : (a: Task, b: Task) => lastRunAt(b) - lastRunAt(a) || byPosition(a, b);
+  const byColumn = (s: TaskStatus) => visible.filter((t) => t.status === s).sort(order);
 
   const model = (t: Task): CardModel => {
     const repo = repoById.get(t.repoId);
@@ -172,7 +189,13 @@ export function BoardView({ projectId, onOpenTask, onOpenRun, onNewProject, onOp
   const onDragStart = (t: Task) => (e: DragEvent<HTMLElement>) => {
     e.dataTransfer.setData(DRAG_TYPE, t.id);
     e.dataTransfer.effectAllowed = "move";
-    setDrag({ id: t.id, status: t.status, index: -1 });
+    // Started on the title (see TaskCard): drag the whole card, from where it was grabbed.
+    if (e.target !== e.currentTarget) {
+      const r = e.currentTarget.getBoundingClientRect();
+      e.dataTransfer.setDragImage(e.currentTarget, e.clientX - r.left, e.clientY - r.top);
+    }
+    setMenu(null);
+    setDrag({ id: t.id, status: t.status, index: -1, height: e.currentTarget.offsetHeight });
   };
 
   const dropIndex = (e: DragEvent<HTMLElement>, list: Task[]) => {
@@ -258,6 +281,52 @@ export function BoardView({ projectId, onOpenTask, onOpenRun, onNewProject, onOp
     }
   };
 
+  // ---------- Context menu ----------
+
+  const closeMenu = useCallback(() => setMenu(null), []);
+  const keyOf = (t: Task) => {
+    const p = projectById.get(t.projectId);
+    return p ? taskKey(p.key, t.number) : `#${t.number}`;
+  };
+
+  const patchTask = async (t: Task, patch: { status?: TaskStatus; priority?: Priority }, msg: string) => {
+    try {
+      await updateTask(t.id, patch);
+      push(msg, t.title, "ok");
+    } catch (err) {
+      push("Couldn't update the task", String(err), "danger");
+    } finally {
+      await invalidate("tasks");
+    }
+  };
+
+  const removeTask = async (t: Task) => {
+    const key = keyOf(t);
+    const ok = await ask({
+      title: `Delete ${key}?`,
+      body: `"${t.title}" and its plan are deleted. This can't be undone.`,
+      confirmLabel: "Delete task",
+    });
+    if (!ok) return;
+    try {
+      await deleteTask(t.id);
+      push("Task deleted", t.title, "ok");
+    } catch (err) {
+      push("Couldn't delete the task", String(err), "danger");
+    } finally {
+      await invalidate("tasks");
+    }
+  };
+
+  const copyId = async (t: Task) => {
+    try {
+      await navigator.clipboard.writeText(keyOf(t));
+      push("Copied", keyOf(t), "ok");
+    } catch (err) {
+      push("Couldn't copy the ID", String(err), "danger");
+    }
+  };
+
   // ---------- States ----------
 
   const loadError = tasks.error ?? repos.error ?? projects.error;
@@ -267,10 +336,10 @@ export function BoardView({ projectId, onOpenTask, onOpenRun, onNewProject, onOp
   const hasFilters = !!(q || filters.repo || filters.source || filters.status || filters.label);
 
   const set = (p: Partial<Filters>) => setFilters((f) => ({ ...f, ...p }));
-  const statusOptions = [...HIDDEN_COLUMNS.slice(0, 1), ...BOARD_COLUMNS, ...HIDDEN_COLUMNS.slice(1)].map((s) => ({
+  const statusOptions = ALL_COLUMNS.map((s) => ({
     value: s,
     label: STATUS_META[s].label,
-    dot: STATUS_META[s].color,
+    icon: <StatusRing status={s} />,
   }));
 
   let body;
@@ -301,6 +370,18 @@ export function BoardView({ projectId, onOpenTask, onOpenRun, onNewProject, onOp
           </button>
         )}
       </EmptyState>
+    );
+  } else if (loading && view === "list") {
+    body = (
+      <div className="tv-body" aria-busy="true" aria-label="Loading tasks">
+        {[62, 48, 70, 40, 56].map((w) => (
+          <div key={w} className="tv-skel-row">
+            <span className="tv-skel tv-skel-ring" />
+            <span className="tv-skel" style={{ width: 54 }} />
+            <span className="tv-skel" style={{ width: `${w}%` }} />
+          </div>
+        ))}
+      </div>
     );
   } else if (loading) {
     body = (
@@ -335,39 +416,94 @@ export function BoardView({ projectId, onOpenTask, onOpenRun, onNewProject, onOp
         </button>
       </EmptyState>
     );
+  } else if (view === "list") {
+    body = (
+      <TaskList
+        tasks={visible}
+        statuses={layout}
+        order={order}
+        showProject={projectId === null}
+        projectById={projectById}
+        repoById={repoById}
+        latest={latest}
+        keyOf={keyOf}
+        onOpen={onOpenTask}
+        onMenu={(taskId, at) => setMenu({ taskId, at })}
+      />
+    );
   } else {
+    const dragged = drag ? allTasks.find((t) => t.id === drag.id) : undefined;
+    const placeholder = dragged && (
+      <div className="bd-drop-ph" style={{ height: drag?.height }} aria-hidden>
+        <span className="bd-drop-ph-title">{dragged.title}</span>
+        <span className="bd-drop-ph-meta mono">{keyOf(dragged)}</span>
+      </div>
+    );
     body = (
       <div className="bd-columns">
-        {columns.map((status) => {
+        {layout.map((status) => {
           const list = byColumn(status);
           const meta = STATUS_META[status];
           const others = list.filter((t) => t.id !== drag?.id);
           const over = drag && drag.status === status && drag.index >= 0 ? drag.index : -1;
+          const dragProps = {
+            onDragOver: onDragOver(status, others),
+            onDragLeave: (e: DragEvent<HTMLElement>) => {
+              if (!e.currentTarget.contains(e.relatedTarget as Node | null) && drag?.status === status) {
+                setDrag({ ...drag, index: -1 });
+              }
+            },
+            onDrop: onDrop(status, others),
+          };
+          if (isRail(status)) {
+            return (
+              <button
+                key={status}
+                type="button"
+                className={`bd-rail ${over >= 0 ? "drop-target" : ""}`}
+                data-rail={status}
+                aria-label={`Show ${meta.label}, ${list.length} tasks`}
+                title={`Show ${meta.label}`}
+                onClick={() => setCollapsed((c) => ({ ...c, [status]: false }))}
+                {...dragProps}
+              >
+                <StatusRing status={status} />
+                <span className="bd-rail-name">
+                  {meta.label} · <span className="num">{list.length}</span>
+                </span>
+              </button>
+            );
+          }
           return (
             <section
               key={status}
               className={`bd-col ${over >= 0 ? "drop-target" : ""}`}
               aria-label={`${meta.label}, ${list.length} tasks`}
-              onDragOver={onDragOver(status, others)}
-              onDragLeave={(e) => {
-                if (!e.currentTarget.contains(e.relatedTarget as Node | null) && drag?.status === status) {
-                  setDrag({ ...drag, index: -1 });
-                }
-              }}
-              onDrop={onDrop(status, others)}
+              {...dragProps}
             >
               <header className="bd-col-head">
                 <StatusRing status={status} />
                 <span className="bd-col-name">{meta.label}</span>
                 <span className="bd-col-count num">{list.length}</span>
-                {HIDDEN_COLUMNS.includes(status) && !filters.status && (
+                <span className="bd-spacer" />
+                {status === "todo" && (
+                  <button type="button" className="icon-btn bd-col-btn" aria-label="New task" title="New task" onClick={() => setNewTask(true)}>
+                    +
+                  </button>
+                )}
+                {!filters.status && (
                   <button
                     type="button"
-                    className="bd-col-hide"
-                    aria-label={`Hide ${meta.label}`}
-                    onClick={() => setShowHidden((h) => ({ ...h, [status]: false }))}
+                    className="icon-btn bd-col-btn"
+                    aria-label={`Collapse ${meta.label}`}
+                    title="Collapse"
+                    onClick={() => {
+                      setCollapsed((c) => ({ ...c, [status]: true }));
+                      // The button unmounts with its column: hand focus to the new rail.
+                      requestAnimationFrame(() => document.querySelector<HTMLElement>(`[data-rail="${status}"]`)?.focus());
+                    }}
                   >
-                    Hide
+                    ‹
                   </button>
                 )}
               </header>
@@ -379,7 +515,7 @@ export function BoardView({ projectId, onOpenTask, onOpenRun, onNewProject, onOp
                   const m = model(t);
                   return (
                     <div key={t.id} data-card-id={t.id} className="bd-slot">
-                      {!isDragged && over === k && <div className="bd-drop-line" />}
+                      {!isDragged && over === k && placeholder}
                       <TaskCard
                         model={m}
                         showProject={projectId === null}
@@ -390,46 +526,36 @@ export function BoardView({ projectId, onOpenTask, onOpenRun, onNewProject, onOp
                         onDragStart={onDragStart(t)}
                         onDragEnd={() => setDrag(null)}
                         onKeyMove={(k) => onKeyMove(t, k)}
+                        onMenu={(at) => setMenu({ taskId: t.id, at })}
                       />
                     </div>
                   );
                 });
               })()}
-              {over >= others.length && <div className="bd-drop-line" />}
-              {list.length === 0 && over < 0 && <div className="bd-col-empty">Nothing here</div>}
+              {over >= others.length && placeholder}
+              {list.length === 0 && over < 0 && (
+                <div className="bd-col-empty">{hasFilters ? "No matching tasks" : "Drop a task here"}</div>
+              )}
             </section>
           );
         })}
-        {hiddenCounts.some((h) => h.count > 0) && (
-          <div className="bd-hidden-toggles">
-            {hiddenCounts
-              .filter((h) => h.count > 0)
-              .map((h) => (
-                <button
-                  key={h.status}
-                  type="button"
-                  className="bd-hidden-btn"
-                  onClick={() => setShowHidden((s) => ({ ...s, [h.status]: true }))}
-                >
-                  {STATUS_META[h.status].label} · {h.count}
-                </button>
-              ))}
-          </div>
-        )}
       </div>
     );
   }
+
+  const menuTask = menu ? allTasks.find((t) => t.id === menu.taskId) : undefined;
+  const menuModel = menuTask ? model(menuTask) : undefined;
 
   const showTools = !noProjects && !noRepos;
 
   return (
     <div className="bd-root">
       {showTools && (
-        <div className="bd-toolbar" role="toolbar" aria-label="Board filters">
+        <div className="bd-toolbar" role="toolbar" aria-label="Task filters">
           <input
             className="input bd-q"
-            placeholder="Filter"
-            aria-label="Filter tasks"
+            placeholder="Search tasks…"
+            aria-label="Search tasks"
             value={filters.q}
             onChange={(e) => set({ q: e.target.value })}
           />
@@ -460,14 +586,59 @@ export function BoardView({ projectId, onOpenTask, onOpenRun, onNewProject, onOp
               Clear
             </button>
           )}
+          <span className="bd-spacer" />
           {runs.error && (
             <span className="bd-tool-warn" title={runs.error}>
               Run status unavailable
             </span>
           )}
+          <SortMenu
+            value={sort}
+            onChange={(v) => {
+              setSort(v);
+              writePref(SORT_PREF, v);
+            }}
+          />
+          <div className="seg bd-view" role="radiogroup" aria-label="View">
+            {VIEWS.map(([v, l]) => (
+              <button
+                key={v}
+                type="button"
+                role="radio"
+                aria-checked={view === v}
+                className="seg-opt"
+                onClick={() => {
+                  setView(v);
+                  writePref(VIEW_PREF, v);
+                }}
+              >
+                {l}
+              </button>
+            ))}
+          </div>
         </div>
       )}
       {body}
+      {menu && menuTask && menuModel && (
+        <CardMenu
+          model={menuModel}
+          taskId={keyOf(menuTask)}
+          at={menu.at}
+          action={cardAction(menuModel)}
+          busy={busy.has(menuTask.id)}
+          onClose={closeMenu}
+          onOpen={() => onOpenTask(menuTask.id)}
+          onAction={(a) => void onAction(menuModel, a)}
+          onStatus={(st) => {
+            if (st !== menuTask.status) void patchTask(menuTask, { status: st }, `${keyOf(menuTask)} → ${STATUS_META[st].label}`);
+          }}
+          onPriority={(p) => {
+            if (p !== menuTask.priority) void patchTask(menuTask, { priority: p }, `${keyOf(menuTask)} → ${PRIORITY_LABEL[p]}`);
+          }}
+          onCopyId={() => void copyId(menuTask)}
+          onDelete={() => void removeTask(menuTask)}
+        />
+      )}
       {newTask && (
         <NewTaskDialog
           projectId={projectId}

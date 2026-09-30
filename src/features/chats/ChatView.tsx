@@ -202,7 +202,7 @@ export function ChatView({ project, repos, onOpenTask, focusChatId, onFocused }:
           <span className="chat-new-plus" aria-hidden>
             +
           </span>
-          New chat
+          <span className="chat-new-label">New chat</span>
         </button>
         <input className="input chat-search" value={q} placeholder="Search chats" aria-label="Search chats" onChange={(e) => setQ(e.target.value)} />
         <h2 className="chat-side-label">Sessions</h2>

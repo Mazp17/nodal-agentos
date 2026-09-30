@@ -1,6 +1,6 @@
 // Controls shared by onboarding, New project and Project settings.
 
-import { useId, type KeyboardEvent } from "react";
+import { useId, type KeyboardEvent, type ReactNode } from "react";
 import { useProviderScopes, useProviderStatus } from "../../domain/hooks/providers";
 import type { ScopeRef } from "../../domain/types";
 import { ScopePicker } from "../providers/ScopePicker";
@@ -56,7 +56,7 @@ export function ColorSwatches({
 
 export interface SegOption<T> {
   value: T;
-  label: string;
+  label: ReactNode;
 }
 
 /** Single-choice segmented control (radio group). */

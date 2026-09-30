@@ -337,17 +337,17 @@ function ProposalCard({
             <span className="chat-proposal-done">
               ✓ <span className="mono">{created.key}</span> created
             </span>
-            <button type="button" className="btn btn-sm btn-ghost" onClick={() => onOpenTask(created.taskId)}>
+            <button type="button" className="chat-proposal-open" onClick={() => onOpenTask(created.taskId)}>
               Open task
             </button>
           </>
         ) : (
           <>
             <span className="chat-proposal-hint">Lands in {status} · local task</span>
-            <button type="button" className="btn btn-sm" disabled={busy} onClick={() => void create(false)}>
+            <button type="button" className="btn" disabled={busy} onClick={() => void create(false)}>
               Create task
             </button>
-            <button type="button" className="btn btn-sm btn-primary" disabled={busy} onClick={() => void create(true)}>
+            <button type="button" className="btn btn-primary" disabled={busy} onClick={() => void create(true)}>
               Create &amp; run
             </button>
           </>

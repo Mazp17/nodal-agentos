@@ -13,11 +13,11 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { createTask, getTask, readTaskPlan, updateTask, type NewTask, type PlanInput, type TaskPatch } from "../../domain/api";
 import { invalidate, useProjectList, useRepos, useSettings } from "../../domain/hooks/store";
 import { taskKey, type Executor, type Priority, type Task } from "../../domain/types";
-import { Kbd } from "../../ui/Kbd";
+import { Kbd, KbdGroup } from "../../ui/Kbd";
 import { SafeMarkdown } from "../../ui/Markdown";
 import { useFocusTrap } from "../../ui/useFocusTrap";
 import { useToast } from "../../ui/Toasts";
-import { ExecutorPicker, executorLabel, inheritedExecutor, sameExecutor } from "../executors";
+import { ExecutorPicker, inheritedExecutor, sameExecutor } from "../executors";
 import { PriorityBars } from "./bits";
 import { useAskLaunch, type RunConfig } from "./LaunchPopover";
 import { PRIORITIES, PRIORITY_LABEL, providerLabel } from "./status";
@@ -109,7 +109,6 @@ export function NewTaskDialog({ projectId, taskId, defaultRepoId, onClose, onSav
   const [acceptance, setAcceptance] = useState<string[]>([]);
   const [critDraft, setCritDraft] = useState("");
   const [assignee, setAssignee] = useState<Executor | null>(null);
-  const [execOpen, setExecOpen] = useState(false);
   const [menu, setMenu] = useState<Menu>(null);
   const [tried, setTried] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -378,7 +377,7 @@ export function NewTaskDialog({ projectId, taskId, defaultRepoId, onClose, onSav
       : original
         ? "Changes apply to the next run"
         : repo
-          ? `${executorLabel(effExecutor)} runs it · delivery is chosen on each run`
+          ? "Isolation, finish and review are chosen on each run"
           : "";
 
   return (
@@ -398,73 +397,17 @@ export function NewTaskDialog({ projectId, taskId, defaultRepoId, onClose, onSav
           <h2 id={titleId} className="dlg-title">
             {original ? "Edit task" : "New task"}
           </h2>
-          <span className="nt-in">in</span>
-          <div className="nt-anchor" ref={repoMenuRef}>
-            <button
-              type="button"
-              className={`nt-repo ${repoErr ? "err" : ""}`}
-              aria-haspopup="menu"
-              aria-expanded={menu === "repo"}
-              aria-label={`Repo: ${repo ? `${project?.name ?? ""} / ${repo.name}` : "none"}`}
-              disabled={!loaded}
-              onClick={() => setMenu(menu === "repo" ? null : "repo")}
-            >
-              {project && <span className="dlg-proj-dot" style={{ background: project.color }} aria-hidden />}
-              {project && <span className="nt-repo-proj">{project.name} /</span>}
-              <span className={`nt-repo-name ${repo ? "" : "empty"}`}>{repo?.name ?? "Choose repo"}</span>
-              <span className="nt-caret" aria-hidden>
-                ▼
+          {project && (
+            <>
+              <span className="nt-sep-dot" aria-hidden>
+                ·
               </span>
-            </button>
-            {menu === "repo" && (
-              <div className="menu nt-menu nt-repo-menu" role="menu" aria-label="Repo">
-                {menuGroups.map((g) => (
-                  <div key={g.project.id} role="group" aria-label={g.project.name}>
-                    {pickProject && (
-                      <div className="menu-label nt-menu-proj">
-                        <span className="dlg-proj-dot" style={{ background: g.project.color }} aria-hidden />
-                        {g.project.name}
-                      </div>
-                    )}
-                    {g.repos.map((r) => (
-                      <button
-                        key={r.id}
-                        type="button"
-                        role="menuitemradio"
-                        aria-checked={r.id === repoId}
-                        className="menu-item nt-repo-item"
-                        onClick={() => pickRepo(r.id, g.project.id)}
-                      >
-                        <span className="menu-mark" aria-hidden>
-                          {r.id === repoId ? "✓" : ""}
-                        </span>
-                        <span className="mono">{r.name}</span>
-                        <span className="nt-repo-path mono ellipsis">{r.path}</span>
-                      </button>
-                    ))}
-                  </div>
-                ))}
-                {onAddRepo && pid && (
-                  <>
-                    <div className="nt-sep" />
-                    <button
-                      type="button"
-                      role="menuitem"
-                      className="menu-item nt-add-repo"
-                      onClick={() => {
-                        setMenu(null);
-                        onAddRepo(pid);
-                      }}
-                    >
-                      Add repo…
-                    </button>
-                  </>
-                )}
-              </div>
-            )}
-          </div>
+              <span className="dlg-proj-dot" style={{ background: project.color }} aria-hidden />
+              <span className="ellipsis">{project.name}</span>
+            </>
+          )}
           <span className="dlg-spacer" />
-          <button type="button" className="icon-btn" aria-label="Close" onClick={onClose}>
+          <button type="button" className="icon-btn" aria-label="Close" title="Close (Esc)" onClick={onClose}>
             ✕
           </button>
         </header>
@@ -475,12 +418,6 @@ export function NewTaskDialog({ projectId, taskId, defaultRepoId, onClose, onSav
           </div>
         ) : (
           <div className="dlg-body nt-body">
-            {(repoErr || noRepos) && (
-              <div className="nt-err nt-repo-err">
-                {noRepos ? "This project has no repos yet. Add one from the repo menu." : "Choose which repo this task runs in."}
-              </div>
-            )}
-
             <section className="nt-sec nt-top">
               <input
                 ref={titleRef}
@@ -498,10 +435,72 @@ export function NewTaskDialog({ projectId, taskId, defaultRepoId, onClose, onSav
                 <span className="tk-hint">Title, priority and labels come from {providerLabel(original?.source?.provider ?? "")}.</span>
               )}
               <div className="nt-meta">
+                <div className="nt-anchor" ref={repoMenuRef}>
+                  <button
+                    type="button"
+                    className={`btn btn-sm nt-repo ${repoErr ? "err" : ""}`}
+                    aria-haspopup="menu"
+                    aria-expanded={menu === "repo"}
+                    aria-label={`Repo: ${repo ? `${project?.name ?? ""} / ${repo.name}` : "none"}`}
+                    disabled={!loaded}
+                    onClick={() => setMenu(menu === "repo" ? null : "repo")}
+                  >
+                    <span className={`nt-repo-name ${repo ? "" : "empty"}`}>{repo?.name ?? "Choose repo"}</span>
+                    <span className="nt-caret" aria-hidden>
+                      ▾
+                    </span>
+                  </button>
+                  {menu === "repo" && (
+                    <div className="menu nt-menu nt-repo-menu" role="menu" aria-label="Repo">
+                      {menuGroups.map((g) => (
+                        <div key={g.project.id} role="group" aria-label={g.project.name}>
+                          {pickProject && (
+                            <div className="menu-label nt-menu-proj">
+                              <span className="dlg-proj-dot" style={{ background: g.project.color }} aria-hidden />
+                              {g.project.name}
+                            </div>
+                          )}
+                          {g.repos.map((r) => (
+                            <button
+                              key={r.id}
+                              type="button"
+                              role="menuitemradio"
+                              aria-checked={r.id === repoId}
+                              className="menu-item nt-repo-item"
+                              onClick={() => pickRepo(r.id, g.project.id)}
+                            >
+                              <span className="menu-mark" aria-hidden>
+                                {r.id === repoId ? "✓" : ""}
+                              </span>
+                              <span className="mono">{r.name}</span>
+                              <span className="nt-repo-path mono ellipsis">{r.path}</span>
+                            </button>
+                          ))}
+                        </div>
+                      ))}
+                      {onAddRepo && pid && (
+                        <>
+                          <div className="nt-sep" role="separator" />
+                          <button
+                            type="button"
+                            role="menuitem"
+                            className="menu-item nt-add-repo"
+                            onClick={() => {
+                              setMenu(null);
+                              onAddRepo(pid);
+                            }}
+                          >
+                            Add repo…
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  )}
+                </div>
                 <div className="nt-anchor" ref={prioMenuRef}>
                   <button
                     type="button"
-                    className="nt-chip"
+                    className="btn btn-sm nt-chip"
                     aria-haspopup="menu"
                     aria-expanded={menu === "prio"}
                     aria-label={`Priority: ${PRIORITY_LABEL[priority]}`}
@@ -510,9 +509,6 @@ export function NewTaskDialog({ projectId, taskId, defaultRepoId, onClose, onSav
                   >
                     <PriorityBars priority={priority} />
                     {priority === "none" ? "Priority" : PRIORITY_LABEL[priority]}
-                    <span className="nt-caret" aria-hidden>
-                      ▼
-                    </span>
                   </button>
                   {menu === "prio" && (
                     <div className="menu nt-menu nt-prio-menu" role="menu" aria-label="Priority">
@@ -528,11 +524,11 @@ export function NewTaskDialog({ projectId, taskId, defaultRepoId, onClose, onSav
                             setMenu(null);
                           }}
                         >
-                          <PriorityBars priority={p} />
-                          <span className="nt-grow">{PRIORITY_LABEL[p]}</span>
                           <span className="menu-mark" aria-hidden>
                             {priority === p ? "✓" : ""}
                           </span>
+                          <PriorityBars priority={p} />
+                          <span className="nt-grow">{PRIORITY_LABEL[p]}</span>
                         </button>
                       ))}
                     </div>
@@ -564,13 +560,18 @@ export function NewTaskDialog({ projectId, taskId, defaultRepoId, onClose, onSav
                   />
                 )}
               </div>
+              {(repoErr || noRepos) && (
+                <div className="nt-err">
+                  {noRepos ? "This project has no repos yet. Add one from the repo menu." : "Choose which repo this task runs in."}
+                </div>
+              )}
             </section>
 
-            <section className="nt-sec">
+            <section className="nt-sec" aria-label="Plan">
               <div className="nt-sec-head">
                 <span className="nt-sec-title">Plan</span>
                 {kind === "text" && (
-                  <div className="nt-tabs" role="tablist" aria-label="Plan view">
+                  <div className="seg nt-seg" role="tablist" aria-label="Plan view">
                     {(
                       [
                         ["write", "Write"],
@@ -582,7 +583,7 @@ export function NewTaskDialog({ projectId, taskId, defaultRepoId, onClose, onSav
                         type="button"
                         role="tab"
                         aria-selected={tab === k}
-                        className={`nt-tab ${tab === k ? "on" : ""}`}
+                        className={`seg-opt ${tab === k ? "on" : ""}`}
                         onClick={() => setTab(k)}
                       >
                         {l}
@@ -594,7 +595,7 @@ export function NewTaskDialog({ projectId, taskId, defaultRepoId, onClose, onSav
                 {kind === "text" && !text.trim() && (
                   <button
                     type="button"
-                    className="nt-soft-btn"
+                    className="btn btn-xs btn-ghost"
                     onClick={() => {
                       setText(PLAN_TEMPLATE);
                       setTab("write");
@@ -603,7 +604,7 @@ export function NewTaskDialog({ projectId, taskId, defaultRepoId, onClose, onSav
                     Insert template
                   </button>
                 )}
-                <button type="button" className="nt-link" onClick={() => setKind(kind === "text" ? "file" : "text")}>
+                <button type="button" className="btn btn-xs btn-ghost" onClick={() => setKind(kind === "text" ? "file" : "text")}>
                   {kind === "text" ? "Use a .md from the repo" : "Write it here instead"}
                 </button>
               </div>
@@ -640,124 +641,77 @@ export function NewTaskDialog({ projectId, taskId, defaultRepoId, onClose, onSav
               {imported && <span className="tk-hint">Saving a new plan overrides the synced description.</span>}
             </section>
 
-            <section className="nt-sec">
-              <div className="nt-sec-head nt-sec-head-base">
-                <span className="nt-sec-title">Done when</span>
-                <span className="nt-sec-sub ellipsis">· the reviewer checks each one</span>
-                <span className="nt-count">
-                  {critCount ? `${critCount} criteri${critCount === 1 ? "on" : "a"}` : ""}
-                </span>
+            <section className="nt-sec nt-crits" aria-label="Acceptance criteria">
+              <div className="nt-sec-head">
+                <span className="nt-sec-title">Acceptance criteria</span>
+                {critCount > 0 && <span className="nt-sec-sub num">{critCount}</span>}
+                <span className="nt-sec-sub nt-sec-note ellipsis">The reviewer checks each one</span>
               </div>
               {suggestions.length > 0 && (
                 <div className="nt-sugg">
-                  <div className="nt-sugg-head">
-                    <span>Found {suggestions.length} in your plan</span>
-                    <button type="button" className="nt-soft-btn" onClick={() => addCriteria(suggestions)}>
-                      Add all
+                  <span className="nt-sugg-label">Found {suggestions.length} in your plan</span>
+                  {suggestions.map((sg) => (
+                    <button key={sg} type="button" className="nt-sugg-item" onClick={() => addCriteria([sg])}>
+                      <span className="nt-plus" aria-hidden>
+                        +
+                      </span>
+                      <span className="ellipsis">{sg}</span>
                     </button>
-                  </div>
-                  <div className="nt-sugg-list">
-                    {suggestions.map((sg) => (
-                      <button key={sg} type="button" className="nt-sugg-item" onClick={() => addCriteria([sg])}>
-                        <span className="nt-plus" aria-hidden>
-                          +{" "}
-                        </span>
-                        {sg}
-                      </button>
-                    ))}
-                  </div>
+                  ))}
+                  <button type="button" className="btn btn-xs btn-ghost" onClick={() => addCriteria(suggestions)}>
+                    Add all
+                  </button>
                 </div>
               )}
-              <div className="nt-crits">
-                {acceptance.map((c, i) => {
-                  const vague = isVague(c);
-                  return (
-                    <div key={i} className="nt-crit">
-                      <div className="nt-crit-row">
-                        <span className={`nt-box ${vague ? "warn" : ""}`} aria-hidden />
-                        <input
-                          ref={(el) => {
-                            acRefs.current[i] = el;
-                          }}
-                          className="nt-crit-input"
-                          value={c}
-                          aria-label={`Criterion ${i + 1}`}
-                          onChange={(e) => setAc(i, e.target.value)}
-                          onKeyDown={(e) => {
-                            if (e.key === "Enter" && !e.metaKey) e.currentTarget.blur();
-                            else if (e.key === "Backspace" && c === "") {
-                              e.preventDefault();
-                              removeAc(i);
-                            }
-                          }}
-                        />
-                        <button
-                          type="button"
-                          className="nt-x"
-                          aria-label={`Remove criterion ${i + 1}`}
-                          onClick={() => removeAc(i)}
-                        >
-                          ✕
-                        </button>
-                      </div>
-                      {vague && (
-                        <div className="nt-vague">Hard to verify. Say what the reviewer would observe: a value, a test, a file.</div>
-                      )}
+              {acceptance.map((c, i) => {
+                const vague = isVague(c);
+                return (
+                  <div key={i} className="nt-crit">
+                    <div className="nt-crit-row">
+                      <span className={`nt-box ${vague ? "warn" : ""}`} aria-hidden />
+                      <input
+                        ref={(el) => {
+                          acRefs.current[i] = el;
+                        }}
+                        className="nt-crit-input"
+                        value={c}
+                        aria-label={`Criterion ${i + 1}`}
+                        onChange={(e) => setAc(i, e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" && !e.metaKey) e.currentTarget.blur();
+                          else if (e.key === "Backspace" && c === "") {
+                            e.preventDefault();
+                            removeAc(i);
+                          }
+                        }}
+                      />
+                      <button type="button" className="icon-btn nt-x" aria-label={`Remove criterion ${i + 1}`} onClick={() => removeAc(i)}>
+                        ✕
+                      </button>
                     </div>
-                  );
-                })}
-                <div className="nt-crit-row nt-crit-new">
-                  <span className="nt-box-plus" aria-hidden>
-                    +
-                  </span>
-                  <input
-                    ref={draftRef}
-                    className="nt-crit-input"
-                    value={critDraft}
-                    onChange={(e) => setCritDraft(e.target.value)}
-                    onKeyDown={onDraftKey}
-                    onPaste={onDraftPaste}
-                    placeholder="Observable outcome, e.g. retries stop after 5 attempts"
-                    aria-label="New criterion"
-                  />
-                  <span className="nt-crit-hint" aria-hidden>
-                    <Kbd>↵</Kbd> add
-                  </span>
-                </div>
+                    {vague && <div className="nt-vague">Hard to verify. Say what the reviewer would observe: a value, a test, a file.</div>}
+                  </div>
+                );
+              })}
+              <div className="nt-crit-row">
+                <span className="nt-box-plus" aria-hidden>
+                  +
+                </span>
+                <input
+                  ref={draftRef}
+                  className="nt-crit-input"
+                  value={critDraft}
+                  onChange={(e) => setCritDraft(e.target.value)}
+                  onKeyDown={onDraftKey}
+                  onPaste={onDraftPaste}
+                  placeholder="Observable outcome, e.g. retries stop after 5 attempts"
+                  aria-label="New criterion"
+                />
               </div>
               {critCount === 0 && (
-                <span className="tk-hint">
+                <span className="nt-crit-empty">
                   Without criteria the reviewer only checks the plan steps. Paste a list and each line becomes one criterion.
                 </span>
-              )}
-            </section>
-
-            <section className="nt-exec">
-              <button
-                type="button"
-                className="nt-exec-head"
-                aria-expanded={execOpen}
-                onClick={() => setExecOpen(!execOpen)}
-              >
-                <span className="nt-sec-title">Execution</span>
-                <span className="nt-exec-sum ellipsis">{executorLabel(effExecutor)}</span>
-                {execCustom && <span className="nt-custom">custom</span>}
-                <span className="nt-exec-btn">{execOpen ? "Done" : "Change"}</span>
-              </button>
-              {execOpen && (
-                <div className="nt-exec-body">
-                  <span className="nt-exec-label">Executor</span>
-                  <div className="nt-exec-opt">
-                    <ExecutorPicker
-                      repoId={repo?.id ?? null}
-                      projectId={pid}
-                      value={assignee}
-                      inherited={inherited}
-                      onChange={(v) => setAssignee(v && sameExecutor(v, inherited) ? null : v)}
-                      dropUp
-                    />
-                  </div>
-                </div>
               )}
             </section>
 
@@ -770,19 +724,39 @@ export function NewTaskDialog({ projectId, taskId, defaultRepoId, onClose, onSav
         )}
 
         <footer className="dlg-foot">
-          <span className={`dlg-foot-note ${tried && missing.length ? "nt-err" : "tk-hint"}`}>{footNote}</span>
-          <button type="button" className="btn btn-ghost" onClick={onClose}>
-            Cancel
-          </button>
-          {!original && (
-            <button type="button" className="btn" disabled={saving || !loaded} onClick={() => void submit(true)}>
-              Create and run
+          <div className="nt-runs">
+            <span className="nt-runs-label">Runs with</span>
+            <ExecutorPicker
+              variant="pill"
+              caption="Executor"
+              repoId={repo?.id ?? null}
+              projectId={pid}
+              value={assignee}
+              inherited={inherited}
+              disabled={!loaded}
+              onChange={(v) => setAssignee(v && sameExecutor(v, inherited) ? null : v)}
+              dropUp
+            />
+            {execCustom && <span className="nt-runs-note">differs from the repo default</span>}
+          </div>
+          <div className="nt-actions">
+            <span className={`dlg-foot-note ${tried && missing.length ? "nt-err" : "tk-hint"}`}>{footNote}</span>
+            <button type="button" className="btn btn-ghost" onClick={onClose}>
+              Cancel
             </button>
-          )}
-          <button type="submit" className="btn btn-primary nt-save" disabled={saving || !loaded}>
-            {original ? "Save" : "Save as to-do"}
-            <Kbd aria-hidden>⌘↵</Kbd>
-          </button>
+            {!original && (
+              <button type="button" className="btn" disabled={saving || !loaded} onClick={() => void submit(true)}>
+                Create and run
+              </button>
+            )}
+            <button type="submit" className="btn btn-primary nt-save" disabled={saving || !loaded}>
+              {original ? "Save" : "Save as to-do"}
+              <KbdGroup aria-hidden>
+                <Kbd>⌘</Kbd>
+                <Kbd>↵</Kbd>
+              </KbdGroup>
+            </button>
+          </div>
         </footer>
       </form>
     </>

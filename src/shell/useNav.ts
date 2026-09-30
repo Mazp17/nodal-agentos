@@ -5,7 +5,7 @@ import { useCallback, useEffect, useState } from "react";
 import { readJsonPref, writePref } from "./storage";
 
 /** Project pages (and the global `board`/`runs` with `projectId: null`). */
-export type ProjectPage = "board" | "chat" | "tasks" | "runs" | "project-settings";
+export type ProjectPage = "board" | "chat" | "runs" | "project-settings";
 export type Page = ProjectPage | "settings" | "run";
 
 /** `debug` exists only in dev builds. */
@@ -21,7 +21,8 @@ export interface Route {
 }
 
 /** These pages need a project; without one they fall back to the global `board`. */
-const NEEDS_PROJECT: ReadonlySet<Page> = new Set(["chat", "tasks", "project-settings"]);
+const NEEDS_PROJECT: ReadonlySet<Page> = new Set(["chat", "project-settings"]);
+// `tasks` is the old List page, now a view of the board; saved routes still carry it.
 const PAGES: ReadonlySet<string> = new Set(["board", "chat", "tasks", "runs", "project-settings", "settings", "run"]);
 const HOME: Route = { projectId: null, page: "board" };
 
@@ -33,6 +34,7 @@ const isRoute = (v: unknown): v is Route => {
 const isStringArray = (v: unknown): v is string[] => Array.isArray(v) && v.every((x) => typeof x === "string");
 
 const normalize = (r: Route): Route => {
+  if ((r.page as string) === "tasks") return { projectId: r.projectId, page: "board" };
   if (r.page === "run" && !r.runId) return HOME;
   if (r.page === "settings") return { projectId: null, page: "settings" };
   if (NEEDS_PROJECT.has(r.page) && !r.projectId) return { projectId: null, page: "board" };
@@ -148,9 +150,8 @@ export function useNav(): Nav {
 }
 
 export const PAGE_TITLE: Record<Page, string> = {
-  board: "Board",
+  board: "Tasks",
   chat: "Chat",
-  tasks: "Tasks",
   runs: "Runs",
   "project-settings": "Settings",
   settings: "Settings",

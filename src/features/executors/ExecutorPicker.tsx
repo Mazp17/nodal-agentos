@@ -23,8 +23,10 @@ export interface ExecutorPickerProps {
   disabled?: boolean;
   /** Prefers opening the menu upwards (e.g. at the foot of a panel). */
   dropUp?: boolean;
-  /** `chip`: compact header chip (`tp-chip`) instead of a form field. */
-  variant?: "field" | "chip";
+  /** `chip`: compact header chip (`tp-chip`); `pill`: composer pill with a caption; default: a form field. */
+  variant?: "field" | "chip" | "pill";
+  /** `pill` only: dim caption before the name (e.g. "Executor"). */
+  caption?: string;
   /** Tooltip; set on the wrapper so it also shows while the trigger is disabled. */
   title?: string;
 }
@@ -73,9 +75,11 @@ export function ExecutorPicker({
   disabled,
   dropUp,
   variant = "field",
+  caption,
   title,
 }: ExecutorPickerProps) {
   const chip = variant === "chip";
+  const pill = variant === "pill";
   const { data: catalog, error } = useExecutors(repoId);
   const { data: hiddenKeys } = useHiddenExecutors(projectId ?? null);
   const [open, setOpen] = useState(false);
@@ -206,7 +210,7 @@ export function ExecutorPicker({
       <button
         ref={trigger}
         type="button"
-        className={chip ? "tp-chip tp-chip-btn ex-chip" : "ex-trigger"}
+        className={chip ? "tp-chip tp-chip-btn ex-chip" : pill ? "ex-pill" : "ex-trigger"}
         aria-label={`${label}: ${value ? executorLabel(shown) : `Default (${executorLabel(shown)})`}`}
         aria-haspopup="dialog"
         aria-expanded={open}
@@ -217,11 +221,12 @@ export function ExecutorPicker({
           setOpen(!open);
         }}
       >
+        {pill && caption && <span className="ex-pill-caption">{caption}</span>}
         <ExecutorAvatar executor={shown} />
         <span className="ellipsis">{executorLabel(shown)}</span>
-        {!value && inherited && !chip && <span className="ex-default">default</span>}
+        {!value && inherited && !chip && !pill && <span className="ex-default">default</span>}
         {!known && <span className="ex-missing" title="Not found in this repo's catalog">not found</span>}
-        {chip ? <span aria-hidden>▾</span> : <span className="ex-caret" aria-hidden>▼</span>}
+        {chip || pill ? <span className="ex-caret-sm" aria-hidden>▾</span> : <span className="ex-caret" aria-hidden>▼</span>}
       </button>
       {open && pos && createPortal(
         <div

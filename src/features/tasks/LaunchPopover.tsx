@@ -13,7 +13,8 @@ import {
 } from "react";
 import type { Executor, Finish, Isolation, Repo } from "../../domain/types";
 import { useFocusTrap } from "../../ui/useFocusTrap";
-import { executorLabel } from "../executors";
+import { Kbd } from "../../ui/Kbd";
+import { ExecutorName } from "../executors";
 import { FINISH_HINT, FINISH_LABEL, ISOLATION_HINT, ISOLATION_LABEL } from "./status";
 import "./tasks.css";
 
@@ -27,6 +28,8 @@ export interface RunConfig {
 export interface AskLaunchOptions {
   /** Task key (or title) shown in the header. */
   name: string;
+  /** Task title; when set, `name` is shown as the key above it. */
+  title?: string;
   repo: Repo | null | undefined;
   /** Effective executor of the run: a workflow hides Isolation. */
   executor: Executor;
@@ -39,10 +42,13 @@ type AskLaunch = (opts: AskLaunchOptions) => Promise<RunConfig | null>;
 const FINISHES: Finish[] = ["changes", "commit", "pr"];
 const ISOLATIONS: Isolation[] = ["worktree", "in_place"];
 
-/** Preselection: the repo defaults only; per-task values are deliberately ignored. */
+/**
+ * Preselection: the repo defaults only; per-task values are deliberately ignored. Review always
+ * starts off; turn it on per run.
+ */
 export function launchPreset(repo: Repo | null | undefined, executor: Executor): RunConfig {
   const finish = repo?.defaultFinish ?? "pr";
-  const review = repo?.defaultReview ?? true;
+  const review = false;
   return executor.kind === "workflow" ? { finish, review } : { isolation: repo?.defaultIsolation ?? "worktree", finish, review };
 }
 
@@ -97,7 +103,7 @@ export function LaunchConfigProvider({ children }: { children: ReactNode }) {
 const GAP = 6;
 const MARGIN = 12;
 
-function LaunchPopover({ name, repo, executor, anchor, onSettle }: AskLaunchOptions & { onSettle: (c: RunConfig | null) => void }) {
+function LaunchPopover({ name, title, repo, executor, anchor, onSettle }: AskLaunchOptions & { onSettle: (c: RunConfig | null) => void }) {
   const ref = useFocusTrap<HTMLDivElement>(() => onSettle(null));
   const titleId = useId();
   const [config, setConfig] = useState<RunConfig>(() => launchPreset(repo, executor));
@@ -149,27 +155,41 @@ function LaunchPopover({ name, repo, executor, anchor, onSettle }: AskLaunchOpti
         onKeyDown={onKeyDown}
       >
         <div className="lp-head">
+          <div className="lp-crumbs">
+            {title && <span className="mono">{name}</span>}
+            {title && repo && (
+              <span className="lp-sep" aria-hidden>
+                ·
+              </span>
+            )}
+            {repo && <span className="mono ellipsis">{repo.name}</span>}
+            <button type="button" className="icon-btn lp-close" data-cancel aria-label="Cancel" onClick={() => onSettle(null)}>
+              ✕
+            </button>
+          </div>
           <span id={titleId} className="lp-title">
-            Run <span className="mono">{name}</span>
-          </span>
-          <span className="tk-muted ellipsis">
-            {executorLabel(executor)}
-            {repo ? ` in ${repo.name}` : ""}
+            <span className="sr-only">Run </span>
+            {title ?? name}
           </span>
         </div>
 
         <div className="lp-body">
+          <span className="lp-label">Executor</span>
+          <div className="lp-opt lp-exec">
+            <ExecutorName executor={executor} />
+          </div>
+
           {!isWorkflow && (
             <>
-              <span className="lp-label">Isolation</span>
+              <span className="lp-label">Where</span>
               <div className="lp-opt">
                 <Seg
-                  label="Isolation"
+                  label="Where it works"
                   options={ISOLATIONS.map((i) => [i, ISOLATION_LABEL[i]])}
                   value={config.isolation ?? "worktree"}
                   onPick={(isolation) => setConfig((c) => ({ ...c, isolation }))}
                 />
-                <span className="tk-hint">{ISOLATION_HINT[config.isolation ?? "worktree"]}</span>
+                <span className="lp-hint">{ISOLATION_HINT[config.isolation ?? "worktree"]}</span>
               </div>
             </>
           )}
@@ -182,7 +202,7 @@ function LaunchPopover({ name, repo, executor, anchor, onSettle }: AskLaunchOpti
               value={config.finish}
               onPick={(finish) => setConfig((c) => ({ ...c, finish }))}
             />
-            <span className="tk-hint">{FINISH_HINT[config.finish]}</span>
+            <span className="lp-hint">{FINISH_HINT[config.finish]}</span>
           </div>
 
           <span className="lp-label">Review</span>
@@ -191,15 +211,13 @@ function LaunchPopover({ name, repo, executor, anchor, onSettle }: AskLaunchOpti
               type="button"
               role="switch"
               aria-checked={config.review}
-              className="nt-toggle"
+              className="lp-toggle"
               onClick={() => setConfig((c) => ({ ...c, review: !c.review }))}
             >
-              <span className={`nt-track ${config.review ? "on" : ""}`} aria-hidden>
-                <span className="nt-knob" />
-              </span>
+              <span className="switch" aria-checked={config.review} aria-hidden />
               Review before In Review
             </button>
-            <span className="tk-hint">
+            <span className="lp-hint">
               {config.review
                 ? `${repo?.reviewer ?? "The reviewer"} checks the criteria first, read-only`
                 : "Goes straight to In Review"}
@@ -208,15 +226,12 @@ function LaunchPopover({ name, repo, executor, anchor, onSettle }: AskLaunchOpti
         </div>
 
         <div className="lp-foot">
-          <button type="button" className="btn btn-ghost btn-sm" data-cancel onClick={() => onSettle(null)}>
+          <button type="button" className="btn btn-ghost" data-cancel onClick={() => onSettle(null)}>
             Cancel
           </button>
-          <button type="button" className="btn btn-primary btn-sm lp-run" data-autofocus onClick={() => onSettle(config)}>
-            <span aria-hidden>▶</span>
+          <button type="button" className="btn btn-primary lp-run" data-autofocus onClick={() => onSettle(config)}>
             Run
-            <span className="nt-kbd" aria-hidden>
-              ↵
-            </span>
+            <Kbd aria-hidden>↵</Kbd>
           </button>
         </div>
       </div>
@@ -236,14 +251,14 @@ function Seg<T extends string>({
   onPick: (v: T) => void;
 }) {
   return (
-    <div className="segmented tk-seg" role="radiogroup" aria-label={label}>
+    <div className="seg" role="radiogroup" aria-label={label}>
       {options.map(([v, l]) => (
         <button
           key={v}
           type="button"
           role="radio"
           aria-checked={value === v}
-          className={`tk-seg-opt ${value === v ? "on" : ""}`}
+          className="seg-opt"
           onClick={() => onPick(v)}
         >
           {l}

@@ -1,27 +1,18 @@
-import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
+import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 
-export interface FilterOption {
-  value: string;
-  label: string;
-  /** Dot color (CSS variable or color). */
-  dot?: string;
-  /** Leading icon; wins over `dot`. */
-  icon?: ReactNode;
-}
+export type BoardSort = "last-run" | "manual";
 
-interface Props {
-  label: string;
-  value: string | null;
-  options: FilterOption[];
-  onChange: (value: string | null) => void;
-}
+const OPTIONS: { value: BoardSort; label: string; hint: string }[] = [
+  { value: "last-run", label: "Last run", hint: "Most recently run first; the rest keep their manual order" },
+  { value: "manual", label: "Manual", hint: "The order you set by dragging cards" },
+];
 
-/** Filter chip with a menu ("Repo", "Source", "Status", "Label"). */
-export function FilterMenu({ label, value, options, onChange }: Props) {
+/** "Order ▾" picker in the board toolbar. */
+export function SortMenu({ value, onChange }: { value: BoardSort; onChange: (v: BoardSort) => void }) {
   const [open, setOpen] = useState(false);
   const wrap = useRef<HTMLDivElement>(null);
   const trigger = useRef<HTMLButtonElement>(null);
-  const current = options.find((o) => o.value === value);
+  const current = OPTIONS.find((o) => o.value === value) ?? OPTIONS[0]!;
 
   useEffect(() => {
     if (!open) return;
@@ -56,41 +47,41 @@ export function FilterMenu({ label, value, options, onChange }: Props) {
     }
   };
 
-  const all: (FilterOption | { value: null; label: string; dot?: undefined; icon?: undefined })[] = [{ value: null, label: "Any" }, ...options];
-
   return (
     <div className="bd-filter" ref={wrap}>
       <button
         ref={trigger}
         type="button"
-        className={`btn btn-sm btn-ghost bd-chip ${value ? "on" : ""}`}
+        className="btn btn-sm btn-ghost bd-sort"
         aria-haspopup="menu"
         aria-expanded={open}
         onClick={() => setOpen(!open)}
       >
-        {current ? `${label}: ${current.label}` : label}
+        <span className="bd-sort-label">Order</span>
+        <span>{current.label}</span>
         <span className="bd-caret" aria-hidden>▾</span>
       </button>
       {open && (
-        <div className="menu bd-filter-menu" role="menu" aria-label={label} onKeyDown={onKey}>
-          {all.map((o) => (
+        <div className="menu bd-filter-menu bd-sort-menu" role="menu" aria-label="Order" onKeyDown={onKey}>
+          {OPTIONS.map((o) => (
             <button
-              key={o.value ?? "__any"}
+              key={o.value}
               type="button"
               role="menuitemradio"
               aria-checked={o.value === value}
-              className="menu-item"
+              className="menu-item bd-sort-item"
               onClick={() => {
                 onChange(o.value);
                 close();
               }}
             >
               <span className="menu-mark" aria-hidden>{o.value === value ? "✓" : ""}</span>
-              {o.icon ?? (o.dot && <span className="bd-filter-dot" style={{ background: o.dot }} aria-hidden />)}
-              <span className="ellipsis">{o.label}</span>
+              <span className="bd-sort-text">
+                <span>{o.label}</span>
+                <span className="bd-sort-hint">{o.hint}</span>
+              </span>
             </button>
           ))}
-          {options.length === 0 && <div className="menu-label">Nothing to filter by</div>}
         </div>
       )}
     </div>

@@ -31,10 +31,14 @@ interface Row {
 
 interface Group {
   id: string;
+  /** Where the definitions come from: a repo, `~/.claude` or a plugin. */
+  source: "repo" | "user" | "plugin";
   title: string;
   hint: string;
   rows: Row[];
 }
+
+const SOURCE_TAG: Record<Group["source"], string> = { repo: "Repo", user: "User", plugin: "Plugin" };
 
 const sameDef = (a: ExecutorInfo, kind: string, name: string) =>
   a.executor.kind === kind && a.executor.kind !== "claude" && a.executor.name === name;
@@ -66,6 +70,7 @@ function groupExecutors(repos: readonly Repo[], catalogs: readonly ExecutorInfo[
 
   const repoGroups: Group[] = perRepo.map(({ repo, list }) => ({
     id: `repo:${repo.id}`,
+    source: "repo",
     title: repo.name,
     hint: `${repo.path}/.claude`,
     rows: list
@@ -80,6 +85,7 @@ function groupExecutors(repos: readonly Repo[], catalogs: readonly ExecutorInfo[
 
   const system: Group = {
     id: "user",
+    source: "user",
     title: "System",
     hint: "~/.claude",
     rows: user
@@ -102,7 +108,7 @@ function groupExecutors(repos: readonly Repo[], catalogs: readonly ExecutorInfo[
       if (row && !plugins.has(row.id)) plugins.set(row.id, row);
     }
   }
-  const plugin: Group = { id: "plugin", title: "Plugin", hint: "Enabled Claude Code plugins", rows: [...plugins.values()] };
+  const plugin: Group = { id: "plugin", source: "plugin", title: "Enabled plugins", hint: "~/.claude/plugins", rows: [...plugins.values()] };
 
   // Busiest sources first; ties keep repo order, then System and Plugin.
   return [...repoGroups, system, plugin].sort((a, b) => b.rows.length - a.rows.length);
@@ -143,9 +149,9 @@ export function AgentsWorkflowsSection({ project }: { project: Project }) {
   const claudeVisible = kind === "all" && (!q || "claude".includes(q));
 
   const kinds: SegOption<KindFilter>[] = [
-    { value: "all", label: `All ${count("all")}` },
-    { value: "agent", label: `Agents ${count("agent")}` },
-    { value: "workflow", label: `Workflows ${count("workflow")}` },
+    { value: "all", label: <KindLabel name="All" count={count("all")} /> },
+    { value: "agent", label: <KindLabel name="Agents" count={count("agent")} /> },
+    { value: "workflow", label: <KindLabel name="Workflows" count={count("workflow")} /> },
   ];
 
   const rescan = async () => {
@@ -171,7 +177,7 @@ export function AgentsWorkflowsSection({ project }: { project: Project }) {
     <>
       <SectionHead
         title="Agents & workflows"
-        text="Turn off the ones this project doesn't use. They only disappear from Nodal's pickers in every repo of the project; their definition files are never touched."
+        text="Found in this project's repos and in your Claude config. Turn one off to hide it from pickers in Nodal; the file is not touched."
       >
         <button type="button" className="btn" disabled={scanning} onClick={() => void rescan()}>
           {scanning ? "Rescanning…" : "Rescan"}
@@ -192,7 +198,6 @@ export function AgentsWorkflowsSection({ project }: { project: Project }) {
           value={query}
           onChange={(e) => setQuery(e.target.value)}
         />
-        <span className="spacer" />
         <span className="aw-summary" aria-live="polite">
           {found.length} found · {foundHidden} hidden
         </span>
@@ -209,14 +214,18 @@ export function AgentsWorkflowsSection({ project }: { project: Project }) {
               C
             </span>
             <div className="aw-row-text">
-              <span className="aw-row-name">Claude</span>
-              <span className="aw-row-desc">Plain Claude Code session. Always shown; it can't be hidden.</span>
+              <span className="aw-row-name mono">Claude</span>
+              <span className="aw-row-desc ellipsis">Plain Claude Code session. Always shown; it can't be hidden.</span>
             </div>
           </div>
         </div>
       )}
 
       {loading && <p className="settings-note">Scanning agents and workflows…</p>}
+
+      {!loading && (q || kind !== "all") && !claudeVisible && found.length === 0 && (
+        <div className="aw-none">Nothing matches that filter.</div>
+      )}
 
       {!loading &&
         groups.map((g) => {
@@ -226,9 +235,11 @@ export function AgentsWorkflowsSection({ project }: { project: Project }) {
           return (
             <section key={g.id} className="panel settings-card aw-group" aria-label={g.title}>
               <header className="aw-group-head">
+                <span className={`aw-group-tag aw-group-tag-${g.source}`}>{SOURCE_TAG[g.source]}</span>
                 <span className="aw-group-title">{g.title}</span>
-                <span className="aw-group-hint mono">{g.hint}</span>
-                <span className="spacer" />
+                <span className="aw-group-hint mono ellipsis" title={g.hint}>
+                  {g.hint}
+                </span>
                 <span className="aw-group-count">
                   {shown} of {g.rows.length} shown
                 </span>
@@ -245,6 +256,15 @@ export function AgentsWorkflowsSection({ project }: { project: Project }) {
   );
 }
 
+function KindLabel({ name, count }: { name: string; count: number }) {
+  return (
+    <span className="aw-kind">
+      {name}{" "}
+      <span className="aw-kind-count">{count}</span>
+    </span>
+  );
+}
+
 function ExecutorRow({ row, hidden, onToggle }: { row: Row; hidden: boolean; onToggle: (r: Row, hide: boolean) => Promise<void> }) {
   const isAgent = row.kind === "agent";
   const over = row.overriddenBy;
@@ -258,12 +278,18 @@ function ExecutorRow({ row, hidden, onToggle }: { row: Row; hidden: boolean; onT
         className="switch"
         onClick={() => void onToggle(row, !hidden)}
       />
-      <span className="aw-mark" title={isAgent ? "Agent" : "Workflow"}>
+      <span className={`aw-mark aw-mark-${row.kind}`} title={isAgent ? "Agent" : "Workflow"}>
         {isAgent ? "A" : "W"}
       </span>
       <div className="aw-row-text">
-        <span className="aw-row-name mono">{row.name}</span>
-        {row.description && <span className="aw-row-desc">{row.description}</span>}
+        <span className="aw-row-name mono ellipsis" title={row.name}>
+          {row.name}
+        </span>
+        {row.description && (
+          <span className="aw-row-desc ellipsis" title={row.description}>
+            {row.description}
+          </span>
+        )}
       </div>
       <div className="aw-flags">
         {hidden && <span className="badge badge-sm tone-muted">hidden</span>}

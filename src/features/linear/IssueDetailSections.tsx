@@ -1,4 +1,5 @@
 import type { IssueDetail, IssueRef, RelationKind, StateRef } from "./api";
+import { Avatar } from "../../ui/Avatar";
 import { ExternalLink } from "../../ui/ExternalLink";
 import { SafeMarkdown } from "../../ui/Markdown";
 import "./issue-panel.css";
@@ -133,11 +134,14 @@ export function Comments({ detail, url }: { detail: IssueDetail; url: string }) 
       )}
       {detail.comments.map((c) => (
         <article key={c.id} className="ip-comment">
-          <header className="ip-comment-head">
-            <span className="ip-comment-author">{c.author ?? "Unknown"}</span>
-            <time dateTime={c.createdAt}>{formatWhen(c.createdAt)}</time>
-          </header>
-          <SafeMarkdown text={c.body} />
+          <Avatar name={c.author ?? "Unknown"} size="md" />
+          <div className="ip-comment-main">
+            <header className="ip-comment-head">
+              <span className="ip-comment-author">{c.author ?? "Unknown"}</span>
+              <time dateTime={c.createdAt}>{formatWhen(c.createdAt)}</time>
+            </header>
+            <SafeMarkdown text={c.body} className="ip-comment-body" />
+          </div>
         </article>
       ))}
     </section>

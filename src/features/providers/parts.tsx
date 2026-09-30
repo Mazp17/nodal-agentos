@@ -146,7 +146,7 @@ export function KeyForm({
           data-autofocus={autoFocus || undefined}
           autoFocus={autoFocus}
         />
-        <button type="submit" className="btn btn-primary" disabled={!key.trim() || busy}>
+        <button type="submit" className="btn btn-primary btn-lg" disabled={!key.trim() || busy}>
           {busy ? "Testing…" : "Save and test"}
         </button>
       </div>

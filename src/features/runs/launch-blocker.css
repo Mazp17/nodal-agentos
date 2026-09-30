@@ -5,10 +5,11 @@
   gap: var(--sp-5);
   padding: var(--sp-4) var(--sp-5);
   border-radius: var(--r-xl);
-  background: var(--red-tint-10);
-  border: 1px solid var(--red-tint-35);
-  color: var(--red);
+  background: var(--red-tint-7);
+  border: 1px solid color-mix(in oklch, var(--red) 28%, transparent);
+  color: var(--red-text);
 }
+.lb-mark { flex: none; font-weight: var(--fw-bold); }
 .lb-compact { gap: var(--sp-3); padding: var(--sp-3) var(--sp-4); border-radius: var(--r-lg); }
 .lb-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
 .lb-title { font-size: var(--fs-base); font-weight: var(--fw-semibold); color: var(--red-text); }

@@ -68,7 +68,7 @@ export function AttachedSessionDrawer({ target, onClose }: AttachedSessionDrawer
             </div>
             {run && (
               <div className="as-sub">
-                <span className="as-mono">{executorLabel(run.executor)}</span>
+                <span className="as-mono as-exec">{executorLabel(run.executor)}</span>
                 {model && (
                   <>
                     <span aria-hidden>·</span>

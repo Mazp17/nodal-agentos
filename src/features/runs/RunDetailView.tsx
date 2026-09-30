@@ -4,6 +4,8 @@ import { projectIdOf, useRun, type RunsState } from "../../domain/hooks/runs";
 import type { Run, RunLight, Verdict } from "../../domain/types";
 import { formatDateTime, formatDuration, formatTokens } from "../../lib/format";
 import { SafeMarkdown } from "../../ui/Markdown";
+import { useToast } from "../../ui/Toasts";
+import { ExecutorAvatar } from "../executors";
 import { useRunActions } from "./actions";
 import {
   AGENT_STATUS,
@@ -21,6 +23,7 @@ import {
   executorLabel,
   OUTCOME_LABEL,
   OUTCOME_TONE,
+  phaseProgress,
   prNumber,
   runName,
   runTaskRef,
@@ -55,11 +58,12 @@ export function RunDetailView({ runId, onBack, onOpenTask, onOpenRun, onOpenDiff
   const actions = useRunActions();
   const [agentIdx, setAgentIdx] = useState<number | null>(null);
   const blocker = useLaunchBlocker(view);
+  const toast = useToast();
 
   if (!view) {
     return (
-      <div className="rd">
-        <button type="button" className="rd-back" onClick={onBack}>
+      <div className="rd rd-missing">
+        <button type="button" className="btn btn-xs btn-ghost rd-back" onClick={onBack}>
           ← Back
         </button>
         <p className="rd-result-note">{state.loaded && full === null ? "This run no longer exists." : "Loading run…"}</p>
@@ -85,81 +89,78 @@ export function RunDetailView({ runId, onBack, onOpenTask, onOpenRun, onOpenDiff
 
   const agent = agentIdx != null ? detail?.agents[agentIdx] : undefined;
   const phases = detail?.phases ?? [];
+  const nits = (detail?.source === "final" ? detail.result?.nits : null) ?? [];
+
+  const copyRunId = async (id: string) => {
+    try {
+      await navigator.clipboard.writeText(id);
+      toast("Run ID copied", id, "ok");
+    } catch (e) {
+      toast("Couldn't copy the run ID", String(e), "danger");
+    }
+  };
 
   return (
     <div className="rd">
-      <div className="rd-head">
-        <div className="rd-head-main">
-          <nav className="rd-crumbs" aria-label="Breadcrumb">
-            <button type="button" className="rd-back" onClick={onBack}>
-              ← Back
+      <div className="rd-bar">
+        <nav className="rd-crumbs" aria-label="Breadcrumb">
+          <button type="button" className="btn btn-xs btn-ghost" onClick={onBack}>
+            ← Back
+          </button>
+          <span className="rd-crumb-sep" aria-hidden>
+            ·
+          </span>
+          {project && (
+            <>
+              <span className="proj-swatch" style={{ background: project.color }} aria-hidden />
+              <span className="rd-crumb-text">{project.name}</span>
+              <span className="rd-crumb-sep" aria-hidden>
+                /
+              </span>
+            </>
+          )}
+          {repo && (
+            <>
+              <span className="rd-crumb-text">{repo.name}</span>
+              <span className="rd-crumb-sep" aria-hidden>
+                /
+              </span>
+            </>
+          )}
+          {task ? (
+            <button type="button" className="rd-crumb-task" onClick={() => onOpenTask(task.id)}>
+              {ref.key ?? task.title}
             </button>
-            <span className="rd-crumb-sep">·</span>
-            {project && (
-              <>
-                <span className="proj-swatch" style={{ background: project.color }} aria-hidden />
-                <span>{project.name}</span>
-                <span className="rd-crumb-sep">/</span>
-              </>
-            )}
-            {repo && (
-              <>
-                <span>{repo.name}</span>
-                <span className="rd-crumb-sep">/</span>
-              </>
-            )}
-            {task ? (
-              <button type="button" className="rd-crumb-task" onClick={() => onOpenTask(task.id)}>
-                {ref.key ?? task.title}
+          ) : (
+            <span className="rd-crumb-text ellipsis">{ref.title}</span>
+          )}
+          {run.claudeRunId && (
+            <>
+              <span className="rd-crumb-sep" aria-hidden>
+                /
+              </span>
+              <button
+                type="button"
+                className="btn btn-xs btn-ghost rd-crumb-id"
+                title={`Copy Claude run ID (${run.claudeRunId})`}
+                aria-label={`Copy Claude run ID ${run.claudeRunId}`}
+                onClick={() => void copyRunId(run.claudeRunId!)}
+              >
+                <span className="mono ellipsis">{run.claudeRunId}</span>
+                <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.2" aria-hidden>
+                  <rect x="3.5" y="3.5" width="7" height="7" rx="1.5" />
+                  <path d="M8.5 3.5v-1a1 1 0 0 0-1-1h-5a1 1 0 0 0-1 1v5a1 1 0 0 0 1 1h1" />
+                </svg>
               </button>
-            ) : (
-              <span>{ref.title}</span>
-            )}
-            {run.claudeRunId && (
-              <>
-                <span className="rd-crumb-sep">/</span>
-                <span className="mono rd-crumb-id">{run.claudeRunId}</span>
-              </>
-            )}
-          </nav>
-          <div className="rd-title-row">
-            <h1 className="rd-title">{ref.title}</h1>
-            <RunBadge run={view} />
-            {run.kind === "review" && <span className="rd-chip">Review</span>}
-            {run.legacyLabel && <span className="rd-chip" title={run.legacyLabel}>Migrated</span>}
-          </div>
-          <div className="rd-meta">
-            <span>
-              Repo <span className="rd-meta-v">{repo?.name ?? "—"}</span>
-            </span>
-            <span>
-              Branch <span className="rd-meta-v mono">{branch ?? "—"}</span>
-            </span>
-            <span>
-              {executorKindLabel(run.executor)} <span className="rd-meta-v">{executorLabel(run.executor)}</span>
-            </span>
-            {run.launchedAt != null && (
-              <span>
-                Started <span className="rd-meta-v">{formatDateTime(run.launchedAt)}</span>
-              </span>
-            )}
-            <span>
-              Elapsed <span className="rd-meta-v num">{formatDuration(view.durationMs)}</span>
-            </span>
-            {isWorkflow ? (
-              <span>
-                Tokens <span className="rd-meta-v num">{formatTokens(view.tokens)}</span>
-              </span>
-            ) : (
-              run.tokens != null && (
-                <span>
-                  Tokens <span className="rd-meta-v num">{formatTokens(run.tokens)}</span>
-                </span>
-              )
-            )}
-          </div>
-        </div>
+            </>
+          )}
+        </nav>
         <div className="rd-actions">
+          {task && (
+            <button type="button" className="btn btn-sm" onClick={() => onOpenTask(task.id)}>
+              Open task
+            </button>
+          )}
           <RunActionsBar
             view={view}
             state={state}
@@ -171,73 +172,118 @@ export function RunDetailView({ runId, onBack, onOpenTask, onOpenRun, onOpenDiff
         </div>
       </div>
 
-      {view.phase === "waiting" && (
-        // Claude Code exposes no way to respond from outside the session: respond via attach.
-        <div className="rd-alert rd-alert-amber" role="status">
-          <span className="dot dot-lg pulse" aria-hidden />
-          <div className="rd-alert-body">
-            <span className="rd-alert-title">
-              {view.waitingFor === "permission prompt"
-                ? "This run is waiting for a permission prompt"
-                : "This run is waiting for your input"}
-            </span>
-            <span className="rd-alert-text">
-              {view.waitingFor === "permission prompt"
-                ? "An agent asked to use a tool outside the allowlist. Claude Code can't answer prompts programmatically: attach to the session and respond there."
-                : `Blocked on: ${view.waitingFor}. Attach to respond.`}
-            </span>
-            {run.claudeRunId && <span className="rd-alert-mono">claude attach {run.claudeRunId}</span>}
+      <div className="rd-scroll">
+        <div className="rd-body">
+          <div className="rd-hero">
+            <h1 className="rd-title">{ref.title}</h1>
+            <div className="rd-chips">
+              <RunBadge run={view} className="rd-status" />
+              {run.kind === "review" && <span className="rd-chip">Review</span>}
+              {run.legacyLabel && (
+                <span className="rd-chip" title={run.legacyLabel}>
+                  Migrated
+                </span>
+              )}
+              <span className="rd-chip" title={`${executorKindLabel(run.executor)} · ${executorLabel(run.executor)}`}>
+                <ExecutorAvatar executor={run.executor} />
+                <span className="mono">{executorLabel(run.executor)}</span>
+              </span>
+              {repo && <span className="rd-chip mono">{repo.name}</span>}
+              <span className="rd-chip num">
+                <span className="rd-chip-k">Elapsed</span>
+                {formatDuration(view.durationMs)}
+              </span>
+              {(isWorkflow || run.tokens != null) && (
+                <span className="rd-chip num">
+                  <span className="rd-chip-k">Tokens</span>
+                  {formatTokens(isWorkflow ? view.tokens : run.tokens)}
+                </span>
+              )}
+            </div>
           </div>
-          {run.claudeRunId && (
-            <button type="button" className="btn btn-amber" disabled={actions.busy} onClick={() => void actions.attach(view)}>
-              Attach to respond
-            </button>
-          )}
-        </div>
-      )}
 
-      {view.phase === "awaiting" && (
-        <div className="rd-alert rd-alert-amber" role="status">
-          <span className="dot dot-lg" aria-hidden />
-          <div className="rd-alert-body">
-            <span className="rd-alert-title">Migrated run awaiting confirmation</span>
-            <span className="rd-alert-text">
-              This run was queued in a previous version ({run.legacyLabel}). It won't start on its own: confirm it to
-              queue it again, or remove it.
-            </span>
+          {view.phase === "waiting" && (
+            // Claude Code exposes no way to respond from outside the session: respond via attach.
+            <div className="rd-alert rd-alert-amber" role="status">
+              <span className="rd-alert-mark" aria-hidden>
+                !
+              </span>
+              <div className="rd-alert-body">
+                <span className="rd-alert-title">
+                  {view.waitingFor === "permission prompt"
+                    ? "This run is waiting for a permission prompt"
+                    : "This run is waiting for your input"}
+                </span>
+                <span className="rd-alert-text">
+                  {view.waitingFor === "permission prompt"
+                    ? "An agent asked to use a tool outside the allowlist. Claude Code can't answer prompts programmatically: attach to the session and respond there."
+                    : `Blocked on: ${view.waitingFor}. Attach to respond.`}
+                </span>
+                {run.claudeRunId && <span className="rd-alert-mono">claude attach {run.claudeRunId}</span>}
+              </div>
+              {run.claudeRunId && (
+                <button type="button" className="btn btn-primary" disabled={actions.busy} onClick={() => void actions.attach(view)}>
+                  Attach to respond
+                </button>
+              )}
+            </div>
+          )}
+
+          {view.phase === "awaiting" && (
+            <div className="rd-alert rd-alert-amber" role="status">
+              <span className="rd-alert-mark" aria-hidden>
+                !
+              </span>
+              <div className="rd-alert-body">
+                <span className="rd-alert-title">Migrated run awaiting confirmation</span>
+                <span className="rd-alert-text">
+                  This run was queued in a previous version ({run.legacyLabel}). It won't start on its own: confirm it to
+                  queue it again, or remove it.
+                </span>
+              </div>
+            </div>
+          )}
+
+          <LaunchBlockerNotice view={view} blocker={blocker} />
+          {genericError && (
+            <div className="rd-alert rd-alert-red" role="alert">
+              <span className="rd-alert-mark" aria-hidden>
+                ✕
+              </span>
+              <div className="rd-alert-body">
+                <span className="rd-alert-title">{run.launchedAt == null ? "Launch failed" : "Run error"}</span>
+                <span className="rd-alert-text">{genericError}</span>
+              </div>
+            </div>
+          )}
+
+          {ended && <ResultCard view={view} detail={detail} branch={branch} />}
+
+          {live && isWorkflow && view.phaseTotal > 0 && <NowCard view={view} detail={detail} />}
+
+          {isWorkflow && phases.length > 0 && <Timeline view={view} detail={detail!} />}
+
+          {isWorkflow ? (
+            <SubagentsPanel view={view} detail={detail} onOpen={setAgentIdx} />
+          ) : (
+            <SessionPanel view={view} full={full} live={live} />
+          )}
+
+          <div className="rd-cards">
+            {!ended && <PendingResult view={view} />}
+            {run.kind === "work" && view.review && <VerdictCard review={view.review} state={state} onOpenRun={onOpenRun} />}
+            {ended && nits.length > 0 && (
+              <div className="rd-card">
+                <NitsList nits={nits} />
+              </div>
+            )}
+            <DetailsCard view={view} detail={detail} branch={branch} ended={ended} />
+            {run.kind === "review" && parent && onOpenRun && (
+              <button type="button" className="btn rd-parent" onClick={() => onOpenRun(parent.run.id)}>
+                Open the reviewed run ({executorLabel(parent.run.executor)})
+              </button>
+            )}
           </div>
-        </div>
-      )}
-
-      <LaunchBlockerNotice view={view} blocker={blocker} />
-      {genericError && (
-        <div className="rd-alert rd-alert-red" role="alert">
-          <span className="dot dot-lg" aria-hidden />
-          <div className="rd-alert-body">
-            <span className="rd-alert-title">{run.launchedAt == null ? "Launch failed" : "Run error"}</span>
-            <span className="rd-alert-text">{genericError}</span>
-          </div>
-        </div>
-      )}
-
-      {isWorkflow && phases.length > 0 && <Timeline view={view} detail={detail!} />}
-
-      <div className="rd-grid">
-        {isWorkflow ? (
-          <SubagentsPanel view={view} detail={detail} onOpen={setAgentIdx} />
-        ) : (
-          <SessionPanel view={view} full={full} live={live} />
-        )}
-        <div className="rd-side">
-          <ResultCard view={view} detail={detail} branch={branch} ended={ended} />
-          {run.kind === "work" && view.review && (
-            <VerdictCard review={view.review} state={state} onOpenRun={onOpenRun} />
-          )}
-          {run.kind === "review" && parent && onOpenRun && (
-            <button type="button" className="btn rd-parent" onClick={() => onOpenRun(parent.run.id)}>
-              Open the reviewed run ({executorLabel(parent.run.executor)})
-            </button>
-          )}
         </div>
       </div>
 
@@ -274,7 +320,7 @@ function RunActionsBar({
   const task = run.taskId ? state.tasks.get(run.taskId) : undefined;
   const canDiff = run.launchedAt != null;
   const diffBtn = canDiff && (
-    <button type="button" className="btn" onClick={onDiff}>
+    <button type="button" className="btn btn-sm" onClick={onDiff}>
       View diff
     </button>
   );
@@ -284,7 +330,7 @@ function RunActionsBar({
         <>
           <button
             type="button"
-            className="btn btn-danger"
+            className="btn btn-sm btn-danger"
             disabled={actions.busy}
             onClick={async () => {
               if (await actions.remove(view, name)) onBack();
@@ -292,7 +338,7 @@ function RunActionsBar({
           >
             Remove from queue
           </button>
-          <button type="button" className="btn btn-primary" disabled={actions.busy} onClick={() => void actions.confirm(view, name)}>
+          <button type="button" className="btn btn-sm btn-primary" disabled={actions.busy} onClick={() => void actions.confirm(view, name)}>
             Confirm
           </button>
         </>
@@ -301,7 +347,7 @@ function RunActionsBar({
       return (
         <button
           type="button"
-          className="btn btn-danger"
+          className="btn btn-sm btn-danger"
           disabled={actions.busy}
           onClick={async () => {
             if (await actions.remove(view, name)) onBack();
@@ -317,14 +363,14 @@ function RunActionsBar({
     case "waiting":
       return (
         <>
-          <button type="button" className="btn btn-danger" disabled={actions.busy} onClick={() => void actions.stop(view, name)}>
+          <button type="button" className="btn btn-sm btn-danger" disabled={actions.busy} onClick={() => void actions.stop(view, name)}>
             Stop
           </button>
           {diffBtn}
           {run.claudeRunId && (
             <button
               type="button"
-              className={`btn ${view.phase === "waiting" ? "btn-primary" : ""}`}
+              className={`btn btn-sm ${view.phase === "waiting" ? "btn-primary" : ""}`}
               disabled={actions.busy}
               onClick={() => void actions.attach(view)}
             >
@@ -340,7 +386,7 @@ function RunActionsBar({
       const again = run.taskId && run.kind === "work" && (
         <button
           type="button"
-          className={`btn ${pr ? "" : "btn-primary"}`}
+          className={`btn btn-sm ${pr ? "" : "btn-primary"}`}
           disabled={actions.busy}
           onClick={() => void actions.runAgain(view, task, name)}
         >
@@ -352,7 +398,7 @@ function RunActionsBar({
           {diffBtn}
           {again}
           {pr && (
-            <button type="button" className="btn btn-primary" onClick={() => openPr(pr)}>
+            <button type="button" className="btn btn-sm btn-primary" onClick={() => openPr(pr)}>
               Open PR {prNumber(pr) ?? ""} ↗
             </button>
           )}
@@ -368,26 +414,48 @@ function Timeline({ view, detail }: { view: RunView; detail: RunDetail }) {
   const finished = view.phase === "finished";
   const stopped = view.tab === "failed";
   return (
-    <div className="panel rd-timeline">
-      <ol className="tl" style={{ gridTemplateColumns: `repeat(${phases.length}, minmax(72px, 1fr))` }}>
+    <section className="rd-timeline" aria-label="Phases">
+      <span className="section-label">Phases</span>
+      <ol className="tl" style={{ gridTemplateColumns: `repeat(${phases.length}, minmax(56px, 1fr))` }}>
         {phases.map((ph, i) => {
           const num = i + 1;
           const done = finished || (cur != null && num < cur);
           const isCur = !finished && cur === num;
           const st = done ? "done" : isCur ? (stopped ? "failed" : "current") : "pending";
+          const label = done ? "done" : st === "failed" ? "stopped" : isCur ? "current" : "pending";
           return (
             <li key={ph.title + i} className={`tl-step tl-${st} tone-${view.tone}`} aria-current={isCur ? "step" : undefined}>
-              <div className="tl-mark-row">
-                <span className="tl-mark">{done ? "✓" : st === "failed" ? "✕" : num}</span>
-                {i < phases.length - 1 && <span className="tl-line" />}
-              </div>
+              <span className="tl-bar" aria-hidden />
               <span className="tl-name" title={ph.detail ?? ph.title}>
                 {ph.title}
+                <span className="sr-only"> ({label})</span>
               </span>
             </li>
           );
         })}
       </ol>
+    </section>
+  );
+}
+
+/** Live workflow: how far it got and what the current phase is doing. */
+function NowCard({ view, detail }: { view: RunView; detail: RunDetail | null | undefined }) {
+  const { pct } = phaseProgress(view);
+  const cur = view.phaseIndex != null ? detail?.phases[view.phaseIndex - 1] : undefined;
+  const msg = cur?.detail ?? (view.phaseName ? `Currently in ${view.phaseName}.` : null);
+  return (
+    <div className={`rd-card rd-now tone-${view.tone}`} role="region" aria-label="Current state">
+      <div className="rd-now-head">
+        <span className="section-label">Now</span>
+        <span className="rd-now-pct num">
+          {view.phaseIndex != null ? `Phase ${view.phaseIndex}/${view.phaseTotal} · ` : ""}
+          {pct}%
+        </span>
+      </div>
+      <span className="rd-now-bar" aria-hidden>
+        <span style={{ width: `${pct}%` }} />
+      </span>
+      {msg && <div className="rd-now-msg">{msg}</div>}
     </div>
   );
 }
@@ -435,7 +503,7 @@ function SubagentsPanel({
 
   const shown = groups.filter((g) => g.agents.length > 0 || g.num !== null);
   return (
-    <div className="panel rd-agents">
+    <div className="rd-card rd-panel rd-agents">
       <div className="rd-panel-head">
         <span className="rd-panel-title">Subagents</span>
         <span className="rd-panel-sub">{summary}</span>
@@ -534,18 +602,25 @@ const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
 function SessionPanel({ view, full, live }: { view: RunView; full: Run | null | undefined; live: boolean }) {
   const run = view.run;
   const [limit, setLimit] = useState(DEFAULT_LIMIT);
+  const [promptOpen, setPromptOpen] = useState(false);
   // Only "running"/"waiting" change the file; "starting" has no session yet.
   const polling = view.phase === "running" || view.phase === "waiting";
   const load = useRunTranscript(run.sessionId ? run.id : null, polling, limit);
   const t = load.status === "ok" ? load.transcript : null;
   return (
-    <div className="panel rd-session">
+    <div className="rd-card rd-panel rd-session">
       <div className="rd-panel-head">
         <span className="rd-panel-title">Session</span>
         <span className="rd-panel-sub">
           {executorKindLabel(run.executor)} · {executorLabel(run.executor)}
           {run.options.model ? ` · ${run.options.model}` : ""}
         </span>
+        {polling && (
+          <span className="rd-live">
+            <span className="dot dot-sm pulse" aria-hidden />
+            Live
+          </span>
+        )}
       </div>
       <div className="rd-session-body">
         <section className="ap-section">
@@ -568,10 +643,14 @@ function SessionPanel({ view, full, live }: { view: RunView; full: Run | null | 
             <div className="tr-prompt">{full.extraInstructions}</div>
           </section>
         )}
-        <details className="rd-res-raw">
-          <summary>Prompt</summary>
-          <pre>{full ? full.prompt : "Loading…"}</pre>
-        </details>
+        <div className="rd-raw">
+          <button type="button" className="rd-raw-toggle" aria-expanded={promptOpen} onClick={() => setPromptOpen(!promptOpen)}>
+            <span aria-hidden>{promptOpen ? "▾" : "▸"}</span>
+            Prompt
+            {full && <span className="rd-raw-meta num">{full.prompt.length.toLocaleString()} chars</span>}
+          </button>
+          {promptOpen && <pre>{full ? full.prompt : "Loading…"}</pre>}
+        </div>
         {!run.sessionId ? null : load.status === "loading" ? (
           <p className="rd-result-note">Loading transcript…</p>
         ) : load.status === "error" ? (
@@ -598,7 +677,7 @@ function SessionPanel({ view, full, live }: { view: RunView; full: Run | null | 
 function StatusLine({ tone, label, pulse }: { tone: string; label: string; pulse?: boolean }) {
   return (
     <div className={`rd-result-status tone-${tone}`}>
-      <span className={`dot dot-lg ${pulse ? "pulse" : ""}`} aria-hidden />
+      <span className={`dot ${pulse ? "pulse" : ""}`} aria-hidden />
       {label}
     </div>
   );
@@ -674,7 +753,81 @@ function rawResult(run: RunLight, workflowResult: RunResult | null | undefined):
   return Object.keys(out).length ? JSON.stringify(out, null, 2) : null;
 }
 
-function ResultCard({
+/** Ended run: outcome, summary, PR or branch, and unmet criteria. */
+function ResultCard({ view, detail, branch }: { view: RunView; detail: RunDetail | null | undefined; branch: string | null }) {
+  const run = view.run;
+  const wr = detail?.source === "final" ? detail.result : null;
+  const outcome = run.outcome ?? "unknown";
+  const pr = run.prUrl ?? wr?.pr ?? null;
+  const unmet = wr?.unmetAcceptance ?? null;
+  const review = run.kind === "review" && run.verdict ? run.verdict : null;
+  const failed = view.tab === "failed" && !run.outcome;
+  const tone = review ? (review.pass ? "ok" : "danger") : failed ? "danger" : OUTCOME_TONE[outcome];
+  const allMet = (review ? review.unmet : unmet)?.length === 0;
+  const shownUnmet = review ? review.unmet : unmet;
+  return (
+    <div className={`rd-card rd-result tone-${tone}`} role="region" aria-label="Result">
+      <StatusLine
+        tone={tone}
+        label={review ? (review.pass ? "Review passed" : "Review failed") : failed ? view.label : OUTCOME_LABEL[outcome]}
+      />
+      {review ? review.summary && <SafeMarkdown text={review.summary} breaks /> : run.summary && <SafeMarkdown text={run.summary} breaks />}
+      {run.error && view.phase !== "failed" && <p className="rd-result-note">{run.error}</p>}
+      <div className="rd-chips">
+        {pr ? (
+          <button type="button" className="rd-chip rd-chip-btn" onClick={() => openPr(pr)}>
+            <span className="rd-pr-title">PR {prNumber(pr) ?? ""} ↗</span>
+            {branch && <span className="rd-chip-sub mono ellipsis">{branch}</span>}
+          </button>
+        ) : (
+          <span className="rd-chip">
+            <span className="rd-chip-k">Branch</span>
+            <span className="mono ellipsis">{branch ?? "—"}</span>
+          </span>
+        )}
+        {allMet && (
+          <span className="rd-chip">
+            <span className="rd-res-mark tone-ok" aria-hidden>
+              ✓
+            </span>
+            All criteria met
+          </span>
+        )}
+      </div>
+      {wr?.where && (
+        <div className="rd-res-sec rd-res-split">
+          <span className="rd-res-label">Stopped at</span>
+          <span className="rd-res-item">{wr.where}</span>
+        </div>
+      )}
+      {shownUnmet && shownUnmet.length > 0 && (
+        <div className="rd-res-split">
+          <CriteriaList unmet={shownUnmet} label="Unmet criteria" />
+        </div>
+      )}
+      {review && <NitsList nits={review.nits} />}
+    </div>
+  );
+}
+
+/** Not ended yet: where the run is. */
+function PendingResult({ view }: { view: RunView }) {
+  const note =
+    view.phase === "awaiting"
+      ? "Confirm the run to queue it again."
+      : view.phase === "queued"
+        ? `Waiting in the global queue${view.queuePos != null ? ` at position #${view.queuePos}` : ""}.`
+        : `The result appears when the run finishes.${view.phaseName ? ` Currently in ${view.phaseName}.` : ""}`;
+  return (
+    <div className="rd-card">
+      <h2 className="section-label">Result</h2>
+      <p className="rd-result-note">{note}</p>
+    </div>
+  );
+}
+
+/** Key facts about the run, and the raw result once it ends. */
+function DetailsCard({
   view,
   detail,
   branch,
@@ -687,87 +840,42 @@ function ResultCard({
 }) {
   const run = view.run;
   const [rawOpen, setRawOpen] = useState(false);
-
-  let body;
-  if (!ended) {
-    const note =
-      view.phase === "awaiting"
-        ? "Confirm the run to queue it again."
-        : view.phase === "queued"
-          ? `Waiting in the global queue${view.queuePos != null ? ` at position #${view.queuePos}` : ""}.`
-          : `The result appears when the run finishes.${view.phaseName ? ` Currently in ${view.phaseName}.` : ""}`;
-    body = <p className="rd-result-note">{note}</p>;
-  } else {
-    const wr = detail?.source === "final" ? detail.result : null;
-    const outcome = run.outcome ?? "unknown";
-    const pr = run.prUrl ?? wr?.pr ?? null;
-    const unmet = wr?.unmetAcceptance ?? null;
-    const nits = wr?.nits ?? [];
-    const raw = rawResult(run, wr);
-    body = (
-      <>
-        {run.kind === "review" && run.verdict ? (
-          <VerdictBody verdict={run.verdict} />
-        ) : (
-          <>
-            <StatusLine
-              tone={view.tab === "failed" && !run.outcome ? "danger" : OUTCOME_TONE[outcome]}
-              label={view.tab === "failed" && !run.outcome ? view.label : OUTCOME_LABEL[outcome]}
-            />
-            {run.summary && <SafeMarkdown text={run.summary} breaks />}
-          </>
-        )}
-        {run.error && view.phase !== "failed" && <p className="rd-result-note">{run.error}</p>}
-        {pr && (
-          <button type="button" className="rd-pr" onClick={() => openPr(pr)}>
-            <span className="rd-pr-title">Pull request {prNumber(pr) ?? ""} ↗</span>
-            {branch && <span className="rd-pr-sub mono">{branch}</span>}
-          </button>
-        )}
-        <div className="rd-res-row">
-          <span className="rd-res-label">Branch</span>
-          <span className="rd-res-mono ellipsis">{branch ?? "—"}</span>
-        </div>
-        {wr?.where && (
-          <div className="rd-res-sec">
-            <span className="rd-res-label">Stopped at</span>
-            <span className="rd-res-item">{wr.where}</span>
-          </div>
-        )}
-        {unmet && <CriteriaList unmet={unmet} />}
-        <NitsList nits={nits} />
-        {raw && (
-          <div className="rd-raw">
-            <button type="button" className="rd-raw-toggle" aria-expanded={rawOpen} onClick={() => setRawOpen(!rawOpen)}>
-              <span aria-hidden>{rawOpen ? "▾" : "▸"}</span>
-              Raw result
-            </button>
-            {rawOpen && <pre>{raw}</pre>}
-          </div>
-        )}
-      </>
-    );
+  const raw = ended ? rawResult(run, detail?.source === "final" ? detail.result : null) : null;
+  const rows: { k: string; v: string; mono?: boolean }[] = [
+    { k: executorKindLabel(run.executor), v: executorLabel(run.executor), mono: true },
+    { k: "Branch", v: branch ?? "—", mono: true },
+  ];
+  if (run.options.model) rows.push({ k: "Model", v: run.options.model, mono: true });
+  if (run.launchedAt != null) rows.push({ k: "Started", v: formatDateTime(run.launchedAt) });
+  rows.push({ k: "Elapsed", v: formatDuration(view.durationMs) });
+  if (detail) {
+    rows.push({ k: "Agents", v: String(detail.agentCount) });
+    rows.push({ k: "Tool calls", v: detail.totalToolCalls != null ? String(detail.totalToolCalls) : "—" });
+    rows.push({ k: "Tokens", v: formatTokens(detail.totalTokens) });
+  } else if (run.tokens != null) {
+    rows.push({ k: "Tokens", v: formatTokens(run.tokens) });
   }
-
   return (
-    <div className="panel rd-result">
-      <h2 className="rd-result-label">Result</h2>
-      {body}
-      {detail && (
-        <dl className="rd-stats">
-          <div>
-            <dt>Agents</dt>
-            <dd className="num">{detail.agentCount}</dd>
+    <div className="rd-card">
+      <h2 className="section-label">Details</h2>
+      <dl className="rd-details">
+        {rows.map((r) => (
+          <div key={r.k}>
+            <dt>{r.k}</dt>
+            <dd className={`num ${r.mono ? "mono" : ""}`} title={r.v}>
+              {r.v}
+            </dd>
           </div>
-          <div>
-            <dt>Tool calls</dt>
-            <dd className="num">{detail.totalToolCalls ?? "—"}</dd>
-          </div>
-          <div>
-            <dt>Tokens</dt>
-            <dd className="num">{formatTokens(detail.totalTokens)}</dd>
-          </div>
-        </dl>
+        ))}
+      </dl>
+      {raw && (
+        <div className="rd-raw">
+          <button type="button" className="rd-raw-toggle" aria-expanded={rawOpen} onClick={() => setRawOpen(!rawOpen)}>
+            <span aria-hidden>{rawOpen ? "▾" : "▸"}</span>
+            Raw result
+          </button>
+          {rawOpen && <pre>{raw}</pre>}
+        </div>
       )}
     </div>
   );
@@ -777,9 +885,9 @@ function ResultCard({
 function VerdictCard({ review, state, onOpenRun }: { review: RunLight; state: RunsState; onOpenRun?: (id: string) => void }) {
   const rv = state.byId.get(review.id);
   return (
-    <div className="panel rd-result">
+    <div className="rd-card">
       <div className="rd-verdict-head">
-        <h2 className="rd-result-label">Reviewer verdict</h2>
+        <h2 className="section-label">Reviewer verdict</h2>
         <span className="rd-panel-sub">{executorLabel(review.executor)}</span>
         {onOpenRun && (
           <button type="button" className="btn btn-xs rd-verdict-open" onClick={() => onOpenRun(review.id)}>

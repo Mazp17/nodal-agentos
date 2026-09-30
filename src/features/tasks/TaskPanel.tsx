@@ -28,6 +28,7 @@ import {
 } from "../../domain/hooks/store";
 import { taskKey, TASK_STATUSES, type Executor, type RelationKind, type RunLight, type Task, type TaskStatus } from "../../domain/types";
 import { formatDateTime, formatDuration, formatTokens } from "../../lib/format";
+import { Kbd, KbdGroup } from "../../ui/Kbd";
 import { SafeMarkdown } from "../../ui/Markdown";
 import { useConfirm } from "../../ui/ConfirmDialog";
 import { useFocusTrap } from "../../ui/useFocusTrap";
@@ -39,7 +40,7 @@ import { MergeDialog } from "./MergeDialog";
 import { NewTaskDialog } from "./NewTaskDialog";
 import { PriorityBars, StatusRing } from "./bits";
 import { useAskLaunch } from "./LaunchPopover";
-import { isClosed, PRIORITY_LABEL, providerLabel, STATUS_META } from "./status";
+import { isClosed, PRIORITIES, PRIORITY_LABEL, providerLabel, STATUS_META } from "./status";
 import { useLaunch } from "./useLaunch";
 import "./tasks.css";
 
@@ -87,7 +88,7 @@ export function TaskPanel({ taskId, onClose, onOpenRun, onOpenDiff, onOpenTask, 
   const globalExecutor = useSettings().data?.defaultExecutor ?? null;
 
   const [tab, setTab] = useState<"overview" | "source">("overview");
-  const [menu, setMenu] = useState<"status" | "repo" | null>(null);
+  const [menu, setMenu] = useState<"status" | "prio" | "repo" | "more" | null>(null);
   const [editing, setEditing] = useState(false);
   const [merging, setMerging] = useState(false);
   const [launchExec, setLaunchExec] = useState<Executor | null>(null);
@@ -109,6 +110,9 @@ export function TaskPanel({ taskId, onClose, onOpenRun, onOpenDiff, onOpenTask, 
   const closeMenu = useCallback(() => setMenu(null), []);
   const statusRef = useOutside(menu === "status", closeMenu);
   const repoRef = useOutside(menu === "repo", closeMenu);
+  const prioRef = useOutside(menu === "prio", closeMenu);
+  const moreRef = useOutside(menu === "more", closeMenu);
+  const runBtnRef = useRef<HTMLButtonElement>(null);
 
   const project = projects.data?.find((p) => p.id === task?.projectId);
   const projectRepos = (repos.data ?? []).filter((r) => r.projectId === task?.projectId);
@@ -156,8 +160,10 @@ export function TaskPanel({ taskId, onClose, onOpenRun, onOpenDiff, onOpenTask, 
     try {
       await fn();
       if (okMsg) push(okMsg[0], okMsg[1], "ok");
+      return true;
     } catch (e) {
       push(`Couldn't ${label}`, String(e), "danger");
+      return false;
     } finally {
       setBusy(null);
       invalidate("tasks", "runs");
@@ -185,7 +191,7 @@ export function TaskPanel({ taskId, onClose, onOpenRun, onOpenDiff, onOpenTask, 
   };
 
   const doLaunch = async (how: "run" | "handoff" | "review", anchor?: HTMLElement) => {
-    const config = how === "run" ? await askLaunch({ name: key, repo, executor: runExec, anchor }) : null;
+    const config = how === "run" ? await askLaunch({ name: key, title: task.title, repo, executor: runExec, anchor }) : null;
     if (how === "run" && !config) return;
     setBusy(how);
     const extraText = extra.trim() || null;
@@ -291,169 +297,304 @@ export function TaskPanel({ taskId, onClose, onOpenRun, onOpenDiff, onOpenTask, 
     await act("unlink the task", () => unlinkTask(task.id), [`${key} unlinked`, `${src.identifier} stays in ${providerLabel(src.provider)}.`]);
   };
 
+  const provider = src ? providerLabel(src.provider) : null;
+  const canDiffLast = !!lastWork && (!!task.worktree || lastWork.isolation !== "worktree");
+  const mergeButton =
+    canMerge && task.worktree ? (
+      <button
+        type="button"
+        className="btn btn-sm btn-primary"
+        disabled={busy !== null || !!activeRun}
+        title={activeRun ? "Cancel the running step first" : `Land ${task.worktree.branch} on ${task.worktree.base}`}
+        onClick={() => setMerging(true)}
+      >
+        {finish === "changes" ? "Commit & merge" : `Merge into ${task.worktree.base} & done`}
+      </button>
+    ) : null;
+  /** Menu action: closes the menu first. */
+  const picked = (fn: () => void) => () => {
+    closeMenu();
+    moreRef.current?.querySelector<HTMLElement>("button")?.focus();
+    fn();
+  };
+  const refocus = (r: RefObject<HTMLDivElement | null>) => () => {
+    closeMenu();
+    r.current?.querySelector<HTMLElement>("button")?.focus();
+  };
+
   return (
     <Shell refEl={ref} headingId={headingId} onClose={onClose}>
-      <div className="tp-head">
-        <div className="tp-head-row">
-          <div className="tp-menu-wrap" ref={statusRef}>
-            <button
-              type="button"
-              className="tp-status"
-              aria-haspopup="menu"
-              aria-expanded={menu === "status"}
-              aria-label={`Status: ${STATUS_META[task.status].label}`}
-              onClick={() => setMenu(menu === "status" ? null : "status")}
-            >
-              <StatusRing status={task.status} />
-              {STATUS_META[task.status].label}
-              <span className="ex-caret" aria-hidden>▼</span>
+      <h2 id={headingId} className="sr-only">
+        {key} · {task.title}
+      </h2>
+      <div className="tp-bar">
+        {project && <span className="tp-proj-dot" style={{ background: project.color }} aria-hidden />}
+        {project && <span className="tp-nowrap">{project.name}</span>}
+        <span className="tp-sep" aria-hidden>
+          /
+        </span>
+        <span className="mono tp-bar-key">{key}</span>
+        {src ? (
+          <>
+            <span className="tp-sep" aria-hidden>
+              ·
+            </span>
+            <button type="button" className="tp-link mono" onClick={() => void openUrl(src.url).catch(() => {})} title={src.url}>
+              {src.identifier} ↗
             </button>
-            {menu === "status" && (
-              <MenuList
-                label="Status"
-                onEscape={() => {
-                  closeMenu();
-                  statusRef.current?.querySelector<HTMLElement>("button")?.focus();
-                }}
-                items={TASK_STATUSES.map((s) => ({
-                  key: s,
-                  label: STATUS_META[s].label,
-                  dot: STATUS_META[s].color,
-                  checked: s === task.status,
-                  onPick: () => setStatus(s),
-                }))}
-              />
-            )}
-          </div>
-          <span className="mono tp-key">{key}</span>
-          <PriorityBars priority={task.priority} />
-          <span className="tp-spacer" />
-          <button type="button" className="icon-btn" aria-label="Close task" onClick={onClose}>
-            ✕
+            <span className={`tp-sync ellipsis ${src.syncError ? "tp-danger" : ""}`}>
+              {src.externalState ? `${src.externalState.name} · ` : ""}
+              {src.syncError ? "Sync failed" : src.lastSyncedAt ? `Synced ${formatDateTime(src.lastSyncedAt)}` : "Not synced yet"}
+            </span>
+          </>
+        ) : (
+          <span className="tp-local">Local</span>
+        )}
+        <span className="tp-spacer" />
+        <div className="tp-menu-wrap" ref={moreRef}>
+          <button
+            type="button"
+            className="icon-btn tp-more"
+            data-autofocus
+            aria-haspopup="menu"
+            aria-expanded={menu === "more"}
+            aria-label="More actions"
+            title="More actions"
+            onClick={() => setMenu(menu === "more" ? null : "more")}
+          >
+            ⋯
           </button>
-        </div>
-        <h2 id={headingId} className="tp-title">
-          {task.title}
-        </h2>
-        <div className="tp-meta">
-          {project && (
-            <span className="tp-chip">
-              <span className="dlg-proj-dot" style={{ background: project.color }} aria-hidden />
-              {project.name}
-            </span>
+          {menu === "more" && (
+            <MenuList
+              label="More actions"
+              className="tp-menu-end"
+              onEscape={refocus(moreRef)}
+              items={[
+                { key: "edit", label: "Edit task…", onPick: picked(() => setEditing(true)) },
+                closed
+                  ? { key: "reopen", label: "Reopen", disabled: busy !== null, onPick: picked(() => setStatus("todo")) }
+                  : {
+                      key: "done",
+                      label: canMerge ? "Mark done without merging" : "Mark done",
+                      disabled: busy !== null,
+                      onPick: picked(() => setStatus("done")),
+                    },
+                ...(canMerge && task.worktree
+                  ? [
+                      {
+                        key: "merge",
+                        label: finish === "changes" ? "Commit & merge…" : `Merge into ${task.worktree.base} & done…`,
+                        disabled: busy !== null || !!activeRun,
+                        onPick: picked(() => setMerging(true)),
+                      },
+                    ]
+                  : []),
+                ...(heroRun
+                  ? [{ key: "run", label: activeRun ? "Open run" : "Open last run", onPick: picked(() => onOpenRun(heroRun.id)) }]
+                  : []),
+                ...(lastWork && canDiffLast
+                  ? [{ key: "diff", label: "View diff", onPick: picked(() => onOpenDiff(lastWork.id)) }]
+                  : []),
+                ...(src
+                  ? [{ key: "unlink", label: `Unlink from ${provider}…`, disabled: busy !== null, onPick: picked(() => void unlink()) }]
+                  : []),
+                {
+                  key: "delete",
+                  label: "Delete task…",
+                  danger: true,
+                  disabled: busy !== null || !!activeRun,
+                  onPick: picked(() => void remove()),
+                },
+              ]}
+            />
           )}
-          <div className="tp-menu-wrap" ref={repoRef}>
-            <button
-              type="button"
-              className={`tp-chip tp-chip-btn ${repo ? "" : "tp-danger"}`}
-              aria-haspopup="menu"
-              aria-expanded={menu === "repo"}
-              aria-label={`Repo: ${repo?.name ?? "removed"}. Move to another repo`}
-              title={repo?.path}
-              onClick={() => setMenu(menu === "repo" ? null : "repo")}
-            >
-              {repo ? repo.name : "Repo removed"} ▾
-            </button>
-            {menu === "repo" && (
-              <MenuList
-                label="Move to repo"
-                onEscape={() => {
-                  closeMenu();
-                  repoRef.current?.querySelector<HTMLElement>("button")?.focus();
-                }}
-                items={projectRepos.map((r) => ({
-                  key: r.id,
-                  label: r.name,
-                  checked: r.id === task.repoId,
-                  onPick: () => {
-                    setMenu(null);
-                    if (r.id !== task.repoId) void patch({ repoId: r.id }, "move the task", [`${key} moved`, `Now runs in ${r.name}`]);
-                  },
-                }))}
-              />
-            )}
-          </div>
-          {src ? (
-            <span className="tp-chip">
-              <button type="button" className="tp-link mono" onClick={() => void openUrl(src.url).catch(() => {})} title={src.url}>
-                {src.identifier} ↗
-              </button>
-              {src.externalState && <span className="tk-muted">{src.externalState.name}</span>}
-              <span className={`dot dot-sm ${src.syncError ? "tone-danger" : "tone-muted"}`} aria-hidden />
-              <span className="tk-muted">
-                {src.syncError ? "Sync failed" : src.lastSyncedAt ? `Synced ${formatDateTime(src.lastSyncedAt)}` : "Not synced yet"}
-              </span>
-            </span>
-          ) : (
-            <span className="tp-chip tp-local">Local</span>
-          )}
-          <ExecutorPicker
-            variant="chip"
-            repoId={repo?.id ?? null}
-            projectId={task.projectId}
-            value={task.assignee}
-            inherited={inherited}
-            label="Assignee"
-            disabled={!!assigneeLocked}
-            title={assigneeLocked ?? "Assignee"}
-            onChange={setAssignee}
-          />
         </div>
-        {src?.syncError && (
-          <div className="banner banner-error tp-banner" role="alert">
-            {providerLabel(src.provider)} sync failed: {src.syncError}
-          </div>
-        )}
-        {src?.moved && (
-          <MovedBanner
-            provider={providerLabel(src.provider)}
-            from={src.moved.fromProject.name}
-            to={src.moved.toProject?.name ?? "no project"}
-            suggested={
-              src.moved.suggestedRepoId === task.repoId
-                ? null
-                : (projectRepos.find((r) => r.id === src.moved?.suggestedRepoId)?.name ?? null)
-            }
-            current={repo?.name ?? null}
-            busy={busy !== null}
-            onMove={() =>
-              void act("move the task", () => resolveMovedTask(task.id, "move"), [
-                `${key} moved`,
-                `Now runs in ${projectRepos.find((r) => r.id === src.moved?.suggestedRepoId)?.name ?? "the suggested repo"}`,
-              ])
-            }
-            onKeep={() => void act("keep the task", () => resolveMovedTask(task.id, "keep"))}
-          />
-        )}
-        {!repo && repos.data && (
-          <div className="banner banner-warn tp-banner">
-            This task's repo was removed from the project. Choose another repo to run it.
-          </div>
-        )}
-        {src && (
-          <div className="segmented tp-tabs" role="tablist" aria-label="Task sections">
-            {(
-              [
-                ["overview", "Overview"],
-                ["source", providerLabel(src.provider)],
-              ] as const
-            ).map(([k, l]) => (
-              <button
-                key={k}
-                type="button"
-                role="tab"
-                aria-selected={tab === k}
-                className={`tk-seg-opt ${tab === k ? "on" : ""}`}
-                onClick={() => setTab(k)}
-              >
-                {l}
-              </button>
-            ))}
-          </div>
-        )}
+        <button type="button" className="icon-btn" aria-label="Close task" title="Close (Esc)" onClick={onClose}>
+          ✕
+        </button>
       </div>
 
       <div className="tp-body">
+        <div className="tp-top">
+          <TitleField
+            key={task.id}
+            title={task.title}
+            readOnly={!!src}
+            readOnlyHint={provider ? `The title comes from ${provider}` : undefined}
+            onSave={(title) => void patch({ title }, "rename the task")}
+          />
+          <div className="tp-meta">
+            <div className="tp-menu-wrap" ref={statusRef}>
+              <button
+                type="button"
+                className="btn btn-sm tp-chip-btn"
+                aria-haspopup="menu"
+                aria-expanded={menu === "status"}
+                aria-label={`Status: ${STATUS_META[task.status].label}`}
+                onClick={() => setMenu(menu === "status" ? null : "status")}
+              >
+                <StatusRing status={task.status} />
+                {STATUS_META[task.status].label}
+              </button>
+              {menu === "status" && (
+                <MenuList
+                  label="Status"
+                  onEscape={refocus(statusRef)}
+                  items={TASK_STATUSES.map((s) => ({
+                    key: s,
+                    label: STATUS_META[s].label,
+                    icon: <StatusRing status={s} />,
+                    checked: s === task.status,
+                    onPick: () => setStatus(s),
+                  }))}
+                />
+              )}
+            </div>
+            <div className="tp-menu-wrap" ref={prioRef} title={provider ? `Priority comes from ${provider}` : undefined}>
+              <button
+                type="button"
+                className="btn btn-sm tp-chip-btn"
+                aria-haspopup="menu"
+                aria-expanded={menu === "prio"}
+                aria-label={`Priority: ${PRIORITY_LABEL[task.priority]}`}
+                disabled={!!src}
+                onClick={() => setMenu(menu === "prio" ? null : "prio")}
+              >
+                <PriorityBars priority={task.priority} />
+                {task.priority === "none" ? "Priority" : PRIORITY_LABEL[task.priority]}
+              </button>
+              {menu === "prio" && (
+                <MenuList
+                  label="Priority"
+                  onEscape={refocus(prioRef)}
+                  items={PRIORITIES.map((p) => ({
+                    key: p,
+                    label: PRIORITY_LABEL[p],
+                    icon: <PriorityBars priority={p} />,
+                    checked: p === task.priority,
+                    onPick: () => {
+                      closeMenu();
+                      if (p !== task.priority) void patch({ priority: p }, "change the priority");
+                    },
+                  }))}
+                />
+              )}
+            </div>
+            <div className="tp-menu-wrap" ref={repoRef}>
+              <button
+                type="button"
+                className={`btn btn-sm tp-chip-btn mono ${repo ? "" : "tp-danger"}`}
+                aria-haspopup="menu"
+                aria-expanded={menu === "repo"}
+                aria-label={`Repo: ${repo?.name ?? "removed"}. Move to another repo`}
+                title={repo?.path}
+                onClick={() => setMenu(menu === "repo" ? null : "repo")}
+              >
+                {repo ? repo.name : "Repo removed"}
+                <span className="tp-caret" aria-hidden>
+                  ▾
+                </span>
+              </button>
+              {menu === "repo" && (
+                <MenuList
+                  label="Move to repo"
+                  onEscape={refocus(repoRef)}
+                  note={!projectRepos.some((r) => r.id !== task.repoId) ? "No other repos in this project" : undefined}
+                  items={projectRepos.map((r) => ({
+                    key: r.id,
+                    label: r.name,
+                    mono: true,
+                    checked: r.id === task.repoId,
+                    onPick: () => {
+                      setMenu(null);
+                      if (r.id !== task.repoId) void patch({ repoId: r.id }, "move the task", [`${key} moved`, `Now runs in ${r.name}`]);
+                    },
+                  }))}
+                />
+              )}
+            </div>
+            <ExecutorPicker
+              variant="chip"
+              repoId={repo?.id ?? null}
+              projectId={task.projectId}
+              value={task.assignee}
+              inherited={inherited}
+              label="Assignee"
+              disabled={!!assigneeLocked}
+              title={assigneeLocked ?? "Assignee"}
+              onChange={setAssignee}
+            />
+            {task.labels.map((l) => (
+              <span key={l} className="tp-label">
+                {l}
+              </span>
+            ))}
+          </div>
+          {src?.syncError && (
+            <div className="banner banner-error tp-banner" role="alert">
+              <span className="tp-banner-mark" aria-hidden>
+                !
+              </span>
+              <span className="tp-banner-text">
+                {provider} sync failed: {src.syncError}
+              </span>
+            </div>
+          )}
+          {src?.moved && (
+            <MovedBanner
+              provider={provider ?? ""}
+              from={src.moved.fromProject.name}
+              to={src.moved.toProject?.name ?? "no project"}
+              suggested={
+                src.moved.suggestedRepoId === task.repoId
+                  ? null
+                  : (projectRepos.find((r) => r.id === src.moved?.suggestedRepoId)?.name ?? null)
+              }
+              current={repo?.name ?? null}
+              busy={busy !== null}
+              onMove={() =>
+                void act("move the task", () => resolveMovedTask(task.id, "move"), [
+                  `${key} moved`,
+                  `Now runs in ${projectRepos.find((r) => r.id === src.moved?.suggestedRepoId)?.name ?? "the suggested repo"}`,
+                ])
+              }
+              onKeep={() => void act("keep the task", () => resolveMovedTask(task.id, "keep"))}
+            />
+          )}
+          {!repo && repos.data && (
+            <div className="banner banner-error tp-banner">
+              <span className="tp-banner-mark" aria-hidden>
+                !
+              </span>
+              <span className="tp-banner-text">This task's repo was removed from the project. Choose another repo to run it.</span>
+              <button type="button" className="btn btn-sm" onClick={() => setMenu("repo")}>
+                Choose repo
+              </button>
+            </div>
+          )}
+          {src && (
+            <div className="tp-tabs" role="tablist" aria-label="Task sections">
+              {(
+                [
+                  ["overview", "Overview"],
+                  ["source", provider ?? ""],
+                ] as const
+              ).map(([k, l]) => (
+                <button
+                  key={k}
+                  type="button"
+                  role="tab"
+                  aria-selected={tab === k}
+                  className={`tp-tab ${tab === k ? "on" : ""}`}
+                  onClick={() => setTab(k)}
+                >
+                  {l}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+
         {tab === "source" && src ? (
           <SourceTab
             task={task}
@@ -478,77 +619,21 @@ export function TaskPanel({ taskId, onClose, onOpenRun, onOpenDiff, onOpenTask, 
                   const done = run.status === "queued" ? await runActions.remove({ run }, key) : await runActions.stop({ run }, key);
                   if (done) void invalidate("tasks");
                 }}
+                extra={mergeButton}
               />
             )}
-            {canLaunch && (
-              <section className="tp-section tp-launch" aria-label="Launch">
-                <div className="tp-launch-head">
-                  <span className="tp-launch-title">{current ? "Run again" : "Start a run"}</span>
-                  <span className="tk-muted ellipsis">
-                    in {repo.name}
-                    {willQueue ? " · queue full" : ""}
-                  </span>
-                </div>
-                <div className="tp-launch-row">
-                  <span className="tk-muted">Executor for this run</span>
-                  <ExecutorPicker
-                    repoId={repo.id}
-                    projectId={task.projectId}
-                    value={launchExec}
-                    inherited={assignee}
-                    label="Executor for this run"
-                    onChange={setLaunchExec}
-                    dropUp
-                  />
-                </div>
-                <textarea
-                  className="textarea tp-extra"
-                  rows={2}
-                  value={extra}
-                  onChange={(e) => setExtra(e.target.value)}
-                  placeholder="Extra instructions for this run (optional)"
-                  aria-label="Extra instructions for this run"
-                />
-                <div className="tp-launch-actions">
-                  <span className="tk-hint">Isolation, finish and review are chosen on Run</span>
-                  <span className="tp-spacer" />
-                  {lastWork && (
-                    <button type="button" className="btn btn-sm" disabled={busy !== null} onClick={() => void doLaunch("review")}>
-                      Review now
-                    </button>
-                  )}
-                  {lastWork && (
-                    <button
-                      type="button"
-                      className="btn btn-sm"
-                      disabled={busy !== null}
-                      title="Next step on the same branch: gets the plan, criteria, previous summary and diff"
-                      onClick={() => void doLaunch("handoff")}
-                    >
-                      Hand off → {executorLabel(runExec)}
-                    </button>
-                  )}
-                </div>
-                <button
-                  type="button"
-                  className="btn btn-primary tp-launch-go"
-                  disabled={busy !== null}
-                  onClick={(e) => void doLaunch("run", e.currentTarget)}
-                >
-                  <span aria-hidden>▶</span>
-                  {willQueue ? "Run (will queue)" : current ? "Run again" : "Run"}
-                </button>
-              </section>
-            )}
 
-            <PlanSection task={task} />
-            <AcceptanceSection task={task} onEdit={() => setEditing(true)} />
-            <RelationsSection task={task} onOpenTask={onOpenTask} />
+            <PlanSection task={task} onEdit={() => setEditing(true)} />
+            <AcceptanceSection
+              key={task.id}
+              task={task}
+              onSave={(acceptance) => patch({ acceptance }, "update the criteria")}
+            />
 
-            <section className="tp-section" aria-label="Steps">
-              <span className="section-label">Steps</span>
+            <section className="tp-section" aria-label="Run history">
+              <span className="section-label">Run history</span>
               {chain.length === 0 ? (
-                <span className="tk-muted">No runs yet.</span>
+                <div className="tp-empty">No runs yet.</div>
               ) : (
                 <ol className="tp-chain">
                   {chain.map((r, i) => (
@@ -558,27 +643,30 @@ export function TaskPanel({ taskId, onClose, onOpenRun, onOpenDiff, onOpenTask, 
               )}
             </section>
 
+            <RelationsSection task={task} onOpenTask={onOpenTask} />
+
             {task.worktree && (
               <section className="tp-section" aria-label="Worktree">
                 <span className="section-label">Worktree</span>
                 <div className="tp-wt">
                   <div className="tp-wt-row">
-                    <span className="tk-muted">Branch</span>
+                    <span className="tp-wt-k">Branch</span>
                     <span className="mono ellipsis">{wt.data?.branch ?? task.worktree.branch}</span>
                     <span className="tk-muted">from</span>
                     <span className="mono">{wt.data?.base ?? task.worktree.base}</span>
                   </div>
                   <div className="tp-wt-row">
-                    <span className="tk-muted">State</span>
+                    <span className="tp-wt-k">State</span>
                     <WorktreeState status={wt.data} error={wt.error} />
                   </div>
                   <div className="tp-wt-row">
-                    <span className="tk-muted">Path</span>
-                    <span className="mono ellipsis" title={task.worktree.path}>
+                    <span className="tp-wt-k">Path</span>
+                    <span className="mono ellipsis tk-muted" title={task.worktree.path}>
                       {task.worktree.path}
                     </span>
                   </div>
                   <div className="tp-wt-actions">
+                    {!heroRun && mergeButton}
                     {lastWork && (
                       <button type="button" className="btn btn-sm" onClick={() => onOpenDiff(lastWork.id)}>
                         View diff
@@ -611,67 +699,84 @@ export function TaskPanel({ taskId, onClose, onOpenRun, onOpenDiff, onOpenTask, 
               </section>
             )}
 
-            <div className="tp-dates tk-muted">
+            <div className="tp-dates">
               Created {formatDateTime(task.createdAt)} · Updated {formatDateTime(task.updatedAt)}
               {task.closedAt ? ` · Closed ${formatDateTime(task.closedAt)}` : ""}
-              {task.priority !== "none" ? ` · ${PRIORITY_LABEL[task.priority]}` : ""}
             </div>
           </>
         )}
       </div>
 
-      <footer className="tp-foot">
-        <button type="button" className="btn btn-sm" onClick={() => setEditing(true)}>
-          Edit
-        </button>
-        {src && (
-          <button type="button" className="btn btn-sm" disabled={busy !== null} onClick={() => void unlink()}>
-            Unlink
-          </button>
-        )}
-        <button type="button" className="btn btn-sm btn-danger" disabled={busy !== null || !!activeRun} onClick={() => void remove()}>
-          Delete
-        </button>
-        <div className="tp-foot-end">
-          {tab === "source" && heroRun && (
-            <button type="button" className="btn btn-sm" onClick={() => onOpenRun(heroRun.id)}>
-              {activeRun ? "Open run" : "Open last run"}
-            </button>
+      {canLaunch && (
+        <footer className="tp-foot">
+          <section className="tp-composer" aria-label="Launch">
+            <textarea
+              className="tp-extra"
+              value={extra}
+              onChange={(e) => setExtra(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key !== "Enter" || !(e.metaKey || e.ctrlKey) || e.nativeEvent.isComposing) return;
+                e.preventDefault();
+                if (busy === null) void doLaunch("run", runBtnRef.current ?? undefined);
+              }}
+              placeholder="Extra instructions for this run (optional)"
+              aria-label="Extra instructions for this run"
+            />
+            <div className="tp-composer-bar">
+              <ExecutorPicker
+                variant="pill"
+                caption="Executor"
+                repoId={repo.id}
+                projectId={task.projectId}
+                value={launchExec}
+                inherited={assignee}
+                label="Executor for this run"
+                onChange={setLaunchExec}
+                dropUp
+              />
+              {lastWork && (
+                <button type="button" className="tp-pill" disabled={busy !== null} onClick={() => void doLaunch("review")}>
+                  Review now
+                </button>
+              )}
+              {lastWork && (
+                <button
+                  type="button"
+                  className="tp-pill"
+                  disabled={busy !== null}
+                  title="Next step on the same branch: gets the plan, criteria, previous summary and diff"
+                  onClick={() => void doLaunch("handoff")}
+                >
+                  Hand off → {executorLabel(runExec)}
+                </button>
+              )}
+              <span className="tp-spacer" />
+              <button
+                ref={runBtnRef}
+                type="button"
+                className="btn btn-primary tp-run"
+                disabled={busy !== null}
+                title={`Isolation, finish and review are chosen next · in ${repo.name}`}
+                onClick={(e) => void doLaunch("run", e.currentTarget)}
+              >
+                {willQueue ? "Run (will queue)" : current ? "Run again" : "Run"}
+                <KbdGroup aria-hidden>
+                  <Kbd>⌘</Kbd>
+                  <Kbd>↵</Kbd>
+                </KbdGroup>
+              </button>
+            </div>
+          </section>
+          {willQueue && (
+            <div className="tp-launch-warn">
+              <span className="tp-launch-warn-mark" aria-hidden>
+                !
+              </span>
+              <span>All run slots are busy: this run waits in the queue.</span>
+            </div>
           )}
-          {/* Same condition as the Worktree section's button: no diff to show once the worktree is gone. */}
-          {tab === "source" && lastWork && (task.worktree || lastWork.isolation !== "worktree") && (
-            <button type="button" className="btn btn-sm" onClick={() => onOpenDiff(lastWork.id)}>
-              View diff
-            </button>
-          )}
-          {closed ? (
-            <button type="button" className="btn btn-sm" disabled={busy !== null} onClick={() => setStatus("todo")}>
-              Reopen
-            </button>
-          ) : (
-            <button
-              type="button"
-              className="btn btn-sm"
-              disabled={busy !== null}
-              title={canMerge ? "Close without merging the branch" : undefined}
-              onClick={() => setStatus("done")}
-            >
-              Mark done
-            </button>
-          )}
-          {canMerge && task.worktree && (
-            <button
-              type="button"
-              className="btn btn-sm btn-primary"
-              disabled={busy !== null || !!activeRun}
-              title={activeRun ? "Cancel the running step first" : `Land ${task.worktree.branch} on ${task.worktree.base}`}
-              onClick={() => setMerging(true)}
-            >
-              {finish === "changes" ? "Commit & merge" : `Merge into ${task.worktree.base} & done`}
-            </button>
-          )}
-        </div>
-      </footer>
+        </footer>
+      )}
 
       {merging && task.worktree && (
         <MergeDialog
@@ -679,7 +784,7 @@ export function TaskPanel({ taskId, onClose, onOpenRun, onOpenDiff, onOpenTask, 
           worktree={task.worktree}
           message={`${key}: ${task.title}`}
           commitFirst={finish === "changes"}
-          provider={src ? providerLabel(src.provider) : null}
+          provider={provider}
           onClose={() => setMerging(false)}
           onMerged={(r) => {
             setMerging(false);
@@ -747,24 +852,41 @@ function Shell({
 interface MenuItem {
   key: string;
   label: string;
-  dot?: string;
-  checked: boolean;
+  icon?: ReactNode;
+  /** Set for radio items (status, priority, repo); plain actions leave it out. */
+  checked?: boolean;
+  mono?: boolean;
+  danger?: boolean;
+  disabled?: boolean;
   onPick: () => void;
 }
 
-function MenuList({ label, items, onEscape }: { label: string; items: MenuItem[]; onEscape: () => void }) {
+function MenuList({
+  label,
+  items,
+  onEscape,
+  note,
+  className = "",
+}: {
+  label: string;
+  items: MenuItem[];
+  onEscape: () => void;
+  note?: string;
+  className?: string;
+}) {
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
-    ref.current?.querySelector<HTMLElement>('[aria-checked="true"]')?.focus();
+    const el = ref.current;
+    (el?.querySelector<HTMLElement>('[aria-checked="true"]') ?? el?.querySelector<HTMLElement>(".menu-item:not(:disabled)"))?.focus();
   }, []);
   return (
     <div
       ref={ref}
-      className="menu tp-menu"
+      className={`menu tp-menu ${className}`}
       role="menu"
       aria-label={label}
       onKeyDown={(e) => {
-        const list = [...(ref.current?.querySelectorAll<HTMLElement>(".menu-item") ?? [])];
+        const list = [...(ref.current?.querySelectorAll<HTMLElement>(".menu-item:not(:disabled)") ?? [])];
         const i = list.indexOf(document.activeElement as HTMLElement);
         if (e.key === "Escape") {
           e.preventDefault();
@@ -779,19 +901,76 @@ function MenuList({ label, items, onEscape }: { label: string; items: MenuItem[]
         }
       }}
     >
-      {items.map((it) => (
-        <button key={it.key} type="button" role="menuitemradio" aria-checked={it.checked} className="menu-item" onClick={it.onPick}>
-          <span className="menu-mark" aria-hidden>{it.checked ? "✓" : ""}</span>
-          {it.dot && <span className="tp-dot" style={{ background: it.dot }} aria-hidden />}
-          <span className="ellipsis">{it.label}</span>
-        </button>
-      ))}
-      {items.length <= 1 && <div className="menu-label">No other repos in this project</div>}
+      {items.map((it) => {
+        const radio = it.checked !== undefined;
+        return (
+          <button
+            key={it.key}
+            type="button"
+            role={radio ? "menuitemradio" : "menuitem"}
+            aria-checked={radio ? it.checked : undefined}
+            className={`menu-item ${it.danger ? "tp-danger" : ""}`}
+            disabled={it.disabled}
+            onClick={it.onPick}
+          >
+            {radio && (
+              <span className="menu-mark" aria-hidden>
+                {it.checked ? "✓" : ""}
+              </span>
+            )}
+            {it.icon}
+            <span className={`ellipsis ${it.mono ? "mono" : ""}`}>{it.label}</span>
+          </button>
+        );
+      })}
+      {note && <div className="menu-label">{note}</div>}
     </div>
   );
 }
 
-function PlanSection({ task }: { task: Task }) {
+/** Inline title: saves on Enter or blur; Escape reverts (and closes the panel once unchanged). */
+function TitleField({
+  title,
+  readOnly,
+  readOnlyHint,
+  onSave,
+}: {
+  title: string;
+  readOnly: boolean;
+  readOnlyHint?: string;
+  onSave: (title: string) => void;
+}) {
+  const [draft, setDraft] = useState(title);
+  useEffect(() => setDraft(title), [title]);
+  const commit = () => {
+    const t = draft.trim();
+    if (!t) setDraft(title);
+    else if (t !== title) onSave(t);
+  };
+  return (
+    <input
+      className="tp-title"
+      value={draft}
+      readOnly={readOnly}
+      title={readOnly ? readOnlyHint : draft}
+      aria-label="Task title"
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={commit}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" && !e.nativeEvent.isComposing) {
+          e.preventDefault();
+          e.currentTarget.blur();
+        } else if (e.key === "Escape" && draft !== title) {
+          e.preventDefault();
+          e.stopPropagation();
+          setDraft(title);
+        }
+      }}
+    />
+  );
+}
+
+function PlanSection({ task, onEdit }: { task: Task; onEdit: () => void }) {
   const plan = useTaskPlan(task.id);
   const { refresh } = plan;
   // An imported task's plan is rematerialized by the sync: re-read it when the task changes
@@ -802,46 +981,137 @@ function PlanSection({ task }: { task: Task }) {
     seen.current = task.updatedAt;
     refresh();
   }, [task.updatedAt, refresh]);
-  const label =
+  const [label, from] =
     task.plan.kind === "file"
-      ? `Plan · ${task.plan.path}`
+      ? ["Plan", task.plan.path]
       : task.source && !task.planOverridden
-        ? `Description · synced from ${providerLabel(task.source.provider)}`
-        : "Plan · written in Nodal";
+        ? ["Description", `synced from ${providerLabel(task.source.provider)}`]
+        : ["Plan", "written in Nodal"];
   return (
     <section className="tp-section" aria-label="Plan">
-      <span className="section-label">{label}</span>
+      <div className="tp-section-head">
+        <span className="section-label">{label}</span>
+        <span className="tp-section-sub ellipsis">· {from}</span>
+        <span className="tp-spacer" />
+        <button type="button" className="btn btn-ghost btn-xs" onClick={onEdit}>
+          Edit
+        </button>
+      </div>
       {plan.error ? (
         <div className="banner banner-warn">{plan.error}</div>
       ) : plan.data === undefined ? (
-        <span className="tk-muted">Loading plan…</span>
+        <span className="tp-muted">Loading plan…</span>
       ) : plan.data.trim() ? (
         <SafeMarkdown text={plan.data} className="tp-plan" />
       ) : (
-        <span className="tk-muted">No description.</span>
+        <span className="tp-muted">No description.</span>
       )}
     </section>
   );
 }
 
-function AcceptanceSection({ task, onEdit }: { task: Task; onEdit: () => void }) {
+const sameList = (a: string[], b: string[]) => a.length === b.length && a.every((x, i) => x === b[i]);
+
+/** Criteria edited in place: a row saves on blur or Enter, ✕ removes it, the last row adds one. */
+function AcceptanceSection({ task, onSave }: { task: Task; onSave: (ac: string[]) => Promise<boolean> }) {
+  const [items, setItems] = useState(task.acceptance);
+  const [draft, setDraft] = useState("");
+  const rootRef = useRef<HTMLElement>(null);
+  const savedRef = useRef(task.acceptance);
+  savedRef.current = task.acceptance;
+  const pending = useRef(0);
+  const queue = useRef<Promise<unknown>>(Promise.resolve());
+  const saved = JSON.stringify(task.acceptance);
+  // Take the saved list only while nobody is typing in it and no save is in flight: a reload
+  // mid-edit would drop what's being typed and shift the rows under the pointer.
+  const resync = useCallback(() => {
+    if (!pending.current && !rootRef.current?.contains(document.activeElement)) setItems(savedRef.current);
+  }, []);
+  useEffect(resync, [saved, resync]);
+
+  const commit = (next: string[]) => {
+    const clean = next.map((s) => s.trim()).filter(Boolean);
+    setItems(clean);
+    if (sameList(clean, savedRef.current)) return;
+    // One save at a time, in order: a blur and a ✕ in the same motion send two.
+    pending.current++;
+    queue.current = queue.current.then(() =>
+      onSave(clean).then((ok) => {
+        pending.current--;
+        if (!ok && !pending.current) setItems(savedRef.current);
+      }),
+    );
+  };
+  const n = task.acceptance.length;
+
   return (
-    <section className="tp-section" aria-label="Acceptance criteria">
+    <section
+      ref={rootRef}
+      className="tp-section tp-crits"
+      aria-label="Acceptance criteria"
+      onBlur={(e) => {
+        if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setTimeout(resync);
+      }}
+    >
       <div className="tp-section-head">
         <span className="section-label">Acceptance criteria</span>
-        <button type="button" className="btn btn-ghost btn-xs" onClick={onEdit}>
-          Edit
-        </button>
+        {n > 0 && <span className="tp-section-sub num">{n}</span>}
       </div>
-      {task.acceptance.length ? (
-        <ol className="tp-ac">
-          {task.acceptance.map((a, i) => (
-            <li key={i}>{a}</li>
-          ))}
-        </ol>
-      ) : (
-        <span className="tk-muted">None yet. The reviewer infers them from the plan and says so in its verdict.</span>
-      )}
+      {items.map((c, i) => (
+        <div key={i} className="tp-crit">
+          <span className="tp-box" aria-hidden />
+          <input
+            className="tp-crit-input"
+            value={c}
+            aria-label={`Criterion ${i + 1}`}
+            onChange={(e) => setItems((l) => l.map((x, k) => (k === i ? e.target.value : x)))}
+            onBlur={() => commit(items)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.nativeEvent.isComposing) {
+                e.preventDefault();
+                e.currentTarget.blur();
+              } else if (e.key === "Escape" && c !== (task.acceptance[i] ?? "")) {
+                e.preventDefault();
+                e.stopPropagation();
+                setItems((l) => l.map((x, k) => (k === i ? (task.acceptance[i] ?? "") : x)));
+              }
+            }}
+          />
+          <button
+            type="button"
+            className="icon-btn tp-crit-x"
+            aria-label={`Remove criterion ${i + 1}`}
+            title="Remove"
+            onClick={() => commit(items.filter((_, k) => k !== i))}
+          >
+            ✕
+          </button>
+        </div>
+      ))}
+      {n === 0 && <div className="tp-empty">No criteria yet. The reviewer infers them from the plan and says so in its verdict.</div>}
+      <div className="tp-crit">
+        <span className="tp-box-plus" aria-hidden>
+          +
+        </span>
+        <input
+          className="tp-crit-input"
+          value={draft}
+          placeholder="Add a criterion, press Enter"
+          aria-label="Add a criterion"
+          onChange={(e) => setDraft(e.target.value)}
+          onBlur={() => {
+            if (!draft.trim()) return;
+            commit([...items, draft]);
+            setDraft("");
+          }}
+          onKeyDown={(e) => {
+            if (e.key !== "Enter" || e.nativeEvent.isComposing || !draft.trim()) return;
+            e.preventDefault();
+            commit([...items, draft]);
+            setDraft("");
+          }}
+        />
+      </div>
     </section>
   );
 }
@@ -957,6 +1227,7 @@ function RunHero({
   onOpenRun,
   onOpenDiff,
   onStop,
+  extra,
 }: {
   run: RunLight;
   canDiff: boolean;
@@ -966,6 +1237,8 @@ function RunHero({
   onOpenRun: (id: string) => void;
   onOpenDiff: (id: string) => void;
   onStop: (run: RunLight) => Promise<void>;
+  /** Extra action (merge) after the run's own. */
+  extra?: ReactNode;
 }) {
   const v = useRunView(runProp);
   // The shared store refreshes faster than the task's run list: read everything from it.
@@ -1004,7 +1277,7 @@ function RunHero({
     <section className={`tp-hero tone-${v.tone}`} aria-label="Latest run">
       <div className="tp-hero-head">
         <RunBadge run={v} />
-        <span className="mono tk-muted ellipsis">
+        <span className="mono tp-hero-id ellipsis">
           {executorLabel(run.executor)} · {run.kind === "review" ? "review" : "work"}
         </span>
         <span className="tp-spacer" />
@@ -1051,6 +1324,7 @@ function RunHero({
             {run.status === "queued" ? "Cancel" : "Stop"}
           </button>
         )}
+        {extra}
       </div>
     </section>
   );
