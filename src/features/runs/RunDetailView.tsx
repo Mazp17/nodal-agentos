@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { projectIdOf, useRun, type RunsState } from "../../domain/hooks/runs";
 import type { Run, RunLight, Verdict } from "../../domain/types";
@@ -168,6 +168,7 @@ export function RunDetailView({ runId, onBack, onOpenTask, onOpenRun, onOpenDiff
             actions={actions}
             onDiff={() => onOpenDiff(run.id)}
             onBack={onBack}
+            onOpenRun={onOpenRun}
           />
         </div>
       </div>
@@ -308,6 +309,7 @@ function RunActionsBar({
   actions,
   onDiff,
   onBack,
+  onOpenRun,
 }: {
   view: RunView;
   state: RunsState;
@@ -315,10 +317,20 @@ function RunActionsBar({
   actions: ReturnType<typeof useRunActions>;
   onDiff: () => void;
   onBack: () => void;
+  /** Opens the run "Run again" creates. */
+  onOpenRun?: (runId: string) => void;
 }) {
   const run = view.run;
   const task = run.taskId ? state.tasks.get(run.taskId) : undefined;
   const canDiff = run.launchedAt != null;
+  // "Run again" navigates once the launch resolves, unless the user already left this run.
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
   const diffBtn = canDiff && (
     <button type="button" className="btn btn-sm" onClick={onDiff}>
       View diff
@@ -388,7 +400,11 @@ function RunActionsBar({
           type="button"
           className={`btn btn-sm ${pr ? "" : "btn-primary"}`}
           disabled={actions.busy}
-          onClick={() => void actions.runAgain(view, task, name)}
+          onClick={() =>
+            void actions.runAgain(view, task, name).then((next) => {
+              if (next && mounted.current) onOpenRun?.(next.id);
+            })
+          }
         >
           Run again
         </button>
