@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
-import { useToast } from "../../ui/Toasts";
-import { getLaunchBlocker, openTerminalAt } from "./api";
+import { getLaunchBlocker } from "./api";
+import { openAttachedSession } from "./attachStore";
 import type { RunView } from "./status";
 import "./launch-blocker.css";
 
@@ -86,8 +86,6 @@ export function useLaunchBlocker(view: RunView | undefined): Blocker | null {
   return sid && fetched?.sid === sid ? fetched.blocker : null;
 }
 
-const basename = (p: string) => p.replace(/\/+$/, "").split("/").pop() || p;
-
 /** Actionable notice for a run blocked by workspace trust or workflow approval. */
 export function LaunchBlockerNotice({
   view,
@@ -101,8 +99,6 @@ export function LaunchBlockerNotice({
 }) {
   const own = useLaunchBlocker(given === undefined ? view : undefined);
   const blocker = given === undefined ? own : given;
-  const toast = useToast();
-  const [opening, setOpening] = useState(false);
   if (!blocker) return null;
 
   if (blocker.kind === "workflowReview") {
@@ -125,17 +121,9 @@ export function LaunchBlockerNotice({
   }
 
   const dir = blocker.dir;
-  const open = async () => {
-    if (!dir) return;
-    setOpening(true);
-    try {
-      await openTerminalAt(dir, true);
-      toast("Opened Terminal", `Accept the trust dialog in ${basename(dir)}, then run again.`);
-    } catch (e) {
-      toast("Couldn't open Terminal", String(e), "danger");
-    } finally {
-      setOpening(false);
-    }
+  // In the app's embedded terminal (the attach drawer), not Terminal.app.
+  const open = () => {
+    if (dir && view) openAttachedSession({ runId: view.run.id, claudeId: null, cwd: dir });
   };
   return (
     <div className={`lb ${compact ? "lb-compact" : ""}`} role="alert">
@@ -155,9 +143,9 @@ export function LaunchBlockerNotice({
           )}
         </span>
       </div>
-      {dir && !blocker.home && (
-        <button type="button" className="btn btn-sm" disabled={opening} onClick={() => void open()}>
-          {opening ? "Opening…" : "Open in Terminal"}
+      {dir && view && !blocker.home && (
+        <button type="button" className="btn btn-sm" onClick={open}>
+          Open Claude here
         </button>
       )}
     </div>

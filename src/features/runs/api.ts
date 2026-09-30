@@ -42,6 +42,15 @@ export const ptyAttach = (
   onExit: Channel<number | null>,
 ) => invoke<number>("pty_attach", { runId, cwd, cols, rows, onData, onExit });
 
+/** Starts an interactive `claude` in `dir` in a PTY (to accept its trust dialog in-app). Same contract as `ptyAttach`. */
+export const ptyOpenClaude = (
+  dir: string,
+  cols: number,
+  rows: number,
+  onData: Channel<ArrayBuffer>,
+  onExit: Channel<number | null>,
+) => invoke<number>("pty_open_claude", { dir, cols, rows, onData, onExit });
+
 /** Writes raw bytes (keystrokes, pastes, mouse reports) to the PTY. */
 export const ptyWrite = (session: number, data: Uint8Array) => invoke<void>("pty_write", { session, data: Array.from(data) });
 

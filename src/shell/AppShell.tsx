@@ -551,7 +551,7 @@ export function AppShell() {
       {diffRunId && <RunDiffDrawer key={diffRunId} runId={diffRunId} onClose={() => setDiffRunId(null)} />}
       {attachTarget && (
         <Suspense fallback={null}>
-          <AttachedSessionDrawer key={attachTarget.claudeId} target={attachTarget} onClose={closeAttachedSession} />
+          <AttachedSessionDrawer key={attachTarget.claudeId ?? `claude:${attachTarget.cwd}`} target={attachTarget} onClose={closeAttachedSession} />
         </Suspense>
       )}
       {createProject && (

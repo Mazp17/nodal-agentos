@@ -7,8 +7,11 @@ import { useSyncExternalStore } from "react";
 export interface AttachTarget {
   /** Nodal run id (`Run.id`), to show its status and title. */
   runId: string;
-  /** Id passed to `claude attach` (`Run.claudeRunId`, or the live session's). */
-  claudeId: string;
+  /**
+   * Id passed to `claude attach` (`Run.claudeRunId`, or the live session's). `null` starts a
+   * plain `claude` in `cwd` instead: accepting a workspace's trust dialog.
+   */
+  claudeId: string | null;
   /** Working directory of the session, if known. */
   cwd: string | null;
 }

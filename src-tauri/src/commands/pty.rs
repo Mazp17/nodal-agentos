@@ -45,6 +45,34 @@ pub async fn pty_attach(
         .map_err(|e| format!("Internal error starting the terminal: {e}"))?
 }
 
+/// Starts an interactive `claude` in `dir` in a pty (to accept its workspace trust dialog
+/// without leaving the app). Same streaming contract as `pty_attach`.
+#[allow(clippy::too_many_arguments)]
+#[tauri::command]
+#[tracing::instrument(skip_all, level = "info")]
+pub async fn pty_open_claude(
+    webview: Webview,
+    state: State<'_, PtySessions>,
+    dir: String,
+    cols: u16,
+    rows: u16,
+    on_data: Channel<InvokeResponseBody>,
+    on_exit: Channel<Option<i32>>,
+) -> Result<u32, String> {
+    let sessions = state.inner().clone();
+    let owner = webview.label().to_string();
+    let generation = sessions.generation_for(&owner);
+    let on_data_cb: nodal_host::pty::OnData = Box::new(move |chunk| {
+        let _ = on_data.send(InvokeResponseBody::Raw(chunk));
+    });
+    let on_exit_cb: nodal_host::pty::OnExit = Box::new(move |code| {
+        let _ = on_exit.send(code);
+    });
+    tauri::async_runtime::spawn_blocking(move || sessions.open_claude(owner, generation, dir, cols, rows, on_data_cb, on_exit_cb))
+        .await
+        .map_err(|e| format!("Internal error starting the terminal: {e}"))?
+}
+
 /// Hands `data` to the session's writer thread; never blocks on the actual write.
 #[tauri::command]
 #[tracing::instrument(skip_all, level = "info")]
