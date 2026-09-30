@@ -4,7 +4,6 @@
 
 use nodal_domain::execution::queue::work_summary as compute_summary;
 use nodal_domain::execution::queue::WorkSummary;
-use nodal_store::board::tasks;
 use nodal_store::execution::runs as qruns;
 use nodal_store::{rows, sources, with_db};
 
@@ -21,9 +20,9 @@ impl Execution {
         let global = project_id.is_none();
         let (runs, blocked, settings) = with_db(&self.core.db, move |c| {
             let p = project_id.as_deref();
-            // Tasks that changed project in the provider are also waiting on the user.
-            let mut need = tasks::blocked_ids(c, p)?;
-            need.extend(sources::moved_ids(c, p)?);
+            // Tasks that changed project in the provider are waiting on the user. Blocked tasks
+            // (a failed run) aren't: they show under "Failed recently", not in "need you".
+            let need = sources::moved_ids(c, p)?;
             Ok((qruns::pending_of(c, p)?, need, rows::load_settings(c)?))
         })
         .await?;
