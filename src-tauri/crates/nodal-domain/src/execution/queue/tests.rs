@@ -85,15 +85,14 @@ fn work_summary_counts_slots_and_dedupes_need_you() {
     let blocked = vec!["t-blocked".to_string(), "t-other".to_string()];
 
     let g = work_summary(&runs, &blocked, &lv, 3, true, NOW);
-    // working: bbbb, xxxx, ffff (foreign included) + c (in grace) + n (launching).
-    assert_eq!((g.running, g.capacity, g.queued), (5, 3, 1));
+    // Own only: a (blocked), b (working), c (in grace), n (launching); foreign xxxx/ffff don't.
+    assert_eq!((g.running, g.capacity, g.queued), (4, 3, 1));
     // t-blocked (Blocked task and its session waiting for permission: once), t-other, the
     // migrated one and the waiting foreign session.
     assert_eq!(g.need_you, 4, "{g:?}");
 
     let p = work_summary(&runs, &blocked, &lv, 3, false, NOW);
-    // Own only: b (working), c (grace), n (launching). `a` is blocked: takes no slot.
-    assert_eq!((p.running, p.queued, p.need_you), (3, 1, 3), "{p:?}");
+    assert_eq!((p.running, p.queued, p.need_you), (4, 1, 3), "{p:?}");
     assert_eq!(
         work_summary(&[], &[], &[], 2, false, NOW),
         WorkSummary {
@@ -123,14 +122,14 @@ fn queue_follows_position_and_respects_free_slots() {
         live("bb22", "done"),
         live("cc33", "stopped"),
     ];
-    // 3 slots, 1 foreign working → 2 free: the first two in the queue.
-    assert_eq!(next_to_launch(&runs, &lv, 3, NOW), ["a", "b"]);
-    assert_eq!(next_to_launch(&runs, &lv, 1, NOW), Vec::<String>::new());
+    // Foreign sessions take no slot: 2 slots → the first two in the queue.
+    assert_eq!(next_to_launch(&runs, &lv, 2, NOW), ["a", "b"]);
+    assert_eq!(next_to_launch(&runs, &lv, 0, NOW), Vec::<String>::new());
     assert_eq!(next_to_launch(&runs, &[], 10, NOW), ["a", "b", "c"]);
     // Reordering changes who goes next.
     let mut reordered = runs.clone();
     reordered[0].queue_position = 1.0;
-    assert_eq!(next_to_launch(&reordered, &lv, 3, NOW), ["c", "a"]);
+    assert_eq!(next_to_launch(&reordered, &lv, 2, NOW), ["c", "a"]);
 }
 
 #[test]
@@ -247,9 +246,13 @@ fn active_detection() {
     ));
     assert!(is_active(&launched("a", "aaaa", 1), Some(&lv), NOW));
     assert!(!is_active(&launched("b", "bbbb", NOW), Some(&lv), NOW));
-    // `blocked` is still active (not relaunched) but takes no slot.
+    // `blocked` is still active (not relaunched) and takes a slot if it's ours.
     assert!(is_active(&launched("c", "cccc", 1), Some(&lv), NOW));
     assert_eq!(occupied_slots(&[], &[live("cccc", "blocked")], NOW), 0);
+    assert_eq!(occupied_slots(&[launched("c", "cccc", 1)], &lv, NOW), 1);
+    // Ended, or unlisted past the grace period: no slot.
+    assert_eq!(occupied_slots(&[launched("b", "bbbb", NOW)], &lv, NOW), 0);
+    assert_eq!(occupied_slots(&[launched("z", "zzzz", NOW - LAUNCH_GRACE_MS - 1)], &lv, NOW), 0);
     assert!(is_active(&launched("d", "dddd", NOW - 10), Some(&lv), NOW));
     assert!(!is_active(
         &launched("d", "dddd", NOW - LAUNCH_GRACE_MS),
