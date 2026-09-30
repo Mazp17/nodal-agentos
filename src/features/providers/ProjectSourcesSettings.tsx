@@ -147,10 +147,10 @@ function ConnectSource({
 
   return (
     <div className="pv-card">
-      <div className="pv-card-body">
+      <div className="pv-card-body pv-card-body-sm">
         <div className="pv-card-row">
           <ProviderMark />
-          <span className="pv-card-name">Linear</span>
+          <span className="pv-card-name pv-card-name-md">Linear</span>
           <span className="pv-hint">Asana and Azure DevOps coming soon</span>
         </div>
         {st.connection === "loading" && <span className="pv-hint">Checking Linear…</span>}
@@ -291,7 +291,7 @@ function SourceCard({
 
   return (
     <article className="pv-card" aria-label={`${prov} · ${link.scope.name}`}>
-      <div className="pv-card-body">
+      <div className="pv-card-head">
         <div className="pv-card-row">
           <ProviderMark />
           <span className="pv-card-name">{prov}</span>
@@ -321,7 +321,24 @@ function SourceCard({
             Disconnect
           </button>
         </div>
+      </div>
 
+      {!keyOk && st.connection !== "loading" && (
+        <div className="pv-alert pv-alert-danger pv-card-strip" role="alert">
+          <span className="pv-alert-text">
+            {st.status?.hasKey
+              ? `${prov} is not reachable with the saved key${st.error ? `: ${st.error}` : "."} Tasks keep their last synced state.`
+              : `${prov} is disconnected. Tasks keep their last synced state.`}
+          </span>
+          {onOpenIntegrations && (
+            <button type="button" className="btn btn-sm" onClick={onOpenIntegrations}>
+              Fix key
+            </button>
+          )}
+        </div>
+      )}
+
+      <div className="pv-card-body pv-card-body-sm">
         {confirmDisconnect && (
           <InlineConfirm
             text={`Disconnect ${prov} · ${link.scope.name}? Imported tasks stay in this project as local tasks; nothing changes in ${prov}.`}
@@ -330,21 +347,6 @@ function SourceCard({
             onConfirm={() => void disconnect()}
             onCancel={() => setConfirmDisconnect(false)}
           />
-        )}
-
-        {!keyOk && st.connection !== "loading" && (
-          <div className="pv-alert pv-alert-danger" role="alert">
-            <span className="pv-alert-text">
-              {st.status?.hasKey
-                ? `${prov} is not reachable with the saved key${st.error ? `: ${st.error}` : "."} Tasks keep their last synced state.`
-                : `${prov} is disconnected. Tasks keep their last synced state.`}
-            </span>
-            {onOpenIntegrations && (
-              <button type="button" className="btn btn-sm" onClick={onOpenIntegrations}>
-                Fix key
-              </button>
-            )}
-          </div>
         )}
 
         {keyOk && link.lastSyncError && (
@@ -374,24 +376,27 @@ function SourceCard({
           </div>
         )}
 
-        <Field label="Auto-import">
-          <div className="pv-inline">
-            <Switch
-              checked={link.autoImport}
-              label="Auto-import"
-              disabled={busy === "patch"}
-              onChange={(v) => void patch({ autoImport: v })}
-            />
+        <div className="pv-toggle">
+          <Switch
+            checked={link.autoImport}
+            label="Auto-import"
+            disabled={busy === "patch"}
+            onChange={(v) => void patch({ autoImport: v })}
+          />
+          <div className="pv-toggle-text">
+            <span className="pv-toggle-title" aria-hidden>
+              Auto-import
+            </span>
             <span className="pv-hint">
               {link.autoImport
                 ? "New issues in this scope are imported automatically."
                 : "Import manually from the board."}
             </span>
+            {link.autoImport && !hasRepoRoute && (
+              <span className="pv-hint pv-hint-warn">Auto-import needs a default repo or a routing rule.</span>
+            )}
           </div>
-          {link.autoImport && !hasRepoRoute && (
-            <span className="pv-hint pv-hint-warn">Auto-import needs a default repo or a routing rule.</span>
-          )}
-        </Field>
+        </div>
 
         <Field label="Default repo for imports">
           <RepoChoice

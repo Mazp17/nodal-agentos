@@ -133,10 +133,10 @@ function LinearCard() {
           <div className="pv-actions">
             {hasKey ? (
               <>
-                <button type="button" className="btn btn-sm" onClick={() => setEditing((v) => !v)}>
+                <button type="button" className="btn" onClick={() => setEditing((v) => !v)}>
                   {editing ? "Cancel" : "Replace key"}
                 </button>
-                <button type="button" className="btn btn-sm btn-danger" onClick={() => setConfirmDelete(true)}>
+                <button type="button" className="btn btn-danger" onClick={() => setConfirmDelete(true)}>
                   Delete key
                 </button>
               </>
@@ -144,7 +144,7 @@ function LinearCard() {
               st.connection !== "loading" && (
                 <button
                   type="button"
-                  className={`btn btn-sm${editing ? "" : " btn-primary"}`}
+                  className={`btn${editing ? "" : " btn-primary"}`}
                   onClick={() => setEditing((v) => !v)}
                 >
                   {editing ? "Cancel" : "Add key"}

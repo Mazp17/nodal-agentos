@@ -152,12 +152,16 @@ function GeneralSection({ project, onDeleted }: { project: Project; onDeleted: (
           />
         </div>
         <div className="field">
+          <span className="field-label">Color</span>
+          <ColorSwatches value={project.color} onChange={(color) => void patch({ color })} />
+        </div>
+        <div className="field">
           <label className="field-label" htmlFor={descId}>
             Description
           </label>
           <textarea
             id={descId}
-            className="input field-textarea field-w-md"
+            className="textarea field-textarea"
             rows={2}
             placeholder="What this project is about"
             value={description}
@@ -165,13 +169,9 @@ function GeneralSection({ project, onDeleted }: { project: Project; onDeleted: (
             onBlur={commitDescription}
           />
         </div>
-        <div className="field">
-          <span className="field-label">Color</span>
-          <ColorSwatches value={project.color} onChange={(color) => void patch({ color })} />
-        </div>
-        <div className="field">
+        <div className="field field-tight">
           <span className="field-label">Task prefix</span>
-          <span className="mono muted">{project.key}-</span>
+          <span className="mono muted field-prefix">{project.key}-</span>
         </div>
         <div className="field">
           <label className="field-label" htmlFor={execId}>
