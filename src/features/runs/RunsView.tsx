@@ -62,18 +62,23 @@ export function RunsView({ projectId, onOpenRun, onGoToBoard }: RunsViewProps) {
   const [repoFilter, setRepoFilter] = useState<string | null>(null);
   const [collapsed, setCollapsed] = useState<ReadonlySet<RunGroup>>(new Set());
   const [finishedAll, setFinishedAll] = useState(false);
+  const [query, setQuery] = useState("");
 
   const fProject = projectId ? null : projectFilter;
   const repoOptions = [...state.repos.values()].filter((r) => (projectId ? r.projectId === projectId : !fProject || r.projectId === fProject));
   const fRepo = repoFilter && repoOptions.some((r) => r.id === repoFilter) ? repoFilter : null;
 
   const { views, projects, repos, tasks, latestByTask, now } = state;
+  const q = query.trim().toLowerCase();
   const rows = useMemo(
     () =>
       buildRows(views, ext.data, source, { projects, repos, tasks, latestByTask, now }).filter(
-        (r) => (!fProject || r.projectId === fProject) && (!fRepo || r.repoId === fRepo),
+        (r) =>
+          (!fProject || r.projectId === fProject) &&
+          (!fRepo || r.repoId === fRepo) &&
+          (!q || r.title.toLowerCase().includes(q) || (r.taskKey?.toLowerCase().includes(q) ?? false)),
       ),
-    [views, projects, repos, tasks, latestByTask, now, ext.data, source, fProject, fRepo],
+    [views, projects, repos, tasks, latestByTask, now, ext.data, source, fProject, fRepo, q],
   );
   const byGroup = new Map(GROUPS.map((g) => [g.id, sortGroup(rows.filter((r) => r.group === g.id), g.id)]));
   const count = (t: Tab) => (t === "all" ? rows.length : (byGroup.get(t)?.length ?? 0));
@@ -102,41 +107,43 @@ export function RunsView({ projectId, onOpenRun, onGoToBoard }: RunsViewProps) {
     });
 
   const showProject = projectId === null;
-  const hasFilters = fProject !== null || fRepo !== null;
+  const hasFilters = fProject !== null || fRepo !== null || source !== "all" || q !== "";
+  const clearFilters = () => {
+    setProjectFilter(null);
+    setRepoFilter(null);
+    setSource("all");
+    setQuery("");
+  };
   const slots = Math.min(Math.max(summary.capacity, summary.running), 16);
 
   return (
     <div className="runs">
-      <div className="runs-tabs">
-        <div className="runs-tablist" role="tablist" aria-label="Runs">
-          {TABS.map((t) => (
-            <button
-              key={t.id}
-              id={`runs-tab-${t.id}`}
-              type="button"
-              role="tab"
-              aria-selected={tab === t.id}
-              className={`runs-tab ${tab === t.id ? "on" : ""}`}
-              onClick={() => setTab(t.id)}
-            >
-              {t.label}
-              <span className="runs-tab-count num">{count(t.id)}</span>
-            </button>
-          ))}
+      <div className="runs-bar">
+        <div className="runs-bar-top">
+          <div className="seg runs-seg" role="radiogroup" aria-label="Run groups">
+            {TABS.map((t) => (
+              <button
+                key={t.id}
+                type="button"
+                role="radio"
+                aria-checked={tab === t.id}
+                className="seg-opt runs-seg-opt"
+                onClick={() => setTab(t.id)}
+              >
+                {t.label}
+                <span className="runs-seg-count num">{count(t.id)}</span>
+              </button>
+            ))}
+          </div>
+          <input
+            className="input runs-search"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search by key or title…"
+            aria-label="Search runs"
+          />
         </div>
-        <div className="runs-filters">
-          {hasFilters && (
-            <button
-              type="button"
-              className="btn btn-sm btn-ghost runs-clear"
-              onClick={() => {
-                setProjectFilter(null);
-                setRepoFilter(null);
-              }}
-            >
-              Clear
-            </button>
-          )}
+        <div className="runs-filters" role="toolbar" aria-label="Run filters">
           {showProject && (
             <Picker
               label="Project"
@@ -164,6 +171,11 @@ export function RunsView({ projectId, onOpenRun, onGoToBoard }: RunsViewProps) {
             options={SOURCES}
             onChange={(v) => setSource(v ?? "all")}
           />
+          {hasFilters && (
+            <button type="button" className="btn btn-sm btn-ghost runs-clear" onClick={clearFilters}>
+              Clear
+            </button>
+          )}
         </div>
       </div>
       {state.error && <div className="banner banner-error runs-error">{state.error}</div>}
@@ -171,14 +183,7 @@ export function RunsView({ projectId, onOpenRun, onGoToBoard }: RunsViewProps) {
       {ext.error && source !== "nodal" && (
         <div className="banner banner-warn runs-error">Couldn't read sessions started outside Nodal: {ext.error}</div>
       )}
-      <div className="table-head runs-cols">
-        <span>Task</span>
-        <span>Run by</span>
-        <span>Progress</span>
-        <span>Launched</span>
-        <span>Result</span>
-      </div>
-      <div className="runs-rows" role="tabpanel" aria-labelledby={`runs-tab-${tab}`}>
+      <div className="runs-rows">
         {groups.map((g) => {
           const list = byGroup.get(g.id) ?? [];
           const open = !collapsed.has(g.id);
@@ -191,8 +196,7 @@ export function RunsView({ projectId, onOpenRun, onGoToBoard }: RunsViewProps) {
                   <span className="runs-group-chev" aria-hidden>
                     {open ? "▾" : "▸"}
                   </span>
-                  <span className="dot" aria-hidden />
-                  {g.label}
+                  <span className="runs-group-name">{g.label}</span>
                   <span className="runs-group-count num">{list.length}</span>
                 </button>
                 {g.id === "running" && slots > 0 && (
@@ -231,14 +235,20 @@ export function RunsView({ projectId, onOpenRun, onGoToBoard }: RunsViewProps) {
           );
         })}
         {groups.length === 0 &&
-          (state.loaded ? (
+          (!state.loaded ? (
+            <div className="runs-empty">Loading runs…</div>
+          ) : hasFilters ? (
+            <EmptyState className="runs-empty-state" title="No runs match" description="Try another search or clear the filters.">
+              <button type="button" className="btn" onClick={clearFilters}>
+                Clear
+              </button>
+            </EmptyState>
+          ) : (
             <EmptyState className="runs-empty-state" title={EMPTY[tab].title} description={EMPTY[tab].description}>
               <button type="button" className="btn" onClick={onGoToBoard}>
                 Go to board
               </button>
             </EmptyState>
-          ) : (
-            <div className="runs-empty">Loading runs…</div>
           ))}
       </div>
     </div>
@@ -262,8 +272,9 @@ function Row({ row: r, now, showProject, queueIndex, busy, onOpen, onMoveUp, onR
   const external = r.view === null;
   const queued = r.group === "queued" && !external;
   const awaiting = r.view?.phase === "awaiting";
+  const bar = r.group === "running" && r.pct !== null && r.pct > 0;
   return (
-    <div className={`runs-cols runs-row ${external ? "external" : ""}`}>
+    <div className={`runs-row tone-${r.tone} ${external ? "external" : ""}`}>
       <span className="runs-task">
         <span className="runs-task-line">
           {r.taskKey && <span className="runs-key">{r.taskKey}</span>}
@@ -276,48 +287,34 @@ function Row({ row: r, now, showProject, queueIndex, busy, onOpen, onMoveUp, onR
             </button>
           )}
           {r.clash && (
-            <span className="runs-clash" role="img" title={r.clash} aria-label={r.clash}>
-              ⚠
+            <span className="runs-clash" title={r.clash}>
+              Possible conflict
             </span>
           )}
         </span>
-        <span className="runs-where">
+        {r.progress && <span className={`runs-why ellipsis ${external ? "mono" : ""}`}>{r.progress}</span>}
+        <span className="runs-where" title={r.byTitle}>
+          {r.executor ? <ExecutorAvatar executor={r.executor} /> : <span className="runs-ext-avatar" aria-hidden />}
+          <span className="runs-by-name">{r.by}</span>
           {showProject && (
             <>
+              <span aria-hidden>·</span>
               <span className="proj-swatch" style={{ background: r.project?.color ?? "var(--text-disabled)" }} aria-hidden />
               <span>{r.project?.name ?? "—"}</span>
-              <span aria-hidden>·</span>
             </>
           )}
+          <span aria-hidden>·</span>
           <span className="runs-repo ellipsis">{r.repoName}</span>
+          {r.meta && (
+            <>
+              <span aria-hidden>·</span>
+              <span className="num">{r.meta}</span>
+            </>
+          )}
         </span>
       </span>
-      <span className="runs-by" title={r.byTitle}>
-        {r.executor ? <ExecutorAvatar executor={r.executor} /> : <span className="runs-ext-avatar" aria-hidden />}
-        <span className="runs-by-name ellipsis">{r.by}</span>
-      </span>
-      <span className={`runs-progress tone-${r.tone}`}>
-        {r.pct !== null ? (
-          <span className="runs-progress-line">
-            <span className="runs-bar">
-              <span style={{ width: `${r.pct}%` }} />
-            </span>
-            <span className="runs-phase-text">{r.progress}</span>
-          </span>
-        ) : (
-          <span className="runs-doing ellipsis">{r.progress}</span>
-        )}
-        {r.meta && <span className="runs-meta num">{r.meta}</span>}
-      </span>
-      <span className="runs-launched num" title={r.launchedAt != null ? formatDateTime(r.launchedAt) : "Waiting for a free slot"}>
-        {r.launchedAt != null ? formatLaunch(r.launchedAt, now) : "Not started"}
-      </span>
-      <span className="runs-result-cell">
-        <span className={`runs-result tone-${r.tone}`}>
-          <span className={`dot dot-sm ${r.pulse ? "pulse" : ""}`} aria-hidden />
-          <span className="ellipsis">{r.label}</span>
-        </span>
-        {queued && (
+      <span className="runs-side">
+        {queued ? (
           <span className="runs-queue-actions">
             {awaiting && (
               <button type="button" className="btn btn-xs btn-amber" disabled={busy} onClick={onConfirm}>
@@ -326,7 +323,7 @@ function Row({ row: r, now, showProject, queueIndex, busy, onOpen, onMoveUp, onR
             )}
             <button
               type="button"
-              className="icon-btn runs-queue-btn"
+              className="btn btn-xs runs-queue-btn"
               aria-label={`Move ${r.taskKey ?? r.title} up`}
               title="Move up"
               disabled={busy || queueIndex <= 0}
@@ -336,7 +333,7 @@ function Row({ row: r, now, showProject, queueIndex, busy, onOpen, onMoveUp, onR
             </button>
             <button
               type="button"
-              className="icon-btn runs-queue-btn"
+              className="btn btn-xs runs-queue-btn"
               aria-label={`Remove ${r.taskKey ?? r.title} from queue`}
               title="Remove from queue"
               disabled={busy}
@@ -345,8 +342,19 @@ function Row({ row: r, now, showProject, queueIndex, busy, onOpen, onMoveUp, onR
               ✕
             </button>
           </span>
+        ) : (
+          <>
+            <span className="runs-result">
+              {r.pulse && <span className="dot dot-sm pulse" aria-hidden />}
+              {r.label}
+            </span>
+            <span className="runs-launched num" title={r.launchedAt != null ? formatDateTime(r.launchedAt) : "Waiting for a free slot"}>
+              {r.launchedAt != null ? formatLaunch(r.launchedAt, now) : "Not started"}
+            </span>
+          </>
         )}
       </span>
+      {bar && <span className="runs-row-bar" style={{ width: `${r.pct}%` }} aria-hidden />}
     </div>
   );
 }

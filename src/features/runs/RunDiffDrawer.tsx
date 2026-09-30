@@ -153,16 +153,16 @@ export function RunDiffDrawer({ runId, onClose }: RunDiffDrawerProps) {
               )}
             </div>
           </div>
-          <button type="button" className="btn btn-sm" disabled={!diff} onClick={() => void copy()}>
+          <button type="button" className="btn" disabled={!diff} onClick={() => void copy()}>
             Copy patch
           </button>
-          <button type="button" className="btn btn-sm" onClick={() => void finder()}>
+          <button type="button" className="btn" onClick={() => void finder()}>
             Open worktree
           </button>
-          <button type="button" className="btn btn-sm btn-primary" onClick={() => void editor()}>
+          <button type="button" className="btn btn-primary" onClick={() => void editor()}>
             Open in editor
           </button>
-          <button type="button" className="icon-btn" aria-label="Close" onClick={onClose}>
+          <button type="button" className="icon-btn diff-close" aria-label="Close" onClick={onClose}>
             ✕
           </button>
         </header>

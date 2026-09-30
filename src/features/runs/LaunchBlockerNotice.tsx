@@ -109,7 +109,9 @@ export function LaunchBlockerNotice({
     const wf = blocker.workflow ?? "the workflow";
     return (
       <div className={`lb ${compact ? "lb-compact" : ""}`} role="alert">
-        <span className="dot dot-lg" aria-hidden />
+        <span className="lb-mark" aria-hidden>
+          ✕
+        </span>
         <div className="lb-body">
           <span className="lb-title">Workflow not approved</span>
           <span className="lb-text">
@@ -137,7 +139,9 @@ export function LaunchBlockerNotice({
   };
   return (
     <div className={`lb ${compact ? "lb-compact" : ""}`} role="alert">
-      <span className="dot dot-lg" aria-hidden />
+      <span className="lb-mark" aria-hidden>
+          ✕
+        </span>
       <div className="lb-body">
         <span className="lb-title">Workspace not trusted</span>
         <span className="lb-text">

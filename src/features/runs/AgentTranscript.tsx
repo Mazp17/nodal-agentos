@@ -5,7 +5,6 @@ import { getRunTranscript } from "../../domain/api";
 import { getAgentTranscript } from "./api";
 import type { RunView } from "./status";
 import type { AgentInfo, AgentState, Transcript, TranscriptItem } from "./types";
-import "./run-detail.css";
 import "./transcript.css";
 
 const POLL_MS = 3000;
@@ -141,6 +140,11 @@ function Item({ item }: { item: TranscriptItem }) {
   }
 }
 
+const waitText = (view: RunView) =>
+  view.waitingFor === "permission prompt"
+    ? "Waiting on a permission prompt. Attach to the session to answer it."
+    : "Waiting for your input. Attach to respond.";
+
 /** A transcript's conversation (messages, tools, "Show more" and the live state). */
 export function TranscriptConversation({
   t,
@@ -149,6 +153,7 @@ export function TranscriptConversation({
   live,
   view,
   waiting,
+  waitNotice = true,
 }: {
   t: Transcript;
   limit: number;
@@ -156,9 +161,11 @@ export function TranscriptConversation({
   live: boolean;
   view: RunView;
   waiting: boolean;
+  /** `false`: the caller shows the waiting notice itself (above the transcript). */
+  waitNotice?: boolean;
 }) {
   return (
-    <section className="ap-section tr-conv" aria-live={live ? "polite" : undefined}>
+    <section className="tr-section tr-conv" aria-live={live ? "polite" : undefined}>
       <h3 className="section-label">Transcript</h3>
       {(t.omitted > 0 || t.partial) && (
         <div className="tr-omitted">
@@ -171,7 +178,7 @@ export function TranscriptConversation({
           )}
         </div>
       )}
-      {t.items.length === 0 && <p className="rd-result-note">No messages yet.</p>}
+      {t.items.length === 0 && <p className="tr-note">No messages yet.</p>}
       {t.items.map((it, i) => (
         <Item key={`${t.omitted + i}`} item={it} />
       ))}
@@ -181,13 +188,7 @@ export function TranscriptConversation({
           Waiting for the next event…
         </div>
       )}
-      {waiting && (
-        <div className="tr-wait">
-          {view.waitingFor === "permission prompt"
-            ? "Waiting on a permission prompt. Attach to the session to answer it."
-            : "Waiting for your input. Attach to respond."}
-        </div>
-      )}
+      {waiting && waitNotice && <div className="tr-wait">{waitText(view)}</div>}
     </section>
   );
 }
@@ -215,20 +216,13 @@ export function AgentTranscript({
 }) {
   const ref = useFocusTrap<HTMLDivElement>(onClose);
   const [limit, setLimit] = useState(DEFAULT_LIMIT);
+  const [promptOpen, setPromptOpen] = useState(false);
   const st = AGENT_STATUS[agent.state];
   const sessionLive = view.phase === "running" || view.phase === "waiting";
   const live = agent.state === "running" && sessionLive;
   const load = useTranscript(view.run.sessionId, view.run.cwd, workflowId, agent.agentId, live, limit);
   const t = load.status === "ok" ? load.transcript : null;
 
-  const sub = [
-    modelName(agent.model ?? t?.model ?? null),
-    agent.phase ? `Phase${phaseNum ? ` ${phaseNum}` : ""} ${agent.phase}` : null,
-    taskRef,
-    view.run.claudeRunId,
-  ]
-    .filter(Boolean)
-    .join(" · ");
   const waiting = agent.state === "running" && view.phase === "waiting";
   const output =
     // While running, the "last text" is intermediate chatter, not the final output.
@@ -236,76 +230,114 @@ export function AgentTranscript({
     agent.resultPreview ??
     (agent.state === "running" ? "No final output yet." : agent.state === "queued" ? "Not started." : "No output recorded.");
   const outTone = agent.state === "done" ? "ok" : agent.state === "failed" ? "danger" : "none";
+  const phase = agent.phase ? `Phase${phaseNum ? ` ${phaseNum}` : ""} · ${agent.phase}` : null;
 
   return (
     <>
       <div className="scrim" onClick={onClose} aria-hidden />
-      <div ref={ref} className="sheet agent-panel" role="dialog" aria-modal="true" aria-labelledby="agent-title" tabIndex={-1}>
-        <header className="ap-head">
-          <div className="ap-head-main">
-            <div className="ap-title-row">
-              <h2 id="agent-title" className="ap-title">
-                {agent.label}
-              </h2>
-              <span className={`ap-status tone-${st.tone}`}>
+      <div ref={ref} className="sheet tr-panel" role="dialog" aria-modal="true" aria-labelledby="agent-title" tabIndex={-1}>
+        <header className="tr-bar">
+          <span>Subagent</span>
+          {taskRef && (
+            <>
+              <span className="tr-bar-sep" aria-hidden>
+                ·
+              </span>
+              <span className="mono tr-bar-id">{taskRef}</span>
+            </>
+          )}
+          {view.run.claudeRunId && (
+            <>
+              <span className="tr-bar-sep" aria-hidden>
+                {taskRef ? "/" : "·"}
+              </span>
+              <span className="mono tr-bar-id ellipsis">{view.run.claudeRunId}</span>
+            </>
+          )}
+          <button type="button" className="icon-btn tr-close" aria-label="Close" title="Close (Esc)" onClick={onClose}>
+            ✕
+          </button>
+        </header>
+        <div className="tr-body">
+          <div className="tr-hero">
+            <h2 id="agent-title" className="tr-title">
+              {agent.label}
+            </h2>
+            <div className="tr-chips">
+              <span className={`tr-chip tr-chip-status tone-${st.tone}`}>
                 <span className={`dot dot-sm ${agent.state === "running" ? "pulse" : ""}`} aria-hidden />
                 {st.label}
               </span>
               {live && (
-                <span className="tr-live">
+                <span className="tr-chip tr-chip-status tone-accent">
                   <span className="dot dot-sm pulse" aria-hidden />
                   Live
                 </span>
               )}
+              <span className="tr-chip mono">{modelName(agent.model ?? t?.model ?? null)}</span>
+              {phase && <span className="tr-chip">{phase}</span>}
+              <span className="tr-chip num">
+                <span className="tr-chip-k">Tool calls</span>
+                {agent.toolCalls ?? "—"}
+              </span>
+              <span className="tr-chip num">
+                <span className="tr-chip-k">Tokens</span>
+                {formatTokens(agent.tokens)}
+              </span>
+              <span className="tr-chip num">
+                <span className="tr-chip-k">Time</span>
+                {formatDuration(agent.durationMs)}
+              </span>
             </div>
-            <span className="ap-sub">{sub}</span>
           </div>
-          <button type="button" className="icon-btn" aria-label="Close" onClick={onClose}>
-            ✕
-          </button>
-        </header>
-        <div className="ap-body">
-          <dl className="rd-stats">
-            <div>
-              <dt>Tokens</dt>
-              <dd className="num">{formatTokens(agent.tokens)}</dd>
+
+          {waiting && (
+            <div className="banner banner-warn tr-banner" role="status">
+              <span aria-hidden className="tr-banner-mark">
+                !
+              </span>
+              <span className="tr-banner-text">{waitText(view)}</span>
             </div>
-            <div>
-              <dt>Tool calls</dt>
-              <dd className="num">{agent.toolCalls ?? "—"}</dd>
-            </div>
-            <div>
-              <dt>Time</dt>
-              <dd className="num">{formatDuration(agent.durationMs)}</dd>
-            </div>
-          </dl>
+          )}
+
+          <section className="tr-section" aria-label="Output">
+            <h3 className="section-label">Output</h3>
+            <div className={`tr-out tone-${outTone === "none" ? "muted" : outTone} ${outTone === "none" ? "tr-out-none" : ""}`}>{output}</div>
+          </section>
 
           {!agent.agentId || !workflowId || !view.run.sessionId ? (
-            <p className="rd-result-note">No transcript available for this agent.</p>
+            <p className="tr-note">No transcript available for this agent.</p>
           ) : load.status === "loading" ? (
-            <p className="rd-result-note">Loading transcript…</p>
+            <p className="tr-note">Loading transcript…</p>
           ) : load.status === "error" ? (
-            <p className="rd-result-note tr-error" role="alert">
+            <p className="tr-note tr-error" role="alert">
               Couldn't load the transcript: {load.error}
             </p>
           ) : t === null ? (
-            <p className="rd-result-note">
+            <p className="tr-note tr-note-box">
               {agent.state === "queued" ? "The agent hasn't started yet." : "No transcript file for this agent yet."}
             </p>
           ) : (
             <>
-              <section className="ap-section">
-                <h3 className="section-label">Input prompt</h3>
-                <div className="tr-prompt">{t.prompt ?? "—"}</div>
+              <section className="tr-section" aria-label="Prompt">
+                <button type="button" className="tr-toggle" aria-expanded={promptOpen} onClick={() => setPromptOpen(!promptOpen)}>
+                  <span className="section-label">Prompt</span>
+                  <span aria-hidden>{promptOpen ? "▾" : "▸"}</span>
+                  {t.prompt && <span className="num">{t.prompt.length.toLocaleString()} chars</span>}
+                </button>
+                {promptOpen && <pre className="tr-prompt">{t.prompt ?? "—"}</pre>}
               </section>
-              <TranscriptConversation t={t} limit={limit} onMore={() => setLimit(FULL_LIMIT)} live={live} view={view} waiting={waiting} />
+              <TranscriptConversation
+                t={t}
+                limit={limit}
+                onMore={() => setLimit(FULL_LIMIT)}
+                live={live}
+                view={view}
+                waiting={waiting}
+                waitNotice={false}
+              />
             </>
           )}
-
-          <section className="ap-section">
-            <h3 className="section-label">Final output</h3>
-            <div className={`ap-out ap-out-${outTone}`}>{output}</div>
-          </section>
         </div>
       </div>
     </>

@@ -2,64 +2,98 @@
 
 /* Full height and above the task panel (.tp, fixed at z 21), like the diff drawer. */
 .monitor-scrim { position: fixed; inset: 0; z-index: 30; }
-.monitor { position: fixed; top: 0; z-index: 31; width: min(420px, 92%); background: var(--surface-sheet); }
+.monitor { position: fixed; top: 0; z-index: 31; width: min(420px, 92%); border-left: 1px solid var(--border-3); background: var(--surface-sheet); }
 .monitor:focus { outline: none; }
 
-.monitor-head { display: flex; flex-direction: column; gap: var(--sp-4); padding: var(--sp-5) var(--sp-6); border-bottom: 1px solid var(--border); }
-.monitor-head-row { display: flex; align-items: center; gap: var(--sp-4); }
-.monitor-title { font-size: var(--fs-lg); font-weight: var(--fw-semibold); }
-.monitor-cap { margin-left: auto; font-size: var(--fs-sm); color: var(--text-dim); }
-.monitor-close { width: 24px; height: 24px; font-size: var(--fs-xs); color: var(--text-dim); }
+.monitor-head { display: flex; flex-direction: column; gap: 10px; padding: 14px var(--sp-7) var(--sp-5); border-bottom: 1px solid var(--border); }
+.monitor-head-row { display: flex; align-items: center; gap: 10px; }
+.monitor-title { flex: 1; font-size: var(--fs-xl); font-weight: var(--fw-semibold); letter-spacing: var(--tracking-tight); }
+.monitor-cap { font-size: var(--fs-sm); color: var(--text-muted); }
+.monitor-close { font-size: var(--fs-md); }
+.monitor .queue-slots span { height: 5px; }
 
-.monitor-body { flex: 1; min-height: 0; overflow: auto; padding: var(--sp-5) var(--sp-6); display: flex; flex-direction: column; gap: var(--sp-7); }
-.monitor-error { white-space: pre-line; }
-.monitor-section { display: flex; flex-direction: column; gap: var(--sp-3); }
-.monitor-section-title { display: flex; align-items: center; gap: var(--sp-2); font-size: var(--fs-sm); font-weight: var(--fw-semibold); color: var(--text-muted); }
-.monitor-count { font-size: var(--fs-xs); font-weight: var(--fw-regular); color: var(--text-dim); }
-.monitor-empty { font-size: var(--fs-md); color: var(--text-dim); line-height: var(--lh-body); }
+.monitor-body { flex: 1; min-height: 0; overflow: auto; padding: 0 var(--sp-5) 20px; display: flex; flex-direction: column; }
+.monitor-error { margin-top: var(--sp-5); white-space: pre-line; }
+.monitor-section { display: flex; flex-direction: column; }
+.monitor-section-title {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-3);
+  padding: var(--sp-7) var(--sp-1) var(--sp-3);
+  font-size: var(--fs-base);
+  font-weight: var(--fw-semibold);
+  color: var(--text);
+  white-space: nowrap;
+}
+.monitor-count { font-size: 13px; font-weight: var(--fw-regular); color: var(--text-dim); }
+.monitor-hint { margin-left: auto; font-size: 12px; font-weight: var(--fw-regular); color: var(--text-dim); }
+.monitor-list { display: flex; flex-direction: column; gap: var(--sp-2); }
+.monitor-empty {
+  padding: 10px var(--sp-5);
+  border: 1px dashed var(--border-2);
+  border-radius: var(--r-card);
+  font-size: var(--fs-sm);
+  color: var(--text-dim);
+  line-height: var(--lh-body);
+}
 
+/* Card: the title's button covers it; the actions sit above. */
 .monitor-card {
-  width: 100%;
+  position: relative;
+  flex: none;
   display: flex;
   flex-direction: column;
-  gap: var(--sp-2);
-  padding: var(--sp-3) var(--sp-4);
+  gap: var(--sp-1);
+  padding: 11px var(--sp-5);
   border-radius: var(--r-card);
   background: var(--surface-card);
   border: 1px solid var(--border);
-  text-align: left;
-  color: var(--text);
+  overflow: hidden;
 }
-button.monitor-card:hover { background: var(--fill-2); }
-.monitor-card-row { display: flex; align-items: center; gap: var(--sp-3); min-width: 0; }
-.monitor-run-title { flex: 1; min-width: 0; display: flex; align-items: center; gap: var(--sp-2); font-size: var(--fs-md); }
-.monitor-key { flex: none; font-family: var(--font-mono); font-size: var(--fs-xs); color: var(--text-muted); }
-.monitor-time { flex: none; font-size: var(--fs-sm); color: var(--text-dim); }
-.monitor-meta { font-size: var(--fs-sm); color: var(--text-dim); }
-.monitor-exec { flex: 1; min-width: 0; }
-.monitor-kind { margin-right: var(--sp-2); color: var(--text-muted); }
-.monitor-progress { display: inline-flex; align-items: center; gap: 5px; max-width: 60%; color: var(--tone); }
-.monitor-progress .dot { flex: none; }
-
-.monitor-stopped { border-color: color-mix(in oklch, var(--tone) 35%, transparent); }
-.monitor-reason {
+.monitor-card:hover { background: var(--surface-card-hover); border-color: var(--border-3); }
+.monitor-card-row { display: flex; align-items: baseline; gap: 10px; min-width: 0; }
+.monitor-card-title { flex: 1; min-width: 0; font-size: var(--fs-base); font-weight: var(--fw-medium); color: var(--text); }
+.monitor-open { padding: 0; border: 0; background: none; text-align: left; }
+.monitor-open::after { content: ""; position: absolute; inset: 0; }
+.monitor-open:focus-visible { outline: none; }
+.monitor-open:focus-visible::after { box-shadow: inset var(--focus-ring); border-radius: inherit; }
+.monitor-status { flex: none; display: inline-flex; align-items: center; gap: 5px; font-size: 12px; font-weight: var(--fw-medium); color: var(--tone); white-space: nowrap; }
+.monitor-status .dot { flex: none; align-self: center; }
+.monitor-why {
+  min-width: 0;
   display: -webkit-box;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
   line-clamp: 2;
   overflow: hidden;
-  font-size: var(--fs-sm);
+  font-size: 13px;
   line-height: 1.45;
-  color: var(--text-muted);
+  color: var(--text-4);
   overflow-wrap: anywhere;
 }
-.monitor-actions { display: flex; gap: var(--sp-2); }
+.monitor-why:empty { display: none; }
+/* Tooltip spans sit above the card's click overlay (.monitor-open::after). */
+.monitor-why [title] { position: relative; z-index: 1; }
+.monitor-meta-row { align-items: center; min-height: 22px; gap: var(--sp-3); }
+.monitor-meta { position: relative; z-index: 1; flex: 0 1 auto; min-width: 0; font-size: 12px; color: var(--text-dim); }
+.monitor-actions { position: relative; z-index: 1; flex: none; margin-left: auto; display: flex; gap: var(--sp-1); }
+.monitor-bar { position: absolute; left: 0; bottom: 0; height: 2px; background: var(--tone); }
 
+/* Up next: overrides the shared queue items from runs.css. */
 .monitor-queue { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--sp-2); }
-.monitor-queue-item { cursor: grab; }
+.monitor-queue-item { gap: 9px; padding: var(--sp-3) var(--sp-3) var(--sp-3) var(--sp-2); border-radius: var(--r-card); cursor: grab; }
 .monitor-queue-item.dragging { opacity: 0.5; }
 .monitor-queue-item.drop-above { box-shadow: 0 -2px 0 var(--accent); }
 .monitor-queue-item.drop-below { box-shadow: 0 2px 0 var(--accent); }
+.queue-grip { width: 12px; flex: none; text-align: center; font-size: var(--fs-2xs); letter-spacing: -2px; color: var(--text-dim); }
+.monitor-queue-item .queue-pos { width: 14px; font-size: var(--fs-2xs); }
+.monitor-queue-item .queue-open { gap: 2px; }
+.queue-line { display: flex; gap: 7px; min-width: 0; }
+.monitor-queue-item .queue-issue { flex: none; font-size: var(--fs-2xs); color: var(--text-muted); }
+.monitor-queue-item .queue-t { font-size: var(--fs-base); color: var(--text); }
+.queue-sub { font-size: var(--fs-2xs); color: var(--text-dim); }
+.monitor-queue-item .queue-btn { width: 22px; height: 22px; border-radius: var(--r-xs); font-size: 12px; }
+.monitor-queue-item .queue-btn:hover:not(:disabled) { color: var(--text); }
 
-.monitor-foot { display: flex; align-items: center; gap: var(--sp-4); padding: var(--sp-4) var(--sp-6); border-top: 1px solid var(--border); }
+.monitor-foot { display: flex; align-items: center; gap: var(--sp-3); padding: var(--sp-5) var(--sp-7); border-top: 1px solid var(--border); }
 .monitor-free { flex: 1; min-width: 0; font-size: var(--fs-sm); color: var(--text-dim); }

@@ -5,8 +5,7 @@ import { POLL, usePolled } from "../../domain/hooks/store";
 import { formatDuration } from "../../lib/format";
 import { useFocusTrap } from "../../ui/useFocusTrap";
 import { useRunActions, type RunActions } from "./actions";
-import { PhaseSegments } from "./RunBadge";
-import { executorKindLabel, executorLabel, runName, runTaskRef, type RunView } from "./status";
+import { executorKindLabel, executorLabel, phaseProgress, runName, runTaskRef, type RunView } from "./status";
 import "./runs.css";
 import "./run-monitor.css";
 
@@ -52,7 +51,7 @@ function runRefOf(v: RunView, state: RunsState) {
   return { task, project, repo, ref: runTaskRef(v.run, task, project), name: runName(v.run, task, project) };
 }
 
-/** Right-side drawer from the topbar pill: what is running, what stopped and what is next. */
+/** Right-side drawer from the topbar pill: what needs you, what is running, what is next and what failed. */
 export function RunMonitor({ onClose, onOpenRun, onGoToRuns }: RunMonitorProps) {
   const ref = useFocusTrap<HTMLDivElement>(onClose);
   const state = useRuns();
@@ -60,6 +59,8 @@ export function RunMonitor({ onClose, onOpenRun, onGoToRuns }: RunMonitorProps) 
   const actions = useRunActions();
   const running = runningNow(state);
   const stopped = stoppedRuns(state);
+  const waiting = stopped.filter((v) => v.phase === "waiting");
+  const failed = stopped.filter((v) => v.phase !== "waiting");
   const cap = summary.capacity;
   const slots = Math.min(Math.max(cap, summary.running), 16);
   const free = Math.max(0, cap - summary.running);
@@ -92,24 +93,32 @@ export function RunMonitor({ onClose, onOpenRun, onGoToRuns }: RunMonitorProps) 
         <div className="monitor-body">
           {state.error && <div className="banner banner-error monitor-error">{state.error}</div>}
 
-          <Section title="Running now" count={running.length}>
+          {waiting.length > 0 && (
+            <Section title="Waiting on you" count={waiting.length}>
+              {waiting.map((v) => (
+                <StoppedCard key={v.run.id} v={v} state={state} actions={actions} onOpen={() => onOpenRun(v.run.id)} />
+              ))}
+            </Section>
+          )}
+
+          <Section title="Running" count={running.length}>
             {running.map((v) => (
               <RunningCard key={v.run.id} v={v} state={state} onOpen={() => onOpenRun(v.run.id)} />
             ))}
             {running.length === 0 && <p className="monitor-empty">{state.loaded ? "Nothing running." : "Loading runs…"}</p>}
           </Section>
 
-          {stopped.length > 0 && (
-            <Section title="Stopped" count={stopped.length}>
-              {stopped.map((v) => (
+          <Section title="Up next" count={state.queue.length} hint={state.queue.length > 1 ? "Drag to reorder" : undefined}>
+            <UpNext state={state} actions={actions} onOpenRun={onOpenRun} />
+          </Section>
+
+          {failed.length > 0 && (
+            <Section title="Failed recently" count={failed.length}>
+              {failed.map((v) => (
                 <StoppedCard key={v.run.id} v={v} state={state} actions={actions} onOpen={() => onOpenRun(v.run.id)} />
               ))}
             </Section>
           )}
-
-          <Section title="Up next" count={state.queue.length}>
-            <UpNext state={state} actions={actions} onOpenRun={onOpenRun} />
-          </Section>
         </div>
 
         <footer className="monitor-foot">
@@ -119,8 +128,8 @@ export function RunMonitor({ onClose, onOpenRun, onGoToRuns }: RunMonitorProps) 
                 ? `${free} slot${free === 1 ? "" : "s"} free`
                 : `All ${cap} slots busy · next starts when one frees up`)}
           </span>
-          <button type="button" className="btn btn-sm" onClick={onGoToRuns}>
-            Go to Runs
+          <button type="button" className="btn" onClick={onGoToRuns}>
+            Go to Runs →
           </button>
         </footer>
       </div>
@@ -128,59 +137,82 @@ export function RunMonitor({ onClose, onOpenRun, onGoToRuns }: RunMonitorProps) 
   );
 }
 
-function Section({ title, count, children }: { title: string; count: number; children: ReactNode }) {
+function Section({ title, count, hint, children }: { title: string; count: number; hint?: string; children: ReactNode }) {
   return (
     <section className="monitor-section" aria-label={title}>
       <h3 className="monitor-section-title">
         {title}
         <span className="monitor-count num">{count}</span>
+        {hint && <span className="monitor-hint">{hint}</span>}
       </h3>
-      {children}
+      <div className="monitor-list">{children}</div>
     </section>
   );
 }
 
-function RunTitle({ v, state }: { v: RunView; state: RunsState }) {
-  const { project, ref } = runRefOf(v, state);
+/**
+ * One run as a card: title and short status, a two-line "why", a meta line with actions, and a
+ * progress hairline. The title's button covers the card; the actions sit above it.
+ */
+function MonitorCard({
+  v,
+  state,
+  why,
+  actions,
+  onOpen,
+}: {
+  v: RunView;
+  state: RunsState;
+  why: ReactNode;
+  actions?: ReactNode;
+  onOpen: () => void;
+}) {
+  const { project, repo, ref } = runRefOf(v, state);
+  const pct = v.run.executor.kind === "workflow" ? phaseProgress(v).pct : 0;
+  const meta = [ref.key, project?.name, repo?.name, executorLabel(v.run.executor), formatDuration(v.durationMs)]
+    .filter((x) => x && x !== "—")
+    .join(" · ");
   return (
-    <span className="monitor-run-title">
-      <span className="proj-swatch" style={{ background: project?.color ?? "var(--text-disabled)" }} aria-hidden />
-      {ref.key && <span className="monitor-key">{ref.key}</span>}
-      <span className="ellipsis">{ref.title}</span>
-    </span>
+    <div className={`monitor-card tone-${v.tone}`}>
+      <span className="monitor-card-row">
+        <button type="button" className="monitor-card-title monitor-open ellipsis" onClick={onOpen}>
+          {ref.title}
+        </button>
+        <span className="monitor-status">
+          <span className={`dot dot-sm ${v.pulse ? "pulse" : ""}`} aria-hidden />
+          {v.label}
+        </span>
+      </span>
+      {why && <span className="monitor-why">{why}</span>}
+      <span className="monitor-card-row monitor-meta-row">
+        <span className="monitor-meta ellipsis" title={`${executorKindLabel(v.run.executor)} ${executorLabel(v.run.executor)}`}>
+          {meta}
+        </span>
+        {actions && <span className="monitor-actions">{actions}</span>}
+      </span>
+      {pct > 0 && <span className="monitor-bar" style={{ width: `${pct}%` }} aria-hidden />}
+    </div>
   );
 }
 
 function RunningCard({ v, state, onOpen }: { v: RunView; state: RunsState; onOpen: () => void }) {
-  const { repo } = runRefOf(v, state);
   const workflow = v.run.executor.kind === "workflow";
   return (
-    <button type="button" className={`monitor-card tone-${v.tone}`} onClick={onOpen}>
-      <span className="monitor-card-row">
-        <RunTitle v={v} state={state} />
-        <span className="monitor-time num">{formatDuration(v.durationMs)}</span>
-      </span>
-      <span className="monitor-card-row monitor-meta">
-        <span className="monitor-exec ellipsis">
-          <span className="monitor-kind">{executorKindLabel(v.run.executor)}</span>
-          {executorLabel(v.run.executor)}
-        </span>
-        <span className="monitor-progress ellipsis">
-          <span className={`dot dot-sm ${v.pulse ? "pulse" : ""}`} aria-hidden />
-          {workflow ? <WorkflowProgress v={v} /> : <AgentProgress v={v} repo={repo?.name ?? null} />}
-        </span>
-      </span>
-      {workflow && <PhaseSegments run={v} />}
-    </button>
+    <MonitorCard
+      v={v}
+      state={state}
+      onOpen={onOpen}
+      why={workflow ? <WorkflowProgress v={v} /> : <AgentProgress v={v} />}
+    />
   );
 }
 
 function WorkflowProgress({ v }: { v: RunView }) {
-  if (v.phase !== "running" || v.phaseIndex == null || !v.phaseTotal) return <>{v.label}</>;
+  if (v.phase !== "running" || v.phaseIndex == null || !v.phaseTotal) return null;
   return <>{`Phase ${v.phaseIndex}/${v.phaseTotal}${v.phaseName ? ` · ${v.phaseName}` : ""}`}</>;
 }
 
-function AgentProgress({ v, repo }: { v: RunView; repo: string | null }) {
+function AgentProgress({ v }: { v: RunView }) {
   const live = v.run.status === "launched" && v.run.sessionId != null;
   const q = usePolled<number | null>(
     live ? `run-tool-calls:${v.run.id}` : null,
@@ -189,8 +221,8 @@ function AgentProgress({ v, repo }: { v: RunView; repo: string | null }) {
     POLL.live,
   );
   const n = q.data;
-  if (n == null) return <>{repo ? `${v.label} · ${repo}` : v.label}</>;
-  return <>{`${n} tool call${n === 1 ? "" : "s"}${repo ? ` · ${repo}` : ""}`}</>;
+  if (n == null) return null;
+  return <>{`${n} tool call${n === 1 ? "" : "s"}`}</>;
 }
 
 function stoppedReason(v: RunView): string {
@@ -208,35 +240,31 @@ function StoppedCard({ v, state, actions, onOpen }: { v: RunView; state: RunsSta
   const retryOf = v.run.kind === "review" && v.run.parentRunId ? (state.byId.get(v.run.parentRunId) ?? v) : v;
   const canRetry = !waiting && v.run.taskId != null;
   return (
-    <div className={`monitor-card monitor-stopped tone-${v.tone}`}>
-      <span className="monitor-card-row">
-        <RunTitle v={v} state={state} />
-        <span className={`badge badge-sm tone-${v.tone}`}>{v.label}</span>
-      </span>
-      <p className="monitor-reason" title={stoppedReason(v)}>
-        {stoppedReason(v)}
-      </p>
-      <span className="monitor-actions">
-        <button type="button" className="btn btn-xs" onClick={onOpen}>
-          Open run
-        </button>
-        {waiting && (
-          <button type="button" className="btn btn-xs btn-primary" disabled={actions.busy} onClick={() => void actions.attach(v)}>
-            Attach
-          </button>
-        )}
-        {canRetry && (
-          <button
-            type="button"
-            className="btn btn-xs btn-primary"
-            disabled={actions.busy}
-            onClick={() => void actions.runAgain(retryOf, task, name)}
-          >
-            Retry
-          </button>
-        )}
-      </span>
-    </div>
+    <MonitorCard
+      v={v}
+      state={state}
+      onOpen={onOpen}
+      why={<span title={stoppedReason(v)}>{stoppedReason(v)}</span>}
+      actions={
+        <>
+          {waiting && (
+            <button type="button" className="btn btn-xs btn-primary" disabled={actions.busy} onClick={() => void actions.attach(v)}>
+              Attach
+            </button>
+          )}
+          {canRetry && (
+            <button
+              type="button"
+              className="btn btn-xs btn-primary"
+              disabled={actions.busy}
+              onClick={() => void actions.runAgain(retryOf, task, name)}
+            >
+              Retry
+            </button>
+          )}
+        </>
+      }
+    />
   );
 }
 
@@ -250,12 +278,12 @@ function UpNext({ state, actions, onOpenRun }: { state: RunsState; actions: RunA
     void actions.reorder(moveId(ids, from, to));
   };
 
-  if (queue.length === 0) return <p className="monitor-empty">Queue is empty. New runs start immediately while slots are free.</p>;
+  if (queue.length === 0) return <p className="monitor-empty">Queue is empty. New runs start right away while slots are free.</p>;
 
   return (
     <ol className="monitor-queue">
       {queue.map((v, k) => {
-        const { project, ref, name } = runRefOf(v, state);
+        const { project, repo, ref, name } = runRefOf(v, state);
         const awaiting = v.phase === "awaiting";
         const over = drag && drag.over === k && drag.from !== k ? (drag.from < k ? "below" : "above") : "";
         return (
@@ -281,12 +309,21 @@ function UpNext({ state, actions, onOpenRun }: { state: RunsState; actions: RunA
             }}
             onDragEnd={() => setDrag(null)}
           >
+            <span className="queue-grip" aria-hidden>
+              ⋮⋮
+            </span>
             <span className="queue-pos num">{k + 1}</span>
             <span className="proj-swatch" style={{ background: project?.color ?? "var(--text-disabled)" }} aria-hidden />
             <button type="button" className="queue-open" onClick={() => onOpenRun(v.run.id)}>
-              <span className="queue-issue">{ref.key ?? executorLabel(v.run.executor)}</span>
-              <span className="queue-t ellipsis">{ref.title}</span>
-              {awaiting && <span className="queue-await">Migrated · awaiting confirmation</span>}
+              <span className="queue-line">
+                {ref.key && <span className="queue-issue">{ref.key}</span>}
+                <span className="queue-t ellipsis">{ref.title}</span>
+              </span>
+              {awaiting ? (
+                <span className="queue-await">Migrated · awaiting confirmation</span>
+              ) : (
+                <span className="queue-sub ellipsis">{[executorLabel(v.run.executor), repo?.name].filter(Boolean).join(" · ")}</span>
+              )}
             </button>
             {awaiting && (
               <button type="button" className="btn btn-xs btn-amber" disabled={actions.busy} onClick={() => void actions.confirm(v, name)}>
