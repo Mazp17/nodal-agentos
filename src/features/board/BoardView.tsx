@@ -189,6 +189,11 @@ export function BoardView({ projectId, onOpenTask, onOpenRun, onNewProject, onOp
   const onDragStart = (t: Task) => (e: DragEvent<HTMLElement>) => {
     e.dataTransfer.setData(DRAG_TYPE, t.id);
     e.dataTransfer.effectAllowed = "move";
+    // Started on the title (see TaskCard): drag the whole card, from where it was grabbed.
+    if (e.target !== e.currentTarget) {
+      const r = e.currentTarget.getBoundingClientRect();
+      e.dataTransfer.setDragImage(e.currentTarget, e.clientX - r.left, e.clientY - r.top);
+    }
     setMenu(null);
     setDrag({ id: t.id, status: t.status, index: -1, height: e.currentTarget.offsetHeight });
   };

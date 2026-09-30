@@ -85,10 +85,13 @@ export function TaskCard({ model, showProject, busy, dragging, onOpen, onAction,
         <span className="bd-card-stripe" style={{ background: project.color }} title={project.name} aria-hidden />
       )}
 
-      {/* Real button to open with the keyboard; the whole card also opens on click. */}
+      {/* Real button to open with the keyboard; the whole card also opens on click.
+          `draggable`: WebKit never starts a drag from a <button>, and the title covers most of
+          the card; the drag bubbles to the card, which sets the whole card as the image. */}
       <button
         type="button"
         className="bd-card-title"
+        draggable
         aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown Alt+ArrowLeft Alt+ArrowRight Shift+F10"
         title="Alt+arrows to move · Shift+F10 for actions"
         onClick={(e) => {
