@@ -51,6 +51,13 @@ P10 (a reader-connection pool ahead of the single-mutex `Db`) was evaluated with
 
 ADR-013 (replace the 5 s poll with push) was re-evaluated after S1's re-measurement (`measure_s1_claude_agents_spawns_per_5s`) found the pump's and the UI's independent 5 s timers still missed `LiveSessions`' cache at both ends of a `pump_offset` ∈ [2 s, 3 s) phase band, spawning `claude agents` twice per window there instead of once. Root cause was the cache's 2 s TTL being less than half the shared 5 s tick, not the polling model itself, so push was **discarded**: raising the TTL to 4 s (`> half` of 5 s, so any phase still leaves at least one side inside the other's cache, with 1.5 s of margin for timer jitter) closes the band instead. Re-measured across the same offsets (0, 1.5 s, 2.5 s, 4 s), 6 runs: 1 spawn / 5 s in 24/24 samples, meeting S1 (a 3 s TTL gave 23/24: one 5/15 s at offset 2.5 s). Push (ADR-013) remains a valid alternative fix — it would close the same gap by leaving only one reader — but is unneeded scope for a target this fix already meets.
 
+## [0.7.0](https://github.com/Mazp17/nodal-agentos/compare/v0.6.1...v0.7.0) (2026-10-02)
+
+
+### Features
+
+* **mcp:** launch, review, cancel and list runs ([#63](https://github.com/Mazp17/nodal-agentos/issues/63)) ([709b946](https://github.com/Mazp17/nodal-agentos/commit/709b946244a322b41765d9f17d3d58dd3420ac3d))
+
 ## [0.6.1](https://github.com/Mazp17/nodal-agentos/compare/v0.6.0...v0.6.1) (2026-09-30)
 
 
