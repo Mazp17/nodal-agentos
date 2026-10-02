@@ -9,6 +9,7 @@ use serde_json::{json, Map, Value};
 
 use nodal_domain::board::dto::{NewTask, PlanInput, TaskPatch};
 use nodal_domain::board::validate;
+use nodal_domain::execution::options;
 use nodal_domain::model::*;
 use nodal_domain::serde_util::double_option;
 use nodal_domain::util::is_valid_id;
@@ -60,23 +61,25 @@ pub fn call(
         "create_task" => create_task(conn, env, parse(args)?, now),
         "update_task" => update_task(conn, env, parse(args)?, now),
         "get_run" => get_run(conn, parse(args)?).map(Outcome::read),
+        "list_runs" => list_runs(conn, parse(args)?).map(Outcome::read),
+        "list_executors" => list_executors(conn, env, parse(args)?).map(Outcome::read),
         PROPOSE_TASK => propose_task(conn, env, parse(args)?).map(Outcome::read),
         _ => Err(format!("Unknown tool: {name}.")),
     }
 }
 
-fn parse<T: for<'de> Deserialize<'de>>(args: Value) -> Result<T, String> {
+pub(super) fn parse<T: for<'de> Deserialize<'de>>(args: Value) -> Result<T, String> {
     serde_json::from_value(args).map_err(|e| format!("Invalid arguments: {e}."))
 }
 
-fn to_value<T: serde::Serialize>(v: &T) -> Result<Value, String> {
+pub(super) fn to_value<T: serde::Serialize>(v: &T) -> Result<Value, String> {
     serde_json::to_value(v).map_err(|e| format!("Internal error: {e}"))
 }
 
 // ---------- Project, repo and task resolution ----------
 
 /// Id or key (`PAY`, any case).
-fn resolve_project(conn: &Connection, s: &str) -> Result<Project, String> {
+pub(super) fn resolve_project(conn: &Connection, s: &str) -> Result<Project, String> {
     let s = s.trim();
     projects::list(conn, true)?
         .into_iter()
@@ -85,7 +88,7 @@ fn resolve_project(conn: &Connection, s: &str) -> Result<Project, String> {
 }
 
 /// Id, name, or a path at or inside the repo (the deepest repo wins).
-fn resolve_repo(
+pub(super) fn resolve_repo(
     conn: &Connection,
     env: &Env,
     s: &str,
@@ -121,7 +124,7 @@ fn resolve_repo(
 }
 
 /// Internal id (`t01…`) or visible key (`PAY-12`, any case).
-fn resolve_task(conn: &Connection, s: &str) -> Result<Task, String> {
+pub(super) fn resolve_task(conn: &Connection, s: &str) -> Result<Task, String> {
     let s = s.trim();
     if is_valid_id(s) {
         if let Ok(t) = tasks::get(conn, s) {
@@ -135,7 +138,7 @@ fn resolve_task(conn: &Connection, s: &str) -> Result<Task, String> {
     tasks::find_by_number(conn, &project.id, number)?.ok_or_else(missing)
 }
 
-fn project_keys(conn: &Connection) -> Result<std::collections::HashMap<String, String>, String> {
+pub(super) fn project_keys(conn: &Connection) -> Result<std::collections::HashMap<String, String>, String> {
     Ok(projects::list(conn, true)?
         .into_iter()
         .map(|p| (p.id, p.key))
@@ -451,6 +454,134 @@ fn get_run(conn: &Connection, a: GetRun) -> Result<Value, String> {
     out.insert("taskKey".into(), task_key.unwrap_or(Value::Null));
     out.insert("review".into(), review.unwrap_or(Value::Null));
     Ok(Value::Object(out))
+}
+
+/// Runs as `list_runs` shows them: each with its task's visible `taskKey` (or `null`).
+pub(super) fn run_values(conn: &Connection, runs: Vec<RunLight>) -> Result<Value, String> {
+    let keys = project_keys(conn)?;
+    let mut task_keys: std::collections::HashMap<String, Value> = std::collections::HashMap::new();
+    runs.into_iter()
+        .map(|r| {
+            let key = match &r.task_id {
+                Some(id) => match task_keys.get(id) {
+                    Some(k) => k.clone(),
+                    None => {
+                        let k = tasks::get(conn, id).ok().and_then(|t| {
+                            keys.get(&t.project_id).map(|p| Value::String(task_key(p, t.number)))
+                        });
+                        let k = k.unwrap_or(Value::Null);
+                        task_keys.insert(id.clone(), k.clone());
+                        k
+                    }
+                },
+                None => Value::Null,
+            };
+            let mut v = to_value(&r)?;
+            if let Value::Object(m) = &mut v {
+                m.insert("taskKey".into(), key);
+            }
+            Ok(v)
+        })
+        .collect::<Result<Vec<_>, String>>()
+        .map(Value::Array)
+}
+
+const RUNS_LIMIT: usize = 20;
+const RUNS_LIMIT_MAX: usize = 200;
+
+#[derive(Deserialize, Default)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct ListRuns {
+    project: Option<String>,
+    task: Option<String>,
+    status: Option<OneOrMany<RunStatus>>,
+    limit: Option<usize>,
+}
+
+/// Newest first, like the run history.
+fn list_runs(conn: &Connection, a: ListRuns) -> Result<Value, String> {
+    let project = a
+        .project
+        .as_deref()
+        .map(|p| resolve_project(conn, p))
+        .transpose()?;
+    let task = a.task.as_deref().map(|t| resolve_task(conn, t)).transpose()?;
+    let statuses = match a.status {
+        Some(OneOrMany::One(s)) => vec![s],
+        Some(OneOrMany::Many(v)) => v,
+        None => vec![],
+    };
+    let limit = a.limit.unwrap_or(RUNS_LIMIT).clamp(1, RUNS_LIMIT_MAX);
+    let project_id = project.as_ref().map(|p| p.id.as_str());
+    let task_id = task.as_ref().map(|t| t.id.as_str());
+    // The history only covers the newest runs; pending ones come from the queue, so an old
+    // run still going is never missed.
+    let pending_only = !statuses.is_empty()
+        && statuses
+            .iter()
+            .all(|s| matches!(s, RunStatus::Queued | RunStatus::Launching | RunStatus::Launched));
+    let runs: Vec<RunLight> = if pending_only {
+        let mut runs: Vec<RunLight> = qruns::pending_of(conn, project_id)?
+            .into_iter()
+            .filter(|r| task_id.is_none() || r.task_id.as_deref() == task_id)
+            .map(RunLight::from)
+            .collect();
+        runs.sort_by_key(|r| std::cmp::Reverse(r.queued_at));
+        runs
+    } else {
+        qruns::list_filtered_light(conn, project_id, task_id)?
+    };
+    let runs = runs
+        .into_iter()
+        .filter(|r| statuses.is_empty() || statuses.contains(&r.status))
+        .take(limit)
+        .collect();
+    run_values(conn, runs)
+}
+
+#[derive(Deserialize, Default)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct ListExecutors {
+    repo: Option<String>,
+    project: Option<String>,
+}
+
+/// The executor catalog (unfiltered by the project's hidden list) and the accepted launch
+/// options; with a repo, also its defaults.
+fn list_executors(conn: &Connection, env: &Env, a: ListExecutors) -> Result<Value, String> {
+    let project = a
+        .project
+        .as_deref()
+        .map(|p| resolve_project(conn, p))
+        .transpose()?;
+    let repo = a
+        .repo
+        .as_deref()
+        .map(|r| resolve_repo(conn, env, r, project.as_ref()))
+        .transpose()?;
+    let executors = env.claude_config.catalog(
+        env.claude_dir.as_deref(),
+        repo.as_ref().map(|r| Path::new(r.path.as_str())),
+    );
+    let defaults = repo.map(|r| {
+        json!({
+            "repoId": r.id,
+            "executor": r.default_executor,
+            "model": r.launch.model,
+            "effort": r.launch.effort,
+            "permissionMode": r.launch.permission_mode,
+            "isolation": r.default_isolation,
+            "finish": r.default_finish,
+            "review": r.default_review,
+        })
+    });
+    Ok(json!({
+        "executors": to_value(&executors)?,
+        "models": options::MODEL_ALIASES,
+        "efforts": options::EFFORTS,
+        "permissionModes": options::PERMISSION_MODES,
+        "repoDefaults": defaults,
+    }))
 }
 
 #[cfg(test)]

@@ -138,10 +138,23 @@ impl PtySessions {
     /// `u32::MAX` sessions have been attached in this run — astronomically unlikely, but cheap
     /// to rule out rather than assume.
     fn next_id(&self) -> Result<u32, String> {
-        self.next_id
-            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |n| n.checked_add(1))
-            .map(|old| old + 1)
-            .map_err(|_| "Ran out of terminal session ids.".to_string())
+        // A compare-exchange loop: `fetch_update` is deprecated on newer toolchains and its
+        // replacement (`try_update`) doesn't exist on older ones.
+        let mut current = self.next_id.load(Ordering::Relaxed);
+        loop {
+            let next = current
+                .checked_add(1)
+                .ok_or_else(|| "Ran out of terminal session ids.".to_string())?;
+            match self.next_id.compare_exchange_weak(
+                current,
+                next,
+                Ordering::Relaxed,
+                Ordering::Relaxed,
+            ) {
+                Ok(_) => return Ok(next),
+                Err(actual) => current = actual,
+            }
+        }
     }
 
     /// A poisoned lock (only possible after a panic while holding it) shouldn't wedge every

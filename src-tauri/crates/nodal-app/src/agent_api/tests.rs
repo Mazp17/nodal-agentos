@@ -15,19 +15,19 @@ use nodal_domain::ports::{BoxFut, ChangeNotifier, ChatRuntime, ClaudeCli, Clock,
 use nodal_host::adapters::{HostClaudeConfig, HostGit, HostLocalFs, HostPlanFiles};
 use nodal_host::testutil::TempDir;
 use nodal_store::Db;
-use serde_json::json;
+use serde_json::{json, Value};
 
 use crate::board::ops;
 use crate::core::{Core, Env};
 
 use super::AgentApi;
 
-/// Not exercised: `AgentApi::call` never reaches `Core::claude`.
+/// Only `list_sessions` is reached (`get_queue`); concurrency 0 keeps the queue from launching.
 struct NoopClaude;
 
 impl ClaudeCli for NoopClaude {
     fn list_sessions(&self) -> BoxFut<'_, Result<Vec<RunSummary>, HostError>> {
-        Box::pin(async move { unimplemented!("not exercised by the agent_api tests") })
+        Box::pin(async move { Ok(Vec::new()) })
     }
     fn list_agent_sessions(&self) -> BoxFut<'_, Result<Vec<AgentSession>, HostError>> {
         Box::pin(async move { unimplemented!("not exercised by the agent_api tests") })
@@ -181,6 +181,13 @@ fn test_env(root: &Path) -> Env {
 
 fn agent_api(env: Env, notifier: Arc<SpyNotifier>) -> (AgentApi, Db) {
     let db = Db::open_in_memory().unwrap();
+    {
+        // Concurrency 0: the queue pass `launch_run` kicks never launches, so runs stay queued.
+        let mut c = db.lock().unwrap();
+        let mut s = nodal_store::rows::load_settings(&c).unwrap();
+        s.concurrency = 0;
+        nodal_store::rows::save_settings(&mut c, &s).unwrap();
+    }
     let core = Arc::new(Core {
         db: db.clone(),
         env,
@@ -191,7 +198,8 @@ fn agent_api(env: Env, notifier: Arc<SpyNotifier>) -> (AgentApi, Db) {
         notifier,
         chats: Arc::new(NoopChatRuntime),
     });
-    (AgentApi::new(core), db)
+    let execution = crate::execution::Execution::new(core.clone());
+    (AgentApi::new(core, execution), db)
 }
 
 /// Project PAY with one repo, seeded directly through `board::ops` (bypassing MCP dispatch).
@@ -282,4 +290,122 @@ fn call_reports_unknown_tools_without_notifying() {
     let err = api.call("launch_task", json!({})).unwrap_err();
     assert!(err.contains("Unknown tool"));
     assert!(notifier.calls.lock().unwrap().is_empty());
+}
+
+/// A task PAY-1 in a repo folder on disk (in place, so no worktree is needed).
+#[allow(clippy::disallowed_methods)] // builds the repo folder directly on disk
+fn seed_task(api: &AgentApi, db: &Db, env: &Env, root: &Path) -> String {
+    let (project_id, _) = seed(db, env);
+    let dir = root.join("web");
+    std::fs::create_dir_all(&dir).unwrap();
+    let repo = ops::add_repo(
+        &db.lock().unwrap(),
+        &project_id,
+        &serde_json::from_value(json!({"path": "web", "defaultIsolation": "in_place"})).unwrap(),
+        &dir,
+        3,
+    )
+    .unwrap();
+    let task = api
+        .call(
+            "create_task",
+            json!({"repo": repo.id, "title": "Logo", "plan": "# Plan"}),
+        )
+        .unwrap();
+    task["key"].as_str().unwrap().to_string()
+}
+
+#[test]
+fn launch_run_queues_with_the_given_options_and_the_run_tools_follow_it() {
+    let t = TempDir::new("agent-api-launch");
+    let env = test_env(&t.0);
+    let notifier = Arc::new(SpyNotifier::default());
+    let (api, db) = agent_api(env.clone(), notifier.clone());
+    let key = seed_task(&api, &db, &env, &t.0);
+    notifier.calls.lock().unwrap().clear();
+
+    let run = api
+        .call(
+            "launch_run",
+            json!({"task": key, "model": "sonnet", "effort": "high", "finish": "commit",
+                   "review": false, "extraInstructions": "Be brief."}),
+        )
+        .unwrap();
+    assert_eq!(run["status"], "queued");
+    assert_eq!(run["taskKey"], "PAY-1");
+    assert_eq!(run["options"]["model"], "sonnet");
+    assert_eq!(run["options"]["effort"], "high");
+    assert_eq!(run["finish"], "commit");
+    assert_eq!(run["isolation"], "in_place");
+    assert!(notifier
+        .calls
+        .lock()
+        .unwrap()
+        .contains(&(ChangeKind::Runs, None)));
+
+    let err = api.call("launch_run", json!({"task": "PAY-1"})).unwrap_err();
+    assert!(err.contains("already has a queued run"), "{err}");
+
+    let queue = api.call("get_queue", json!({"project": "pay"})).unwrap();
+    assert_eq!(queue["queued"], 1);
+    assert_eq!(queue["runs"][0]["id"], run["id"]);
+
+    let listed = api
+        .call("list_runs", json!({"task": "PAY-1", "status": "queued"}))
+        .unwrap();
+    assert_eq!(listed.as_array().unwrap().len(), 1);
+    assert_eq!(listed[0]["taskKey"], "PAY-1");
+    let got = api.call("get_run", json!({"task": "PAY-1"})).unwrap();
+    assert_eq!(got["run"]["id"], run["id"]);
+
+    let canceled = api
+        .call("cancel_run", json!({"runId": run["id"]}))
+        .unwrap();
+    assert_eq!(canceled["status"], "canceled");
+    let listed = api
+        .call("list_runs", json!({"status": ["queued", "launched"]}))
+        .unwrap();
+    assert_eq!(listed, json!([]));
+}
+
+#[test]
+fn launch_run_rejects_invalid_options_and_unknown_tasks() {
+    let t = TempDir::new("agent-api-launch-invalid");
+    let env = test_env(&t.0);
+    let (api, db) = agent_api(env.clone(), Arc::new(SpyNotifier::default()));
+    let key = seed_task(&api, &db, &env, &t.0);
+
+    let err = api
+        .call("launch_run", json!({"task": key, "effort": "huge"}))
+        .unwrap_err();
+    assert!(err.contains("Invalid effort"), "{err}");
+    let err = api
+        .call(
+            "launch_run",
+            json!({"task": key, "executor": {"kind": "workflow", "name": "nope"}}),
+        )
+        .unwrap_err();
+    assert!(err.contains("Workflow \"nope\" not found"), "{err}");
+    let err = api.call("launch_run", json!({"task": "PAY-9"})).unwrap_err();
+    assert!(err.contains("No task"), "{err}");
+    let err = api
+        .call("launch_run", json!({"task": key, "bogus": 1}))
+        .unwrap_err();
+    assert!(err.contains("Invalid arguments"), "{err}");
+}
+
+#[test]
+fn list_executors_reports_the_launch_options_and_the_repo_defaults() {
+    let t = TempDir::new("agent-api-executors");
+    let env = test_env(&t.0);
+    let (api, db) = agent_api(env.clone(), Arc::new(SpyNotifier::default()));
+    let (_, repo_id) = seed(&db, &env);
+
+    let out = api.call("list_executors", json!({"repo": repo_id})).unwrap();
+    assert!(out["executors"].is_array());
+    assert!(out["efforts"].as_array().unwrap().contains(&json!("max")));
+    assert!(out["models"].as_array().unwrap().contains(&json!("opus")));
+    assert_eq!(out["repoDefaults"]["repoId"], repo_id);
+    let out = api.call("list_executors", json!({})).unwrap();
+    assert_eq!(out["repoDefaults"], Value::Null);
 }
