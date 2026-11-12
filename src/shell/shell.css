@@ -25,7 +25,8 @@
 .brand-name { font-size: var(--fs-xl); font-weight: var(--fw-semibold); letter-spacing: var(--tracking-tighter); line-height: 1.1; }
 .brand-tag { font-size: var(--fs-2xs); color: var(--text-dim); line-height: 1.3; white-space: nowrap; }
 
-.side-search { justify-content: space-between; margin-bottom: var(--sp-4); }
+.side-search { justify-content: space-between; margin-bottom: var(--sp-2); }
+.side-new-project { flex: none; justify-content: flex-start; gap: var(--sp-3); margin-bottom: var(--sp-4); color: var(--text-3); }
 
 .side-nav { display: flex; flex-direction: column; gap: 1px; }
 .side-item {
@@ -116,7 +117,8 @@
 .side-update:disabled { color: var(--text-muted); }
 
 /* ---- Main panel ---- */
-.main-wrap { flex: 1; min-width: 0; display: flex; padding: var(--sp-3) var(--sp-3) var(--sp-3) 0; }
+/* Edge to edge: the main panel fills the window right of the sidebar (no inset card). */
+.main-wrap { flex: 1; min-width: 0; display: flex; }
 .main {
   position: relative;
   flex: 1;
@@ -124,8 +126,7 @@
   display: flex;
   flex-direction: column;
   background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: var(--r-panel);
+  border-left: 1px solid var(--border);
   overflow: hidden;
 }
 .content { flex: 1; min-height: 0; display: flex; flex-direction: column; }
@@ -164,3 +165,178 @@
 .status-pill-queued { color: var(--text-dim); }
 /* Same mark as an unread chat in the Chat page's sessions (`.chat-session-unread`). */
 .side-unread { flex: none; display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--accent); }
+
+/* ---- Sidebar: Chats | Tasks switch ---- */
+.side-mode {
+  flex: none;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 2px;
+  margin-bottom: var(--sp-4);
+  padding: 3px;
+  border-radius: 9px;
+  background: var(--fill-inset);
+}
+.side-mode-btn {
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: var(--fs-base);
+  font-weight: var(--fw-medium);
+}
+.side-mode-btn:hover { color: var(--text); }
+.side-mode-btn.on { background: var(--surface-selected); color: var(--text-strong); box-shadow: 0 1px 2px rgb(0 0 0 / 0.35); }
+
+.side-primary { flex: none; justify-content: flex-start; gap: var(--sp-3); margin-bottom: var(--sp-3); }
+
+/* ---- Sidebar: chats grouped by project ---- */
+.side-groups { flex: 1; min-height: 0; overflow: auto; display: flex; flex-direction: column; gap: var(--sp-5); }
+.side-group { display: flex; flex-direction: column; gap: 1px; }
+.side-group-head { flex: none; display: flex; align-items: center; gap: 2px; padding-right: 2px; border-radius: var(--r-lg); }
+.side-group-head:hover { background: var(--fill-3); }
+.side-group-toggle {
+  flex: 1;
+  min-width: 0;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: 0 var(--sp-1) 0 var(--sp-3);
+  border: 0;
+  background: transparent;
+  text-align: left;
+}
+.side-group-name { flex: 1; min-width: 0; font-size: var(--fs-sm); font-weight: var(--fw-semibold); color: var(--text-5); }
+.side-group-chev { display: flex; color: var(--text-dim); transition: transform 120ms ease-out; }
+.side-group-chev.open { transform: rotate(90deg); }
+.side-group-add { color: var(--text-muted); }
+.side-group-empty,
+.side-group-more {
+  height: 26px;
+  padding: 0 var(--sp-3) 0 22px;
+  border: 0;
+  border-radius: var(--r-lg);
+  background: transparent;
+  color: var(--text-muted);
+  font-size: var(--fs-sm);
+  text-align: left;
+}
+.side-group-empty:hover:not(:disabled),
+.side-group-more:hover { background: var(--fill-4); color: var(--text); }
+
+.side-chat { position: relative; flex: none; display: flex; align-items: center; border-radius: var(--r-lg); }
+.side-chat:hover { background: var(--fill-3); }
+.side-chat.on { background: var(--fill-5); }
+.side-chat-pick {
+  flex: 1;
+  min-width: 0;
+  min-height: 42px;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: 5px var(--sp-3) 5px 9px;
+  border: 0;
+  background: transparent;
+  text-align: left;
+}
+.side-chat-dot { flex: none; width: 6px; height: 6px; border-radius: 50%; }
+.side-chat-dot.unread,
+.side-chat-dot.live { background: var(--accent); }
+.side-chat-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.side-chat-title { font-size: var(--fs-base); color: var(--text-4); }
+.side-chat.on .side-chat-title,
+.side-chat.unread .side-chat-title { color: var(--text-strong); }
+.side-chat.unread .side-chat-title { font-weight: var(--fw-semibold); }
+.side-chat-branch { display: flex; align-items: center; gap: 5px; min-width: 0; font-family: var(--font-mono); font-size: var(--fs-2xs); color: var(--text-muted); }
+.side-chat-meta { flex: none; font-size: var(--fs-2xs); color: var(--text-dim); white-space: nowrap; }
+.side-chat-meta.live { color: var(--accent); }
+.side-chat-del { position: absolute; right: 4px; opacity: 0; background: var(--surface-selected); color: var(--text-muted); }
+.side-chat:hover .side-chat-del,
+.side-chat-del:focus-visible { opacity: 1; }
+.side-chat:hover .side-chat-meta { visibility: hidden; }
+
+.side-need { flex: none; font-size: var(--fs-2xs); color: var(--amber); }
+.side-project-row:hover .side-project-btn,
+.side-project-btn:focus-visible { color: var(--text); }
+
+/* Footer: Settings with the task manager status at its right. */
+.side-foot { flex-direction: column; align-items: stretch; gap: var(--sp-1); padding: var(--sp-3) 0 0; }
+.side-foot .side-item { height: 30px; }
+.side-foot .side-foot-status { flex: none; gap: 5px; font-size: var(--fs-2xs); color: var(--text-muted); font-weight: var(--fw-regular, 400); }
+.side-foot .side-version { margin: 0; padding: 0 var(--sp-3); color: var(--text-dim); }
+
+/* ---- Tabs over the main panel ---- */
+.tab-dot-all { flex: none; width: 8px; height: 8px; box-sizing: border-box; border: 1.3px solid var(--text-muted); border-radius: 2px; }
+.tabbar {
+  flex: none;
+  height: 40px;
+  display: flex;
+  align-items: flex-end;
+  gap: var(--sp-1);
+  padding: 0 var(--sp-3);
+  background: var(--bg-rail);
+  border-bottom: 1px solid var(--border);
+}
+.tabbar-scroll { flex: 0 1 auto; min-width: 0; height: 100%; display: flex; align-items: flex-end; gap: 2px; overflow-x: auto; }
+/* Thin scrollbar that only shows on hover, in the 8px left under the 32px tabs. */
+.tabbar-scroll::-webkit-scrollbar { height: 4px; background: transparent; }
+.tabbar-scroll::-webkit-scrollbar-track { background: transparent; }
+.tabbar-scroll::-webkit-scrollbar-thumb { background: transparent; border-radius: 4px; }
+.tabbar-scroll:hover::-webkit-scrollbar-thumb { background: var(--fill-7); }
+.tabbar-scroll::-webkit-scrollbar-thumb:hover { background: var(--border-strong); }
+.tab {
+  flex: none;
+  min-width: 120px;
+  max-width: 210px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  border-radius: 7px 7px 0 0;
+}
+.tab:hover { background: var(--fill-2); }
+.tab.on { background: var(--bg); }
+.tab-pick {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0 var(--sp-2) 0 var(--sp-4);
+  border: 0;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: var(--fs-sm);
+  text-align: left;
+}
+.tab.on .tab-pick { color: var(--text-strong); }
+.tab-unread { font-weight: var(--fw-semibold); color: var(--text); }
+.tab-close { flex: none; width: 20px; height: 20px; margin-right: 6px; color: var(--text-dim); }
+/* Inactive tabs hide their close button, except unsaved ones (they show the dot). */
+.tab:not(.on):not(:hover):not(.dirty) .tab-close { opacity: 0; }
+.tab-close:focus-visible { opacity: 1; }
+.tabbar-btn { flex: none; width: 28px; height: 28px; margin-bottom: 6px; color: var(--text-muted); }
+.tabbar-btn.on { background: var(--surface-selected); color: var(--text-strong); }
+.tabbar-end { margin-left: auto; display: flex; align-items: flex-end; }
+.side-chat-wt { flex: none; padding: 0 4px; border-radius: 3px; background: var(--fill-5); color: var(--text-4); font-family: var(--font-sans, inherit); }
+.side-chat-diff { flex: none; color: var(--text-dim); }
+.tab-file-icon { flex: none; color: var(--text-muted); }
+
+/* Tab right-click menu (radix positions it; `.menu` gives the look). */
+.tab-menu { position: static; min-width: 180px; }
+.tab-menu .menu-item { cursor: default; user-select: none; }
+.tab-menu .menu-item[data-highlighted] { background: var(--fill-6); outline: none; }
+.tab-menu .menu-item[data-disabled] { color: var(--text-dim); pointer-events: none; }
+.menu-sep { height: 1px; margin: var(--sp-1) var(--sp-2); background: var(--border); }
+
+/* Unsaved file tab: a dot in place of the close button, the button back on hover. */
+.tab.dirty .tab-close { opacity: 1; position: relative; color: transparent; }
+.tab.dirty .tab-close::after { content: ""; position: absolute; inset: 0; margin: auto; width: 8px; height: 8px; border-radius: 50%; background: var(--text-4); }
+.tab.dirty:hover .tab-close, .tab.dirty .tab-close:focus-visible { color: var(--text-dim); }
+.tab.dirty:hover .tab-close::after, .tab.dirty .tab-close:focus-visible::after { display: none; }

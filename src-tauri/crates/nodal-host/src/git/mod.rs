@@ -5,6 +5,8 @@
 //! the `Git` port.
 
 pub mod diff;
+pub mod ls;
+pub mod stat;
 pub mod merge;
 pub mod worktree;
 

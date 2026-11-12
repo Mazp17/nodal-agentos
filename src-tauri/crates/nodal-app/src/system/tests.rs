@@ -123,3 +123,50 @@ fn import_legacy_uses_core_env_data_dir_now_and_db() {
         .unwrap();
     assert_eq!(repos, 1);
 }
+
+#[test]
+fn repo_file_commands_only_accept_the_repos_own_worktrees() {
+    use std::path::Path;
+
+    use nodal_domain::testutil::{project_of, repo_of};
+    use nodal_host::testutil::{git_available, init_repo};
+    use nodal_store::rows::{insert_project, insert_repo};
+
+    if !git_available() {
+        return;
+    }
+    let root = TempDir::new("system-worktrees");
+    let repo = root.0.join("repo");
+    init_repo(&repo);
+    let wt = root.0.join("wt");
+    let status = std::process::Command::new("git")
+        .arg("-C")
+        .arg(&repo)
+        .args(["worktree", "add", "-q", "-b", "side", wt.to_str().unwrap()])
+        .status()
+        .unwrap();
+    assert!(status.success());
+    std::fs::write(wt.join("only-in-wt.txt"), "x").unwrap();
+
+    let db = Db::open_in_memory().unwrap();
+    {
+        let c = db.lock().unwrap();
+        insert_project(&c, &project_of("p1", "PAY")).unwrap();
+        insert_repo(&c, &repo_of("r1", "p1", repo.to_str().unwrap())).unwrap();
+    }
+    let system = system_with(&root.0, db);
+    let list = |wt: Option<&Path>| {
+        block_on(system.list_repo_dir("r1".into(), "".into(), wt.map(|p| p.display().to_string())))
+    };
+
+    let main = list(None).unwrap();
+    assert!(main.iter().all(|e| e.name != "only-in-wt.txt"));
+    assert!(list(Some(&wt)).unwrap().iter().any(|e| e.name == "only-in-wt.txt"));
+    // Anything else, even an existing folder, is not a worktree of this repo.
+    for bad in [root.0.as_path(), Path::new("/"), Path::new("/nope")] {
+        let err = list(Some(bad)).unwrap_err().to_string();
+        assert_eq!(err, "Not a worktree of this repo.");
+    }
+    let err = block_on(system.revert_repo_file("r1".into(), "x".into(), Some("/".into()))).unwrap_err();
+    assert_eq!(err.to_string(), "Not a worktree of this repo.");
+}
