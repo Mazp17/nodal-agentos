@@ -1,14 +1,14 @@
 ---
 name: nodal-tasks
-description: Create, update and follow tasks on a Nodal board through the `nodal` MCP server (list_projects, list_tasks, get_task, create_task, update_task, get_run). Use when work should be queued as a task instead of done now — follow-ups found while finishing a task, a plan to split into tasks, work for another repo — or to check a task's status or a run's result.
+description: Create, update, launch and follow tasks on a Nodal board through the `nodal` MCP server (list_projects, list_tasks, get_task, create_task, update_task, list_executors, launch_run, review_task, cancel_run, get_run, list_runs, get_queue). Use when work should be queued as a task instead of done now — follow-ups found while finishing a task, a plan to split into tasks, work for another repo — to launch a task's run with a given model, effort or workflow, or to check a task's status or a run's result.
 ---
 
 # Nodal tasks
 
 Nodal is a macOS app that keeps a board of tasks per project and runs each task with an executor
 (plain Claude, an agent or a workflow). While Nodal is open, the `nodal` MCP server lets you read
-the board, create and update tasks, and read the result of runs. You cannot launch runs: a person
-launches them from the app.
+the board, create and update tasks, launch, review and cancel runs, and read their status and
+results. Launch a run only when the user asks for it: it spends their slots and tokens.
 
 If the tools fail with "Open Nodal first", the app is not running or its MCP server is off. Say so and stop; do not retry in
 a loop and do not fall back to another tracker unless you are asked to.
@@ -127,6 +127,30 @@ listed.
 Setting `in_progress` does not launch anything. Tasks imported from Linear only accept status,
 plan, acceptance criteria, executor and repo; their title, priority and labels come from Linear.
 
+## Launching a run
+
+`launch_run` queues a work run for a task; Nodal launches it when a slot is free (`get_queue`
+shows the slots, the queue and what waits on the user). It fails if the task already has a queued
+or running run. Every option is optional and falls back to the task's, then the repo's:
+
+- `executor`: as above; a workflow manages its own worktree, so `isolation` is ignored for it;
+- `model`: `fable`, `opus`, `sonnet`, `haiku` or a full name (`claude-sonnet-5-5`, `[1m]` allowed);
+- `effort`: `low`, `medium`, `high`, `xhigh` or `max`;
+- `permissionMode`: `default`, `manual`, `acceptEdits`, `auto`, `dontAsk`, `plan` or
+  `bypassPermissions`;
+- `isolation`: `worktree` (its own branch) or `in_place` (in the repo folder);
+- `finish`: `changes` (left uncommitted), `commit`, or `pr` (commit, push and open a PR);
+- `review`: queue a review run when the work finishes;
+- `extraInstructions`: added to the prompt of this run only.
+
+Call `list_executors` with the task's repo first when you need an agent or a workflow: it lists the
+ones that exist there, the accepted values and the repo's defaults. `review_task` queues a review of
+the task's current work (`reviewer` overrides the agent). `cancel_run` dequeues a queued run or
+stops a running one; a stopped run leaves its half-done work as a patch and the task `blocked`.
+
+After launching, tell the user the run id and come back with `get_run` later instead of polling in
+a loop. `list_runs` lists runs (newest first) by `project`, `task` and `status`.
+
 ## How to read a run's result
 
 `get_task` returns the task, its plan text and its latest runs (newest first). `get_run` with
@@ -153,7 +177,7 @@ The task status follows the result: a failed, stopped or `red` run, or a failed 
 task to `blocked`; a passed review (or a `green`/`yellow` run without review) moves it to
 `in_review`, waiting for a person. So a `blocked` task is the one to look at: read the summary and
 the unmet criteria, then fix the plan or the criteria with `update_task`, or create a follow-up
-task, and tell the user it is ready to be launched again.
+task, and ask the user before launching it again.
 
 Report a run's result to the user as it is: say "the review failed on X" rather than "done" when
 `verdict.pass` is false, and do not call a change merged or shipped because a run is `green`.

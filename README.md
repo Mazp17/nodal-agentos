@@ -53,7 +53,7 @@ claude mcp add nodal -- /Applications/Nodal.app/Contents/MacOS/nodal-mcp
 
 From source, build it with `cargo build --release --bin nodal-mcp` in `src-tauri` (after `pnpm build`) and register `src-tauri/target/release/nodal-mcp` instead.
 
-Tools: `list_projects`, `list_tasks`, `get_task`, `create_task`, `update_task` and `get_run`. Runs are launched from the app. Nodal's own chats launch it with `--chat`, which adds `propose_task`: the chat shows a task card and nothing is created until you accept it. A debug build of `nodal-mcp` talks to a debug build of the app.
+Tools: `list_projects`, `list_tasks`, `get_task`, `create_task`, `update_task`, `list_executors`, `launch_run`, `review_task`, `cancel_run`, `get_run`, `list_runs` and `get_queue`. Nodal's own chats launch it with `--chat`, which adds `propose_task`: the chat shows a task card and nothing is created until you accept it. A debug build of `nodal-mcp` talks to a debug build of the app.
 
 The [`nodal-tasks` skill](skills/nodal-tasks/SKILL.md) teaches agents when to create a task instead of doing the work, how to write its plan and acceptance criteria, how to pick the repo and the executor, and how to read a run's result. Install it with [skills](https://skills.sh):
 

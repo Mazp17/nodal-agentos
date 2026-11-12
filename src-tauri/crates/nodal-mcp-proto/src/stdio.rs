@@ -160,7 +160,7 @@ fn initialize(params: &Value, version: &str) -> Value {
         "protocolVersion": protocol_version,
         "capabilities": {"tools": {}},
         "serverInfo": {"name": "nodal", "version": version},
-        "instructions": "Tasks on the Nodal board: list projects and tasks, create and update tasks, and read run results. Runs are launched from the Nodal app, not from here. Nodal must be open."
+        "instructions": "Tasks on the Nodal board: list projects and tasks, create and update tasks, launch, review and cancel runs (model, effort, executor or workflow), and follow their status and results. Nodal must be open."
     })
 }
 

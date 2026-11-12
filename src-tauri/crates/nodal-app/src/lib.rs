@@ -43,13 +43,14 @@ impl App {
             notifier: deps.notifier,
             chats: deps.chats,
         });
+        let execution = execution::Execution::new(core.clone());
         Arc::new(App {
             board: board::Board::new(core.clone()),
-            execution: execution::Execution::new(core.clone()),
+            execution: execution.clone(),
             sessions: sessions::Sessions::new(core.clone()),
             sources: deps.sources,
             chats: chats::Chats::new(core.clone()),
-            agent_api: agent_api::AgentApi::new(core.clone()),
+            agent_api: agent_api::AgentApi::new(core.clone(), execution),
             system: system::System::new(core),
         })
     }

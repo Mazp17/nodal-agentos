@@ -333,7 +333,7 @@ fn get_run_reports_the_review_result() {
 }
 
 #[test]
-fn definitions_cover_every_tool_and_nothing_launches() {
+fn definitions_cover_every_tool() {
     let defs = definitions();
     let names: Vec<&str> = defs
         .as_array()
@@ -349,7 +349,13 @@ fn definitions_cover_every_tool_and_nothing_launches() {
             "get_task",
             "create_task",
             "update_task",
-            "get_run"
+            "get_run",
+            "list_runs",
+            "list_executors",
+            "launch_run",
+            "review_task",
+            "cancel_run",
+            "get_queue"
         ]
     );
     for d in defs.as_array().unwrap() {
@@ -467,4 +473,10 @@ fn the_skill_describes_every_tool_and_value() {
             "SKILL.md does not mention `{word}`"
         );
     }
+}
+
+#[test]
+fn launch_options_in_the_schema_match_the_domain() {
+    assert_eq!(nodal_mcp_proto::tools::EFFORTS, options::EFFORTS);
+    assert_eq!(nodal_mcp_proto::tools::PERMISSION_MODES, options::PERMISSION_MODES);
 }
