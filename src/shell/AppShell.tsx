@@ -662,7 +662,7 @@ export function AppShell() {
       ? { tone: "ok", label: "Linear connected" }
       : provider.status?.hasKey
         ? { tone: "danger", label: "Linear unreachable" }
-        : { tone: "muted", label: "No task manager" };
+        : { tone: "muted", label: "No task manager connected" };
 
   return (
     <div className="desk">

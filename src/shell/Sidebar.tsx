@@ -4,6 +4,7 @@ import type { Chat, Project } from "../domain/types";
 import { chatTitle, shortAgo } from "../features/chats/model";
 import { BrandMark } from "../ui/BrandMark";
 import { Kbd, KbdGroup } from "../ui/Kbd";
+import { Tooltip, TooltipContent, TooltipTrigger } from "../ui/Tooltip";
 import { readJsonPref, writePref } from "./storage";
 
 export type SideMode = "chat" | "tasks";
@@ -320,10 +321,14 @@ export function Sidebar(p: Props) {
         >
           <SideIcon name="settings" />
           <span className="side-item-label">Settings</span>
-          <span className="side-foot-status" role="status" title={p.provider.label}>
-            <span className={`dot dot-sm tone-${p.provider.tone}`} aria-hidden />
-            <span className="ellipsis">{p.provider.label.replace(/ connected$/, "")}</span>
-          </span>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <span className="side-foot-status" role="status" aria-label={p.provider.label}>
+                <span className={`dot dot-sm tone-${p.provider.tone}`} aria-hidden />
+              </span>
+            </TooltipTrigger>
+            <TooltipContent side="top">{p.provider.label}</TooltipContent>
+          </Tooltip>
         </button>
         {p.updateAvailable ? (
           <button
