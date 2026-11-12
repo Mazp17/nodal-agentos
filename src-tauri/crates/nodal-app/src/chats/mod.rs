@@ -22,6 +22,7 @@ use nodal_domain::execution::options;
 use nodal_domain::model::chat::{ChatLive, ChatSpec, ClaudeDefaults};
 use nodal_domain::model::claude::Transcript;
 use nodal_domain::model::events::ChangeKind;
+use nodal_domain::model::executors::{is_valid_agent_name, ExecutorInfo};
 use nodal_domain::model::{Chat, LaunchOptions, Project, Repo};
 use nodal_domain::serde_util::double_option;
 use nodal_domain::sessions::transcript::{is_valid_session_id, TRANSCRIPT_DEFAULT_LIMIT, TRANSCRIPT_MAX_LIMIT};
@@ -41,6 +42,8 @@ pub struct NewChat {
     pub repo_id: Option<String>,
     #[serde(default)]
     pub title: Option<String>,
+    #[serde(default)]
+    pub agent: Option<String>,
     #[serde(flatten)]
     pub launch: LaunchOptions,
 }
@@ -54,6 +57,8 @@ pub struct ChatPatch {
     #[serde(default, deserialize_with = "double_option")]
     pub repo_id: Option<Option<String>>,
     #[serde(default, deserialize_with = "double_option")]
+    pub agent: Option<Option<String>>,
+    #[serde(default, deserialize_with = "double_option")]
     pub model: Option<Option<String>>,
     #[serde(default, deserialize_with = "double_option")]
     pub effort: Option<Option<String>>,
@@ -64,6 +69,17 @@ pub struct ChatPatch {
 fn title(t: Option<&str>) -> Option<String> {
     let one_line = t?.split_whitespace().collect::<Vec<_>>().join(" ");
     (!one_line.is_empty()).then(|| clip_chars(&one_line, TITLE_MAX))
+}
+
+pub const AGENT_LOCKED: &str = "A chat keeps the agent it started with: start a new chat to talk to another one.";
+
+/// `None` (or empty) is plain Claude; anything else must be usable as `--agent <name>`.
+fn agent(name: Option<&str>) -> Result<Option<String>, String> {
+    match name.map(str::trim).filter(|n| !n.is_empty()) {
+        None => Ok(None),
+        Some(n) if is_valid_agent_name(n) => Ok(Some(n.to_string())),
+        Some(n) => Err(format!("Invalid agent name: \"{n}\".")),
+    }
 }
 
 fn check_repo(conn: &Connection, project_id: &str, repo_id: Option<&str>) -> Result<(), String> {
@@ -89,6 +105,7 @@ pub mod ops {
             title: title(input.title.as_deref()),
             session_title: None,
             session_id: None,
+            agent: agent(input.agent.as_deref())?,
             launch: options::normalize(&input.launch).map_err(|e| e.join("\n"))?,
             created_at: now,
             updated_at: now,
@@ -106,6 +123,15 @@ pub mod ops {
             let r = r.clone().filter(|r| !r.is_empty());
             check_repo(conn, &c.project_id, r.as_deref())?;
             c.repo_id = r;
+        }
+        if let Some(a) = &patch.agent {
+            let a = agent(a.as_deref())?;
+            // Claude Code keeps a session's agent on `--resume` (verified with v2.1: a session
+            // started as one agent answers as it whatever `--agent` says), so it can't change.
+            if c.session_id.is_some() && a != c.agent {
+                return Err(AGENT_LOCKED.into());
+            }
+            c.agent = a;
         }
         let mut launch = c.launch.clone();
         for (field, value) in [
@@ -173,8 +199,13 @@ impl<'a> ChatCwd<'a> {
 
 /// Where the chat runs: its repo, else the project's root folder, else its first repo.
 pub fn chat_cwd<'a>(chat: &Chat, project: &'a Project, repos: &'a [Repo]) -> Result<ChatCwd<'a>, String> {
-    let found = match (&chat.repo_id, project.root_path.as_deref().filter(|p| !p.is_empty())) {
-        (Some(id), _) => repos.iter().find(|r| &r.id == id).map(ChatCwd::Repo),
+    scope_cwd(chat.repo_id.as_deref(), project, repos)
+}
+
+/// `chat_cwd` for a Repo pill value (`None`: the whole project), before the chat exists.
+pub fn scope_cwd<'a>(repo_id: Option<&str>, project: &'a Project, repos: &'a [Repo]) -> Result<ChatCwd<'a>, String> {
+    let found = match (repo_id, project.root_path.as_deref().filter(|p| !p.is_empty())) {
+        (Some(id), _) => repos.iter().find(|r| r.id == id).map(ChatCwd::Repo),
         (None, Some(root)) => Some(ChatCwd::Root(root)),
         (None, None) => repos.first().map(ChatCwd::Repo),
     };
@@ -187,6 +218,9 @@ pub fn chat_cwd<'a>(chat: &Chat, project: &'a Project, repos: &'a [Repo]) -> Res
 pub fn spec(chat: &Chat, project: &Project, repos: &[Repo], mcp: Option<&Path>) -> Result<ChatSpec, String> {
     let cwd = chat_cwd(chat, project, repos)?;
     let mut args = options::to_args(&chat.launch)?;
+    if let Some(a) = &chat.agent {
+        args.extend(["--agent".to_string(), a.clone()]);
+    }
     args.extend(context::args(chat, project, repos, cwd, mcp));
     Ok(ChatSpec { cwd: PathBuf::from(cwd.path()), args })
 }
@@ -313,6 +347,28 @@ impl Chats {
         blocking(move || Ok(claude_config.claude_defaults(claude_dir.as_deref(), repo_path.as_deref().map(Path::new))))
             .await
             .map_err(AppError::from)
+    }
+
+    /// Agents a chat can talk to in the folder it runs in for this Repo pill value (`None`: the
+    /// whole project): the user's, the folder's `.claude/agents` and enabled plugins'.
+    pub async fn list_chat_agents(&self, project_id: String, repo_id: Option<String>) -> Result<Vec<ExecutorInfo>, AppError> {
+        check_id(&project_id, "project")?;
+        if let Some(id) = &repo_id {
+            check_id(id, "repo")?;
+        }
+        let dir = self
+            .db(move |c| {
+                let project = projects::get(c, &project_id)?;
+                let repos = repos::list(c, Some(&project_id))?;
+                Ok(scope_cwd(repo_id.as_deref(), &project, &repos)?.path().to_string())
+            })
+            .await?;
+        let claude_dir = self.core.env.claude_dir.clone();
+        let claude_config = self.core.env.claude_config.clone();
+        let agents = blocking(move || Ok(claude_config.list_agents(claude_dir.as_deref(), Some(Path::new(&dir)))))
+            .await
+            .map_err(AppError::from)?;
+        Ok(agents.into_iter().map(ExecutorInfo::from).collect())
     }
 
     /// The chat's history, read from its Claude Code session. `None` before the first message.

@@ -31,11 +31,11 @@ pub fn insert(conn: &Connection, c: &Chat) -> Result<(), DbError> {
 /// Saves everything except `project_id`, `session_id`, `session_title` and `created_at`.
 pub fn update(conn: &Connection, c: &Chat) -> Result<(), DbError> {
     let n = conn.execute(
-        "UPDATE chats SET repo_id = :repo, title = :title, model = :model, effort = :effort,
+        "UPDATE chats SET repo_id = :repo, title = :title, agent = :agent, model = :model, effort = :effort,
                           permission_mode = :perm, updated_at = :updated
          WHERE id = :id",
         named_params! {
-            ":id": c.id, ":repo": c.repo_id, ":title": c.title, ":model": c.launch.model,
+            ":id": c.id, ":repo": c.repo_id, ":title": c.title, ":agent": c.agent, ":model": c.launch.model,
             ":effort": c.launch.effort, ":perm": c.launch.permission_mode, ":updated": c.updated_at,
         },
     )?;

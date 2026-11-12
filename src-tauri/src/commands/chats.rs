@@ -147,6 +147,17 @@ pub async fn get_chat_live(state: State<'_, Arc<App>>, id: String) -> Result<Cha
     Ok(state.chats.get_chat_live(id).await?)
 }
 
+/// Agents a chat can pick in the folder it runs in for `repo_id` (`null`: the whole project).
+#[tauri::command]
+#[tracing::instrument(skip_all, level = "info")]
+pub async fn list_chat_agents(
+    state: State<'_, Arc<App>>,
+    project_id: String,
+    repo_id: Option<String>,
+) -> Result<Vec<nodal_domain::model::executors::ExecutorInfo>, CommandError> {
+    Ok(state.chats.list_chat_agents(project_id, repo_id).await?)
+}
+
 /// The model and effort Claude Code uses when a chat leaves them unset, as configured in its
 /// settings for `repo_id` (or only the user's settings without one).
 #[tauri::command]

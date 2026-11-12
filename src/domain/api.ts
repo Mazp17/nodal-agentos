@@ -503,9 +503,11 @@ export interface NewChat extends LaunchOptions {
   /** The Repo pill; absent → the whole project. */
   repoId?: string | null;
   title?: string | null;
+  /** Agent to talk to; absent → plain Claude. */
+  agent?: string | null;
 }
 
-export type ChatPatch = { [K in "title" | "repoId" | "model" | "effort" | "permissionMode"]?: string | null };
+export type ChatPatch = { [K in "title" | "repoId" | "agent" | "model" | "effort" | "permissionMode"]?: string | null };
 
 /** A permission prompt waiting for `respondChatPermission`. */
 export interface PermissionRequest {
@@ -583,6 +585,9 @@ export interface ClaudeDefaults {
   model: string | null;
   effort: string | null;
 }
+/** Agents a chat can talk to in the folder it runs in for `repoId` (`null`: the whole project). */
+export const listChatAgents = (projectId: string, repoId: string | null) =>
+  invoke<ExecutorInfo[]>("list_chat_agents", { projectId, repoId });
 export const getClaudeDefaults = (repoId: string | null) => invoke<ClaudeDefaults>("get_claude_defaults", { repoId });
 /** A project's chats (with `null`, every project's), most recently used first. */
 export const listChats = (projectId: string | null) => invoke<Chat[]>("list_chats", { projectId });

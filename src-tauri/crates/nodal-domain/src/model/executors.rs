@@ -37,6 +37,20 @@ pub struct AgentDef {
     pub path: std::path::PathBuf,
 }
 
+impl From<AgentDef> for ExecutorInfo {
+    fn from(a: AgentDef) -> Self {
+        ExecutorInfo {
+            executor: Executor::Agent { name: a.name, source: a.source },
+            description: a.description,
+            tools: a.tools,
+            manages_source: None,
+            reviews: false,
+            path: Some(a.path.to_string_lossy().into_owned()),
+            source: Some(a.source),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum WorkflowSource {

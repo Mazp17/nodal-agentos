@@ -270,7 +270,12 @@ CREATE UNIQUE INDEX project_hidden_executors_key
 CREATE INDEX project_hidden_executors_repo ON project_hidden_executors(repo_id);
 "#;
 
-pub const MIGRATIONS: &[&str] = &[V1, V2, V3, V4, V5, V6, V7];
+/// v8: `chats.agent`, the agent the chat talks to (`--agent <name>`); NULL = plain Claude.
+const V8: &str = r#"
+ALTER TABLE chats ADD COLUMN agent TEXT;
+"#;
+
+pub const MIGRATIONS: &[&str] = &[V1, V2, V3, V4, V5, V6, V7, V8];
 
 pub fn user_version(conn: &Conn) -> Result<i64, DbError> {
     Ok(conn.query_row("PRAGMA user_version", [], |r| r.get(0))?)

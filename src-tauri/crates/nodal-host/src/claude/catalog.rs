@@ -415,22 +415,7 @@ pub fn catalog(claude_dir: Option<&Path>, repo: Option<&Path>) -> Vec<ExecutorIn
         path: None,
         source: None,
     }];
-    out.extend(
-        list_agents(claude_dir, repo)
-            .into_iter()
-            .map(|a| ExecutorInfo {
-                executor: Executor::Agent {
-                    name: a.name,
-                    source: a.source,
-                },
-                description: a.description,
-                tools: a.tools,
-                manages_source: None,
-                reviews: false,
-                path: Some(a.path.to_string_lossy().into_owned()),
-                source: Some(a.source),
-            }),
-    );
+    out.extend(list_agents(claude_dir, repo).into_iter().map(ExecutorInfo::from));
     let wf_dir = claude_dir.map(|d| d.join("workflows"));
     out.extend(
         workflows::list_from(wf_dir.as_deref(), repo)

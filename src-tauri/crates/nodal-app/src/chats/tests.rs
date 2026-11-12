@@ -111,6 +111,12 @@ fn update_patches_only_what_it_gets() {
     );
     assert_eq!(u.launch.effort.as_deref(), Some("high"));
 
+    let u = ops::update(&c, &chat.id, &patch(r#"{"agent":"code-reviewer"}"#)).unwrap();
+    assert_eq!(u.agent.as_deref(), Some("code-reviewer"));
+    assert!(ops::update(&c, &chat.id, &patch(r#"{"agent":"--bad"}"#)).is_err());
+    let u = ops::update(&c, &chat.id, &patch(r#"{"agent":null}"#)).unwrap();
+    assert_eq!(u.agent, None);
+
     assert!(ops::update(&c, &chat.id, &patch(r#"{"repoId":"r3"}"#)).is_err());
     assert!(ops::update(&c, &chat.id, &patch(r#"{"permissionMode":"yolo"}"#)).is_err());
     assert!(
@@ -167,6 +173,7 @@ fn spec_runs_in_the_chat_repo_or_the_first_one() {
         repo_id: None,
         title: None,
         session_title: None,
+        agent: None,
         session_id: None,
         launch: LaunchOptions {
             model: Some("haiku".into()),
@@ -206,6 +213,11 @@ fn spec_runs_in_the_chat_repo_or_the_first_one() {
         "the repo's permission mode isn't inherited"
     );
 
+    chat.agent = Some("code-reviewer".into());
+    let s = spec(&chat, &project, &repos, None).unwrap();
+    assert!(s.args.windows(2).any(|w| w == ["--agent", "code-reviewer"]));
+    chat.agent = None;
+
     chat.repo_id = Some("gone".into());
     assert!(spec(&chat, &project, &repos, None).is_err());
     chat.repo_id = None;
@@ -229,6 +241,7 @@ fn a_repo_less_chat_runs_at_the_project_root_when_it_has_one() {
         repo_id: None,
         title: None,
         session_title: None,
+        agent: None,
         session_id: None,
         launch: LaunchOptions::default(),
         created_at: 1,
@@ -615,6 +628,24 @@ fn respond_interrupt_stop_and_live_delegate_to_the_runtime() {
 }
 
 #[test]
+fn list_chat_agents_reads_the_folder_the_chat_runs_in() {
+    let f = fx("chats-agents");
+    let dir = f.repo_path.join(".claude/agents");
+    #[allow(clippy::disallowed_methods)] // a fixture agent file in the repo folder
+    {
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("planner.md"), "---\nname: planner\ndescription: Plans work\n---\nYou plan.\n").unwrap();
+    }
+    // Without a repo pill and no root folder, the chat runs in the first repo: same folder.
+    for repo in [Some("r1".to_string()), None] {
+        let agents = block_on(f.chats.list_chat_agents("p1".into(), repo)).unwrap();
+        let names: Vec<_> = agents.iter().map(|a| a.executor.clone()).collect();
+        assert_eq!(names, [nodal_domain::model::Executor::Agent { name: "planner".into(), source: nodal_domain::model::AgentSource::Repo }]);
+    }
+    assert!(block_on(f.chats.list_chat_agents("p1".into(), Some("../x".into()))).is_err());
+}
+
+#[test]
 fn get_claude_defaults_rejects_an_invalid_repo_id() {
     let f = fx("chats-defaults-bad-repo");
     let err = block_on(f.chats.get_claude_defaults(Some("../nope".into()))).unwrap_err();
@@ -686,4 +717,18 @@ fn stop_project_delegates_to_the_runtime() {
     let f = fx("chats-stop-project");
     f.chats.stop_project("p1");
     assert_eq!(f.runtime.stopped_projects.lock().unwrap().as_slice(), ["p1".to_string()]);
+}
+
+#[test]
+fn a_started_chat_keeps_its_agent() {
+    let db = Db::open_in_memory().unwrap();
+    let c = db.lock().unwrap();
+    seed(&c);
+    let chat = ops::create(&c, "p1", &serde_json::from_str(r#"{"agent":"planner"}"#).unwrap(), 1).unwrap();
+    assert!(chats::set_session(&c, &chat.id, "00000000-0000-4000-8000-000000000001").unwrap());
+    assert_eq!(ops::update(&c, &chat.id, &patch(r#"{"agent":"code-reviewer"}"#)).unwrap_err(), AGENT_LOCKED);
+    assert_eq!(ops::update(&c, &chat.id, &patch(r#"{"agent":null}"#)).unwrap_err(), AGENT_LOCKED);
+    // Re-sending the same agent (or other fields) is fine.
+    let u = ops::update(&c, &chat.id, &patch(r#"{"agent":"planner","effort":"high"}"#)).unwrap();
+    assert_eq!((u.agent.as_deref(), u.launch.effort.as_deref()), (Some("planner"), Some("high")));
 }

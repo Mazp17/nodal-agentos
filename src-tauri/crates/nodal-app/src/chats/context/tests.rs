@@ -14,6 +14,7 @@ fn chat(repo_id: Option<&str>) -> Chat {
         repo_id: repo_id.map(Into::into),
         title: None,
         session_title: None,
+        agent: None,
         session_id: None,
         launch: LaunchOptions::default(),
         created_at: 1,
