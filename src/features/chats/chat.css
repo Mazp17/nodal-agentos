@@ -1,52 +1,9 @@
-/* Chat page: 230px sessions list + conversation with the composer at the bottom. */
+/* Chat page: one chat tab, the conversation with the composer at the bottom. */
 
-.chat-page { flex: 1; min-height: 0; display: grid; grid-template-columns: 230px minmax(0, 1fr); }
-
-/* ---- Sessions ---- */
-.chat-side {
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-  gap: var(--sp-3);
-  padding: var(--sp-4) var(--sp-3);
-  border-right: 1px solid var(--border);
-}
-.chat-new { flex: none; gap: var(--sp-3); }
-.chat-new-label { flex: 1; text-align: left; }
-.chat-new-plus { font-size: var(--fs-xl); line-height: 1; color: var(--text-muted); }
-.chat-search { flex: none; }
-.chat-side-label { margin: 0; padding: var(--sp-2) var(--sp-3) 0; font-size: var(--fs-2xs); font-weight: var(--fw-medium); color: var(--text-dim); }
-.chat-sessions { flex: 1; min-height: 0; overflow: auto; display: flex; flex-direction: column; gap: 1px; }
-.chat-side-empty { padding: var(--sp-1) var(--sp-3); font-size: var(--fs-md); color: var(--text-dim); }
-
-.chat-session { position: relative; flex: none; display: flex; align-items: center; border-radius: var(--r-lg); }
-.chat-session:hover, .chat-session.on { background: var(--fill-3); }
-.chat-session.on { background: var(--fill-5); }
-.chat-session-pick {
-  flex: 1;
-  min-width: 0;
-  height: var(--h-2xl);
-  display: flex;
-  align-items: center;
-  gap: var(--sp-3);
-  padding: 0 var(--sp-3);
-  border: 0;
-  background: transparent;
-  color: var(--text-muted);
-  font-size: var(--fs-base);
-  text-align: left;
-}
-.chat-session.on .chat-session-pick { color: var(--text); }
-.chat-session-title { flex: 1; }
-.chat-session.unread .chat-session-pick { color: var(--text); }
-.chat-session.unread .chat-session-title { font-weight: var(--fw-medium); }
-.chat-session-unread { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--accent); }
-.chat-session-ago { flex: none; font-size: var(--fs-2xs); color: var(--text-dim); white-space: nowrap; }
-.chat-session-del { position: absolute; right: 4px; width: var(--h-xs); height: var(--h-xs); font-size: var(--fs-xs); opacity: 0; background: var(--surface-selected); }
-.chat-session:hover .chat-session-del, .chat-session-del:focus-visible { opacity: 1; }
+.chat-page { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
 
 /* ---- Conversation ---- */
-.chat-main { min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+.chat-main { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
 .chat-scroll { flex: 1; min-height: 0; overflow: auto; display: flex; flex-direction: column; align-items: center; padding: var(--sp-10) 24px var(--sp-8); }
 .chat-thread { width: 100%; max-width: 720px; display: flex; flex-direction: column; gap: 20px; }
 
@@ -325,3 +282,178 @@
 .chat-send.on:hover { filter: brightness(1.08); }
 .chat-stop { background: var(--fill-7); color: var(--text); font-size: 10px; }
 .chat-stop:hover { background: var(--fill-6); }
+
+/* ---- Chat tabs and the files panel ---- */
+.chat-tabs { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.chat-body { flex: 1; min-height: 0; display: flex; }
+.files-panel { width: 260px; flex: none; display: flex; flex-direction: column; min-height: 0; background: var(--bg-rail); border-left: 1px solid var(--border); }
+.files-head { flex: none; height: 40px; display: flex; align-items: center; gap: var(--sp-3); padding: 0 var(--sp-3) 0 var(--sp-5); border-bottom: 1px solid var(--border); }
+.files-title { flex: 1; font-size: var(--fs-sm); font-weight: var(--fw-semibold); color: var(--text-2); }
+.files-tree { flex: 1; min-height: 0; overflow: auto; margin: 0; padding: var(--sp-2); list-style: none; }
+.files-tree ul { margin: 0; padding: 0; list-style: none; }
+.files-row {
+  width: 100%;
+  height: 26px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding-right: var(--sp-3);
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  font-size: var(--fs-sm);
+  text-align: left;
+}
+.files-dir { color: var(--text-3); }
+.files-dir:hover { background: var(--fill-4); color: var(--text); }
+.files-file { color: var(--text-5); }
+.files-icon { flex: none; color: var(--text-dim); }
+.files-note { padding-top: var(--sp-1); padding-bottom: var(--sp-1); font-size: var(--fs-xs); color: var(--text-dim); }
+
+/* Uncommitted changes where the chat works, right above the composer (same width). */
+.chat-changes {
+  flex: none;
+  width: calc(100% - 48px);
+  max-width: 760px;
+  align-self: center;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  margin-bottom: var(--sp-3);
+  padding: 0 var(--sp-3);
+  font-size: var(--fs-xs);
+  color: var(--text-muted);
+}
+.chat-changes-files { color: var(--text-3); }
+.chat-changes-add { color: var(--green); }
+.chat-changes-del { color: var(--red-text); }
+.chat-changes-where { margin-left: auto; min-width: 0; font-family: var(--font-mono); font-size: var(--fs-2xs); }
+
+/* Files panel rows: a chevron column so files line up with folders. */
+.files-chev { flex: none; width: 10px; height: 10px; color: var(--text-dim); transition: transform 120ms ease-out; }
+.files-chev.open { transform: rotate(90deg); }
+.files-file:hover { background: var(--fill-4); color: var(--text); }
+.files-file.on { background: var(--surface-selected); color: var(--text-strong); }
+.files-changes .files-row { padding-left: 8px; }
+.files-modes { display: flex; gap: 2px; }
+.files-modes .icon-btn.on { background: var(--fill-4); color: var(--text); }
+.files-changes-note { margin: 0; padding: var(--sp-3) var(--sp-5); }
+.files-change-dir { min-width: 0; font-size: var(--fs-xs); color: var(--text-dim); }
+.files-change-stat { margin-left: auto; flex: none; display: flex; gap: 4px; font-size: var(--fs-xs); }
+
+/* ---- Read-only file viewer (a tab next to the chats) ---- */
+.file-view { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+.file-view-head {
+  flex: none;
+  min-height: 40px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2) var(--sp-5);
+  padding: var(--sp-2) var(--sp-7);
+  border-bottom: 1px solid var(--border);
+}
+.file-view-path { flex: 1; min-width: 0; margin: 0; font-family: var(--font-mono); font-size: var(--fs-xs); color: var(--text-muted); }
+.file-view-repo { color: var(--text-dim); }
+.file-view-name { color: var(--text-strong); }
+.file-view-meta { font-size: var(--fs-xs); color: var(--text-muted); white-space: nowrap; }
+.file-view-badge { padding: 2px 8px; border-radius: 999px; border: 1px solid var(--border-3); font-size: var(--fs-2xs); color: var(--text-5); white-space: nowrap; }
+.file-view-note { margin: 0; padding: var(--sp-5) var(--sp-7); font-size: var(--fs-sm); color: var(--text-muted); }
+.file-view-code { flex: 1; min-height: 0; overflow: auto; padding: var(--sp-4) 0 var(--sp-8); font-family: var(--font-mono); font-size: 12.5px; line-height: 20px; }
+.file-view-code:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.file-view-lines { min-width: max-content; }
+.file-line { display: flex; }
+.file-line-n { width: 56px; flex: none; padding-right: 18px; box-sizing: border-box; text-align: right; color: var(--text-dim); user-select: none; }
+.file-line-text { white-space: pre; padding-right: 24px; color: var(--text-2); }
+.file-view-code ::selection { background: rgb(232 149 74 / 0.3); }
+
+/* Token colors (warm palette from the design prototype). */
+.tok-kw { color: #e8954a; }
+.tok-str { color: #9fcf8c; }
+.tok-com { color: var(--text-muted); font-style: italic; }
+.tok-num { color: #d79ad0; }
+.tok-type,
+.tok-key { color: #7fb8e6; }
+.tok-fn { color: #e7cf9b; }
+.tok-tag { color: #ef8f7a; }
+.tok-attr { color: #c9b3f0; }
+.tok-punc { color: var(--text-5); }
+.tok-head { color: var(--text-strong); font-weight: var(--fw-semibold); }
+/* The changes bar is a button: opens the files panel on its git view. */
+button.chat-changes { border: 0; border-radius: var(--r-lg); background: transparent; font-family: inherit; text-align: left; cursor: pointer; height: 26px; }
+button.chat-changes:hover { background: var(--fill-3); color: var(--text); }
+button.chat-changes:hover .chat-changes-files { text-decoration: underline; text-underline-offset: 2px; }
+
+/* ---- Editor: a transparent textarea over the highlighted text, both with identical metrics.
+   The outer `.file-view-code` scrolls; the textarea grows with its content and never scrolls. */
+.file-edit { display: flex; min-width: max-content; min-height: 100%; }
+.file-edit-gutter { width: 56px; flex: none; padding-right: 18px; box-sizing: border-box; text-align: right; color: var(--text-dim); user-select: none; }
+.file-edit-stack { position: relative; flex: 1; min-width: max-content; }
+.file-edit-hl,
+.file-edit-input {
+  margin: 0;
+  padding: 0 24px 0 0;
+  font: inherit;
+  line-height: inherit;
+  letter-spacing: 0;
+  white-space: pre;
+  tab-size: 4;
+}
+.file-edit-hl { color: var(--text-2); }
+.file-edit-line { min-height: 20px; }
+.file-edit-input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  outline: none;
+  resize: none;
+  overflow: hidden;
+  background: transparent;
+  color: transparent;
+  caret-color: var(--text-strong);
+}
+.file-edit-input::selection { background: rgb(232 149 74 / 0.3); color: transparent; }
+.file-view-dirty { font-size: var(--fs-2xs); color: var(--amber); }
+.file-view-conflict { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-3); }
+.file-view-conflict span { flex: 1; min-width: 200px; }
+
+/* Checkout picker (repo or one of its worktrees) under the files panel header. */
+.files-root { flex: none; padding: var(--sp-3) var(--sp-3) var(--sp-1); }
+.files-root-btn {
+  width: 100%;
+  min-height: 40px;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid var(--border-2);
+  border-radius: var(--r-lg);
+  background: var(--fill-2);
+  color: var(--text-3);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.files-root-btn:hover,
+.files-root-btn[data-state="open"] { background: var(--fill-4); border-color: var(--border-3); }
+.files-root-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.files-root-icon { flex: none; color: var(--text-muted); }
+.files-root-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.files-root-name { font-size: var(--fs-sm); font-weight: var(--fw-medium); color: var(--text-2); }
+.files-root-branch { font-family: var(--font-mono); font-size: var(--fs-2xs); color: var(--text-muted); }
+.files-root-tag { flex: none; padding: 1px 6px; border-radius: 4px; background: var(--fill-5); font-size: var(--fs-2xs); color: var(--text-4); }
+.files-root-caret { flex: none; color: var(--text-dim); }
+/* The menu matches the trigger's width (radix exposes it) and wraps nothing: names ellipsize. */
+.files-root-menu { width: var(--radix-dropdown-menu-trigger-width); max-width: 340px; max-height: 360px; }
+.files-root-menu .files-root-item { height: auto; min-height: 38px; align-items: center; padding-top: 4px; padding-bottom: 4px; }
+
+/* Changed file row: a revert button shows on hover/focus (and stays for keyboard users). */
+.files-change { position: relative; display: flex; align-items: center; }
+.files-change .files-row { flex: 1; min-width: 0; }
+.files-revert { position: absolute; right: 4px; width: 22px; height: 22px; opacity: 0; background: var(--surface-selected); color: var(--text-muted); }
+.files-change:hover .files-revert, .files-revert:focus-visible { opacity: 1; }
+.files-change:hover .files-change-stat { visibility: hidden; }
+.menu-danger { color: var(--red-text); }
+.file-view-wt { display: inline-flex; align-items: center; gap: 4px; margin: 0 6px; padding: 1px 6px; border-radius: 4px; background: var(--fill-5); color: var(--text-4); vertical-align: 1px; }

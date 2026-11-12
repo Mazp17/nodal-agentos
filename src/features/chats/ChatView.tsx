@@ -1,26 +1,22 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { createChat, deleteChat, interruptChat, sendChatMessage, updateChat, type ChatPatch } from "../../domain/api";
+import { createChat, interruptChat, sendChatMessage, updateChat, type ChatPatch } from "../../domain/api";
+import { useChatWorkspace } from "../../domain/hooks/branches";
 import { useChatAgents, useChats, useClaudeDefaults } from "../../domain/hooks/chats";
 import { hiddenSetOf, invalidate, isExecutorHidden, setData, useHiddenExecutors } from "../../domain/hooks/store";
 import type { Chat, Project, Repo } from "../../domain/types";
-import { readJsonPref, writePref } from "../../shell/storage";
-import { useConfirm } from "../../ui/ConfirmDialog";
 import { EmptyState } from "../../ui/EmptyState";
 import { useToast } from "../../ui/Toasts";
 import { Composer, type ComposerSettings } from "./Composer";
 import { Conversation } from "./Conversation";
-import { agentOptions, chatTitle, effortOptions, modelOptions, modeOptions, repoOptions, shortAgo, toTurns } from "./model";
+import { agentOptions, chatTitle, effortOptions, modelOptions, modeOptions, repoOptions, toTurns } from "./model";
 import {
   dropOutbox,
   ensureChatAttached,
-  forgetChat,
   markInterrupting,
   pushOutbox,
   seedChat,
   setViewedChat,
   useChatStream,
-  useRunStates,
-  useUnreadChats,
 } from "./stream";
 import "../runs/transcript.css";
 import "./chat.css";
@@ -28,15 +24,14 @@ import "./chat.css";
 export interface ChatViewProps {
   project: Project;
   repos: Repo[];
+  /** The chat this tab shows; `null` is a new chat, created on its first message. */
+  chatId: string | null;
+  /** A new chat was created: its tab now points at `id`. */
+  onCreated: (id: string) => void;
+  /** "N files changed" was clicked: show the uncommitted changes (files panel, git view). */
+  onShowChanges: () => void;
   onOpenTask: (taskId: string) => void;
-  /** A chat to select (picked in the command palette); `onFocused` clears it. */
-  focusChatId?: string | null;
-  onFocused?: () => void;
 }
-
-/** Selected chat per project; `null` is "New chat". Not stored: the most recent one. */
-const SELECTED_PREF = "chatSelected";
-const isSelection = (v: unknown): v is Record<string, string | null> => !!v && typeof v === "object" && !Array.isArray(v);
 
 const NEW_CHAT: ComposerSettings = { permissionMode: "auto", repoId: null, agent: null, model: null, effort: null };
 
@@ -48,45 +43,21 @@ const settingsOf = (c: Chat): ComposerSettings => ({
   effort: c.effort ?? null,
 });
 
-/** The Chat page: the project's sessions, the selected conversation and the composer. */
-export function ChatView({ project, repos, onOpenTask, focusChatId, onFocused }: ChatViewProps) {
+/** One chat tab: the conversation and the composer. */
+export function ChatView({ project, repos, chatId: tabChatId, onCreated, onShowChanges, onOpenTask }: ChatViewProps) {
   const toast = useToast();
-  const ask = useConfirm();
   const chats = useChats(project.id);
-  const runStates = useRunStates();
-  const [selection, setSelection] = useState(() => readJsonPref(SELECTED_PREF, {}, isSelection));
-  const [q, setQ] = useState("");
   const [draft, setDraft] = useState("");
   const [menu, setMenu] = useState<string | null>(null);
   const [draftSettings, setDraftSettings] = useState<ComposerSettings>(NEW_CHAT);
-  const [now, setNow] = useState(() => Date.now());
 
-  useEffect(() => {
-    const t = window.setInterval(() => setNow(Date.now()), 30_000);
-    return () => window.clearInterval(t);
-  }, []);
-  useEffect(() => writePref(SELECTED_PREF, JSON.stringify(selection)), [selection]);
-
-  const list = useMemo(() => chats.data ?? [], [chats.data]);
-  const stored = selection[project.id];
-  const chat = stored === null ? null : (list.find((c) => c.id === stored) ?? list[0] ?? null);
+  const chat = useMemo(() => (tabChatId ? ((chats.data ?? []).find((c) => c.id === tabChatId) ?? null) : null), [chats.data, tabChatId]);
   const chatId = chat?.id ?? null;
   const stream = useChatStream(chatId);
-  const unread = useUnreadChats();
   useEffect(() => {
     setViewedChat(chatId);
     return () => setViewedChat(null);
   }, [chatId]);
-  const select = (id: string | null) => {
-    setSelection((s) => ({ ...s, [project.id]: id }));
-    setMenu(null);
-  };
-  useEffect(() => {
-    if (!focusChatId) return;
-    setSelection((s) => ({ ...s, [project.id]: focusChatId }));
-    setMenu(null);
-    onFocused?.();
-  }, [focusChatId, project.id, onFocused]);
 
   const settings = chat ? settingsOf(chat) : draftSettings;
   // A chat without a repo runs in the project's first one, so its settings apply.
@@ -106,6 +77,13 @@ export function ChatView({ project, repos, onOpenTask, focusChatId, onFocused }:
     return agentOptions(shown, settings.agent);
   }, [folderAgents, hiddenKeys, settings.repoId, settings.agent, project.rootPath, repos]);
   const busy = !!stream && (stream.state === "busy" || stream.outbox.length > 0);
+  const workspace = useChatWorkspace(chatId).data ?? null;
+  // An answer may have edited files or moved into a worktree: re-read when it ends.
+  const wasBusy = useRef(false);
+  useEffect(() => {
+    if (wasBusy.current && !busy) void invalidate("chats");
+    wasBusy.current = busy;
+  }, [busy]);
   const turns = useMemo(() => (stream ? toTurns(stream.items, stream.outbox) : []), [stream]);
   const hasMessages = turns.length > 0 || !!stream?.streaming;
 
@@ -167,7 +145,10 @@ export function ChatView({ project, repos, onOpenTask, focusChatId, onFocused }:
       }
       seedChat(target.id);
       setData<Chat[]>(`chats:${project.id}`, (cs) => [target as Chat, ...cs]);
-      select(target.id);
+      // The sidebar reads every project's chats: show the new one there (and keep its tab) right away.
+      setData<Chat[]>("chats:*", (cs) => [target as Chat, ...cs]);
+      void invalidate("chats");
+      onCreated(target.id);
     }
     const id = target.id;
     pushOutbox(id, text);
@@ -195,25 +176,6 @@ export function ChatView({ project, repos, onOpenTask, focusChatId, onFocused }:
     });
   };
 
-  const remove = async (c: Chat) => {
-    const ok = await ask({
-      title: `Delete “${chatTitle(c)}”?`,
-      body: "It leaves the sessions list. The Claude Code session stays on disk and can still be resumed with claude --resume.",
-      confirmLabel: "Delete chat",
-    });
-    if (!ok) return;
-    try {
-      await deleteChat(c.id);
-      forgetChat(c.id);
-      if (chatId === c.id) select(list.find((x) => x.id !== c.id)?.id ?? null);
-      void invalidate("chats");
-    } catch (e) {
-      toast("Couldn't delete the chat", String(e), "danger");
-    }
-  };
-
-  const ql = q.trim().toLowerCase();
-  const sessions = list.filter((c) => !ql || chatTitle(c).toLowerCase().includes(ql));
   const firstRepo = repos[0]?.name;
   const scopeRepo = repos.find((r) => r.id === settings.repoId)?.name;
   const suggestions = [
@@ -224,47 +186,6 @@ export function ChatView({ project, repos, onOpenTask, focusChatId, onFocused }:
 
   return (
     <div className="chat-page" data-screen-label="Chat">
-      <aside className="chat-side" aria-label="Chats">
-        <button type="button" className="btn chat-new" onClick={() => select(null)}>
-          <span className="chat-new-plus" aria-hidden>
-            +
-          </span>
-          <span className="chat-new-label">New chat</span>
-        </button>
-        <input className="input chat-search" value={q} placeholder="Search chats" aria-label="Search chats" onChange={(e) => setQ(e.target.value)} />
-        <h2 className="chat-side-label">Sessions</h2>
-        <nav className="chat-sessions" aria-label="Sessions">
-          {sessions.map((c) => {
-            const on = c.id === chatId;
-            const live = runStates.get(c.id) === "busy";
-            return (
-              <div key={c.id} className={`chat-session ${on ? "on" : ""} ${unread.has(c.id) ? "unread" : ""}`}>
-                <button
-                  type="button"
-                  className="chat-session-pick"
-                  aria-current={on ? "page" : undefined}
-                  title={c.sessionId ? `claude --resume ${c.sessionId}` : undefined}
-                  onClick={() => select(c.id)}
-                >
-                  <span className="ellipsis chat-session-title">{chatTitle(c)}</span>
-                  {live ? (
-                    <span className="dot dot-sm pulse tone-accent" aria-label="Answering" />
-                  ) : (
-                    unread.has(c.id) && <span className="chat-session-unread" role="img" aria-label="Unread" title="Unread" />
-                  )}
-                  <span className="chat-session-ago num">{shortAgo(c.updatedAt, now)}</span>
-                </button>
-                <button type="button" className="icon-btn chat-session-del" aria-label={`Delete ${chatTitle(c)}`} title="Delete chat" onClick={() => void remove(c)}>
-                  ✕
-                </button>
-              </div>
-            );
-          })}
-          {chats.error && !chats.data && <span className="chat-side-empty">Couldn't load chats: {chats.error}</span>}
-          {chats.data && sessions.length === 0 && <span className="chat-side-empty">{ql ? "No matches" : "No chats yet"}</span>}
-        </nav>
-      </aside>
-
       <section className="chat-main" aria-label={chat ? chatTitle(chat) : "New chat"}>
         {!hasMessages ? (
           chat && stream && !stream.loaded ? (
@@ -311,6 +232,21 @@ export function ChatView({ project, repos, onOpenTask, focusChatId, onFocused }:
               />
             )}
           </div>
+        )}
+        {workspace && workspace.files > 0 && (
+          <button type="button" className="chat-changes" title="Show the changes" onClick={onShowChanges}>
+            <span className="chat-changes-files">
+              {workspace.files} {workspace.files === 1 ? "file" : "files"} changed
+            </span>
+            <span className="chat-changes-add num">+{workspace.additions}</span>
+            <span className="chat-changes-del num">−{workspace.deletions}</span>
+            {workspace.branch && (
+              <span className="chat-changes-where ellipsis" title={workspace.cwd ?? undefined}>
+                {workspace.isWorktree ? "worktree · " : "on "}
+                {workspace.branch}
+              </span>
+            )}
+          </button>
         )}
         <Composer
           draft={draft}

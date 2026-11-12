@@ -1,16 +1,21 @@
 import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { deleteChat } from "../domain/api";
+import { useChatWorkspace } from "../domain/hooks/branches";
 import { useAllChats } from "../domain/hooks/chats";
 import { useProjects } from "../domain/hooks/projects";
 import { useProviderStatus, useSourceLinks } from "../domain/hooks/providers";
 import { useQueueSummary } from "../domain/hooks/runs";
 import { invalidate, useSettings } from "../domain/hooks/store";
-import { taskKey, type Project } from "../domain/types";
+import { taskKey, type Chat, type Project } from "../domain/types";
 import { BoardView } from "../features/board";
 import { ChatView } from "../features/chats";
 import { chatTitle } from "../features/chats/model";
 import { setInAppNotice } from "../features/chats/alerts";
-import { pruneUnread, useUnreadChats } from "../features/chats/stream";
+import { forgetChat, pruneUnread, useRunStates, useUnreadChats } from "../features/chats/stream";
+import { FilesPanel, type FilesMode } from "../features/chats/FilesPanel";
+import { setDraft, useDirtyTabs } from "../features/chats/drafts";
+import { FileDiffView, FileView } from "../features/chats/FileView";
 import { Onboarding } from "../features/onboarding/Onboarding";
 import { CreateProjectDialog } from "../features/projects/CreateProjectDialog";
 import { resolveExecutor } from "../features/executors";
@@ -29,11 +34,15 @@ import { SettingsView } from "../features/settings/SettingsView";
 import { NewTaskDialog, TaskPanel, useAskLaunch, useLaunch } from "../features/tasks";
 import { useUpdates } from "../features/updates/useUpdates";
 import { CommandPalette, type PaletteItem } from "./palette/CommandPalette";
-import { Sidebar, type ProviderFoot } from "./Sidebar";
+import { Sidebar, type ProviderFoot, type SideMode } from "./Sidebar";
+import { TabBar, type TabItem } from "./TabBar";
+import { draftProject, draftTab, fileTab, parseFileTab, useTabs } from "./useTabs";
+import { useConfirm } from "../ui/ConfirmDialog";
 import { EmptyState } from "../ui/EmptyState";
 import { useToast } from "../ui/Toasts";
 import { Topbar } from "./Topbar";
-import { PAGE_TITLE, useNav, type Page, type ProjectPage } from "./useNav";
+import { PAGE_TITLE, useNav, type Page } from "./useNav";
+import { readJsonPref, writePref } from "./storage";
 import { useWorkStatus } from "./useWorkStatus";
 import "./shell.css";
 
@@ -45,9 +54,10 @@ const AttachedSessionDrawer = lazy(() =>
 const isEditable = (t: EventTarget | null) =>
   t instanceof HTMLElement && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName));
 
-/** ⌘1–3, as in the design. */
-const SHORTCUT_PAGES: Record<string, ProjectPage> = { "1": "board", "2": "chat", "3": "runs" };
-const PROJECT_PAGES: ReadonlySet<Page> = new Set(["board", "chat", "runs", "project-settings"]);
+/** ⌘1 Chats, ⌘2 Tasks, ⌘3 Runs. */
+const SHORTCUT_PAGES: Record<string, Page> = { "1": "chat", "2": "board", "3": "runs" };
+/** Board tab id of the pinned "All projects". */
+const ALL_BOARD = "__all";
 
 export function AppShell() {
   const ctx = useProjects();
@@ -72,9 +82,34 @@ export function AppShell() {
   /** Run shown in the "Attached session" drawer (opened by `useRunActions().attach`). */
   const attachTarget = useAttachTarget();
   const [monitorOpen, setMonitorOpen] = useState(false);
-  /** A chat picked in the palette, for the Chat page to select once it's showing. */
-  const [chatFocus, setChatFocus] = useState<string | null>(null);
-  const allChats = useAllChats(paletteOpen);
+  const allChats = useAllChats(true);
+  const tabs = useTabs();
+  const ask = useConfirm();
+  const runStates = useRunStates();
+  // The files panel comes back as it was left: open or not, which view and which checkout.
+  const [filesOpen, setFilesOpen] = useState(() => readJsonPref("filesPanel", false, (v): v is boolean => typeof v === "boolean"));
+  const [filesMode, setFilesMode] = useState<FilesMode>(() =>
+    readJsonPref<FilesMode>("filesMode", "tree", (v): v is FilesMode => v === "tree" || v === "changes"),
+  );
+  /** Checkout the files panel shows: a worktree path, or `null` for the repo's own. */
+  const [filesWorktree, setFilesWorktree] = useState<string | null>(() =>
+    readJsonPref<string | null>("filesWorktree", null, (v): v is string | null => v === null || typeof v === "string"),
+  );
+  useEffect(() => writePref("filesPanel", JSON.stringify(filesOpen)), [filesOpen]);
+  useEffect(() => writePref("filesMode", JSON.stringify(filesMode)), [filesMode]);
+  useEffect(() => writePref("filesWorktree", JSON.stringify(filesWorktree)), [filesWorktree]);
+  // The chat's working folder: the files panel follows it into a worktree.
+  const activeChatId = tabs.chat && !parseFileTab(tabs.chat) && !draftProject(tabs.chat) ? tabs.chat : null;
+  const chatCwd = useChatWorkspace(activeChatId).data?.cwd ?? null;
+  const dirtyTabs = useDirtyTabs();
+  const chatById = useMemo(() => new Map((allChats.data ?? []).map((c) => [c.id, c])), [allChats.data]);
+  /** Project of a tab in the chat bar (a draft carries it, a chat has it, a file's repo has it). */
+  const chatProjectOf = (tab: string | null): string | null => {
+    if (!tab) return null;
+    const file = parseFileTab(tab);
+    if (file) return ctx.repoById.get(file.repoId)?.projectId ?? null;
+    return draftProject(tab) ?? chatById.get(tab)?.projectId ?? null;
+  };
 
   const { route } = nav;
   const project = route.projectId ? (ctx.projectById.get(route.projectId) ?? null) : null;
@@ -86,7 +121,6 @@ export function AppShell() {
   // (called once a chat is sent to, from the Chat page) keeps its channel attached regardless of
   // which page is showing afterward.
   const unreadChats = useUnreadChats();
-  const unreadProjects = useMemo(() => new Set(unreadChats.values()), [unreadChats]);
   useEffect(() => {
     if (ctx.loaded && !ctx.error) pruneUnread(new Set(ctx.projectById.keys()));
   }, [ctx.loaded, ctx.error, ctx.projectById]);
@@ -182,6 +216,113 @@ export function AppShell() {
     ctx.projects[0] ??
     null;
 
+  // Last board shown: target of the Tasks switch.
+  const lastBoard = useRef<string | null>(null);
+  useEffect(() => {
+    if (route.page === "board") lastBoard.current = route.projectId;
+  }, [route.page, route.projectId]);
+
+  const goMode = (m: SideMode) => {
+    if (m === "tasks") {
+      go("board", lastBoard.current);
+      return;
+    }
+    const pid = chatProjectOf(tabs.chat) ?? fallbackProject()?.id ?? null;
+    if (pid) go("chat", pid);
+  };
+  const openChatTab = (c: Chat) => {
+    tabs.openChat(c.id);
+    go("chat", c.projectId);
+  };
+  const newChat = (pid: string) => {
+    tabs.openChat(draftTab(pid));
+    go("chat", pid);
+  };
+  const pickChatTab = (tab: string) => {
+    tabs.openChat(tab);
+    const pid = chatProjectOf(tab);
+    if (pid) go("chat", pid);
+  };
+  /** Closing file tabs with unsaved edits asks first; on yes, their edits are dropped. */
+  const discardOk = async (ids: string[]) => {
+    const dirty = ids.filter((t) => dirtyTabs.has(t));
+    if (dirty.length === 0) return true;
+    const one = dirty.length === 1 ? parseFileTab(dirty[0]!)?.path.split("/").pop() : null;
+    const ok = await ask({
+      title: one ? `Discard your changes to ${one}?` : `Discard your changes to ${dirty.length} files?`,
+      body: "They haven't been saved.",
+      confirmLabel: "Discard",
+    });
+    if (ok) for (const t of dirty) setDraft(t, null);
+    return ok;
+  };
+  const closeChatTabs = async (ids: string[]) => {
+    if (!(await discardOk(ids))) return;
+    const pid = chatProjectOf(tabs.closeChats(ids));
+    if (pid && route.page === "chat") go("chat", pid);
+  };
+  const closeChatTab = (tab: string) => {
+    if (dirtyTabs.has(tab)) {
+      void closeChatTabs([tab]);
+      return;
+    }
+    const next = tabs.closeChat(tab);
+    const pid = chatProjectOf(next);
+    if (pid && route.page === "chat") go("chat", pid);
+  };
+  const removeChat = async (c: Chat) => {
+    const ok = await ask({
+      title: `Delete “${chatTitle(c)}”?`,
+      body: "It leaves the chats list. The Claude Code session stays on disk and can still be resumed with claude --resume.",
+      confirmLabel: "Delete chat",
+    });
+    if (!ok) return;
+    try {
+      await deleteChat(c.id);
+      forgetChat(c.id);
+      if (tabs.chats.includes(c.id)) closeChatTab(c.id);
+      void invalidate("chats");
+    } catch (e) {
+      toast("Couldn't delete the chat", String(e), "danger");
+    }
+  };
+  const openBoard = (pid: string | null) => {
+    if (pid) tabs.openBoard(pid);
+    go("board", pid);
+  };
+  const closeBoardTab = (pid: string) => {
+    tabs.closeBoard(pid);
+    if (route.page === "board" && route.projectId === pid) go("board", null);
+  };
+
+  // A board opened from elsewhere (palette, a new project) gets its tab.
+  const { openBoard: addBoardTab, prune: pruneTabs } = tabs;
+  useEffect(() => {
+    if (route.page === "board" && route.projectId) addBoardTab(route.projectId);
+  }, [route.page, route.projectId, addBoardTab]);
+  // Tabs of deleted chats and projects go away.
+  useEffect(() => {
+    if (!allChats.data || !ctx.loaded || ctx.error) return;
+    const ids = new Set(allChats.data.map((c) => c.id));
+    pruneTabs(
+      (t) => {
+        const file = parseFileTab(t);
+        if (file) return ctx.repoById.has(file.repoId);
+        const dp = draftProject(t);
+        return dp ? ctx.projectById.has(dp) : ids.has(t);
+      },
+      (id) => ctx.projectById.has(id),
+    );
+  }, [allChats.data, ctx.loaded, ctx.error, ctx.projectById, pruneTabs]);
+
+  const liveChats = useMemo(() => new Set([...runStates].filter(([, st]) => st === "busy").map(([id]) => id)), [runStates]);
+  const openByProject = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const t of work.tasks) if (t.status !== "done" && t.status !== "canceled") m.set(t.projectId, (m.get(t.projectId) ?? 0) + 1);
+    return m;
+  }, [work.tasks]);
+  const needYouByProject = useMemo(() => new Set(work.blocked.map((t) => t.projectId)), [work.blocked]);
+
   const showOnboarding = ctx.loaded && (ctx.projects.length === 0 || forceOnboarding) && !(ctx.error && ctx.projects.length === 0);
 
   // The handler changes every render; the listener is registered once and calls the latest.
@@ -206,10 +347,9 @@ export function AppShell() {
           return;
         }
         const page = SHORTCUT_PAGES[e.key]!;
-        const needsProject = page === "chat";
-        const pid = needsProject ? (fallbackProject()?.id ?? null) : (visible.projectId ?? null);
-        if (needsProject && !pid) return;
-        go(page, pid);
+        if (page === "chat") goMode("chat");
+        else if (page === "board") goMode("tasks");
+        else go(page, visible.projectId ?? null);
         return;
       }
       // Cascading Esc: the palette and dialogs catch it first (useFocusTrap); what's left
@@ -297,10 +437,7 @@ export function AppShell() {
             kind: "Chat",
             label: chatTitle(c),
             sub: ctx.projectById.get(c.projectId)?.name,
-            run: () => {
-              setChatFocus(c.id);
-              go("chat", c.projectId);
-            },
+            run: () => openChatTab(c),
           }))
       : [];
     return [...runItems, ...taskItems, ...chatItems];
@@ -376,18 +513,119 @@ export function AppShell() {
           />
         );
         break;
-      case "chat":
-        content = project && (
-          <ChatView
-            key={project.id}
-            project={project}
-            repos={projectRepos}
-            onOpenTask={openTask}
-            focusChatId={chatFocus}
-            onFocused={() => setChatFocus(null)}
-          />
+      case "chat": {
+        const tab = tabs.chat;
+        const tabPid = chatProjectOf(tab);
+        const tabProject = tabPid ? ctx.projectById.get(tabPid) : undefined;
+        const repos = tabProject ? ctx.reposOf(tabProject.id) : [];
+        const openFile = tab ? parseFileTab(tab) : null;
+        // The files panel follows the active tab: the open file's repo, or the chat's.
+        const filesRepo =
+          repos.find((r) => r.id === (openFile ? openFile.repoId : tab ? chatById.get(tab)?.repoId : null)) ?? repos[0];
+        const items: TabItem[] = tabs.chats.map((t) => {
+          const file = parseFileTab(t);
+          if (file) {
+            const name = file.path.split("/").pop() ?? file.path;
+            return { id: t, label: file.diff ? `${name} (changes)` : name, closable: true, file: true, dirty: dirtyTabs.has(t) };
+          }
+          const dp = draftProject(t);
+          const c = dp ? undefined : chatById.get(t);
+          const pid = dp ?? c?.projectId;
+          return {
+            id: t,
+            label: c ? chatTitle(c) : "New chat",
+            color: (pid && ctx.projectById.get(pid)?.color) || undefined,
+            closable: true,
+            live: liveChats.has(t),
+            unread: unreadChats.has(t),
+          };
+        });
+        content = (
+          <div className="chat-tabs">
+            <TabBar
+              label="Open chats"
+              items={items}
+              active={tab}
+              onPick={pickChatTab}
+              onClose={closeChatTab}
+              onCloseMany={(ids) => void closeChatTabs(ids)}
+              after={
+                tabProject && (
+                  <button
+                    type="button"
+                    className="icon-btn tabbar-btn"
+                    aria-label={`New chat in ${tabProject.name}`}
+                    title={`New chat in ${tabProject.name}`}
+                    onClick={() => newChat(tabProject.id)}
+                  >
+                    <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" aria-hidden focusable="false">
+                      <path d="M6 2.5v7M2.5 6h7" />
+                    </svg>
+                  </button>
+                )
+              }
+              end={
+                filesRepo && (
+                  <button
+                    type="button"
+                    className={`icon-btn tabbar-btn ${filesOpen ? "on" : ""}`}
+                    aria-pressed={filesOpen}
+                    aria-label="Project files"
+                    title="Project files"
+                    onClick={() => setFilesOpen((o) => !o)}
+                  >
+                    <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round" aria-hidden focusable="false">
+                      <path d="M1.5 3.5A1 1 0 0 1 2.5 2.5h3l1.2 1.5h4.8a1 1 0 0 1 1 1v5.5a1 1 0 0 1-1 1h-9a1 1 0 0 1-1-1z" />
+                    </svg>
+                  </button>
+                )
+              }
+            />
+            <div className="chat-body">
+              {openFile && tabProject ? (
+                ctx.repoById.get(openFile.repoId) && (
+                  openFile.diff ? (
+                    <FileDiffView key={tab} repo={ctx.repoById.get(openFile.repoId)!} worktree={openFile.worktree} path={openFile.path} />
+                  ) : (
+                    <FileView key={tab} tab={tab!} repo={ctx.repoById.get(openFile.repoId)!} worktree={openFile.worktree} path={openFile.path} />
+                  )
+                )
+              ) : tab && tabProject ? (
+                <ChatView
+                  key={tab}
+                  project={tabProject}
+                  repos={repos}
+                  chatId={draftProject(tab) ? null : tab}
+                  onCreated={(id) => tabs.replaceChat(tab, id)}
+                  onShowChanges={() => {
+                    setFilesMode("changes");
+                    setFilesOpen(true);
+                  }}
+                  onOpenTask={openTask}
+                />
+              ) : (
+                <EmptyState title="No chat open" description="Pick a chat in the sidebar, or start one with the + next to a project." />
+              )}
+              {filesOpen && filesRepo && (
+                <FilesPanel
+                  key={filesRepo.id}
+                  repo={filesRepo}
+                  activePath={openFile && openFile.repoId === filesRepo.id && openFile.worktree === filesWorktree ? openFile.path : null}
+                  onOpenFile={(path) => tabs.openChat(fileTab(filesRepo.id, path, false, filesWorktree))}
+                  onOpenDiff={(path) => tabs.openChat(fileTab(filesRepo.id, path, true, filesWorktree))}
+                  worktree={filesWorktree}
+                  onWorktree={setFilesWorktree}
+                  prefer={openFile ? openFile.worktree : chatCwd}
+                  mode={filesMode}
+                  onMode={setFilesMode}
+                  onClose={() => setFilesOpen(false)}
+                />
+              )}
+            </div>
+          </div>
         );
         break;
+      }
       case "runs":
         content = <RunsView key={route.projectId ?? "all"} projectId={route.projectId} onOpenRun={openRun} onGoToBoard={() => go("board", route.projectId)} />;
         break;
@@ -429,37 +667,59 @@ export function AppShell() {
   return (
     <div className="desk">
       <Sidebar
-        current={visible}
+        mode={visible.page === "chat" ? "chat" : "tasks"}
         projects={ctx.projects}
-        expanded={nav.expanded}
+        chats={allChats.data ?? []}
+        defaultRepo={(pid) => ctx.reposOf(pid)[0]?.id ?? null}
+        activeChat={visible.page === "chat" ? tabs.chat : null}
+        liveChats={liveChats}
+        unreadChats={unreadChats}
+        activeBoard={visible.page === "board" ? visible.projectId : undefined}
+        settingsOpen={visible.page === "settings"}
         openTotal={work.openTotal}
-        activeTotal={work.activeTotal}
-        activeByProject={work.activeByProject}
+        openByProject={openByProject}
+        needYouByProject={needYouByProject}
         mappingDrift={mappingDrift}
-        unreadChats={unreadProjects}
+        canNewTask={ctx.repos.length > 0}
         provider={foot}
         version={updates.version}
         updateAvailable={updates.available}
         updating={updates.installing}
         checkingUpdates={updates.checking}
         onUpdate={updates.check}
-        onGo={(page, pid) => go(page, pid)}
-        onPickProject={(pid) => {
-          // As in the design: picking another project opens it on the same page; the current one just expands.
-          if (visible.projectId === pid) {
-            nav.setExpanded(pid, true);
-          } else {
-            const page = PROJECT_PAGES.has(visible.page) && visible.projectId ? visible.page : "board";
-            go(page, pid);
-          }
+        onMode={goMode}
+        onOpenChat={openChatTab}
+        onNewChat={newChat}
+        onDeleteChat={(c) => void removeChat(c)}
+        onOpenBoard={openBoard}
+        onNewTask={openNewTask}
+        onProjectSettings={(pid) => {
+          setProjectSection("general");
+          go("project-settings", pid);
         }}
-        onToggleProject={nav.toggleProject}
+        onSettings={() => go("settings")}
         onNewProject={() => setCreateProject(true)}
         onOpenPalette={() => setPaletteOpen(true)}
       />
       <div className="main-wrap">
         <main className="main">
-          <Topbar
+          {route.page === "board" && (
+            <TabBar
+              label="Open boards"
+              items={[
+                { id: ALL_BOARD, label: "All projects", closable: false },
+                ...tabs.boards.flatMap((id) => {
+                  const bp = ctx.projectById.get(id);
+                  return bp ? [{ id, label: bp.name, color: bp.color, closable: true }] : [];
+                }),
+              ]}
+              active={route.projectId ?? ALL_BOARD}
+              onPick={(id) => openBoard(id === ALL_BOARD ? null : id)}
+              onClose={closeBoardTab}
+              onCloseMany={(ids) => ids.forEach(closeBoardTab)}
+            />
+          )}
+          {route.page !== "chat" && <Topbar
             project={route.page === "run" ? crumbProject : project}
             page={pageTitle}
             running={queue.running}
@@ -472,7 +732,7 @@ export function AppShell() {
             onToggleMonitor={() => setMonitorOpen((o) => !o)}
             onImport={() => project && setImportFor(project.id)}
             onNewTask={openNewTask}
-          />
+          />}
           {work.error && (
             <div className="banner banner-error" role="alert">
               Couldn't refresh runs and tasks: {work.error}
