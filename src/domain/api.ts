@@ -667,3 +667,33 @@ export const onChanged = (cb: (e: ChangedEvent) => void): Promise<UnlistenFn> =>
 
 /** "Check for Updates…" in the app menu (release builds only). Returns the unlisten. */
 export const onCheckForUpdates = (cb: () => void): Promise<UnlistenFn> => listen("nodal://check-updates", () => cb());
+
+export interface DirEntry { name: string; isDir: boolean }
+/** Current branch of a repo's checkout; `null` when detached or unknown. */
+export const repoBranch = (repoId: string) => invoke<string | null>("repo_branch", { repoId });
+/** Direct children of `dir` (relative to the repo root, "" for the root), dirs first, git-ignored entries left out. */
+export const listRepoDir = (repoId: string, dir: string, worktree: string | null = null) =>
+  invoke<DirEntry[]>("list_repo_dir", { repoId, dir, worktree });
+
+/** Where a chat is working now (it may have moved into a worktree) and its uncommitted changes there. */
+export interface ChatWorkspace { cwd: string | null; branch: string | null; isWorktree: boolean; files: number; additions: number; deletions: number }
+export const chatWorkspace = (chatId: string) => invoke<ChatWorkspace>("chat_workspace", { chatId });
+
+export interface RepoFile { version: string; content: string; binary: boolean; truncated: boolean; size: number }
+/** A repo file's text for the read-only viewer (first 1 MB; `binary` files come back empty). */
+export const readRepoFile = (repoId: string, path: string, worktree: string | null = null) =>
+  invoke<RepoFile>("read_repo_file", { repoId, path, worktree });
+
+/** Uncommitted changes of a repo's checkout vs HEAD (untracked files included), per file with hunks. */
+export const repoChanges = (repoId: string, worktree: string | null = null) =>
+  invoke<FileDiff[]>("repo_changes", { repoId, worktree });
+/** Saves an edited repo file. `version` is the one it was read at; a newer one on disk fails with "File changed on disk…" unless `force`. */
+export const writeRepoFile = (repoId: string, path: string, content: string, version: string, force = false, worktree: string | null = null) =>
+  invoke<RepoFile>("write_repo_file", { repoId, path, content, version, force, worktree });
+
+export interface RepoWorktree { path: string; branch: string | null; isMain: boolean }
+/** A repo's checkouts, main first; pass one's `path` as the `worktree` argument of the repo file bindings. */
+export const listRepoWorktrees = (repoId: string) => invoke<RepoWorktree[]>("list_repo_worktrees", { repoId });
+/** Discards one file's uncommitted changes (restores it from HEAD, or deletes it if new). */
+export const revertRepoFile = (repoId: string, path: string, worktree: string | null = null) =>
+  invoke<void>("revert_repo_file", { repoId, path, worktree });

@@ -732,3 +732,14 @@ fn a_started_chat_keeps_its_agent() {
     let u = ops::update(&c, &chat.id, &patch(r#"{"agent":"planner","effort":"high"}"#)).unwrap();
     assert_eq!((u.agent.as_deref(), u.launch.effort.as_deref()), (Some("planner"), Some("high")));
 }
+
+#[test]
+fn pick_cwd_prefers_the_session_then_the_launch_folder_when_they_exist() {
+    let exists = |p: &str| p != "/gone";
+    let s = |v: &str| Some(v.to_string());
+    assert_eq!(pick_cwd(s("/wt"), s("/repo"), exists), s("/wt"));
+    assert_eq!(pick_cwd(None, s("/repo"), exists), s("/repo"));
+    assert_eq!(pick_cwd(s("/gone"), s("/repo"), exists), s("/repo"));
+    assert_eq!(pick_cwd(s("/gone"), s("/gone"), exists), None);
+    assert_eq!(pick_cwd(None, None, exists), None);
+}

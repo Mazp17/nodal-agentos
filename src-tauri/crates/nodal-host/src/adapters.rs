@@ -16,7 +16,7 @@ use nodal_domain::model::claude::{
     ExtraFlags, LaunchBlocker, LaunchError, RunDetail, RunRef, RunSummary, SessionReadout, Transcript,
 };
 use nodal_domain::model::executors::{AgentDef, ExecutorInfo};
-use nodal_domain::model::{LaunchOptions, WorktreeRef};
+use nodal_domain::model::{DiffStat, DirEntry, RepoFile, RepoWorktree, LaunchOptions, WorktreeRef};
 use nodal_domain::ports::{BoxFut, ClaudeCli, ClaudeConfig, Clock, Git, LocalFs, PlanFiles, SessionFiles};
 
 use crate::claude::live::AgentsRaw;
@@ -130,6 +130,11 @@ impl SessionFiles for HostSessionFiles {
         fs::paths::find_session_jsonl(projects, cwd, session_id)
     }
 
+    fn session_location(&self, path: &Path) -> (Option<String>, Option<String>) {
+        let info = crate::claude::activity_files::read_tail(path, 256 * 1024).map(|t| crate::claude::activity_files::parse_tail(&t)).unwrap_or_default();
+        (info.cwd, info.git_branch)
+    }
+
     fn read_session_transcript(
         &self,
         path: &Path,
@@ -228,6 +233,34 @@ impl Git for HostGit {
 
     fn current_branch(&self, dir: &Path) -> Option<String> {
         git::diff::current_branch(dir)
+    }
+
+    fn list_dir(&self, repo: &Path, rel: &str) -> Result<Vec<DirEntry>, HostError> {
+        Ok(git::ls::list_dir(repo, rel)?)
+    }
+
+    fn read_file(&self, repo: &Path, rel: &str) -> Result<RepoFile, HostError> {
+        Ok(git::ls::read_file(repo, rel)?)
+    }
+
+    fn write_file(&self, repo: &Path, rel: &str, content: &str, version: &str, force: bool) -> Result<RepoFile, HostError> {
+        Ok(git::ls::write_file(repo, rel, content, version, force)?)
+    }
+
+    fn list_worktrees(&self, repo: &Path) -> Result<Vec<RepoWorktree>, HostError> {
+        Ok(git::ls::list_worktrees(repo)?)
+    }
+
+    fn revert_file(&self, root: &Path, rel: &str) -> Result<(), HostError> {
+        Ok(git::ls::revert_file(root, rel)?)
+    }
+
+    fn is_worktree(&self, dir: &Path) -> bool {
+        git::stat::is_worktree(dir)
+    }
+
+    fn changes(&self, dir: &Path) -> DiffStat {
+        git::stat::changes(dir)
     }
 
     fn merge(&self, repo: &Path, wt: &WorktreeRef, message: &str, squash: bool) -> Result<MergeOutcome, HostError> {

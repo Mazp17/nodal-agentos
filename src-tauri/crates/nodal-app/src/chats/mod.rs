@@ -23,7 +23,7 @@ use nodal_domain::model::chat::{ChatLive, ChatSpec, ClaudeDefaults};
 use nodal_domain::model::claude::Transcript;
 use nodal_domain::model::events::ChangeKind;
 use nodal_domain::model::executors::{is_valid_agent_name, ExecutorInfo};
-use nodal_domain::model::{Chat, LaunchOptions, Project, Repo};
+use nodal_domain::model::{Chat, ChatWorkspace, LaunchOptions, Project, Repo};
 use nodal_domain::serde_util::double_option;
 use nodal_domain::sessions::transcript::{is_valid_session_id, TRANSCRIPT_DEFAULT_LIMIT, TRANSCRIPT_MAX_LIMIT};
 use nodal_domain::util::{check_id, clip_chars, new_id};
@@ -410,11 +410,62 @@ impl Chats {
         Ok(transcript)
     }
 
+    /// Where the chat works right now and its uncommitted changes there. Claude Code can move
+    /// its session into a worktree or switch branches, so the session file's last `cwd` wins
+    /// over the launch folder. Read-only and cheap: polled per visible chat.
+    pub async fn chat_workspace(&self, id: String) -> Result<ChatWorkspace, AppError> {
+        check_id(&id, "chat")?;
+        let (chat, project, repos) = self
+            .db(move |c| {
+                let chat = chats::get(c, &id)?;
+                let project = projects::get(c, &chat.project_id)?;
+                let repos = repos::list(c, Some(&chat.project_id))?;
+                Ok((chat, project, repos))
+            })
+            .await?;
+        let launch = chat_cwd(&chat, &project, &repos).ok().map(|c| c.path().to_string());
+        let sid = chat.session_id.clone().filter(|s| is_valid_session_id(s));
+        let projects_dir = self.core.env.claude_dir.as_ref().map(|d| d.join("projects"));
+        let (sessions, env) = (self.core.sessions.clone(), self.core.env.clone());
+        Ok(blocking(move || {
+            let located = match (&sid, &projects_dir) {
+                (Some(sid), Some(dir)) => sessions
+                    .find_session_jsonl(dir, launch.as_deref().unwrap_or(""), sid)
+                    .map(|p| sessions.session_location(&p)),
+                _ => None,
+            };
+            let (session_cwd, session_branch) = located.unwrap_or_default();
+            let Some(cwd) = pick_cwd(session_cwd, launch, |p| env.fs.is_dir(Path::new(p))) else {
+                return Ok(ChatWorkspace::default());
+            };
+            let dir = Path::new(&cwd);
+            let branch = env
+                .git
+                .current_branch(dir)
+                .or_else(|| session_branch.filter(|b| b != "HEAD"));
+            let stat = env.git.changes(dir);
+            Ok(ChatWorkspace {
+                is_worktree: env.git.is_worktree(dir),
+                branch,
+                files: stat.files,
+                additions: stat.additions,
+                deletions: stat.deletions,
+                cwd: Some(cwd),
+            })
+        })
+        .await?)
+    }
+
     /// Stops every process of the project's chats (called when the project is deleted, through
     /// `App::delete_project`). Not a Tauri command.
     pub fn stop_project(&self, project_id: &str) {
         self.core.chats.stop_project(project_id);
     }
+}
+
+/// The session's last known cwd if it still exists, else the launch folder if it does.
+fn pick_cwd(session: Option<String>, launch: Option<String>, is_dir: impl Fn(&str) -> bool) -> Option<String> {
+    session.filter(|p| is_dir(p)).or(launch.filter(|p| is_dir(p)))
 }
 
 #[cfg(test)]

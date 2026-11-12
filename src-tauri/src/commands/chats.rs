@@ -176,3 +176,13 @@ pub async fn get_chat_transcript(
 ) -> Result<Option<Transcript>, CommandError> {
     Ok(state.chats.get_chat_transcript(id, limit).await?)
 }
+
+/// Where the chat is working now (it may have moved into a worktree) and its uncommitted changes.
+#[tauri::command]
+#[tracing::instrument(skip_all, level = "info")]
+pub async fn chat_workspace(
+    state: State<'_, Arc<App>>,
+    chat_id: String,
+) -> Result<nodal_domain::model::ChatWorkspace, CommandError> {
+    Ok(state.chats.chat_workspace(chat_id).await?)
+}

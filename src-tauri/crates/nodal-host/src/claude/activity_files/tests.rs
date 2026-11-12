@@ -102,3 +102,15 @@ fn tail_reads_only_the_end() {
     assert!(tail.contains("\"n\":1999"));
     fs::remove_file(&tmp).unwrap();
 }
+
+#[test]
+fn tail_takes_the_latest_cwd_and_git_branch() {
+    let t = parse_tail(concat!(
+        "{\"type\":\"user\",\"cwd\":\"/repo\",\"gitBranch\":\"main\"}\n",
+        "{\"type\":\"assistant\",\"cwd\":\"/repo/.claude/worktrees/x\",\"gitBranch\":\"worktree-x\"}\n",
+        "{\"type\":\"system\"}\n",
+    ));
+    assert_eq!(t.cwd.as_deref(), Some("/repo/.claude/worktrees/x"));
+    assert_eq!(t.git_branch.as_deref(), Some("worktree-x"));
+    assert_eq!(parse_tail("").cwd, None);
+}

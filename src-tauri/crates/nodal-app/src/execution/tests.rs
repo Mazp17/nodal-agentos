@@ -90,6 +90,27 @@ impl Git for FakeGit {
     fn current_branch(&self, _dir: &Path) -> Option<String> {
         self.branch.lock().unwrap().clone()
     }
+    fn list_dir(&self, _repo: &Path, _rel: &str) -> Result<Vec<nodal_domain::model::DirEntry>, HostError> {
+        Ok(Vec::new())
+    }
+    fn read_file(&self, _repo: &Path, _rel: &str) -> Result<nodal_domain::model::RepoFile, HostError> {
+        Err("unused".into())
+    }
+    fn write_file(&self, _repo: &Path, _rel: &str, _content: &str, _version: &str, _force: bool) -> Result<nodal_domain::model::RepoFile, HostError> {
+        Err("unused".into())
+    }
+    fn list_worktrees(&self, _repo: &Path) -> Result<Vec<nodal_domain::model::RepoWorktree>, HostError> {
+        Ok(Vec::new())
+    }
+    fn revert_file(&self, _root: &Path, _rel: &str) -> Result<(), HostError> {
+        Err("unused".into())
+    }
+    fn is_worktree(&self, _dir: &Path) -> bool {
+        false
+    }
+    fn changes(&self, _dir: &Path) -> nodal_domain::model::DiffStat {
+        Default::default()
+    }
     fn merge(&self, _repo: &Path, _wt: &WorktreeRef, _message: &str, _squash: bool) -> Result<MergeOutcome, HostError> {
         Ok(self.merge_outcome.lock().unwrap().clone().unwrap_or(MergeOutcome::Merged {
             commit: "c1".into(),

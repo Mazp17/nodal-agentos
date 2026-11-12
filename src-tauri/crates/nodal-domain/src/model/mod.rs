@@ -768,5 +768,57 @@ impl Default for Settings {
     }
 }
 
+/// One child of a repo directory (`list_repo_dir`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DirEntry {
+    pub name: String,
+    pub is_dir: bool,
+}
+
+/// Uncommitted changes of a checkout against HEAD.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct DiffStat {
+    pub files: u32,
+    pub additions: u32,
+    pub deletions: u32,
+}
+
+/// Where a chat is working now (it may have moved into a worktree) and its uncommitted changes there.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChatWorkspace {
+    pub cwd: Option<String>,
+    pub branch: Option<String>,
+    pub is_worktree: bool,
+    pub files: u32,
+    pub additions: u32,
+    pub deletions: u32,
+}
+
+/// A repo file for the read-only viewer: text of the first 1 MB, or empty when `binary`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RepoFile {
+    /// Opaque token of the file on disk; changes whenever the file does.
+    pub version: String,
+    pub content: String,
+    pub binary: bool,
+    pub truncated: bool,
+    pub size: u64,
+}
+
+/// A checkout of a repo: its main folder or a linked git worktree.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RepoWorktree {
+    pub path: String,
+    pub branch: Option<String>,
+    pub is_main: bool,
+}
+
+/// Cap on entries `list_repo_dir` returns, to keep the UI responsive.
+pub const DIR_ENTRIES_MAX: usize = 2000;
+
 #[cfg(test)]
 mod tests;

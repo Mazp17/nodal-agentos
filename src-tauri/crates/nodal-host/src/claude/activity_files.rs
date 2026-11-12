@@ -118,6 +118,8 @@ pub struct TailInfo {
     pub has_turns: bool,
     /// `cwd` of the most recent line that has one.
     pub cwd: Option<String>,
+    /// `gitBranch` of the most recent line that has one.
+    pub git_branch: Option<String>,
     pub entrypoint: Option<String>,
     pub last_tool: Option<String>,
     pub last_tool_summary: Option<String>,
@@ -174,6 +176,9 @@ pub fn parse_tail(text: &str) -> TailInfo {
         }
         if info.cwd.is_none() {
             info.cwd = v.get("cwd").and_then(Value::as_str).map(String::from);
+        }
+        if info.git_branch.is_none() {
+            info.git_branch = v.get("gitBranch").and_then(Value::as_str).map(String::from);
         }
         if info.entrypoint.is_none() {
             info.entrypoint = v

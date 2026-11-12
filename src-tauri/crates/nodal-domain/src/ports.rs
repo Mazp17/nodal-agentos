@@ -19,7 +19,7 @@ use crate::model::claude::{
 use crate::model::events::ChangeKind;
 use crate::model::executors::{AgentDef, ExecutorInfo};
 use crate::model::providers::{ExternalItem, ImportQuery, Page, ProviderResult};
-use crate::model::{ExternalState, LaunchOptions, ScopeRef, WorktreeRef};
+use crate::model::{DiffStat, DirEntry, RepoFile, RepoWorktree, ExternalState, LaunchOptions, ScopeRef, WorktreeRef};
 
 pub type BoxFut<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 
@@ -74,6 +74,12 @@ pub trait SessionFiles: Send + Sync {
         limit: usize,
     ) -> Result<Option<Transcript>, HostError>; // get_agent_transcript closure body
     fn find_session_jsonl(&self, projects: &Path, cwd: &str, session_id: &str) -> Option<PathBuf>;
+    /// `(cwd, gitBranch)` of the most recent session entries that carry them (from the file's
+    /// tail). Default: unknown.
+    fn session_location(&self, path: &Path) -> (Option<String>, Option<String>) {
+        let _ = path;
+        (None, None)
+    }
     fn read_session_transcript(
         &self,
         path: &Path,
@@ -136,6 +142,25 @@ pub trait Git: Send + Sync {
     fn diff_branch(&self, repo: &Path, base: &str, branch: &str) -> Result<String, HostError>; // collect_branch
     fn commits(&self, dir: &Path, base: &str, head: &str) -> Result<Vec<CommitInfo>, HostError>;
     fn current_branch(&self, dir: &Path) -> Option<String>;
+    /// Direct children of `rel` (relative to `repo`, "" = root): dirs first, then files, each
+    /// sorted case-insensitively; `.git` and git-ignored entries left out; capped at
+    /// `DIR_ENTRIES_MAX`. Errors on absolute paths, `..`, or anything resolving outside `repo`.
+    fn list_dir(&self, repo: &Path, rel: &str) -> Result<Vec<DirEntry>, HostError>;
+    /// A regular file under `repo` (same path rules as `list_dir`), first 1 MB as UTF-8 text;
+    /// `binary` files come back empty. Git-ignored files are readable.
+    fn read_file(&self, repo: &Path, rel: &str) -> Result<RepoFile, HostError>;
+    /// Atomically overwrites an existing text file (same path rules). Errors starting with
+    /// "File changed on disk" when `version` is stale and not `force`.
+    fn write_file(&self, repo: &Path, rel: &str, content: &str, version: &str, force: bool) -> Result<RepoFile, HostError>;
+    /// The repo's worktrees, main first; prunable or missing ones left out.
+    fn list_worktrees(&self, repo: &Path) -> Result<Vec<RepoWorktree>, HostError>;
+    /// Discards one file's uncommitted changes (see `git::ls::revert_file`).
+    fn revert_file(&self, root: &Path, rel: &str) -> Result<(), HostError>;
+    /// Whether `dir` is inside a linked worktree (its `.git` is a file).
+    fn is_worktree(&self, dir: &Path) -> bool;
+    /// Uncommitted changes in `dir` vs HEAD, untracked non-ignored files included. Cheap (no
+    /// full diff); zeros when `dir` isn't a git repo.
+    fn changes(&self, dir: &Path) -> DiffStat;
     fn merge(
         &self,
         repo: &Path,
