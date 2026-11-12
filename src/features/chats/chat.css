@@ -270,6 +270,7 @@
   bottom: 32px;
   z-index: 41;
   min-width: 210px;
+  max-width: 360px;
   max-height: 320px;
   overflow: auto;
   padding: var(--sp-1);

@@ -1,7 +1,7 @@
 // Pure helpers of the Chat page: pill options, how the conversation is grouped into
 // turns, the `propose_task` card and the context ring.
 
-import { PROPOSE_TASK_TOOL, type NewTask } from "../../domain/api";
+import { PROPOSE_TASK_TOOL, type ExecutorInfo, type NewTask } from "../../domain/api";
 import type { Chat, Executor, Priority, Repo, TaskStatus } from "../../domain/types";
 import type { TranscriptItem } from "../runs/types";
 
@@ -61,6 +61,19 @@ export function repoOptions(repos: Repo[]): PillOption[] {
     { value: null, label: "All repos", hint: repos[0] ? `Whole project · runs in ${repos[0].name}` : "Whole project" },
     ...repos.map((r) => ({ value: r.id, label: r.name, hint: r.path })),
   ];
+}
+
+/** Plain Claude, then the folder's agents; a chosen agent that's no longer there stays listed. */
+export function agentOptions(agents: ExecutorInfo[], current: string | null): PillOption[] {
+  const out: PillOption[] = [{ value: null, label: "Claude", hint: "No agent" }];
+  for (const a of agents) {
+    if (a.executor.kind !== "agent") continue;
+    out.push({ value: a.executor.name, label: a.executor.name, hint: a.description ?? undefined });
+  }
+  if (current && !out.some((o) => o.value === current)) {
+    out.push({ value: current, label: current, hint: "Not found in this folder" });
+  }
+  return out;
 }
 
 export const optionLabel = (options: PillOption[], value: string | null | undefined, fallback?: string) =>

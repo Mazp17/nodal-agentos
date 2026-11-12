@@ -119,6 +119,10 @@ pub struct Chat {
     pub session_title: Option<String>,
     /// Claude Code's session id, known after the first message.
     pub session_id: Option<String>,
+    /// Agent the chat talks to (`--agent <name>`, `plugin:agent` for plugin ones); `None` is
+    /// plain Claude.
+    #[serde(default)]
+    pub agent: Option<String>,
     /// `model`, `effort` and `permissionMode` are flattened in the JSON.
     #[serde(flatten)]
     pub launch: LaunchOptions,

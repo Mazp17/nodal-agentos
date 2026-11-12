@@ -60,6 +60,8 @@ export interface Chat extends LaunchOptions {
   sessionTitle: string | null;
   /** Claude Code's session id, known after the first message. */
   sessionId: string | null;
+  /** Agent the chat talks to (`--agent`); `null` is plain Claude. */
+  agent: string | null;
   createdAt: number;
   /** Last message sent: the sessions list is ordered by it. */
   updatedAt: number;

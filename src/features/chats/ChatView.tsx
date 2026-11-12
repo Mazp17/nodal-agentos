@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createChat, deleteChat, interruptChat, sendChatMessage, updateChat, type ChatPatch } from "../../domain/api";
-import { useChats, useClaudeDefaults } from "../../domain/hooks/chats";
-import { invalidate, setData } from "../../domain/hooks/store";
+import { useChatAgents, useChats, useClaudeDefaults } from "../../domain/hooks/chats";
+import { hiddenSetOf, invalidate, isExecutorHidden, setData, useHiddenExecutors } from "../../domain/hooks/store";
 import type { Chat, Project, Repo } from "../../domain/types";
 import { readJsonPref, writePref } from "../../shell/storage";
 import { useConfirm } from "../../ui/ConfirmDialog";
@@ -9,7 +9,7 @@ import { EmptyState } from "../../ui/EmptyState";
 import { useToast } from "../../ui/Toasts";
 import { Composer, type ComposerSettings } from "./Composer";
 import { Conversation } from "./Conversation";
-import { chatTitle, effortOptions, modelOptions, modeOptions, repoOptions, shortAgo, toTurns } from "./model";
+import { agentOptions, chatTitle, effortOptions, modelOptions, modeOptions, repoOptions, shortAgo, toTurns } from "./model";
 import {
   dropOutbox,
   ensureChatAttached,
@@ -38,11 +38,12 @@ export interface ChatViewProps {
 const SELECTED_PREF = "chatSelected";
 const isSelection = (v: unknown): v is Record<string, string | null> => !!v && typeof v === "object" && !Array.isArray(v);
 
-const NEW_CHAT: ComposerSettings = { permissionMode: "auto", repoId: null, model: null, effort: null };
+const NEW_CHAT: ComposerSettings = { permissionMode: "auto", repoId: null, agent: null, model: null, effort: null };
 
 const settingsOf = (c: Chat): ComposerSettings => ({
   permissionMode: c.permissionMode ?? null,
   repoId: c.repoId,
+  agent: c.agent ?? null,
   model: c.model ?? null,
   effort: c.effort ?? null,
 });
@@ -90,6 +91,20 @@ export function ChatView({ project, repos, onOpenTask, focusChatId, onFocused }:
   const settings = chat ? settingsOf(chat) : draftSettings;
   // A chat without a repo runs in the project's first one, so its settings apply.
   const defaults = useClaudeDefaults(settings.repoId ?? repos[0]?.id ?? null).data;
+  // Agents of the folder the chat runs in, minus the ones the project hides from its pickers.
+  const chatAgents = useChatAgents(project.id, settings.repoId);
+  const folderAgents = chatAgents.data;
+  const hiddenKeys = useHiddenExecutors(project.id).data;
+  const agents = useMemo(() => {
+    const hidden = hiddenSetOf(hiddenKeys);
+    // Repo-level entries are keyed by the repo the chat runs in (none at the project root).
+    const runsIn = settings.repoId ?? (project.rootPath ? null : (repos[0]?.id ?? null));
+    // The chat's own agent stays listed even if the project hides it.
+    const shown = (folderAgents ?? []).filter(
+      (a) => (a.executor.kind === "agent" && a.executor.name === settings.agent) || !isExecutorHidden(hidden, a, runsIn),
+    );
+    return agentOptions(shown, settings.agent);
+  }, [folderAgents, hiddenKeys, settings.repoId, settings.agent, project.rootPath, repos]);
   const busy = !!stream && (stream.state === "busy" || stream.outbox.length > 0);
   const turns = useMemo(() => (stream ? toTurns(stream.items, stream.outbox) : []), [stream]);
   const hasMessages = turns.length > 0 || !!stream?.streaming;
@@ -105,13 +120,24 @@ export function ChatView({ project, repos, onOpenTask, focusChatId, onFocused }:
     if (el && atBottom.current) el.scrollTop = el.scrollHeight;
   }, [stream, chatId]);
 
+  // Claude Code keeps a session's agent on `--resume`, so it's fixed once the chat has a
+  // session (or while its first message is on the way). A first send that failed before one
+  // was saved (e.g. an agent that doesn't exist) can still change it.
+  const agentLocked = !!chat?.sessionId || busy;
+
   const setSetting = (key: keyof ComposerSettings, value: string | null) => {
+    // An agent from the old repo's `.claude/agents` isn't there in the new one.
+    const dropAgent =
+      key === "repoId" &&
+      !agentLocked &&
+      !!folderAgents?.some((a) => a.source === "repo" && a.executor.kind === "agent" && a.executor.name === settings.agent);
     if (!chat) {
-      setDraftSettings((s) => ({ ...s, [key]: value }));
+      setDraftSettings((s) => ({ ...s, [key]: value, ...(dropAgent ? { agent: null } : {}) }));
       return;
     }
-    const patch: ChatPatch = { [key]: value };
-    const optimistic: Partial<Chat> = key === "repoId" ? { repoId: value } : { [key]: value ?? undefined };
+    const patch: ChatPatch = { [key]: value, ...(dropAgent ? { agent: null } : {}) };
+    const optimistic: Partial<Chat> = key === "repoId" || key === "agent" ? { [key]: value } : { [key]: value ?? undefined };
+    if (dropAgent) optimistic.agent = null;
     setData<Chat[]>(`chats:${project.id}`, (cs) => cs.map((c) => (c.id === chat.id ? { ...c, ...optimistic } : c)));
     updateChat(chat.id, patch).then(
       () => void invalidate("chats"),
@@ -130,6 +156,7 @@ export function ChatView({ project, repos, onOpenTask, focusChatId, onFocused }:
       try {
         target = await createChat(project.id, {
           repoId: settings.repoId,
+          agent: settings.agent,
           model: settings.model ?? undefined,
           effort: settings.effort ?? undefined,
           permissionMode: settings.permissionMode ?? undefined,
@@ -291,6 +318,8 @@ export function ChatView({ project, repos, onOpenTask, focusChatId, onFocused }:
           settings={settings}
           modes={modeOptions(settings.permissionMode)}
           repoOptions={repoOptions(repos)}
+          agents={agents}
+          agentLocked={agentLocked}
           models={modelOptions(defaults?.model)}
           efforts={effortOptions(defaults?.effort)}
           menu={menu}
@@ -299,7 +328,11 @@ export function ChatView({ project, repos, onOpenTask, focusChatId, onFocused }:
           contextWindow={stream?.contextWindow ?? null}
           focusKey={chatId ?? "new"}
           onDraft={setDraft}
-          onMenu={setMenu}
+          onMenu={(id) => {
+            // Agent files can appear while the page is open: re-read them when the menu opens.
+            if (id === "agent") void chatAgents.refresh();
+            setMenu(id);
+          }}
           onSetting={setSetting}
           onSend={() => void send()}
           onStop={stop}

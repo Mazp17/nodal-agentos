@@ -233,6 +233,7 @@ fn chats_crud_and_order() {
         repo_id: None,
         title: None,
         session_title: None,
+        agent: None,
         session_id: None,
         launch: LaunchOptions::default(),
         created_at: 1,

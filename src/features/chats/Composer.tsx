@@ -14,6 +14,8 @@ export interface PillProps {
   align: "left" | "right";
   tone?: "warn";
   disabled?: boolean;
+  /** Tooltip, e.g. why the pill is disabled. */
+  title?: string;
   onToggle: (id: string | null) => void;
   onPick: (value: string | null) => void;
 }
@@ -21,7 +23,8 @@ export interface PillProps {
 export function Pill(p: PillProps) {
   const menuId = `chat-pill-${p.id}`;
   return (
-    <div className="chat-pill-wrap">
+    // The tooltip sits on the wrapper: a disabled button gets no hover events.
+    <div className="chat-pill-wrap" title={p.title}>
       <button
         type="button"
         className={`chat-pill ${p.caption ? "chat-pill-boxed" : ""} ${p.open ? "on" : ""} ${p.tone === "warn" ? "chat-pill-warn" : ""}`}
@@ -90,6 +93,7 @@ export function ContextRing({ tokens, window }: { tokens: number | null; window:
 export interface ComposerSettings {
   permissionMode: string | null;
   repoId: string | null;
+  agent: string | null;
   model: string | null;
   effort: string | null;
 }
@@ -100,6 +104,9 @@ export interface ComposerProps {
   settings: ComposerSettings;
   modes: PillOption[];
   repoOptions: PillOption[];
+  agents: PillOption[];
+  /** The chat already started: Claude Code keeps a session's agent. */
+  agentLocked: boolean;
   models: PillOption[];
   efforts: PillOption[];
   menu: string | null;
@@ -164,6 +171,11 @@ export function Composer(p: ComposerProps) {
             tone={p.settings.permissionMode === "auto" || p.settings.permissionMode === "bypassPermissions" ? "warn" : undefined}
           />
           <Pill {...pill("repoId", p.repoOptions, "left", "Repo")} />
+          <Pill
+            {...pill("agent", p.agents, "left", "Agent")}
+            disabled={p.agentLocked}
+            title={p.agentLocked ? "A chat keeps the agent it started with. Start a new chat to talk to another one." : undefined}
+          />
           <span className="spacer" />
           <ContextRing tokens={p.contextTokens} window={p.contextWindow} />
           <Pill {...pill("model", p.models, "right")} />
