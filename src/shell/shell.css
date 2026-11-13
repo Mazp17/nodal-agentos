@@ -267,6 +267,10 @@
 .tab-menu .menu-item { cursor: default; user-select: none; }
 .tab-menu .menu-item[data-highlighted] { background: var(--fill-6); outline: none; }
 .tab-menu .menu-item[data-disabled] { color: var(--text-dim); pointer-events: none; }
+/* Dragging tabs: the dragged one fades, a ghost of it shows where it would land. */
+.tab.dragging { opacity: 0.4; }
+.tab-ghost { flex: none; opacity: 0.35; pointer-events: none; padding: 0 var(--sp-4); color: var(--text-muted); background: var(--fill-5); }
+.menu-kbd { margin-left: auto; padding-left: var(--sp-4); color: var(--text-dim); font-size: var(--fs-xs); }
 .menu-sep { height: 1px; margin: var(--sp-1) var(--sp-2); background: var(--border); }
 
 /* Unsaved file tab: a dot in place of the close button, the button back on hover. */
