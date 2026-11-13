@@ -129,6 +129,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::host::claude_version,
             commands::host::open_terminal_at,
+            commands::host::claude_usage,
             commands::host::resolve_git_root,
             commands::host::scan_git_repos,
             commands::host::git_version,
