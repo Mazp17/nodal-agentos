@@ -210,6 +210,8 @@ pub fn run() {
             commands::chats::stop_chat,
             commands::chats::get_chat_live,
             commands::chats::get_chat_transcript,
+            commands::chats::list_chat_subagents,
+            commands::chats::get_chat_subagent_transcript,
             commands::chats::chat_workspace,
             commands::chats::start_task_chat,
             commands::chats::attach_chat_channel,

@@ -11,7 +11,7 @@ use crate::diff::CommitInfo;
 use crate::error::HostError;
 use crate::execution::worktree::{MergeOutcome, WorktreeStatus};
 use crate::model::chat::{ChatEnvelope, ChatLive, ChatSpec, ClaudeDefaults};
-use crate::model::claude::Transcript;
+use crate::model::claude::{SubagentRef, Transcript};
 use crate::model::events::ChangeKind;
 use crate::model::executors::AgentDef;
 use crate::model::providers::{ExternalItem, ImportQuery, Page, ProviderResult};
@@ -42,6 +42,21 @@ pub trait SessionFiles: Send + Sync {
         limit: usize,
     ) -> Result<Option<Transcript>, HostError>;
     fn session_title(&self, path: &Path) -> Option<String>;
+    /// Subagents of the session file, oldest first. Default: none.
+    fn list_subagents(&self, session_path: &Path) -> Vec<SubagentRef> {
+        let _ = session_path;
+        vec![]
+    }
+    /// One subagent's transcript. Default: none.
+    fn read_subagent_transcript(
+        &self,
+        session_path: &Path,
+        agent_id: &str,
+        limit: usize,
+    ) -> Result<Option<Transcript>, HostError> {
+        let _ = (session_path, agent_id, limit);
+        Ok(None)
+    }
 }
 
 /// Claude Code config on disk. Blocking.

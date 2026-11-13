@@ -5,6 +5,9 @@
 //! Nodal writes to its stdin: launch flags, event parsing and the stdin messages.
 //! Content blocks share their shape with session files, so they go through `fs::transcript`.
 //!
+//! Subagent lines (`parent_tool_use_id` set) are parsed like main ones and each `Item` /
+//! `ToolResult` is wrapped in `StreamEvent::Subagent`; their deltas and `Usage` are dropped.
+//!
 //! Policy: tolerate anything unknown and skip it instead of failing.
 //!
 //! `parse_line` deserializes into typed structs instead of poking a generic `Value` tree:
@@ -125,7 +128,7 @@ enum RawDelta<'a> {
 }
 
 /// `assistant`. `message.content`/`message.usage` are deferred (`&RawValue`): only turned into
-/// a `Value` (for `fs::transcript`'s helpers) once we know the line isn't subagent traffic.
+/// a `Value` (for `fs::transcript`'s helpers) only when the line is parsed.
 #[derive(Deserialize)]
 struct RawAssistant<'a> {
     #[serde(default, borrow, rename = "parent_tool_use_id")]
@@ -270,10 +273,6 @@ fn parse_assistant(line: &str) -> Vec<StreamEvent> {
     let Ok(v) = serde_json::from_str::<RawAssistant>(line) else {
         return vec![];
     };
-    // Subagent (`Task`) traffic is not part of the chat's own conversation.
-    if v.parent_tool_use_id.is_some() {
-        return vec![];
-    }
     let Some(message) = v.message else {
         return vec![];
     };
@@ -286,6 +285,10 @@ fn parse_assistant(line: &str) -> Vec<StreamEvent> {
         .filter_map(assistant_item)
         .map(|item| StreamEvent::Item { item })
         .collect();
+    // A subagent's usage isn't the chat's context.
+    if v.parent_tool_use_id.is_some() {
+        return wrap_subagent(v.parent_tool_use_id.as_deref(), out);
+    }
     let usage = message.usage.and_then(to_value);
     if let Some(n) = usage.as_ref().and_then(context_tokens) {
         out.push(StreamEvent::Usage { context_tokens: n });
@@ -293,17 +296,27 @@ fn parse_assistant(line: &str) -> Vec<StreamEvent> {
     out
 }
 
+/// Wraps each event for a subagent line; a no-op for main-thread lines (`parent` is `None`).
+fn wrap_subagent(parent: Option<&str>, events: Vec<StreamEvent>) -> Vec<StreamEvent> {
+    let Some(parent) = parent else { return events };
+    events
+        .into_iter()
+        .map(|e| StreamEvent::Subagent {
+            parent_tool_use_id: parent.to_string(),
+            event: Box::new(e),
+        })
+        .collect()
+}
+
 fn parse_user(line: &str) -> Vec<StreamEvent> {
     let Ok(v) = serde_json::from_str::<RawUser>(line) else {
         return vec![];
     };
-    if v.parent_tool_use_id.is_some() {
-        return vec![];
-    }
     let Some(content) = v.message.and_then(|m| m.content).and_then(to_value) else {
         return vec![];
     };
-    match content {
+    let parent = v.parent_tool_use_id.as_deref();
+    let out = match content {
         Value::String(s) if !s.trim().is_empty() => {
             vec![StreamEvent::Item { item: user_item(&s) }]
         }
@@ -332,7 +345,8 @@ fn parse_user(line: &str) -> Vec<StreamEvent> {
                 .collect()
         }
         _ => vec![],
-    }
+    };
+    wrap_subagent(parent, out)
 }
 
 fn parse_control_request(line: &str) -> Vec<StreamEvent> {

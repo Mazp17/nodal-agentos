@@ -171,7 +171,35 @@ pub struct ToolResultInfo {
     pub is_error: bool,
     pub truncated: bool,
     /// The file change of an `Edit`/`Write`/`MultiEdit`, when Claude Code reported it.
-    pub patch: Option<ToolPatch>,
+    pub patch: Option<Box<ToolPatch>>,
+    /// Set when the call launched a subagent (`Agent`/`Task`).
+    pub agent: Option<Box<AgentStats>>,
+}
+
+/// A finished subagent's summary, from the structured result of its `Agent`/`Task` call.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentStats {
+    pub agent_id: String,
+    pub agent_type: Option<String>,
+    pub status: Option<String>,
+    pub duration_ms: Option<i64>,
+    pub total_tokens: Option<i64>,
+    pub tool_uses: Option<i64>,
+}
+
+/// A subagent of a session, from `<sid>/subagents/agent-<id>(.meta.json|.jsonl)`.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SubagentRef {
+    pub agent_id: String,
+    pub tool_use_id: Option<String>,
+    pub agent_type: Option<String>,
+    pub description: Option<String>,
+    pub model: Option<String>,
+    pub stopped_by_user: bool,
+    /// Epoch ms: the transcript file's creation (or modification) time.
+    pub started_at: Option<i64>,
 }
 
 /// A tool's file change as a diff, built from the structured result Claude Code records

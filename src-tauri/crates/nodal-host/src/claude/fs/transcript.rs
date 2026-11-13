@@ -8,7 +8,9 @@ use serde::Deserialize;
 use serde_json::Value;
 
 use nodal_domain::diff::{DiffFileStatus, DiffHunk, DiffLine, DiffLineKind, FileDiff};
-use nodal_domain::model::claude::{ToolPatch, ToolResultInfo, Transcript, TranscriptItem};
+use nodal_domain::model::claude::{
+    AgentStats, SubagentRef, ToolPatch, ToolResultInfo, Transcript, TranscriptItem,
+};
 use nodal_domain::sessions::transcript::{clip, TEXT_MAX};
 
 use super::last_tool::tool_summary_n;
@@ -31,7 +33,7 @@ struct RawTranscriptLine {
 }
 
 /// Structured result of a line's tool call (for `Edit`/`Write`: `structuredPatch`). Read in a
-/// second pass, only for lines that carry a patch: other results (`Read`, `Task`, the
+/// second pass, only for lines that carry a patch or an `agentId`: other results (`Read`, the
 /// `originalFile` of edits) can be large and are never shown.
 #[derive(Deserialize)]
 struct RawToolUseResult {
@@ -102,7 +104,7 @@ pub(crate) fn tool_result_info<'a>(
     let patch = if is_error {
         None
     } else {
-        structured.and_then(tool_patch)
+        structured.and_then(tool_patch).map(Box::new)
     };
     (
         b.get("tool_use_id").and_then(Value::as_str),
@@ -111,8 +113,24 @@ pub(crate) fn tool_result_info<'a>(
             is_error,
             truncated,
             patch,
+            agent: structured.and_then(agent_stats).map(Box::new),
         },
     )
+}
+
+/// `{status, agentId, agentType, totalDurationMs, totalTokens, totalToolUseCount}` (observed in
+/// 2.1.283) of an `Agent`/`Task` result.
+fn agent_stats(r: &Value) -> Option<AgentStats> {
+    let s = |k: &str| r.get(k).and_then(Value::as_str).map(str::to_string);
+    let n = |k: &str| r.get(k).and_then(Value::as_i64);
+    Some(AgentStats {
+        agent_id: s("agentId")?,
+        agent_type: s("agentType"),
+        status: s("status"),
+        duration_ms: n("totalDurationMs"),
+        total_tokens: n("totalTokens"),
+        tool_uses: n("totalToolUseCount"),
+    })
 }
 
 /// The message's structured tool result when it carries exactly one `tool_result` block.
@@ -340,8 +358,8 @@ pub fn parse_transcript(text: &str, limit: usize) -> ParsedTranscript {
                     }
                 }
                 Some(Value::Array(blocks)) => {
-                    let tool_use_result = line
-                        .contains("\"structuredPatch\"")
+                    let tool_use_result = (line.contains("\"structuredPatch\"")
+                        || line.contains("\"agentId\""))
                         .then(|| serde_json::from_str::<RawToolUseResult>(line).ok())
                         .flatten()
                         .and_then(|r| r.tool_use_result);
@@ -529,6 +547,91 @@ pub fn read_session_transcript(
     let parsed = parse_transcript(&main_thread_lines(&text), limit);
     Ok(Some(Transcript {
         agent_id: id.to_string(),
+        label,
+        model,
+        phase: None,
+        prompt: parsed.prompt,
+        omitted: (parsed.total - parsed.items.len()) as u32,
+        total_items: parsed.total as u32,
+        tool_calls: parsed.tool_calls as u32,
+        items: parsed.items,
+        final_output: parsed.final_output,
+        partial,
+        bytes,
+    }))
+}
+
+fn subagents_dir(session_path: &Path) -> std::path::PathBuf {
+    session_path.with_extension("").join("subagents")
+}
+
+/// Subagents of `<dir>/<sid>.jsonl`, from `<dir>/<sid>/subagents/agent-<id>.meta.json`, oldest
+/// first. The `workflows/` subfolder is ignored.
+pub fn list_subagents(session_path: &Path) -> Vec<SubagentRef> {
+    let Ok(entries) = fs::read_dir(subagents_dir(session_path)) else {
+        return vec![];
+    };
+    let mut out: Vec<SubagentRef> = entries
+        .flatten()
+        .filter_map(|e| {
+            let name = e.file_name().into_string().ok()?;
+            let agent_id = name.strip_prefix("agent-")?.strip_suffix(".jsonl")?.to_string();
+            if !is_agent_id(&agent_id) {
+                return None;
+            }
+            let meta: Value = fs::read_to_string(e.path().with_extension("meta.json"))
+                .ok()
+                .and_then(|t| serde_json::from_str(&t).ok())
+                .unwrap_or(Value::Null);
+            let s = |k: &str| meta.get(k).and_then(Value::as_str).map(str::to_string);
+            let md = e.metadata().ok()?;
+            let started_at = md
+                .created()
+                .or_else(|_| md.modified())
+                .ok()
+                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                .map(|d| d.as_millis() as i64);
+            Some(SubagentRef {
+                agent_id,
+                tool_use_id: s("toolUseId"),
+                agent_type: s("agentType"),
+                description: s("description"),
+                model: s("model"),
+                stopped_by_user: meta.get("stoppedByUser").and_then(Value::as_bool).unwrap_or(false),
+                started_at,
+            })
+        })
+        .collect();
+    out.sort_by(|a, b| (a.started_at, &a.agent_id).cmp(&(b.started_at, &b.agent_id)));
+    out
+}
+
+/// Agent ids are alphanumeric; checked before one goes into a path.
+fn is_agent_id(id: &str) -> bool {
+    !id.is_empty() && id.len() <= 64 && id.bytes().all(|b| b.is_ascii_alphanumeric())
+}
+
+/// A subagent's own transcript. `Ok(None)` if the id is invalid or there's no file.
+pub fn read_subagent_transcript(
+    session_path: &Path,
+    agent_id: &str,
+    limit: usize,
+) -> Result<Option<Transcript>, String> {
+    if !is_agent_id(agent_id) {
+        return Ok(None);
+    }
+    let file = subagents_dir(session_path).join(format!("agent-{agent_id}.jsonl"));
+    let meta = list_subagents(session_path).into_iter().find(|s| s.agent_id == agent_id);
+    let (label, model) = meta.map_or((None, None), |m| (m.description, m.model));
+    // Lines are all sidechain, so `main_thread_lines`' filter doesn't apply.
+    let (text, partial, bytes) = match read_transcript_text(&file) {
+        Ok(r) => r,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(e) => return Err(format!("Couldn't read the transcript: {e}")),
+    };
+    let parsed = parse_transcript(&text, limit);
+    Ok(Some(Transcript {
+        agent_id: agent_id.to_string(),
         label,
         model,
         phase: None,

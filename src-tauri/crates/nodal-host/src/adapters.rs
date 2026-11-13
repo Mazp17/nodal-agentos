@@ -9,7 +9,7 @@ use nodal_domain::diff::CommitInfo;
 use nodal_domain::error::HostError;
 use nodal_domain::execution::worktree::{MergeOutcome, WorktreeStatus};
 use nodal_domain::model::chat::ClaudeDefaults;
-use nodal_domain::model::claude::Transcript;
+use nodal_domain::model::claude::{SubagentRef, Transcript};
 use nodal_domain::model::executors::AgentDef;
 use nodal_domain::model::{DiffStat, DirEntry, RepoFile, RepoWorktree, WorktreeRef};
 use nodal_domain::ports::{ClaudeConfig, Clock, Git, LocalFs, PlanFiles, SessionFiles};
@@ -52,6 +52,19 @@ impl SessionFiles for HostSessionFiles {
 
     fn session_title(&self, path: &Path) -> Option<String> {
         fs::transcript::session_title(path)
+    }
+
+    fn list_subagents(&self, session_path: &Path) -> Vec<SubagentRef> {
+        fs::transcript::list_subagents(session_path)
+    }
+
+    fn read_subagent_transcript(
+        &self,
+        session_path: &Path,
+        agent_id: &str,
+        limit: usize,
+    ) -> Result<Option<Transcript>, HostError> {
+        Ok(fs::transcript::read_subagent_transcript(session_path, agent_id, limit)?)
     }
 }
 

@@ -12,7 +12,7 @@ use tokio::runtime::Handle;
 use nodal_app::chats::{ChatPatch, NewChat};
 use nodal_app::App;
 use nodal_domain::model::chat::{ChatEnvelope, ChatLive, ClaudeDefaults};
-use nodal_domain::model::claude::Transcript;
+use nodal_domain::model::claude::{SubagentRef, Transcript};
 use nodal_domain::model::Chat;
 use nodal_domain::ports::{ChangeNotifier, ChatHooks, ChatRuntime, SessionFiles};
 use nodal_store::Db;
@@ -176,6 +176,25 @@ pub async fn get_chat_transcript(
     limit: Option<u32>,
 ) -> Result<Option<Transcript>, CommandError> {
     Ok(state.chats.get_chat_transcript(id, limit).await?)
+}
+
+/// Subagents the chat's session ran, oldest first.
+#[tauri::command]
+#[tracing::instrument(skip_all, level = "info")]
+pub async fn list_chat_subagents(state: State<'_, Arc<App>>, chat_id: String) -> Result<Vec<SubagentRef>, CommandError> {
+    Ok(state.chats.list_chat_subagents(chat_id).await?)
+}
+
+/// One subagent's own conversation. `None` if there's no such transcript.
+#[tauri::command]
+#[tracing::instrument(skip_all, level = "info")]
+pub async fn get_chat_subagent_transcript(
+    state: State<'_, Arc<App>>,
+    chat_id: String,
+    agent_id: String,
+    limit: Option<u32>,
+) -> Result<Option<Transcript>, CommandError> {
+    Ok(state.chats.get_chat_subagent_transcript(chat_id, agent_id, limit).await?)
 }
 
 /// Where the chat is working now (it may have moved into a worktree) and its uncommitted changes.
