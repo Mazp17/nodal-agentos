@@ -45,6 +45,7 @@ fn scan_git_repos_finds_repos_under_the_root() {
     init_repo(&t.0.join("web/app"));
 
     let found = tauri::async_runtime::block_on(super::scan_git_repos(t.0.to_string_lossy().into_owned())).unwrap();
-    let expected: Vec<String> = ["api", "web/app"].iter().map(|r| t.0.join(r).to_string_lossy().into_owned()).collect();
+    let expected: Vec<String> =
+        [t.0.join("api"), t.0.join("web").join("app")].iter().map(|p| p.to_string_lossy().into_owned()).collect();
     assert_eq!(found, expected);
 }
