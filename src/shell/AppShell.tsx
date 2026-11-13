@@ -669,7 +669,21 @@ export function AppShell() {
         );
         break;
       case "overview":
-        content = <OverviewView chats={allChats.data ?? []} projects={ctx.projects} onOpen={openChatTab} />;
+        content = (
+          <OverviewView
+            chats={allChats.data ?? []}
+            projects={ctx.projects}
+            onOpen={openChatTab}
+            onNewChat={newChat}
+            onOpenProject={(pid) => {
+              const latest = (allChats.data ?? []).filter((c) => c.projectId === pid).sort((a, b) => b.updatedAt - a.updatedAt)[0];
+              if (latest) openChatTab(latest);
+              else newChat(pid);
+            }}
+            onOpenBoard={(pid) => go("board", pid)}
+            onNewProject={() => setCreateProject(true)}
+          />
+        );
         break;
       case "settings":
         content = <SettingsView section={nav.settingsSection} onSection={nav.setSettingsSection} updates={updates} />;
