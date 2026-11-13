@@ -276,15 +276,15 @@
 /* Sidebar resize handle: a 6px strip over its right edge. */
 .sidebar { position: relative; }
 .side-resizer { position: absolute; top: 0; right: -3px; width: 6px; height: 100%; z-index: 2; cursor: col-resize; }
-.side-resizer:hover, .side-resizer:focus-visible { background: rgb(232 149 74 / 0.45); outline: none; }
+.side-resizer:hover, .side-resizer:focus-visible { background: var(--accent-tint-50); outline: none; }
 body.resizing-col { cursor: col-resize; user-select: none; }
-.side-group-live { flex: none; display: inline-flex; align-items: center; gap: 5px; font-size: var(--fs-2xs); font-weight: var(--fw-regular, 400); color: var(--accent, #e8954a); }
+.side-group-live { flex: none; display: inline-flex; align-items: center; gap: 5px; font-size: var(--fs-2xs); font-weight: var(--fw-regular, 400); color: var(--accent); }
 .side-live-dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; animation: side-pulse 1.6s ease-in-out infinite; }
 @keyframes side-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
 @media (prefers-reduced-motion: reduce) { .side-live-dot { animation: none; } }
 
 /* Activity rail: the places as icons; the panel beside it lists the one picked. */
-.rail { flex: none; width: 56px; display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 14px 0 12px; background: color-mix(in oklch, var(--bg-sidebar) 70%, black); border-right: 1px solid var(--border); }
+.rail { flex: none; width: 56px; display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 14px 0 12px; background: var(--bg-deep); border-right: 1px solid var(--border); }
 .rail-brand { display: flex; margin-bottom: 10px; }
 .rail-btn { position: relative; width: 40px; height: 40px; flex: none; display: flex; align-items: center; justify-content: center; padding: 0; border: 0; border-radius: 10px; background: transparent; color: var(--text-muted); cursor: pointer; }
 .rail-btn:hover { background: var(--fill-4); color: var(--text); }
@@ -292,9 +292,9 @@ body.resizing-col { cursor: col-resize; user-select: none; }
 /* The picked place: a short bar on the rail's left edge. */
 .rail-btn.on::before { content: ""; position: absolute; left: -8px; top: 9px; width: 3px; height: 22px; border-radius: 0 3px 3px 0; background: var(--accent); }
 .rail-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
-.rail-badge { position: absolute; top: 3px; right: 3px; min-width: 15px; height: 15px; padding: 0 4px; box-sizing: border-box; display: flex; align-items: center; justify-content: center; border-radius: 999px; font-size: 10px; font-weight: var(--fw-bold); line-height: 1; color: #1a120a; font-variant-numeric: tabular-nums; }
+.rail-badge { position: absolute; top: 3px; right: 3px; min-width: 15px; height: 15px; padding: 0 4px; box-sizing: border-box; display: flex; align-items: center; justify-content: center; border-radius: 999px; font-size: 10px; font-weight: var(--fw-bold); line-height: 1; color: var(--on-accent); font-variant-numeric: tabular-nums; }
 .rail-badge-live { background: var(--accent); }
-.rail-badge-need { background: var(--amber); }
+.rail-badge-need { background: var(--amber); color: var(--on-amber); }
 .rail-spacer { flex: 1; }
 .rail-update { color: var(--accent); }
 .rail-status { display: flex; padding: 6px; }

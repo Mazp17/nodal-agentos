@@ -8,8 +8,7 @@
 @source "../features/chats";
 @import "shadcn/tailwind.css";
 
-/* Nodal is dark-only. */
-@custom-variant dark (&);
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
 
 @theme {
   --*: initial;

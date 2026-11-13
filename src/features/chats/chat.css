@@ -201,9 +201,9 @@
   border-radius: var(--r-3xl);
   border: 1px solid var(--border-3);
   background: var(--surface-1);
-  box-shadow: 0 12px 32px rgb(0 0 0 / 0.32);
+  box-shadow: var(--shadow-composer);
 }
-.chat-composer:focus-within { border-color: color-mix(in oklch, var(--accent) 40%, var(--border-3)); box-shadow: 0 12px 32px rgb(0 0 0 / 0.32), 0 0 0 3px color-mix(in oklch, var(--accent) 12%, transparent); }
+.chat-composer:focus-within { border-color: color-mix(in oklch, var(--accent) 40%, var(--border-3)); box-shadow: var(--shadow-composer), 0 0 0 3px color-mix(in oklch, var(--accent) 12%, transparent); }
 .chat-input {
   display: block;
   width: 100%;
@@ -374,7 +374,7 @@
 .files-modes { flex: none; display: inline-flex; padding: 2px; border-radius: 999px; border: 1px solid var(--border-2); background: var(--fill-1); }
 .files-mode { height: 24px; display: inline-flex; align-items: center; gap: 5px; padding: 0 9px 0 7px; border: 0; border-radius: 999px; background: transparent; color: var(--text-muted); font: inherit; font-size: var(--fs-2xs); font-weight: var(--fw-medium); cursor: pointer; transition: background var(--dur-fast, 120ms), color var(--dur-fast, 120ms); }
 .files-mode:hover { color: var(--text); }
-.files-mode.on { background: var(--surface-selected); color: var(--text-strong); box-shadow: 0 1px 2px rgb(0 0 0 / 0.3); }
+.files-mode.on { background: var(--surface-selected); color: var(--text-strong); box-shadow: var(--shadow-raised); }
 .files-mode.on svg { color: var(--accent); }
 .files-mode:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .files-changes-note { margin: 0; padding: var(--sp-3) var(--sp-5); }
@@ -405,18 +405,17 @@
 .file-line { display: flex; }
 .file-line-n { width: 56px; flex: none; padding-right: 18px; box-sizing: border-box; text-align: right; color: var(--text-dim); user-select: none; }
 .file-line-text { white-space: pre; padding-right: 24px; color: var(--text-2); }
-.file-view-code ::selection { background: rgb(232 149 74 / 0.3); }
+.file-view-code ::selection { background: var(--accent-tint-30); }
 
-/* Token colors (warm palette from the design prototype). */
-.tok-kw { color: #e8954a; }
-.tok-str { color: #9fcf8c; }
+.tok-kw { color: var(--syn-kw); }
+.tok-str { color: var(--syn-str); }
 .tok-com { color: var(--text-muted); font-style: italic; }
-.tok-num { color: #d79ad0; }
+.tok-num { color: var(--syn-num); }
 .tok-type,
-.tok-key { color: #7fb8e6; }
-.tok-fn { color: #e7cf9b; }
-.tok-tag { color: #ef8f7a; }
-.tok-attr { color: #c9b3f0; }
+.tok-key { color: var(--syn-key); }
+.tok-fn { color: var(--syn-fn); }
+.tok-tag { color: var(--syn-tag); }
+.tok-attr { color: var(--syn-attr); }
 .tok-punc { color: var(--text-5); }
 .tok-head { color: var(--text-strong); font-weight: var(--fw-semibold); }
 /* The changes bar is a button: opens the files panel on its git view. */
@@ -478,7 +477,7 @@
   color: transparent;
   caret-color: var(--text-strong);
 }
-.file-edit-input::selection { background: rgb(232 149 74 / 0.3); color: transparent; }
+.file-edit-input::selection { background: var(--accent-tint-30); color: transparent; }
 .file-view-dirty { font-size: var(--fs-2xs); color: var(--amber); }
 .file-view-conflict { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-3); }
 .file-view-conflict span { flex: 1; min-width: 200px; }

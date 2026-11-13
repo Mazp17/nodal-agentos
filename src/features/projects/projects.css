@@ -72,7 +72,7 @@
   padding: var(--sp-4) var(--sp-5);
   margin-top: var(--sp-1);
   border-radius: var(--r-card);
-  background: rgb(0 0 0 / 0.18);
+  background: var(--fill-inset);
   border: 1px solid var(--border);
 }
 .repo-opt { display: flex; align-items: center; gap: var(--sp-5); }
