@@ -18,6 +18,13 @@ pub async fn worktree_status(state: State<'_, Arc<App>>, task_id: String) -> Res
     Ok(state.board.worktree_status(task_id).await?)
 }
 
+/// Looks up the PR of the task's branch and moves the task after it (throttled unless `force`).
+#[tauri::command]
+#[tracing::instrument(skip_all, level = "info")]
+pub async fn refresh_task_pr(state: State<'_, Arc<App>>, task_id: String, force: Option<bool>) -> Result<Task, CommandError> {
+    Ok(state.board.refresh_task_pr(task_id, force).await?)
+}
+
 /// "Clean up": deletes the task's worktree and branch. Without `force`, refuses if there are
 /// unpushed commits or uncommitted changes.
 #[tauri::command]

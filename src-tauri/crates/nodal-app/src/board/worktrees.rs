@@ -24,7 +24,9 @@ impl Board {
         })
         .await?;
         let git = self.core.env.git.clone();
-        Ok(blocking(move || git.worktree_status(Path::new(&repo.path), task.worktree.as_ref()).map_err(|e| e.to_string()))
+        // Counted from `diff_base`: after a squash merge the branch's commits aren't "ahead" anymore.
+        let wt = task.worktree.clone().map(|w| WorktreeRef { base: task.diff_base().unwrap_or(&w.base).to_string(), ..w });
+        Ok(blocking(move || git.worktree_status(Path::new(&repo.path), wt.as_ref()).map_err(|e| e.to_string()))
             .await?)
     }
 

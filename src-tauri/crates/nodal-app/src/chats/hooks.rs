@@ -103,6 +103,10 @@ fn review_if_changed(db: &Db, git: &dyn Git, now: i64, chat_id: &str) -> Result<
     Ok(moved)
 }
 
+fn task_of(db: &Db, chat_id: &str) -> Option<String> {
+    chats::get(&db.guard(), chat_id).ok()?.task_id
+}
+
 impl ChatHooks for ChatHooksImpl {
     /// Precondition: `session_id` is already validated by the caller (`ChatProcesses`); this
     /// stores it as-is.
@@ -127,10 +131,21 @@ impl ChatHooks for ChatHooksImpl {
             let (db, notifier, chat_id, project_id) =
                 (self.db.clone(), self.notifier.clone(), chat_id.to_string(), project_id.clone());
             self.rt.spawn_blocking(move || {
-                match review_if_changed(&db, git.as_ref(), clock.now_ms(), &chat_id) {
-                    Ok(true) => notifier.notify(ChangeKind::Tasks, Some(&project_id)),
-                    Ok(false) => {}
-                    Err(e) => eprintln!("chats: {e}"),
+                let reviewed = review_if_changed(&db, git.as_ref(), clock.now_ms(), &chat_id).unwrap_or_else(|e| {
+                    eprintln!("chats: {e}");
+                    false
+                });
+                // The turn may have opened a PR (`gh pr create`): link it right away.
+                let linked = task_of(&db, &chat_id)
+                    .map(|id| crate::board::pr::refresh(&db, git.as_ref(), clock.now_ms(), &id, true))
+                    .transpose()
+                    .unwrap_or_else(|e| {
+                        eprintln!("chats: {e}");
+                        None
+                    })
+                    .is_some_and(|(_, changed)| changed);
+                if reviewed || linked {
+                    notifier.notify(ChangeKind::Tasks, Some(&project_id));
                 }
             });
         }

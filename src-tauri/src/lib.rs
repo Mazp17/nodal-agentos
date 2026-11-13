@@ -155,6 +155,7 @@ pub fn run() {
             commands::board::add_task_relation,
             commands::board::remove_task_relation,
             commands::worktrees::cleanup_worktree,
+            commands::worktrees::refresh_task_pr,
             commands::worktrees::remove_repo_worktree,
             commands::worktrees::merge_worktree,
             commands::worktrees::worktree_status,

@@ -2,6 +2,7 @@
 
 mod cleaning;
 pub mod ops;
+pub mod pr;
 mod worktrees;
 
 use std::sync::Arc;
