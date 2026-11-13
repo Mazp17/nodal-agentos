@@ -594,6 +594,8 @@ export const mcpStop = () => invoke<McpStatus>("mcp_stop");
 
 export const getSettings = () => invoke<Settings>("get_settings");
 export const setSettings = (settings: Settings) => invoke<Settings>("set_settings", { settings });
+/** The built-in `chatSystemPrompt`. */
+export const defaultChatSystemPrompt = () => invoke<string>("default_chat_system_prompt");
 
 // ---------- Events ----------
 

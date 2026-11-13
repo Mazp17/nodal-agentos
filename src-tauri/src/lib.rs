@@ -200,6 +200,7 @@ pub fn run() {
             commands::mcp::mcp_stop,
             commands::chats::list_chats,
             commands::chats::get_claude_defaults,
+            commands::chats::default_chat_system_prompt,
             commands::chats::list_chat_agents,
             commands::chats::create_chat,
             commands::chats::update_chat,
