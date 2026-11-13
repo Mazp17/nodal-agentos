@@ -20,16 +20,6 @@ fn simple_fields() {
     );
     assert!(labels(&["x".repeat(41)]).is_err());
     assert_eq!(acceptance(&["a\nb".into(), "  ".into()]).unwrap(), ["a b"]);
-    assert!(executor(&Executor::Agent {
-        name: "a b".into(),
-        source: crate::model::AgentSource::User
-    })
-    .is_err());
-    assert!(executor(&Executor::Workflow { name: "-x".into() }).is_err());
-    assert!(executor(&Executor::Claude).is_ok());
     assert_eq!(editor(" cursor ").unwrap(), "cursor");
     assert!(editor("rm").is_err());
-    assert!(concurrency(0).is_err() && concurrency(17).is_err() && concurrency(3).is_ok());
-    assert_eq!(extra_instructions(Some("  ")).unwrap(), None);
-    assert_eq!(reviewer(" code-reviewer ").unwrap(), "code-reviewer");
 }

@@ -10,16 +10,12 @@ use std::sync::Arc;
 use crate::diff::CommitInfo;
 use crate::error::HostError;
 use crate::execution::worktree::{MergeOutcome, WorktreeStatus};
-use crate::model::activity::{AgentSession, AppRuns, ExternalSessions};
 use crate::model::chat::{ChatEnvelope, ChatLive, ChatSpec, ClaudeDefaults};
-use crate::model::claude::{
-    ExtraFlags, LaunchBlocker, LaunchError, RunDetail, RunRef, RunSummary, SessionReadout,
-    Transcript,
-};
+use crate::model::claude::Transcript;
 use crate::model::events::ChangeKind;
-use crate::model::executors::{AgentDef, ExecutorInfo};
+use crate::model::executors::AgentDef;
 use crate::model::providers::{ExternalItem, ImportQuery, Page, ProviderResult};
-use crate::model::{DiffStat, DirEntry, RepoFile, RepoWorktree, ExternalState, LaunchOptions, ScopeRef, WorktreeRef};
+use crate::model::{DiffStat, DirEntry, RepoFile, RepoWorktree, ExternalState, ScopeRef, WorktreeRef};
 
 pub type BoxFut<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 
@@ -28,51 +24,8 @@ pub trait Clock: Send + Sync {
     fn now_ms(&self) -> i64;
 }
 
-/// The `claude` CLI. Bodies are today's functions verbatim.
-pub trait ClaudeCli: Send + Sync {
-    /// `runs::list_runs` (claude agents --json --all → claude_fs::parse_agents_json).
-    fn list_sessions(&self) -> BoxFut<'_, Result<Vec<RunSummary>, HostError>>;
-    /// `activity::list_agents` (same command → claude_sessions::parse_agents). Not unified on purpose.
-    fn list_agent_sessions(&self) -> BoxFut<'_, Result<Vec<AgentSession>, HostError>>;
-    /// `runs::launch_bg`.
-    fn launch_bg<'a>(
-        &'a self,
-        cwd: String,
-        prompt: String,
-        opts: &'a LaunchOptions,
-        extra: &'a ExtraFlags,
-    ) -> BoxFut<'a, Result<RunRef, LaunchError>>;
-    /// `runs::terminal::stop` (validates the id).
-    fn stop<'a>(&'a self, short_id: &'a str) -> BoxFut<'a, Result<(), HostError>>;
-}
-
 /// `~/.claude/projects`. Blocking.
 pub trait SessionFiles: Send + Sync {
-    fn read_session(&self, session_id: &str, cwd: &str) -> SessionReadout; // runs::read_session
-    fn session_tokens(&self, session_id: &str, cwd: &str) -> Option<i64>; // runs::session_tokens
-    /// `read_session` + `session_tokens` together (run closing needs both), from a single
-    /// read of the main transcript instead of one open per field (P12). Default: the two
-    /// calls above, for implementations that don't need the merged read.
-    fn session_close(&self, session_id: &str, cwd: &str) -> (SessionReadout, Option<i64>) {
-        (
-            self.read_session(session_id, cwd),
-            self.session_tokens(session_id, cwd),
-        )
-    }
-    fn run_detail(&self, session_id: &str, cwd: &str) -> Result<Option<RunDetail>, HostError>; // get_run_detail closure body
-    fn launch_blocker(
-        &self,
-        session_id: &str,
-        cwd: &str,
-    ) -> Result<Option<LaunchBlocker>, HostError>; // get_launch_blocker closure body
-    fn agent_transcript(
-        &self,
-        session_id: &str,
-        cwd: &str,
-        run_id: &str,
-        agent_id: &str,
-        limit: usize,
-    ) -> Result<Option<Transcript>, HostError>; // get_agent_transcript closure body
     fn find_session_jsonl(&self, projects: &Path, cwd: &str, session_id: &str) -> Option<PathBuf>;
     /// `(cwd, gitBranch)` of the most recent session entries that carry them (from the file's
     /// tail). Default: unknown.
@@ -89,34 +42,10 @@ pub trait SessionFiles: Send + Sync {
         limit: usize,
     ) -> Result<Option<Transcript>, HostError>;
     fn session_title(&self, path: &Path) -> Option<String>;
-    /// Tool calls in the main transcript's complete lines from byte offset `from` (`0`: the
-    /// whole file) to the current end, and the offset to resume from next poll (P03): an
-    /// incremental cursor instead of re-parsing the transcript on every poll. A concurrent
-    /// partial write is left for the next call. Default: no progress (only `HostSessionFiles`
-    /// implements the real incremental read).
-    fn count_new_tool_calls(&self, path: &Path, from: u64) -> io::Result<(u32, u64)> {
-        let _ = path;
-        Ok((0, from))
-    }
-    /// external_sessions closure body: projects dir lookup + external_sessions_of(.., existing_roots).
-    fn external_sessions(
-        &self,
-        repos: &[(String, PathBuf)],
-        agents: &[AgentSession],
-        app: &AppRuns,
-        now: i64,
-    ) -> Result<ExternalSessions, HostError>;
 }
 
 /// Claude Code config on disk. Blocking.
 pub trait ClaudeConfig: Send + Sync {
-    fn catalog(&self, claude_dir: Option<&Path>, repo: Option<&Path>) -> Vec<ExecutorInfo>; // executors::catalog
-    fn find_workflow(
-        &self,
-        claude_dir: Option<&Path>,
-        repo: Option<&Path>,
-        name: &str,
-    ) -> Option<ExecutorInfo>;
     fn list_agents(&self, claude_dir: Option<&Path>, repo: Option<&Path>) -> Vec<AgentDef>;
     fn claude_defaults(&self, claude_dir: Option<&Path>, repo: Option<&Path>) -> ClaudeDefaults; // claude_settings::read
 }
@@ -141,11 +70,18 @@ pub trait Git: Send + Sync {
     fn diff(&self, cwd: &Path, base: Option<&str>) -> Result<(String, bool), HostError>; // work::diff::collect
     fn diff_branch(&self, repo: &Path, base: &str, branch: &str) -> Result<String, HostError>; // collect_branch
     fn commits(&self, dir: &Path, base: &str, head: &str) -> Result<Vec<CommitInfo>, HostError>;
+    /// HEAD's commits not in `base`, or the latest ones without a base (newest first).
+    fn log(&self, dir: &Path, base: Option<&str>) -> Result<Vec<CommitInfo>, HostError>;
+    /// A commit's patch (unified diff text), `sha` hex only.
+    fn show_commit(&self, dir: &Path, sha: &str) -> Result<String, HostError>;
     fn current_branch(&self, dir: &Path) -> Option<String>;
     /// Direct children of `rel` (relative to `repo`, "" = root): dirs first, then files, each
     /// sorted case-insensitively; `.git` and git-ignored entries left out; capped at
     /// `DIR_ENTRIES_MAX`. Errors on absolute paths, `..`, or anything resolving outside `repo`.
     fn list_dir(&self, repo: &Path, rel: &str) -> Result<Vec<DirEntry>, HostError>;
+    /// Every file of the checkout (tracked plus untracked, git-ignored left out), relative,
+    /// capped at `REPO_FILES_MAX`; for the quick-open search.
+    fn list_files(&self, repo: &Path) -> Result<Vec<String>, HostError>;
     /// A regular file under `repo` (same path rules as `list_dir`), first 1 MB as UTF-8 text;
     /// `binary` files come back empty. Git-ignored files are readable.
     fn read_file(&self, repo: &Path, rel: &str) -> Result<RepoFile, HostError>;
@@ -169,6 +105,15 @@ pub trait Git: Send + Sync {
         squash: bool,
     ) -> Result<MergeOutcome, HostError>;
     fn push_base(&self, repo: &Path, base: &str) -> Result<String, HostError>;
+    /// Stages everything (`git add -A`) and commits it; returns the new commit. Errors with
+    /// "Nothing to commit." or git's own message (hooks, identity).
+    /// Commits everything, or only `paths` (relative) when given.
+    fn commit_all(&self, dir: &Path, message: &str, paths: &[String]) -> Result<CommitInfo, HostError>;
+    /// The remote's default branch when known locally (`origin/HEAD`).
+    fn default_branch(&self, dir: &Path) -> Option<String>;
+    /// Pushes `branch` to `origin` and opens a PR against `base` with the GitHub CLI (or finds
+    /// the existing one). Returns the PR URL.
+    fn open_pr(&self, dir: &Path, base: &str, branch: &str, title: &str, body: &str) -> Result<String, HostError>;
 }
 
 /// Files Nodal owns (plans, stopped patches) + plan files inside repos. Blocking.

@@ -3,7 +3,7 @@
 
 use serde::Deserialize;
 
-use crate::model::{Executor, Finish, Isolation, LaunchOptions, Priority, TaskStatus};
+use crate::model::{LaunchOptions, Priority, TaskStatus};
 use crate::serde_util::double_option;
 
 #[derive(Debug, Clone, Deserialize)]
@@ -29,10 +29,6 @@ pub struct ProjectPatch {
     pub description: Option<Option<String>>,
     #[serde(default, deserialize_with = "double_option")]
     pub root_path: Option<Option<String>>,
-    #[serde(default, deserialize_with = "double_option")]
-    pub default_executor: Option<Option<Executor>>,
-    #[serde(default, deserialize_with = "double_option")]
-    pub reviewer: Option<Option<String>>,
     pub archived: Option<bool>,
 }
 
@@ -44,29 +40,12 @@ pub struct NewRepo {
     pub name: Option<String>,
     #[serde(flatten)]
     pub launch: LaunchOptions,
-    #[serde(default)]
-    pub default_executor: Option<Executor>,
-    #[serde(default)]
-    pub default_isolation: Option<Isolation>,
-    #[serde(default)]
-    pub default_finish: Option<Finish>,
-    #[serde(default)]
-    pub default_review: Option<bool>,
-    #[serde(default)]
-    pub reviewer: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct RepoPatch {
     pub name: Option<String>,
-    #[serde(default, deserialize_with = "double_option")]
-    pub default_executor: Option<Option<Executor>>,
-    pub default_isolation: Option<Isolation>,
-    pub default_finish: Option<Finish>,
-    pub default_review: Option<bool>,
-    #[serde(default, deserialize_with = "double_option")]
-    pub reviewer: Option<Option<String>>,
     #[serde(default, deserialize_with = "double_option")]
     pub model: Option<Option<String>>,
     #[serde(default, deserialize_with = "double_option")]
@@ -104,14 +83,6 @@ pub struct NewTask {
     pub labels: Option<Vec<String>>,
     #[serde(default)]
     pub acceptance: Option<Vec<String>>,
-    #[serde(default)]
-    pub assignee: Option<Executor>,
-    #[serde(default)]
-    pub isolation: Option<Isolation>,
-    #[serde(default)]
-    pub finish: Option<Finish>,
-    #[serde(default)]
-    pub review: Option<bool>,
 }
 
 /// `repoId` moves the task to another repo of the same project.
@@ -125,32 +96,6 @@ pub struct TaskPatch {
     pub priority: Option<Priority>,
     pub labels: Option<Vec<String>>,
     pub acceptance: Option<Vec<String>>,
-    #[serde(default, deserialize_with = "double_option")]
-    pub assignee: Option<Option<Executor>>,
-    #[serde(default, deserialize_with = "double_option")]
-    pub isolation: Option<Option<Isolation>>,
-    #[serde(default, deserialize_with = "double_option")]
-    pub finish: Option<Option<Finish>>,
-    #[serde(default, deserialize_with = "double_option")]
-    pub review: Option<Option<bool>>,
-}
-
-/// Overrides for this run; anything missing comes from task → repo → project.
-#[derive(Debug, Clone, Default, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct LaunchInput {
-    #[serde(default)]
-    pub executor: Option<Executor>,
-    #[serde(default)]
-    pub isolation: Option<Isolation>,
-    #[serde(default)]
-    pub finish: Option<Finish>,
-    #[serde(default)]
-    pub review: Option<bool>,
-    #[serde(default)]
-    pub extra_instructions: Option<String>,
-    #[serde(default)]
-    pub options: Option<LaunchOptions>,
 }
 
 /// "Merge into <base> & done". Squash is on unless it's turned off; pushing is opt-in.

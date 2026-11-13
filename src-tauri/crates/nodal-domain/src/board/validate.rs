@@ -1,8 +1,5 @@
-//! Input validation (projects, repos, tasks, executors, settings). `plan_file` and
+//! Input validation (projects, repos, tasks, settings). `plan_file` and
 //! `root_path`, which touch disk, live in nodal-host / nodal-app.
-
-use crate::model::executors::{is_valid_agent_name, is_valid_workflow_name};
-use crate::model::{Executor, MAX_CONCURRENCY};
 
 pub const MAX_TITLE_CHARS: usize = 200;
 pub const MAX_NAME_CHARS: usize = 80;
@@ -12,7 +9,6 @@ const MAX_LABELS: usize = 20;
 const MAX_LABEL_CHARS: usize = 40;
 const MAX_CRITERIA: usize = 50;
 const MAX_CRITERION_CHARS: usize = 1000;
-const MAX_EXTRA_CHARS: usize = 8000;
 
 /// Editors allowed for "Open in editor" (binary looked up in PATH).
 pub const EDITORS: [&str; 9] = [
@@ -163,27 +159,6 @@ pub fn acceptance(items: &[String]) -> Result<Vec<String>, String> {
     Ok(out)
 }
 
-pub fn executor(e: &Executor) -> Result<(), String> {
-    match e {
-        Executor::Agent { name, .. } if !is_valid_agent_name(name) => {
-            Err(format!("Invalid agent name \"{name}\"."))
-        }
-        Executor::Workflow { name } if !is_valid_workflow_name(name) => {
-            Err(format!("Invalid workflow name \"{name}\"."))
-        }
-        _ => Ok(()),
-    }
-}
-
-pub fn reviewer(name: &str) -> Result<String, String> {
-    let n = name.trim();
-    if is_valid_agent_name(n) {
-        Ok(n.to_string())
-    } else {
-        Err(format!("Invalid reviewer agent name \"{n}\"."))
-    }
-}
-
 pub fn editor(e: &str) -> Result<String, String> {
     let e = e.trim();
     if EDITORS.contains(&e) {
@@ -192,16 +167,6 @@ pub fn editor(e: &str) -> Result<String, String> {
         Err(format!(
             "Unknown editor \"{e}\": use one of {}.",
             EDITORS.join(", ")
-        ))
-    }
-}
-
-pub fn concurrency(n: u32) -> Result<u32, String> {
-    if (1..=MAX_CONCURRENCY).contains(&n) {
-        Ok(n)
-    } else {
-        Err(format!(
-            "Concurrency must be between 1 and {MAX_CONCURRENCY}."
         ))
     }
 }
@@ -216,18 +181,6 @@ pub fn description(s: Option<&str>) -> Result<Option<String>, String> {
     if t.chars().count() > MAX_DESCRIPTION_CHARS {
         return Err(format!(
             "The description is too long (max {MAX_DESCRIPTION_CHARS} characters)."
-        ));
-    }
-    Ok(Some(t.to_string()))
-}
-
-pub fn extra_instructions(s: Option<&str>) -> Result<Option<String>, String> {
-    let Some(t) = s.map(str::trim).filter(|t| !t.is_empty()) else {
-        return Ok(None);
-    };
-    if t.chars().count() > MAX_EXTRA_CHARS {
-        return Err(format!(
-            "The extra instructions are too long (max {MAX_EXTRA_CHARS} characters)."
         ));
     }
     Ok(Some(t.to_string()))

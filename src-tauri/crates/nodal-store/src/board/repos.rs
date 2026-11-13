@@ -1,8 +1,7 @@
 use rusqlite::{named_params, OptionalExtension};
 
 use crate::error::not_found;
-use crate::json::opt_json;
-use crate::rows::{get_repo, insert_repo, repo_from_row, SqlEnum};
+use crate::rows::{get_repo, insert_repo, repo_from_row};
 use crate::Conn as Connection;
 use crate::DbError;
 use nodal_domain::model::Repo;
@@ -50,14 +49,11 @@ pub fn insert(conn: &Connection, r: &Repo) -> Result<(), DbError> {
 pub fn update(conn: &Connection, r: &Repo) -> Result<(), DbError> {
     let n = conn.execute(
         "UPDATE repos SET name = :name, model = :model, effort = :effort, permission_mode = :perm,
-                          default_executor_json = :exec, default_isolation = :iso, default_finish = :finish,
-                          default_review = :review, reviewer = :reviewer, position = :pos
+                          position = :pos
          WHERE id = :id",
         named_params! {
             ":id": r.id, ":name": r.name, ":model": r.launch.model, ":effort": r.launch.effort,
-            ":perm": r.launch.permission_mode, ":exec": opt_json(&r.default_executor)?,
-            ":iso": SqlEnum(r.default_isolation), ":finish": SqlEnum(r.default_finish), ":review": r.default_review,
-            ":reviewer": r.reviewer, ":pos": r.position,
+            ":perm": r.launch.permission_mode, ":pos": r.position,
         },
     )?;
     if n == 0 {

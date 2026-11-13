@@ -72,12 +72,11 @@ pub struct PullDecision {
 }
 
 /// `pending_push`: the task has a `set_state` in the outbox (a local change not yet pushed),
-/// which wins over the external state just like an active run.
+/// which wins over the external state.
 pub fn decide_pull(
     task: &Task,
     item: &ExternalItem,
     map: &StateMap,
-    active_run: bool,
     pending_push: bool,
 ) -> PullDecision {
     let prev = task
@@ -87,7 +86,7 @@ pub fn decide_pull(
         .map(|s| s.id.as_str());
     let changed = prev != Some(item.state.id.as_str());
     let mapped = pull_status(map, &item.state);
-    let apply = changed && !active_run && !pending_push;
+    let apply = changed && !pending_push;
     PullDecision {
         title: (item.title != task.title).then(|| item.title.clone()),
         status: if apply {

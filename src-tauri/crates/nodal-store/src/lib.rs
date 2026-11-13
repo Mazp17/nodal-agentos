@@ -16,7 +16,6 @@ pub type DbError = StoreError;
 
 pub mod board;
 pub mod chats;
-pub mod execution;
 pub mod legacy;
 pub mod rows;
 pub mod sources;

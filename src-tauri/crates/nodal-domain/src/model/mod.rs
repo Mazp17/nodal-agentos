@@ -59,10 +59,6 @@ pub struct Project {
     /// chats run there. Never a run target.
     #[serde(default)]
     pub root_path: Option<String>,
-    /// Default executor if the repo doesn't define one. `None` → the global one in Settings → Claude.
-    pub default_executor: Option<Executor>,
-    /// Default reviewer if the repo doesn't define one. `None` → `code-reviewer`.
-    pub reviewer: Option<String>,
     pub created_at: i64,
     pub archived_at: Option<i64>,
 }
@@ -91,12 +87,6 @@ pub struct Repo {
     /// `model`, `effort` and `permissionMode` are flattened in the JSON.
     #[serde(flatten)]
     pub launch: LaunchOptions,
-    pub default_executor: Option<Executor>,
-    pub default_isolation: Isolation,
-    pub default_finish: Finish,
-    pub default_review: bool,
-    /// Reviewer agent. `None` → the project's → `code-reviewer`.
-    pub reviewer: Option<String>,
     /// Order within the project.
     pub position: i64,
     pub created_at: i64,
@@ -123,6 +113,12 @@ pub struct Chat {
     /// plain Claude.
     #[serde(default)]
     pub agent: Option<String>,
+    /// The task this chat works on: it runs in the task's worktree and moves its status.
+    #[serde(default)]
+    pub task_id: Option<String>,
+    /// A free chat's own worktree folder (one of its repo's); a task chat uses the task's.
+    #[serde(default)]
+    pub worktree: Option<String>,
     /// `model`, `effort` and `permissionMode` are flattened in the JSON.
     #[serde(flatten)]
     pub launch: LaunchOptions,
@@ -178,28 +174,6 @@ pub struct HiddenExecutor {
     #[serde(default)]
     pub repo_id: Option<String>,
 }
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum Isolation {
-    /// `~/.nodal/worktrees/<repo>/<task-slug>`, branch `nodal/<task-slug>`.
-    Worktree,
-    /// In the repo folder; the queue never launches two at once per repo.
-    InPlace,
-}
-str_enum!(Isolation { Worktree => "worktree", InPlace => "in_place" });
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum Finish {
-    /// Uncommitted changes.
-    Changes,
-    /// Commit on the branch, no push.
-    Commit,
-    /// Commit, push and PR with `gh`.
-    Pr,
-}
-str_enum!(Finish { Changes => "changes", Commit => "commit", Pr => "pr" });
 
 // ---------- Tasks ----------
 
@@ -333,12 +307,6 @@ pub struct Task {
     pub plan_overridden: bool,
     /// Acceptance criteria the gate reviews against.
     pub acceptance: Vec<String>,
-    /// `None` → repo default → project default → Claude.
-    pub assignee: Option<Executor>,
-    /// `None` → repo default.
-    pub isolation: Option<Isolation>,
-    pub finish: Option<Finish>,
-    pub review: Option<bool>,
     pub worktree: Option<WorktreeRef>,
     pub source: Option<TaskSource>,
     pub created_at: i64,
@@ -369,45 +337,7 @@ pub struct TaskRelation {
     pub kind: RelationKind,
 }
 
-// ---------- Runs ----------
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum RunKind {
-    Work,
-    Review,
-}
-str_enum!(RunKind { Work => "work", Review => "review" });
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum RunStatus {
-    Queued,
-    Launching,
-    Launched,
-    Finished,
-    Failed,
-    Canceled,
-}
-str_enum!(RunStatus {
-    Queued => "queued",
-    Launching => "launching",
-    Launched => "launched",
-    Finished => "finished",
-    Failed => "failed",
-    Canceled => "canceled",
-});
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum RunOutcome {
-    Green,
-    Yellow,
-    Red,
-    Stopped,
-    Unknown,
-}
-str_enum!(RunOutcome { Green => "green", Yellow => "yellow", Red => "red", Stopped => "stopped", Unknown => "unknown" });
+// ---------- Verdict ----------
 
 /// The reviewer's verdict (or the structured result of a reviewing workflow).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -417,116 +347,6 @@ pub struct Verdict {
     pub unmet: Vec<String>,
     pub nits: Vec<String>,
     pub summary: Option<String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct Run {
-    pub id: String,
-    /// `None` for runs without a task (launched by hand or migrated).
-    pub task_id: Option<String>,
-    pub repo_id: Option<String>,
-    pub cwd: String,
-    pub executor: Executor,
-    pub kind: RunKind,
-    /// Previous step in the chain (the reviewed run, or the one before a handoff).
-    pub parent_run_id: Option<String>,
-    pub prompt: String,
-    /// "Extra instructions for this run", already included in `prompt`.
-    pub extra_instructions: Option<String>,
-    pub options: LaunchOptions,
-    pub finish: Finish,
-    /// Resolved on enqueue (task → repo). `None` for workflows, which manage their own worktree.
-    pub isolation: Option<Isolation>,
-    /// Resolved on enqueue: when this work run finishes, the reviewer is enqueued.
-    pub review: bool,
-    pub verdict: Option<Verdict>,
-    pub status: RunStatus,
-    /// Order in the global queue (lower goes first). REAL to reorder without renumbering.
-    pub queue_position: f64,
-    /// Short id from `claude --bg`.
-    pub claude_run_id: Option<String>,
-    pub session_id: Option<String>,
-    pub queued_at: i64,
-    pub launched_at: Option<i64>,
-    pub finished_at: Option<i64>,
-    pub outcome: Option<RunOutcome>,
-    /// `summary` from the executor's final JSON block (passed on to the next step).
-    pub summary: Option<String>,
-    pub pr_url: Option<String>,
-    pub branch: Option<String>,
-    pub error: Option<String>,
-    /// Label of a run imported from a previous version (old issue or task).
-    pub legacy_label: Option<String>,
-    /// Transcript tokens (input + output + cache), summed on close (v2). `None` for
-    /// workflows or if it couldn't be read.
-    #[serde(default)]
-    pub tokens: Option<i64>,
-}
-
-/// `Run` without `prompt` or `extraInstructions`, for lists (history, board).
-#[derive(Debug, Clone, PartialEq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct RunLight {
-    pub id: String,
-    pub task_id: Option<String>,
-    pub repo_id: Option<String>,
-    pub cwd: String,
-    pub executor: Executor,
-    pub kind: RunKind,
-    pub parent_run_id: Option<String>,
-    pub options: LaunchOptions,
-    pub finish: Finish,
-    pub isolation: Option<Isolation>,
-    pub review: bool,
-    pub verdict: Option<Verdict>,
-    pub status: RunStatus,
-    pub queue_position: f64,
-    pub claude_run_id: Option<String>,
-    pub session_id: Option<String>,
-    pub queued_at: i64,
-    pub launched_at: Option<i64>,
-    pub finished_at: Option<i64>,
-    pub outcome: Option<RunOutcome>,
-    pub summary: Option<String>,
-    pub pr_url: Option<String>,
-    pub branch: Option<String>,
-    pub error: Option<String>,
-    pub legacy_label: Option<String>,
-    pub tokens: Option<i64>,
-}
-
-impl From<Run> for RunLight {
-    fn from(r: Run) -> Self {
-        RunLight {
-            id: r.id,
-            task_id: r.task_id,
-            repo_id: r.repo_id,
-            cwd: r.cwd,
-            executor: r.executor,
-            kind: r.kind,
-            parent_run_id: r.parent_run_id,
-            options: r.options,
-            finish: r.finish,
-            isolation: r.isolation,
-            review: r.review,
-            verdict: r.verdict,
-            status: r.status,
-            queue_position: r.queue_position,
-            claude_run_id: r.claude_run_id,
-            session_id: r.session_id,
-            queued_at: r.queued_at,
-            launched_at: r.launched_at,
-            finished_at: r.finished_at,
-            outcome: r.outcome,
-            summary: r.summary,
-            pr_url: r.pr_url,
-            branch: r.branch,
-            error: r.error,
-            legacy_label: r.legacy_label,
-            tokens: r.tokens,
-        }
-    }
 }
 
 // ---------- External sources ----------
@@ -739,33 +559,12 @@ pub struct OutboxItem {
 
 // ---------- Settings ----------
 
-pub const DEFAULT_CONCURRENCY: u32 = 3;
-pub const MAX_CONCURRENCY: u32 = 16;
-pub const DEFAULT_REVIEWER: &str = "code-reviewer";
-
 /// Global settings. In the database it's one row per field (`settings.key` = camelCase name).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct Settings {
-    /// Concurrent runs in the global queue.
-    pub concurrency: u32,
     /// Editor command for "Open in editor" (`code`, `cursor`...). `None` → the system one.
     pub editor: Option<String>,
-    /// Global reviewer if neither the repo nor the project define one.
-    pub reviewer: String,
-    /// Last executor fallback: repo → project → this → Claude.
-    pub default_executor: Option<Executor>,
-}
-
-impl Default for Settings {
-    fn default() -> Self {
-        Self {
-            concurrency: DEFAULT_CONCURRENCY,
-            editor: None,
-            reviewer: DEFAULT_REVIEWER.into(),
-            default_executor: None,
-        }
-    }
 }
 
 /// One child of a repo directory (`list_repo_dir`).
@@ -819,6 +618,8 @@ pub struct RepoWorktree {
 
 /// Cap on entries `list_repo_dir` returns, to keep the UI responsive.
 pub const DIR_ENTRIES_MAX: usize = 2000;
+/// Cap on the files `list_repo_files` returns for the quick-open search.
+pub const REPO_FILES_MAX: usize = 20_000;
 
 #[cfg(test)]
 mod tests;
