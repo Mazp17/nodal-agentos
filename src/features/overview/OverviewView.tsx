@@ -284,12 +284,16 @@ function NeedRow({ chat, need, where, onOpen }: { chat: Chat; need: ChatNeed; wh
               {need.summary && <span className="ov-ask-arg">{need.summary}</span>}
             </code>
             <div className="ov-actions">
-              <button type="button" className="btn btn-sm btn-amber" disabled={busy} onClick={() => answer(true)}>
-                Approve
-              </button>
-              <button type="button" className="btn btn-sm" disabled={busy} onClick={() => answer(false)}>
-                Deny
-              </button>
+              {!need.question && (
+                <>
+                  <button type="button" className="btn btn-sm btn-amber" disabled={busy} onClick={() => answer(true)}>
+                    Approve
+                  </button>
+                  <button type="button" className="btn btn-sm" disabled={busy} onClick={() => answer(false)}>
+                    Deny
+                  </button>
+                </>
+              )}
               <button type="button" className="btn btn-sm btn-ghost" onClick={onOpen}>
                 Open
               </button>
