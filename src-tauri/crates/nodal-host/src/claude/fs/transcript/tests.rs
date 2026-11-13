@@ -139,12 +139,12 @@ fn session_transcript_skips_sidechains() {
 fn agent_results_carry_their_stats() {
     let lines = [
         r#"{"type":"assistant","message":{"content":[{"type":"tool_use","id":"t1","name":"Agent","input":{"prompt":"go"}}]}}"#,
-        r#"{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"t1","content":"done"}]},"toolUseResult":{"status":"completed","agentId":"a73d70ac1e77c19f3","agentType":"web-fetch","totalDurationMs":11270,"totalTokens":16367,"totalToolUseCount":2}}"#,
+        r#"{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"t1","content":"done"}]},"toolUseResult":{"status":"completed","agentId":"a0000000000000001","agentType":"web-fetch","totalDurationMs":11270,"totalTokens":16367,"totalToolUseCount":2}}"#,
     ];
     let p = parse_transcript(&lines.join("\n"), 100);
     let TranscriptItem::ToolUse { result: Some(r), .. } = &p.items[0] else { panic!("{:?}", p.items) };
     let a = r.agent.as_ref().expect("agent");
-    assert_eq!((a.agent_id.as_str(), a.agent_type.as_deref(), a.status.as_deref()), ("a73d70ac1e77c19f3", Some("web-fetch"), Some("completed")));
+    assert_eq!((a.agent_id.as_str(), a.agent_type.as_deref(), a.status.as_deref()), ("a0000000000000001", Some("web-fetch"), Some("completed")));
     assert_eq!((a.duration_ms, a.total_tokens, a.tool_uses), (Some(11270), Some(16367), Some(2)));
 }
 
@@ -154,7 +154,7 @@ fn subagents_are_listed_and_read_from_the_session_folder() {
     let session = t.0.join("sid.jsonl");
     let dir = t.0.join("sid").join("subagents");
     fs::create_dir_all(dir.join("workflows")).unwrap();
-    fs::write(dir.join("agent-a1.meta.json"), r#"{"agentType":"web-fetch","description":"Read orca.dev","toolUseId":"toolu_1","model":"sonnet","stoppedByUser":true}"#).unwrap();
+    fs::write(dir.join("agent-a1.meta.json"), r#"{"agentType":"web-fetch","description":"Read example.com","toolUseId":"toolu_1","model":"sonnet","stoppedByUser":true}"#).unwrap();
     fs::write(dir.join("agent-a1.jsonl"), [
         r#"{"type":"user","isSidechain":true,"message":{"role":"user","content":"Fetch it"}}"#,
         r#"{"type":"assistant","isSidechain":true,"message":{"content":[{"type":"text","text":"Fetched."}]}}"#,
@@ -166,7 +166,7 @@ fn subagents_are_listed_and_read_from_the_session_folder() {
     assert_eq!((a1.tool_use_id.as_deref(), a1.agent_type.as_deref(), a1.stopped_by_user), (Some("toolu_1"), Some("web-fetch"), true));
     assert!(a1.started_at.is_some());
     let tr = read_subagent_transcript(&session, "a1", 10).unwrap().unwrap();
-    assert_eq!((tr.label.as_deref(), tr.model.as_deref(), tr.prompt.as_deref()), (Some("Read orca.dev"), Some("sonnet"), Some("Fetch it")));
+    assert_eq!((tr.label.as_deref(), tr.model.as_deref(), tr.prompt.as_deref()), (Some("Read example.com"), Some("sonnet"), Some("Fetch it")));
     assert_eq!(tr.final_output.as_deref(), Some("Fetched."));
     for bad in ["../x", "a/b", "", "a.b"] {
         assert!(read_subagent_transcript(&session, bad, 10).unwrap().is_none(), "{bad}");
