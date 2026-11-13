@@ -1,11 +1,15 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { createChat, interruptChat, sendChatMessage, updateChat, type ChatPatch } from "../../domain/api";
+import { cleanupWorktree, createChat, interruptChat, sendChatMessage, updateChat, updateTask, type ChatPatch } from "../../domain/api";
 import { useChatWorkspace } from "../../domain/hooks/branches";
 import { useChatAgents, useChats, useClaudeDefaults } from "../../domain/hooks/chats";
-import { hiddenSetOf, invalidate, isExecutorHidden, setData, useHiddenExecutors } from "../../domain/hooks/store";
+import { hiddenSetOf, invalidate, isExecutorHidden, setData, useHiddenExecutors, useTask } from "../../domain/hooks/store";
 import type { Chat, Project, Repo } from "../../domain/types";
+import { ExternalLink } from "../../ui/ExternalLink";
+import { useConfirm } from "../../ui/ConfirmDialog";
 import { EmptyState } from "../../ui/EmptyState";
 import { useToast } from "../../ui/Toasts";
+import { isClosed, providerLabel, STATUS_META, taskTag } from "../tasks/status";
+import { StatusRing } from "../tasks/bits";
 import { Composer, type ComposerSettings } from "./Composer";
 import { Conversation } from "./Conversation";
 import { agentOptions, chatTitle, effortOptions, modelOptions, modeOptions, repoOptions, toTurns } from "./model";
@@ -18,7 +22,7 @@ import {
   setViewedChat,
   useChatStream,
 } from "./stream";
-import "../runs/transcript.css";
+import "./transcript.css";
 import "./chat.css";
 
 export interface ChatViewProps {
@@ -31,6 +35,8 @@ export interface ChatViewProps {
   /** "N files changed" was clicked: show the uncommitted changes (files panel, git view). */
   onShowChanges: () => void;
   onOpenTask: (taskId: string) => void;
+  /** Opens a file's changes: `worktree` is the checkout it lives in (`null`: the repo's own). */
+  onOpenDiff: (repoId: string, path: string, worktree: string | null) => void;
 }
 
 const NEW_CHAT: ComposerSettings = { permissionMode: "auto", repoId: null, agent: null, model: null, effort: null };
@@ -44,8 +50,9 @@ const settingsOf = (c: Chat): ComposerSettings => ({
 });
 
 /** One chat tab: the conversation and the composer. */
-export function ChatView({ project, repos, chatId: tabChatId, onCreated, onShowChanges, onOpenTask }: ChatViewProps) {
+export function ChatView({ project, repos, chatId: tabChatId, onCreated, onShowChanges, onOpenTask, onOpenDiff }: ChatViewProps) {
   const toast = useToast();
+  const ask = useConfirm();
   const chats = useChats(project.id);
   const [draft, setDraft] = useState("");
   const [menu, setMenu] = useState<string | null>(null);
@@ -53,6 +60,7 @@ export function ChatView({ project, repos, chatId: tabChatId, onCreated, onShowC
 
   const chat = useMemo(() => (tabChatId ? ((chats.data ?? []).find((c) => c.id === tabChatId) ?? null) : null), [chats.data, tabChatId]);
   const chatId = chat?.id ?? null;
+  const task = useTask(chat?.taskId ?? null).data;
   const stream = useChatStream(chatId);
   useEffect(() => {
     setViewedChat(chatId);
@@ -167,6 +175,44 @@ export function ChatView({ project, repos, chatId: tabChatId, onCreated, onShowC
     }
   };
 
+  const taskKeyLabel = task ? taskTag(task, project.key) : "";
+  // Discard acts on the task worktree, so it only makes sense while it exists and the task is open.
+  const canLand = !!task?.worktree && !isClosed(task.status);
+
+  const discard = async () => {
+    if (!task?.worktree) return;
+    const ok = await ask({
+      title: `Discard ${taskKeyLabel}'s work?`,
+      body: `Deletes the worktree and branch ${task.worktree.branch}, with any commits and changes in it. The task goes back to Todo.`,
+      confirmLabel: "Discard work",
+    });
+    if (!ok) return;
+    try {
+      await cleanupWorktree(task.id, true);
+      await updateTask(task.id, { status: "todo" });
+      toast("Work discarded", `${taskKeyLabel} is back in Todo`, "ok");
+    } catch (e) {
+      toast("Couldn't discard the work", String(e), "danger");
+    } finally {
+      void invalidate("tasks", "chats");
+    }
+  };
+
+  /** A path a tool edited (absolute, or relative to the chat's folder) → repo, checkout, relative path. */
+  const openDiff = (p: string) => {
+    const cwd = workspace?.cwd ?? null;
+    const abs = p.startsWith("/") ? p : cwd ? `${cwd}/${p}` : null;
+    if (!abs) return;
+    const under = (root: string) => abs.startsWith(`${root}/`);
+    // shortcut: takes the chat's folder as the worktree root, wrong if Claude cd'd into a subfolder of it.
+    if (workspace?.isWorktree && cwd && under(cwd)) {
+      const repo = repos.find((r) => cwd.startsWith(`${r.path}/`)) ?? repos.find((r) => r.id === chat?.repoId);
+      if (repo) return onOpenDiff(repo.id, abs.slice(cwd.length + 1), cwd);
+    }
+    const repo = repos.filter((r) => under(r.path)).sort((a, b) => b.path.length - a.path.length)[0];
+    if (repo) onOpenDiff(repo.id, abs.slice(repo.path.length + 1), null);
+  };
+
   const stop = () => {
     if (!chatId) return;
     markInterrupting(chatId, true);
@@ -187,6 +233,28 @@ export function ChatView({ project, repos, chatId: tabChatId, onCreated, onShowC
   return (
     <div className="chat-page" data-screen-label="Chat">
       <section className="chat-main" aria-label={chat ? chatTitle(chat) : "New chat"}>
+        {task && (
+          <div className="chat-task">
+            <span className="chat-task-tag mono">
+              {task.source ? (
+                <ExternalLink url={task.source.url} label={`Open ${taskKeyLabel} in ${providerLabel(task.source.provider)}`}>
+                  {taskKeyLabel} ↗
+                </ExternalLink>
+              ) : (
+                <button type="button" className="chat-task-link" onClick={() => onOpenTask(task.id)}>
+                  {taskKeyLabel}
+                </button>
+              )}
+            </span>
+            <button type="button" className="chat-task-title ellipsis" title="Open the task" onClick={() => onOpenTask(task.id)}>
+              {task.title}
+            </button>
+            <span className="chat-task-status">
+              <StatusRing status={task.status} size={12} />
+              {STATUS_META[task.status].label}
+            </span>
+          </div>
+        )}
         {!hasMessages ? (
           chat && stream && !stream.loaded ? (
             <div className="chat-empty">
@@ -229,24 +297,40 @@ export function ChatView({ project, repos, chatId: tabChatId, onCreated, onShowC
                 projectKey={project.key}
                 repos={repos}
                 onOpenTask={onOpenTask}
+                onOpenDiff={openDiff}
               />
             )}
           </div>
         )}
-        {workspace && workspace.files > 0 && (
-          <button type="button" className="chat-changes" title="Show the changes" onClick={onShowChanges}>
-            <span className="chat-changes-files">
-              {workspace.files} {workspace.files === 1 ? "file" : "files"} changed
-            </span>
-            <span className="chat-changes-add num">+{workspace.additions}</span>
-            <span className="chat-changes-del num">−{workspace.deletions}</span>
-            {workspace.branch && (
-              <span className="chat-changes-where ellipsis" title={workspace.cwd ?? undefined}>
-                {workspace.isWorktree ? "worktree · " : "on "}
-                {workspace.branch}
+        {((workspace && workspace.files > 0) || canLand) && (
+          <div className="chat-changes">
+            {workspace && workspace.files > 0 ? (
+              <button type="button" className="chat-changes-btn" title="Show the changes" onClick={onShowChanges}>
+                <span className="chat-changes-files">
+                  {workspace.files} {workspace.files === 1 ? "file" : "files"} changed
+                </span>
+                <span className="chat-changes-add num">+{workspace.additions}</span>
+                <span className="chat-changes-del num">−{workspace.deletions}</span>
+                {workspace.branch && (
+                  <span className="chat-changes-where ellipsis" title={workspace.cwd ?? undefined}>
+                    {workspace.isWorktree ? "worktree · " : "on "}
+                    {task && workspace.isWorktree ? taskKeyLabel : workspace.branch}
+                  </span>
+                )}
+              </button>
+            ) : (
+              <span className="chat-changes-where ellipsis" title={task?.worktree?.branch}>
+                worktree · {taskKeyLabel}
               </span>
             )}
-          </button>
+            {canLand && task?.worktree && (
+              <span className="chat-changes-actions">
+                <button type="button" className="btn btn-xs btn-ghost chat-discard" disabled={busy} onClick={() => void discard()}>
+                  Discard
+                </button>
+              </span>
+            )}
+          </div>
         )}
         <Composer
           draft={draft}

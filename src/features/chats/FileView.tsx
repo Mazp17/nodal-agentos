@@ -1,11 +1,11 @@
 import { useMemo, useState, type KeyboardEvent } from "react";
 import { revertRepoFile, writeRepoFile } from "../../domain/api";
-import { repoFileKey, useRepoChanges, useRepoFile } from "../../domain/hooks/branches";
+import { repoFileKey, useCommitDiff, useRepoChanges, useRepoCommits, useRepoFile } from "../../domain/hooks/branches";
 import { invalidate, setData } from "../../domain/hooks/store";
 import { useConfirm } from "../../ui/ConfirmDialog";
 import { useToast } from "../../ui/Toasts";
 import { getDraft, setDraft, useDirtyTabs } from "./drafts";
-import { DiffLines } from "../runs/DiffLines";
+import { DiffLines } from "./DiffLines";
 import type { DiffFileStatus } from "../../domain/api";
 import type { Repo } from "../../domain/types";
 import { extOf, languageOf, tokenize } from "./highlight";
@@ -200,7 +200,7 @@ export function FileDiffView({ repo, worktree, path }: Props) {
             <span className="diff-add">+{file.additions}</span> <span className="diff-del">−{file.deletions}</span>
           </span>
         )}
-        <span className="file-view-badge">vs HEAD</span>
+        <span className="file-view-badge">{worktree ? "vs base" : "vs HEAD"}</span>
         {file && (
           <button
             type="button"
@@ -218,7 +218,7 @@ export function FileDiffView({ repo, worktree, path }: Props) {
       ) : !changes.data ? (
         <p className="file-view-note">Loading…</p>
       ) : !file ? (
-        <p className="file-view-note">No uncommitted changes in this file.</p>
+        <p className="file-view-note">{worktree ? "No changes to this file on this branch." : "No uncommitted changes in this file."}</p>
       ) : (
         <div className="file-view-code" role="region" aria-label={`Diff of ${path}`} tabIndex={0}>
           <DiffLines file={file} />
@@ -278,4 +278,53 @@ export async function revertChanges(a: {
     a.toast("Couldn't revert the file", String(e), "danger");
     return false;
   }
+}
+
+/** One commit's changes: every file it touched, stacked. */
+export function CommitView({ repo, worktree, sha }: { repo: Repo; worktree: string | null; sha: string }) {
+  const files = useCommitDiff(repo.id, sha, worktree);
+  const info = useRepoCommits(repo.id, true, worktree).data?.find((c) => c.sha === sha);
+  const adds = files.data?.reduce((n, f) => n + f.additions, 0) ?? 0;
+  const dels = files.data?.reduce((n, f) => n + f.deletions, 0) ?? 0;
+  return (
+    <section className="file-view" aria-label={`Commit ${sha.slice(0, 7)}`}>
+      <header className="file-view-head">
+        <p className="file-view-path ellipsis" title={`${worktree ?? repo.path} @ ${sha}`}>
+          <RootCrumb repo={repo} worktree={worktree} />
+          <span className="file-view-name">{info?.subject ?? sha.slice(0, 7)}</span>
+        </p>
+        {files.data && (
+          <span className="file-view-meta num">
+            {files.data.length} {files.data.length === 1 ? "file" : "files"} <span className="diff-add">+{adds}</span> <span className="diff-del">−{dels}</span>
+          </span>
+        )}
+        <span className="file-view-badge mono" title={info ? `${info.author}` : undefined}>
+          {sha.slice(0, 7)}
+        </span>
+      </header>
+      {files.error && !files.data ? (
+        <p className="file-view-note tr-error" role="alert">
+          Couldn't read the commit: {files.error}
+        </p>
+      ) : !files.data ? (
+        <p className="file-view-note">Loading…</p>
+      ) : files.data.length === 0 ? (
+        <p className="file-view-note">This commit changes no files.</p>
+      ) : (
+        <div className="file-view-code commit-files" role="region" aria-label="Changed files" tabIndex={0}>
+          {files.data.map((f) => (
+            <div key={f.path} className="commit-file">
+              <div className="commit-file-head">
+                <span className="ellipsis">{f.oldPath ? `${f.oldPath} → ${f.path}` : f.path}</span>
+                <span className="num">
+                  <span className="diff-add">+{f.additions}</span> <span className="diff-del">−{f.deletions}</span>
+                </span>
+              </div>
+              <DiffLines file={f} />
+            </div>
+          ))}
+        </div>
+      )}
+    </section>
+  );
 }

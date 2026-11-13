@@ -10,13 +10,14 @@ import {
   listChats,
   getChatLive,
   getChatTranscript,
+  sendChatMessage,
   type ChatEvent,
   type ChatEventEnvelope,
   type ChatRunState,
   type PermissionRequest,
 } from "../../domain/api";
 import { readJsonPref, writePref } from "../../shell/storage";
-import type { TranscriptItem } from "../runs/types";
+import type { TranscriptItem } from "./types";
 import { appFocused, notifyChat, preview } from "./alerts";
 import { chatTitle, toolLabel } from "./model";
 
@@ -80,8 +81,36 @@ function set(chatId: string, update: (s: ChatStream) => ChatStream) {
   notify(chatId);
 }
 
+// ---------- Finished at ----------
+
+/** When each chat last stopped working (busy → anything else), kept across launches: the overview's "just finished". */
+const FINISHED_PREF = "chatFinishedAt";
+const isTimes = (v: unknown): v is Record<string, number> =>
+  !!v && typeof v === "object" && !Array.isArray(v) && Object.values(v).every((x) => typeof x === "number");
+let finishedAt: ReadonlyMap<string, number> = new Map(Object.entries(readJsonPref(FINISHED_PREF, {}, isTimes)));
+const finishedListeners = new Set<() => void>();
+const FINISHED_KEEP = 50;
+
+function markFinished(chatId: string) {
+  // Newest first, capped: only the latest few are ever shown.
+  const rest = [...finishedAt].filter(([id]) => id !== chatId);
+  const next = new Map<string, number>([[chatId, Date.now()] as const, ...rest].slice(0, FINISHED_KEEP));
+  finishedAt = next;
+  writePref(FINISHED_PREF, JSON.stringify(Object.fromEntries(next)));
+  finishedListeners.forEach((l) => l());
+}
+
+export function useFinishedAt(): ReadonlyMap<string, number> {
+  const subscribe = useCallback((l: () => void) => {
+    finishedListeners.add(l);
+    return () => finishedListeners.delete(l);
+  }, []);
+  return useSyncExternalStore(subscribe, () => finishedAt);
+}
+
 function setRunState(chatId: string, state: ChatRunState | null) {
   if ((runStates.get(chatId) ?? null) === state) return;
+  if (runStates.get(chatId) === "busy") markFinished(chatId);
   const next = new Map(runStates);
   if (state) next.set(chatId, state);
   else next.delete(chatId);
@@ -357,4 +386,20 @@ export function useRunStates(): ReadonlyMap<string, ChatRunState> {
     return () => stateListeners.delete(l);
   }, []);
   return useSyncExternalStore(subscribe, () => runStates);
+}
+
+/**
+ * Sends `text` to a chat from outside its composer (a task's first message, "ask the chat for a
+ * PR"), the way the composer does: attached channel first, shown at once, streamed live.
+ */
+export async function sendToChat(chatId: string, text: string): Promise<void> {
+  seedChat(chatId);
+  pushOutbox(chatId, text);
+  try {
+    await ensureChatAttached(chatId);
+    await sendChatMessage(chatId, text);
+  } catch (e) {
+    dropOutbox(chatId, text);
+    throw e;
+  }
 }

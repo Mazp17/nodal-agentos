@@ -1,9 +1,27 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, type ReactNode } from "react";
 import { formatTokens } from "../../lib/format";
 import { contextPercent, DEFAULT_CONTEXT_WINDOW, optionLabel, type PillOption } from "./model";
 
+/** Field glyphs, drawn on the same 14px grid and stroke as the app's other icons. */
+export type PillIcon = "mode" | "repo" | "agent" | "model" | "effort";
+const ICONS: Record<PillIcon, ReactNode> = {
+  mode: <path d="M7 1.6l4.6 1.8v3.3c0 2.9-2 4.9-4.6 5.7-2.6-.8-4.6-2.8-4.6-5.7V3.4z" />,
+  repo: <path d="M1.8 3.6a1 1 0 0 1 1-1h2.8l1.2 1.4h4.4a1 1 0 0 1 1 1v5.4a1 1 0 0 1-1 1H2.8a1 1 0 0 1-1-1z" />,
+  agent: (
+    <>
+      <circle cx="7" cy="7" r="2.2" />
+      <path d="M9.2 7v.9a1.6 1.6 0 0 0 3.2 0V7A5.4 5.4 0 1 0 10 11.5" />
+    </>
+  ),
+  model: <path d="M7 1.8l1.2 3.3 3.3 1.2-3.3 1.2L7 10.8 5.8 7.5 2.5 6.3l3.3-1.2zM11 9.6l.5 1.3 1.3.5-1.3.5-.5 1.3-.5-1.3-1.3-.5 1.3-.5z" />,
+  effort: <path d="M2.5 11.5V8.5M5.5 11.5V6.5M8.5 11.5V4.5M11.5 11.5V2.5" />,
+};
+
 export interface PillProps {
   id: string;
+  icon?: PillIcon;
+  /** Joined to its neighbour in a `.chat-pill-group` (model · effort). */
+  joined?: "start" | "end";
   /** Small label before the value (`Mode`, `Repo`). */
   caption?: string;
   label: string;
@@ -27,7 +45,8 @@ export function Pill(p: PillProps) {
     <div className="chat-pill-wrap" title={p.title}>
       <button
         type="button"
-        className={`chat-pill ${p.caption ? "chat-pill-boxed" : ""} ${p.open ? "on" : ""} ${p.tone === "warn" ? "chat-pill-warn" : ""}`}
+        className={`chat-pill ${p.open ? "on" : ""} ${p.tone === "warn" ? "chat-pill-warn" : ""} ${p.joined ? `chat-pill-${p.joined}` : ""}`}
+        title={p.caption ? `${p.caption}: ${p.label}` : undefined}
         aria-haspopup="menu"
         aria-expanded={p.open}
         aria-controls={p.open ? menuId : undefined}
@@ -35,11 +54,17 @@ export function Pill(p: PillProps) {
         disabled={p.disabled}
         onClick={() => p.onToggle(p.open ? null : p.id)}
       >
-        {p.caption && <span className="chat-pill-caption">{p.caption}</span>}
+        {p.icon && (
+          <svg className="chat-pill-icon" width="13" height="13" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" aria-hidden focusable="false">
+            {ICONS[p.icon]}
+          </svg>
+        )}
         <span className="ellipsis">{p.label}</span>
-        <span className="chat-pill-chev" aria-hidden>
-          ▾
-        </span>
+        {!p.joined && (
+          <svg className="chat-pill-chev" width="9" height="9" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden focusable="false">
+            <path d="M2.5 4l2.5 2.5L7.5 4" />
+          </svg>
+        )}
       </button>
       {p.open && (
         <>
@@ -60,7 +85,11 @@ export function Pill(p: PillProps) {
                   }}
                 >
                   <span className="chat-menu-mark" aria-hidden>
-                    {on ? "✓" : ""}
+                    {on && (
+                      <svg width="11" height="11" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" focusable="false">
+                        <path d="M2.5 6.2l2.3 2.3 4.7-5" />
+                      </svg>
+                    )}
                   </span>
                   <span className="chat-menu-text">
                     <span>{o.label}</span>
@@ -127,9 +156,10 @@ export function Composer(p: ComposerProps) {
 
   const lines = p.draft.split("\n").length;
   const canSend = !!p.draft.trim() && !p.busy;
-  const pill = (id: keyof ComposerSettings, options: PillOption[], align: "left" | "right", caption?: string) => ({
+  const pill = (id: keyof ComposerSettings, options: PillOption[], align: "left" | "right", caption: string, icon: PillIcon) => ({
     id,
     caption,
+    icon,
     options,
     align,
     value: p.settings[id],
@@ -167,22 +197,27 @@ export function Composer(p: ComposerProps) {
         />
         <div className="chat-composer-bar">
           <Pill
-            {...pill("permissionMode", p.modes, "left", "Mode")}
-            tone={p.settings.permissionMode === "auto" || p.settings.permissionMode === "bypassPermissions" ? "warn" : undefined}
-          />
-          <Pill {...pill("repoId", p.repoOptions, "left", "Repo")} />
-          <Pill
-            {...pill("agent", p.agents, "left", "Agent")}
+            {...pill("agent", p.agents, "left", "Agent", "agent")}
             disabled={p.agentLocked}
             title={p.agentLocked ? "A chat keeps the agent it started with. Start a new chat to talk to another one." : undefined}
           />
+          <Pill {...pill("repoId", p.repoOptions, "left", "Repo", "repo")} />
+          <Pill
+            {...pill("permissionMode", p.modes, "left", "Mode", "mode")}
+            tone={p.settings.permissionMode === "auto" || p.settings.permissionMode === "bypassPermissions" ? "warn" : undefined}
+          />
           <span className="spacer" />
           <ContextRing tokens={p.contextTokens} window={p.contextWindow} />
-          <Pill {...pill("model", p.models, "right")} />
-          <Pill {...pill("effort", p.efforts, "right")} />
+          {/* Model and effort read as one setting, "Opus · high", each half with its own menu. */}
+          <span className="chat-pill-group" role="group" aria-label="Model and effort">
+            <Pill {...pill("model", p.models, "right", "Model", "model")} joined="start" />
+            <Pill {...pill("effort", p.efforts, "right", "Effort", "effort")} joined="end" />
+          </span>
           {p.busy ? (
             <button type="button" className="chat-send chat-stop" title="Stop" aria-label="Stop the answer" onClick={p.onStop}>
-              ■
+              <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden focusable="false">
+                <rect x="1" y="1" width="8" height="8" rx="1.5" fill="currentColor" />
+              </svg>
             </button>
           ) : (
             <button
@@ -193,7 +228,9 @@ export function Composer(p: ComposerProps) {
               disabled={!canSend}
               onClick={p.onSend}
             >
-              ↑
+              <svg width="13" height="13" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden focusable="false">
+                <path d="M6 10V2M2.5 5.5L6 2l3.5 3.5" />
+              </svg>
             </button>
           )}
         </div>

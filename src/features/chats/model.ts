@@ -2,8 +2,8 @@
 // turns, the `propose_task` card and the context ring.
 
 import { PROPOSE_TASK_TOOL, type ExecutorInfo, type NewTask } from "../../domain/api";
-import type { Chat, Executor, Priority, Repo, TaskStatus } from "../../domain/types";
-import type { TranscriptItem } from "../runs/types";
+import type { Chat, Priority, Repo, TaskStatus } from "../../domain/types";
+import type { TranscriptItem } from "./types";
 
 export type ToolUse = Extract<TranscriptItem, { kind: "toolUse" }>;
 
@@ -250,7 +250,6 @@ export function readProposal(item: ToolUse, projectId: string, repos: Repo[]): P
   if (!input || !title || !plan || !repo) return { status: "unreadable", title: title ?? item.summary };
   const priority = str(input.priority) as Priority | null;
   const status = str(input.status) as TaskStatus | null;
-  const executor = input.executor && typeof input.executor === "object" ? (input.executor as Executor) : null;
   return {
     status: "ok",
     proposal: {
@@ -264,7 +263,6 @@ export function readProposal(item: ToolUse, projectId: string, repos: Repo[]): P
         priority: priority && PRIORITIES.includes(priority) ? priority : "none",
         labels: strs(input.labels),
         acceptance: strs(input.acceptance).map((a) => a.trim()),
-        assignee: executor,
       },
     },
   };
