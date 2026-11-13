@@ -14,6 +14,7 @@ import {
   type ChatEvent,
   type ChatEventEnvelope,
   type ChatRunState,
+  type SubagentEvent,
   type PermissionRequest,
 } from "../../domain/api";
 import { readJsonPref, writePref } from "../../shell/storage";
@@ -39,6 +40,8 @@ export interface ChatStream {
   pending: PermissionRequest[];
   /** Tool calls denied without asking, by tool use id. */
   denied: Record<string, string>;
+  /** What each subagent did since the chat loaded, by the id of the `Agent` call that launched it. */
+  subagents: Record<string, TranscriptItem[]>;
   contextTokens: number | null;
   contextWindow: number | null;
   /** Why the last turn failed, until the next message. */
@@ -57,6 +60,7 @@ const EMPTY: ChatStream = {
   state: "stopped",
   pending: [],
   denied: {},
+  subagents: {},
   contextTokens: null,
   contextWindow: null,
   notice: null,
@@ -245,6 +249,33 @@ const withResult = (items: TranscriptItem[], id: string, apply: (t: Extract<Tran
   return next;
 };
 
+/** In-memory bounds of `subagents`: the most recent agents, the latest items of each. */
+const SUBAGENTS_KEEP = 40;
+const SUBAGENT_ITEMS_KEEP = 300;
+
+const isKnownCall = (items: TranscriptItem[], it: TranscriptItem) =>
+  it.kind === "toolUse" && !!it.id && items.some((x) => x.kind === "toolUse" && x.id === it.id);
+
+/** Folds one subagent event into the items of its parent `Agent` call. */
+export function reduceSubagent(
+  subagents: Record<string, TranscriptItem[]>,
+  parentToolUseId: string,
+  e: SubagentEvent,
+): Record<string, TranscriptItem[]> {
+  const cur = subagents[parentToolUseId] ?? [];
+  let items: TranscriptItem[];
+  if (e.type === "toolResult") {
+    items = withResult(cur, e.toolUseId, (t) => ({ ...t, result: e.result }));
+  } else if (isKnownCall(cur, e.item)) {
+    return subagents;
+  } else {
+    items = [...cur, e.item].slice(-SUBAGENT_ITEMS_KEEP);
+  }
+  // Re-inserting moves the key last, so the oldest agents are the ones dropped.
+  const { [parentToolUseId]: _, ...rest } = subagents;
+  return Object.fromEntries(Object.entries({ ...rest, [parentToolUseId]: items }).slice(-SUBAGENTS_KEEP));
+}
+
 /** Chats with something unread → their project. */
 export function useUnreadChats(): ReadonlyMap<string, string> {
   const subscribe = useCallback((l: () => void) => {
@@ -272,6 +303,8 @@ export function reduce(s: ChatStream, e: ChatEvent): ChatStream {
     }
     case "toolResult":
       return { ...s, items: withResult(s.items, e.toolUseId, (t) => ({ ...t, result: e.result })) };
+    case "subagent":
+      return { ...s, subagents: reduceSubagent(s.subagents, e.parentToolUseId, e.event) };
     case "permissionRequest": {
       if (s.pending.some((p) => p.requestId === e.requestId)) return s;
       const { type: _, ...req } = e;

@@ -119,7 +119,6 @@ fn skips_subagents_and_junk() {
         "not json",
         r#"{"type":"rate_limit_event"}"#,
         r#"{"type":"system","subtype":"hook_started"}"#,
-        r#"{"type":"assistant","message":{"content":[{"type":"text","text":"inner"}]},"parent_tool_use_id":"toolu_9"}"#,
         r#"{"type":"stream_event","event":{"delta":{"type":"text_delta","text":"x"}},"parent_tool_use_id":"toolu_9"}"#,
         r#"{"type":"control_response","response":{"subtype":"success","request_id":"i"}}"#,
         r#"{"type":"control_request","request":{"subtype":"can_use_tool"}}"#,
@@ -128,9 +127,31 @@ fn skips_subagents_and_junk() {
     }
 }
 
+#[test]
+fn subagent_lines_are_wrapped_and_carry_no_usage() {
+    let line = r#"{"type":"assistant","message":{"content":[{"type":"tool_use","id":"t1","name":"Bash","input":{"command":"ls"}}],"usage":{"input_tokens":5}},"parent_tool_use_id":"toolu_9"}"#;
+    let evs = parse_line(line);
+    assert_eq!(evs.len(), 1, "{evs:?}");
+    assert!(matches!(
+        &evs[0],
+        StreamEvent::Subagent { parent_tool_use_id, event }
+            if parent_tool_use_id == "toolu_9"
+                && matches!(**event, StreamEvent::Item { item: TranscriptItem::ToolUse { .. } })
+    ));
+    let result = r#"{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"t1","content":"a.rs"}]},"parent_tool_use_id":"toolu_9"}"#;
+    assert!(matches!(
+        &parse_line(result)[0],
+        StreamEvent::Subagent { event, .. } if matches!(**event, StreamEvent::ToolResult { .. })
+    ));
+    let json = serde_json::to_value(&evs[0]).unwrap();
+    assert_eq!(json["type"], "subagent");
+    assert_eq!(json["parentToolUseId"], "toolu_9");
+    assert_eq!(json["event"]["type"], "item");
+}
+
 fn patch_of(line: &str) -> Option<ToolPatch> {
     match parse_line(line).into_iter().next() {
-        Some(StreamEvent::ToolResult { result, .. }) => result.patch,
+        Some(StreamEvent::ToolResult { result, .. }) => result.patch.map(|p| *p),
         other => panic!("expected a tool result, got {other:?}"),
     }
 }

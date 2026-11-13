@@ -22,7 +22,7 @@ use serde::Deserialize;
 
 use nodal_domain::execution::options;
 use nodal_domain::model::chat::{ChatLive, ChatSpec, ClaudeDefaults};
-use nodal_domain::model::claude::Transcript;
+use nodal_domain::model::claude::{SubagentRef, Transcript};
 use nodal_domain::model::events::ChangeKind;
 use nodal_domain::model::executors::{is_valid_agent_name, ExecutorInfo};
 use nodal_domain::model::{Chat, ChatWorkspace, LaunchOptions, Project, Repo};
@@ -436,8 +436,8 @@ impl Chats {
         Ok(agents.into_iter().map(ExecutorInfo::from).collect())
     }
 
-    /// The chat's history, read from its Claude Code session. `None` before the first message.
-    pub async fn get_chat_transcript(&self, id: String, limit: Option<u32>) -> Result<Option<Transcript>, AppError> {
+    /// The chat and its Claude Code session file. `None` before the first message or without the file.
+    async fn chat_session_file(&self, id: String) -> Result<Option<(Chat, PathBuf)>, AppError> {
         check_id(&id, "chat")?;
         let fs = self.core.env.fs.clone();
         let (chat, project, repos, wt) = self
@@ -454,13 +454,20 @@ impl Chats {
             return Err("Couldn't locate the Claude Code folder ($HOME is not set).".into());
         };
         let cwd = chat_cwd(&chat, &project, &repos, wt.as_deref()).map(|c| c.path().to_string()).unwrap_or_default();
+        let sessions = self.core.sessions.clone();
+        let path = blocking(move || Ok(sessions.find_session_jsonl(&claude_dir.join("projects"), &cwd, &sid)))
+            .await
+            .map_err(AppError::from)?;
+        Ok(path.map(|p| (chat, p)))
+    }
+
+    /// The chat's history, read from its Claude Code session. `None` before the first message.
+    pub async fn get_chat_transcript(&self, id: String, limit: Option<u32>) -> Result<Option<Transcript>, AppError> {
+        let Some((chat, path)) = self.chat_session_file(id).await? else { return Ok(None) };
         let limit = limit.unwrap_or(TRANSCRIPT_DEFAULT_LIMIT).clamp(1, TRANSCRIPT_MAX_LIMIT) as usize;
         let (chat_id, project_id, known_title) = (chat.id.clone(), chat.project_id.clone(), chat.session_title.clone());
         let sessions = self.core.sessions.clone();
         let (transcript, title) = blocking(move || {
-            let Some(path) = sessions.find_session_jsonl(&claude_dir.join("projects"), &cwd, &sid) else {
-                return Ok((None, None));
-            };
             let t = sessions
                 .read_session_transcript(&path, &chat.id, chat.title.clone(), chat.launch.model.clone(), limit)
                 .map_err(|e| e.to_string())?;
@@ -475,6 +482,28 @@ impl Chats {
             }
         }
         Ok(transcript)
+    }
+
+    /// Subagents (`Agent`/`Task` calls) the chat's session ran, oldest first.
+    pub async fn list_chat_subagents(&self, chat_id: String) -> Result<Vec<SubagentRef>, AppError> {
+        let Some((_, path)) = self.chat_session_file(chat_id).await? else { return Ok(vec![]) };
+        let sessions = self.core.sessions.clone();
+        blocking(move || Ok(sessions.list_subagents(&path))).await.map_err(AppError::from)
+    }
+
+    /// One subagent's own conversation. `None` if the chat has no session or the agent no file.
+    pub async fn get_chat_subagent_transcript(
+        &self,
+        chat_id: String,
+        agent_id: String,
+        limit: Option<u32>,
+    ) -> Result<Option<Transcript>, AppError> {
+        let Some((_, path)) = self.chat_session_file(chat_id).await? else { return Ok(None) };
+        let limit = limit.unwrap_or(TRANSCRIPT_DEFAULT_LIMIT).clamp(1, TRANSCRIPT_MAX_LIMIT) as usize;
+        let sessions = self.core.sessions.clone();
+        blocking(move || sessions.read_subagent_transcript(&path, &agent_id, limit).map_err(|e| e.to_string()))
+            .await
+            .map_err(AppError::from)
     }
 
     /// Where the chat works right now and its uncommitted changes there. Claude Code can move

@@ -13,6 +13,7 @@ import { isClosed, providerLabel, STATUS_META, taskTag } from "../tasks/status";
 import { StatusRing } from "../tasks/bits";
 import { Composer, type ComposerSettings } from "./Composer";
 import { Conversation } from "./Conversation";
+import { closeSubagent, SubagentSheet, useSubagentTarget } from "./SubagentSheet";
 import { agentOptions, chatTitle, effortOptions, modelOptions, modeOptions, repoOptions, toTurns } from "./model";
 import {
   dropOutbox,
@@ -63,6 +64,7 @@ export function ChatView({ project, repos, chatId: tabChatId, onCreated, onShowC
   const chatId = chat?.id ?? null;
   const task = useTask(chat?.taskId ?? null).data;
   const stream = useChatStream(chatId);
+  const subagent = useSubagentTarget(chatId);
   useEffect(() => {
     setViewedChat(chatId);
     return () => setViewedChat(null);
@@ -359,6 +361,7 @@ export function ChatView({ project, repos, chatId: tabChatId, onCreated, onShowC
           onStop={stop}
         />
       </section>
+      {subagent && stream && <SubagentSheet target={subagent} stream={stream} live={stream.state === "busy"} onClose={closeSubagent} />}
     </div>
   );
 }

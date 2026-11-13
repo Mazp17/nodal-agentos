@@ -2,7 +2,11 @@ import { useEffect, useState, type ReactNode } from "react";
 import { basename } from "../../domain/hooks/projects";
 import { ContextMenu, DropdownMenu } from "radix-ui";
 import { rootKey, useRepoChanges, useRepoCommits, useRepoDir, useRepoWorktrees } from "../../domain/hooks/branches";
-import { shortAgo } from "./model";
+import { agentRows, isAgentCall, shortAgo } from "./model";
+import { openSubagent } from "./SubagentSheet";
+import { useChatStream } from "./stream";
+import { useChatSubagents } from "../../domain/hooks/chats";
+import { formatDuration } from "../../lib/format";
 import type { FileDiff } from "../../domain/api";
 import { readJsonPref, writePref } from "../../shell/storage";
 
@@ -36,10 +40,12 @@ interface Props {
   /** The checkout shown: one of the repo's worktrees (absolute path), `null` for the repo's own. */
   worktree: string | null;
   onWorktree: (worktree: string | null) => void;
+  /** The chat open, whose subagents the "Agents" tab lists (`null`: none, e.g. a file tab is active). */
+  chatId: string | null;
   onClose: () => void;
 }
 
-export type FilesMode = "tree" | "changes";
+export type FilesMode = "tree" | "changes" | "agents";
 
 const STATUS_BADGE: Record<DiffFileStatus, { letter: string; cls: string; label: string }> = {
   added: { letter: "A", cls: "df-added", label: "Added" },
@@ -50,7 +56,7 @@ const STATUS_BADGE: Record<DiffFileStatus, { letter: string; cls: string; label:
 
 /** The repo's files next to the chat: a lazy tree (one listing per expanded folder), or only
  * the uncommitted changes. */
-export function FilesPanel({ repo, activePath, onOpenFile, onOpenDiff, onOpenCommit, activeCommit, onAskChatForPr, mode, onMode: setMode, worktree, onWorktree, onClose }: Props) {
+export function FilesPanel({ repo, activePath, onOpenFile, onOpenDiff, onOpenCommit, activeCommit, onAskChatForPr, mode, onMode: setMode, worktree, onWorktree, chatId, onClose }: Props) {
   const worktrees = useRepoWorktrees(repo.id).data;
   // Files picked in "Changes" (⇧/⌘-click) for the next commit, tied to the checkout they're in.
   const [picked, setPicked] = useState<Picked>({ root: "", paths: [], anchor: null });
@@ -91,6 +97,14 @@ export function FilesPanel({ repo, activePath, onOpenFile, onOpenDiff, onOpenCom
               <path d="M4 4.5v5M10 6.5c0 2-2 2.5-6 3" />
             </svg>
           </button>
+          <button type="button" className={`files-mode ${mode === "agents" ? "on" : ""}`} aria-pressed={mode === "agents"} aria-label="Agents" title="Subagents of this chat" onClick={() => setMode("agents")}>
+            <svg width="13" height="13" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" aria-hidden focusable="false">
+              <circle cx="7" cy="3" r="1.5" />
+              <circle cx="3.5" cy="11" r="1.5" />
+              <circle cx="10.5" cy="11" r="1.5" />
+              <path d="M7 4.5v2M7 6.5H3.5v3M7 6.5h3.5v3" />
+            </svg>
+          </button>
         </div>
         <button type="button" className="icon-btn files-close" aria-label="Close files" title="Close" onClick={onClose}>
           <svg width="9" height="9" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" aria-hidden focusable="false">
@@ -99,7 +113,9 @@ export function FilesPanel({ repo, activePath, onOpenFile, onOpenDiff, onOpenCom
         </button>
       </div>
       {worktrees && worktrees.length > 1 && <RootPicker repo={repo} worktrees={worktrees} value={worktree} onChange={onWorktree} />}
-      {mode === "tree" ? (
+      {mode === "agents" ? (
+        <Agents chatId={chatId} />
+      ) : mode === "tree" ? (
         <ul className="files-tree" role="tree" aria-label="Files">
           <Dir key={worktree ?? ""} repoId={repo.id} worktree={worktree} dir="" depth={0} open={open} onToggle={toggle} active={activePath} onOpen={onOpenFile} />
         </ul>
@@ -130,6 +146,57 @@ export function FilesPanel({ repo, activePath, onOpenFile, onOpenDiff, onOpenCom
         </div>
       )}
     </aside>
+  );
+}
+
+const AGENT_TONE = { running: "accent", ok: "ok", error: "danger", stopped: "muted" } as const;
+
+/** The chat's subagents, newest first; one opens its transcript. */
+function Agents({ chatId }: { chatId: string | null }) {
+  const stream = useChatStream(chatId);
+  const subs = useChatSubagents(chatId);
+  const refresh = subs.refresh;
+  // Re-read when the tab opens and each time an Agent call finishes.
+  const finished = stream?.items.filter((i) => i.kind === "toolUse" && isAgentCall(i) && i.result).length ?? 0;
+  useEffect(() => {
+    void refresh();
+  }, [finished, refresh]);
+  if (!chatId) return <p className="files-note files-changes-note">Open a chat to see its subagents</p>;
+  if (subs.error && !subs.data) {
+    return (
+      <p className="files-note files-changes-note tr-error" role="alert">
+        Couldn't read the subagents: {subs.error}
+      </p>
+    );
+  }
+  if (!subs.data || !stream) return <p className="files-note files-changes-note">Loading…</p>;
+  const rows = agentRows(subs.data, stream.items, stream.state === "busy");
+  if (rows.length === 0) return <p className="files-note files-changes-note">No subagents yet</p>;
+  const now = Date.now();
+  return (
+    <ul className="files-tree files-changes" aria-label="Subagents">
+      {rows.map((r, i) => {
+        const meta = [r.durationMs != null && formatDuration(r.durationMs), r.stats].filter(Boolean).join(" · ");
+        return (
+          <li key={r.agentId ?? r.toolUseId ?? i} className="files-item">
+            <button
+              type="button"
+              className="files-row files-agent"
+              title={[r.type, r.description, meta].filter(Boolean).join("\n")}
+              onClick={() => openSubagent({ chatId, toolUseId: r.toolUseId, agentId: r.agentId, title: r.description ?? r.type })}
+            >
+              <span className="files-agent-line">
+                <span className={`dot dot-sm tone-${AGENT_TONE[r.state]} ${r.state === "running" ? "pulse" : ""}`} aria-hidden />
+                <span className="files-agent-type">{r.type}</span>
+                <span className="ellipsis files-agent-desc">{r.description}</span>
+                <span className="files-change-dir num">{r.state === "running" ? "now" : r.startedAt != null ? shortAgo(r.startedAt, now) : ""}</span>
+              </span>
+              {meta && <span className="files-agent-meta num">{meta}</span>}
+            </button>
+          </li>
+        );
+      })}
+    </ul>
   );
 }
 

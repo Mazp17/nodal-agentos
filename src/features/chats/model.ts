@@ -4,7 +4,8 @@
 import { relUnder } from "../../domain/hooks/projects";
 import { PROPOSE_TASK_TOOL, type ExecutorInfo, type NewTask } from "../../domain/api";
 import type { Chat, Priority, Repo, TaskStatus } from "../../domain/types";
-import type { TranscriptItem } from "./types";
+import { formatTokens } from "../../lib/format";
+import type { AgentResultInfo, SubagentRef, TranscriptItem } from "./types";
 
 export type ToolUse = Extract<TranscriptItem, { kind: "toolUse" }>;
 
@@ -120,6 +121,111 @@ export function toTurns(items: TranscriptItem[], outbox: string[] = []): Turn[] 
   }
   for (const text of outbox) turns.push({ kind: "user", text, pending: true });
   return turns;
+}
+
+// ---------- Subagents ----------
+
+/** Claude Code's delegation tool (`Task` in older versions). */
+export const isAgentCall = (it: ToolUse) => it.name === "Agent" || it.name === "Task";
+
+/** What a subagent call is for, from its input (clipped inputs may not parse). */
+export function agentMeta(it: ToolUse): { type: string; description: string | null } {
+  const input = parse(it.input);
+  return { type: str(input?.subagent_type) ?? it.result?.agent?.agentType ?? "agent", description: str(input?.description) ?? it.summary };
+}
+
+/**
+ * A user turn Claude Code injects itself, not something the user typed: a background
+ * subagent's report (`<agent-message from="<agentId>">`) or a task notification.
+ */
+export function harnessMessage(text: string): { kind: "report"; agentId: string } | { kind: "notification" } | null {
+  const m = /^\s*<agent-message from="([A-Za-z0-9]+)">/.exec(text);
+  if (m) return { kind: "report", agentId: m[1] };
+  return /^\s*<task-notification>/.test(text) ? { kind: "notification" } : null;
+}
+
+export type AgentState = "running" | "ok" | "error" | "stopped";
+
+/**
+ * Where a subagent call stands. `live`: the answer is still being written. A call that
+ * returned at once with a launch status (a background agent) keeps running while `live`.
+ */
+export function agentState(it: ToolUse, live: boolean): AgentState {
+  const r = it.result;
+  if (!r) return live ? "running" : "stopped";
+  const status = (r.agent?.status ?? "").toLowerCase();
+  if (r.isError || /fail|error/.test(status)) return "error";
+  if (/kill|stop|cancel|abort/.test(status)) return "stopped";
+  if (/async|running|launched/.test(status)) return live ? "running" : "ok";
+  return "ok";
+}
+
+/** The subagent's latest tool call (what it's doing now). */
+export function latestToolUse(items: TranscriptItem[] | undefined): ToolUse | null {
+  for (let i = (items?.length ?? 0) - 1; i >= 0; i--) {
+    const it = items?.[i];
+    if (it?.kind === "toolUse") return it;
+  }
+  return null;
+}
+
+/** "12 tools · 38k tokens", or `null` when the result reported neither. */
+export function agentStats(a: AgentResultInfo | null | undefined): string | null {
+  const parts = [
+    a?.toolUses != null && `${a.toolUses} ${a.toolUses === 1 ? "tool" : "tools"}`,
+    a?.totalTokens != null && `${formatTokens(a.totalTokens)} tokens`,
+  ].filter(Boolean);
+  return parts.length ? parts.join(" · ") : null;
+}
+
+export interface AgentRow {
+  toolUseId: string | null;
+  agentId: string | null;
+  type: string;
+  description: string | null;
+  state: AgentState;
+  durationMs: number | null;
+  stats: string | null;
+  startedAt: number | null;
+}
+
+/**
+ * The Agents tab: the session's subagents (`refs`, oldest first) joined with the conversation's
+ * `Agent` calls by tool use id, newest first. Calls the session file doesn't list yet (just
+ * launched) come first, since they're the latest.
+ */
+export function agentRows(refs: SubagentRef[], items: TranscriptItem[], live: boolean): AgentRow[] {
+  const calls = new Map<string, ToolUse>();
+  for (const it of items) if (it.kind === "toolUse" && isAgentCall(it) && it.id) calls.set(it.id, it);
+  const known = new Set(refs.map((r) => r.toolUseId));
+  const rows: AgentRow[] = [...refs].reverse().map((r) => {
+    const call = r.toolUseId ? calls.get(r.toolUseId) : undefined;
+    const a = call?.result?.agent;
+    return {
+      toolUseId: r.toolUseId,
+      agentId: r.agentId,
+      type: r.agentType ?? a?.agentType ?? "agent",
+      description: r.description ?? (call ? agentMeta(call).description : null),
+      state: call ? agentState(call, live) : r.stoppedByUser ? "stopped" : "ok",
+      durationMs: a?.durationMs ?? null,
+      stats: agentStats(a),
+      startedAt: r.startedAt,
+    };
+  });
+  const fresh: AgentRow[] = [...calls.values()]
+    .filter((c) => !known.has(c.id))
+    .reverse()
+    .map((c) => ({
+      toolUseId: c.id,
+      agentId: c.result?.agent?.agentId ?? null,
+      type: agentMeta(c).type,
+      description: agentMeta(c).description,
+      state: agentState(c, live),
+      durationMs: c.result?.agent?.durationMs ?? null,
+      stats: agentStats(c.result?.agent),
+      startedAt: null,
+    }));
+  return [...fresh, ...rows];
 }
 
 /** `mcp__nodal__list_tasks` → `nodal · list_tasks`. */

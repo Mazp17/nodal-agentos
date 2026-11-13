@@ -2,13 +2,13 @@
  * shared with the run detail's session panel. */
 
 /* ---- Subagent sheet ---- */
+/* Same drawer as the task panel (.tp): full height, flush right. */
+.tr-scrim { position: fixed; inset: 0; z-index: 20; background: var(--scrim); }
 .sheet.tr-panel {
-  top: calc(var(--h-bar) + var(--sp-3));
-  right: var(--sp-3);
-  bottom: var(--sp-3);
-  width: min(600px, calc(100% - 2 * var(--sp-3)));
-  border: 1px solid var(--border-3);
-  border-radius: var(--r-2xl);
+  position: fixed;
+  top: 0;
+  width: 540px;
+  max-width: 100vw;
   background: var(--surface-sheet);
   overflow: hidden;
 }

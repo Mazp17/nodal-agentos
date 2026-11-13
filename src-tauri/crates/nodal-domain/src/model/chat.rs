@@ -92,6 +92,12 @@ pub enum StreamEvent {
         result: ToolResultInfo,
     },
     PermissionRequest(PermissionRequest),
+    /// An event from a subagent's own conversation, launched by the `Agent`/`Task` call `parent_tool_use_id`.
+    #[serde(rename_all = "camelCase")]
+    Subagent {
+        parent_tool_use_id: String,
+        event: Box<StreamEvent>,
+    },
     /// A tool was denied without asking (the permission mode or a rule decided).
     #[serde(rename_all = "camelCase")]
     PermissionDenied {
