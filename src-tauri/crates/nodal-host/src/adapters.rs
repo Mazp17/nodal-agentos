@@ -221,7 +221,7 @@ impl LocalFs for HostLocalFs {
     }
 
     fn canonicalize(&self, path: &Path) -> io::Result<PathBuf> {
-        path.canonicalize()
+        dunce::canonicalize(path)
     }
 
     fn canonical_dir(&self, path: &str) -> Result<PathBuf, HostError> {

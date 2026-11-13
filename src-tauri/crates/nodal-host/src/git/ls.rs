@@ -33,10 +33,8 @@ fn check_rel(rel: &str) -> Result<&Path, String> {
 /// (symlinks followed) still inside the canonical repo root.
 fn resolve(repo: &Path, rel: &str) -> Result<PathBuf, String> {
     let rel_path = check_rel(rel)?;
-    let root = repo.canonicalize().map_err(|e| format!("Repo folder unavailable: {e}"))?;
-    let path = root
-        .join(rel_path)
-        .canonicalize()
+    let root = dunce::canonicalize(repo).map_err(|e| format!("Repo folder unavailable: {e}"))?;
+    let path = dunce::canonicalize(root.join(rel_path))
         .map_err(|e| format!("Can't read `{rel}`: {e}"))?;
     // Symlinks are resolved above, so this also rejects links pointing outside the repo.
     if !path.starts_with(&root) {
@@ -181,11 +179,11 @@ pub fn revert_file(root: &Path, rel: &str) -> Result<(), String> {
     if norm.as_os_str().is_empty() {
         return Err("Pick a file to revert.".into());
     }
-    let root = root.canonicalize().map_err(|e| format!("Repo folder unavailable: {e}"))?;
+    let root = dunce::canonicalize(root).map_err(|e| format!("Repo folder unavailable: {e}"))?;
     let full = root.join(&norm);
     // The file itself may be gone: validate its nearest existing ancestor instead.
     let near = full.ancestors().skip(1).find(|a| a.exists()).unwrap_or(&root);
-    let near = near.canonicalize().map_err(|e| format!("Can't revert `{rel}`: {e}"))?;
+    let near = dunce::canonicalize(near).map_err(|e| format!("Can't revert `{rel}`: {e}"))?;
     if !near.starts_with(&root) {
         return Err("Path resolves outside the repo.".into());
     }

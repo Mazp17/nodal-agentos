@@ -22,7 +22,7 @@ impl TempDir {
         let d = std::env::temp_dir().join(format!("nodal-test-{}-{name}", std::process::id()));
         let _ = std::fs::remove_dir_all(&d);
         std::fs::create_dir_all(&d).unwrap();
-        TempDir(d.canonicalize().unwrap())
+        TempDir(dunce::canonicalize(d).unwrap())
     }
 }
 

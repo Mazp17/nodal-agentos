@@ -194,8 +194,7 @@ fn same_content(backup: &Path, files: &[LegacyFile]) -> bool {
 /// `<data_dir>/legacy-backup-<now>[-n]/` and returns that path plus the warnings. If the most
 /// recent backup already has exactly that content, it's reused instead of copying again.
 pub fn backup(src: &Path, data_dir: &Path, now: i64) -> Result<(PathBuf, Vec<String>), String> {
-    let src = src
-        .canonicalize()
+    let src = dunce::canonicalize(src)
         .map_err(|e| format!("Couldn't open the folder {}: {e}", src.display()))?;
     if !src.is_dir() {
         return Err(format!("{} is not a folder.", src.display()));
@@ -301,8 +300,8 @@ fn det_id(prefix: &str, key: &str) -> String {
 
 fn expand(raw: &str) -> PathBuf {
     let raw = raw.trim();
-    match (raw.strip_prefix("~/"), std::env::var_os("HOME")) {
-        (Some(rest), Some(home)) => PathBuf::from(home).join(rest),
+    match (raw.strip_prefix("~/").or_else(|| raw.strip_prefix("~\\")), std::env::home_dir()) {
+        (Some(rest), Some(home)) => home.join(rest),
         _ => PathBuf::from(raw),
     }
 }
@@ -321,7 +320,7 @@ pub fn norm_path(raw: &str) -> String {
 /// Like `norm_path`, plus symlinks resolved if the path exists (to compare with `repos.path`).
 pub fn canon_path(raw: &str) -> String {
     let p = expand(raw);
-    trim_slash(&p.canonicalize().unwrap_or(p))
+    trim_slash(&dunce::canonicalize(&p).unwrap_or(p))
 }
 
 fn folder_name(path: &str) -> String {

@@ -10,12 +10,12 @@ use crate::git;
 pub use crate::claude::fs::paths::claude_config_dir;
 
 pub fn home() -> Option<PathBuf> {
-    std::env::var_os("HOME").map(PathBuf::from)
+    std::env::home_dir()
 }
 
 /// `~` and `~/x` → home. Everything else stays as is.
 pub fn expand_home(path: &str) -> PathBuf {
-    match (path.strip_prefix("~/"), home()) {
+    match (path.strip_prefix("~/").or_else(|| path.strip_prefix("~\\")), home()) {
         (Some(rest), Some(h)) => h.join(rest),
         _ if path == "~" => home().unwrap_or_default(),
         _ => PathBuf::from(path),
@@ -44,7 +44,7 @@ fn existing_dir(path: &str) -> Result<PathBuf, String> {
 /// canonical too, so both can be compared with `Path::starts_with`.
 pub fn canonical_dir(path: &str) -> Result<PathBuf, String> {
     let dir = existing_dir(path)?;
-    dir.canonicalize().map_err(|e| format!("Couldn't resolve {}: {e}", dir.display()))
+    dunce::canonicalize(&dir).map_err(|e| format!("Couldn't resolve {}: {e}", dir.display()))
 }
 
 /// Canonical git root (symlinks resolved) of the repo containing `path`. `Ok(None)` if it's
@@ -52,7 +52,7 @@ pub fn canonical_dir(path: &str) -> Result<PathBuf, String> {
 pub fn git_root_of(path: &str) -> Result<Option<PathBuf>, String> {
     let dir = existing_dir(path)?;
     let Some(root) = git::toplevel(&dir)? else { return Ok(None) };
-    Ok(Some(root.canonicalize().map_err(|e| format!("Couldn't resolve {}: {e}", root.display()))?))
+    Ok(Some(dunce::canonicalize(&root).map_err(|e| format!("Couldn't resolve {}: {e}", root.display()))?))
 }
 
 /// Canonical git root, or an error ready to display.
