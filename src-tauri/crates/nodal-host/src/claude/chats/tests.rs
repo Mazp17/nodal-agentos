@@ -285,3 +285,50 @@ fn measure_endless_flood_lines_parsed() {
         .success();
     eprintln!("P08 chat stdout: endless flood, 2 s -> {parsed} lines parsed/emitted, process alive: {alive}");
 }
+
+/// Logs its arguments per launch and answers `rewind_files` requests; any other message ends a turn.
+const REWINDER: &str = r#"#!/bin/sh
+echo "$@" >> "$(dirname "$0")/args.log"
+while IFS= read -r line; do
+  case "$line" in
+    *rewind_files*)
+      id=$(echo "$line" | sed 's/.*"request_id":"\([^"]*\)".*/\1/')
+      echo "{\"type\":\"control_response\",\"response\":{\"subtype\":\"success\",\"request_id\":\"$id\",\"response\":{\"canRewind\":true,\"filesChanged\":[\"/a\"],\"insertions\":1,\"deletions\":2}}}" ;;
+    *) echo '{"type":"result","subtype":"success","is_error":false}' ;;
+  esac
+done
+"#;
+
+#[test]
+#[cfg_attr(windows, ignore = "the fake claude is a sh script")]
+fn a_rewind_restores_files_and_the_next_spawn_resumes_at_the_message_once() {
+    use nodal_domain::ports::ChatRuntime;
+    const SID: &str = "00000000-0000-4000-8000-000000000001";
+    let f = Fixture::new("rewind", REWINDER);
+    let launches = || std::fs::read_to_string(f.dir.join("args.log")).unwrap_or_default().lines().map(String::from).collect::<Vec<_>>();
+    block_on(async {
+        let r = f.chats.rewind_files("c1", "p1", Some(SID), f.spec(), "aaaa-1", true).await.unwrap();
+        assert_eq!((r.files_changed, r.insertions, r.deletions, r.files_error), (vec!["/a".to_string()], 1, 2, None));
+
+        f.chats.rewind_conversation("c1", Some("bbbb-2")).unwrap();
+        assert_eq!(f.chats.live("c1").state, RunState::Stopped);
+        f.chats.send("c1", "p1", Some(SID), f.spec(), "hi").unwrap();
+        f.wait_for(1, "turn end", |e| matches!(e, ChatEvent::Stream(StreamEvent::TurnEnd { .. }))).await;
+        f.chats.stop("c1");
+        f.chats.send("c1", "p1", Some(SID), f.spec(), "again").unwrap();
+        f.wait_for(2, "second turn end", |e| matches!(e, ChatEvent::Stream(StreamEvent::TurnEnd { .. }))).await;
+
+        let l = launches();
+        assert_eq!(l.len(), 3, "{l:?}");
+        assert!(l.iter().all(|a| a.contains(&format!("--resume {SID}"))), "{l:?}");
+        assert_eq!(l.iter().map(|a| a.contains("--resume-session-at bbbb-2")).collect::<Vec<_>>(), [false, true, false]);
+        assert!(f.chats.rewind_files("c1", "p1", Some(SID), f.spec(), "a b", true).await.is_err(), "uuid is validated");
+    });
+}
+
+#[test]
+fn rewind_files_that_cannot_be_restored_are_reported_not_failed() {
+    let r = super::rewind_result(Ok(serde_json::json!({"canRewind": false, "error": "No file checkpoint found"})));
+    assert_eq!((r.files_changed.len(), r.files_error.as_deref()), (0, Some("No file checkpoint found")));
+    assert_eq!(super::rewind_result(Err("boom".into())).files_error.as_deref(), Some("boom"));
+}

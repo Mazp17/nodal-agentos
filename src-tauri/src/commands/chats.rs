@@ -11,7 +11,7 @@ use tokio::runtime::Handle;
 
 use nodal_app::chats::{ChatPatch, NewChat};
 use nodal_app::App;
-use nodal_domain::model::chat::{ChatEnvelope, ChatLive, ClaudeDefaults};
+use nodal_domain::model::chat::{ChatEnvelope, ChatLive, ClaudeDefaults, RewindResult};
 use nodal_domain::model::claude::{SubagentRef, Transcript};
 use nodal_domain::model::Chat;
 use nodal_domain::ports::{ChangeNotifier, ChatHooks, ChatRuntime, SessionFiles};
@@ -132,6 +132,19 @@ pub async fn respond_chat_permission(
 #[tracing::instrument(skip_all, level = "info")]
 pub async fn interrupt_chat(state: State<'_, Arc<App>>, id: String) -> Result<(), CommandError> {
     Ok(state.chats.interrupt_chat(id).await?)
+}
+
+/// Rewinds the chat to just before its user message `message_uuid`: files and conversation
+/// (`dry_run` only reports the files it would change). Fails while a turn runs.
+#[tauri::command]
+#[tracing::instrument(skip_all, level = "info")]
+pub async fn rewind_chat(
+    state: State<'_, Arc<App>>,
+    id: String,
+    message_uuid: String,
+    dry_run: bool,
+) -> Result<RewindResult, CommandError> {
+    Ok(state.chats.rewind_chat(id, message_uuid, dry_run).await?)
 }
 
 /// Stops the chat's process now instead of waiting for it to go idle.

@@ -174,3 +174,72 @@ fn subagents_are_listed_and_read_from_the_session_folder() {
     assert!(read_subagent_transcript(&session, "zz", 10).unwrap().is_none());
     assert!(list_subagents(&t.0.join("none.jsonl")).is_empty());
 }
+
+/// Two branches: `u1 a1 u2 a2` was abandoned by rewinding to `a1`, then `u3 a3` was appended.
+const TWO_BRANCHES: [&str; 8] = [
+    r#"{"type":"user","uuid":"u1","parentUuid":null,"message":{"role":"user","content":"first"}}"#,
+    r#"{"type":"assistant","uuid":"a1","parentUuid":"u1","message":{"content":[{"type":"text","text":"one"}]}}"#,
+    r#"{"type":"user","uuid":"u2","parentUuid":"a1","message":{"role":"user","content":"abandoned"}}"#,
+    r#"{"type":"assistant","uuid":"a2","parentUuid":"u2","message":{"content":[{"type":"text","text":"gone"}]}}"#,
+    r#"{"type":"ai-title","aiTitle":"No uuid, kept"}"#,
+    r#"{"type":"user","uuid":"u3","parentUuid":"a1","message":{"role":"user","content":"second try"}}"#,
+    r#"{"type":"assistant","uuid":"a3","parentUuid":"u3","message":{"content":[{"type":"text","text":"two"}]}}"#,
+    r#"{"type":"last-prompt","lastPrompt":"x"}"#,
+];
+
+#[test]
+fn only_the_active_branch_is_read() {
+    let t = TempDir::new("branches");
+    let f = t.0.join("s.jsonl");
+    fs::write(&f, TWO_BRANCHES.join("\n")).unwrap();
+    let tr = read_session_transcript(&f, "c", None, None, 100).unwrap().unwrap();
+    assert_eq!((tr.prompt.as_deref(), tr.prompt_uuid.as_deref()), (Some("first"), Some("u1")));
+    let seen: Vec<String> = tr
+        .items
+        .iter()
+        .map(|i| match i {
+            TranscriptItem::User { text, uuid, .. } => format!("user {text} {}", uuid.as_deref().unwrap()),
+            TranscriptItem::Text { text, .. } => format!("claude {text}"),
+            other => format!("{other:?}"),
+        })
+        .collect();
+    assert_eq!(seen, ["claude one", "user second try u3", "claude two"]);
+}
+
+#[test]
+fn compaction_boundaries_are_followed_through_logical_parent() {
+    let lines = [
+        r#"{"type":"user","uuid":"u1","parentUuid":null,"message":{"content":"old"}}"#,
+        r#"{"type":"assistant","uuid":"a1","parentUuid":"u1","message":{"content":[{"type":"text","text":"old answer"}]}}"#,
+        r#"{"type":"system","subtype":"compact_boundary","uuid":"b1","parentUuid":null,"logicalParentUuid":"a1"}"#,
+        r#"{"type":"user","uuid":"u2","parentUuid":"b1","message":{"content":"new"}}"#,
+    ];
+    assert_eq!(active_branch(&lines).unwrap(), lines);
+}
+
+#[test]
+fn an_unresolvable_walk_keeps_every_line() {
+    // The first line's parent isn't in the file.
+    let lines = [
+        r#"{"type":"user","uuid":"u1","parentUuid":"gone","message":{"content":"x"}}"#,
+        r#"{"type":"user","uuid":"u2","parentUuid":"u1","message":{"content":"y"}}"#,
+    ];
+    assert!(active_branch(&lines).is_none());
+    let t = TempDir::new("unresolvable");
+    let f = t.0.join("s.jsonl");
+    fs::write(&f, lines.join("\n")).unwrap();
+    assert_eq!(read_session_transcript(&f, "c", None, None, 100).unwrap().unwrap().prompt.as_deref(), Some("x\n\ny"));
+    assert!(rewind_point(&f, "u2").is_err());
+}
+
+#[test]
+fn rewind_point_is_the_assistant_before_the_message_on_the_active_branch() {
+    let t = TempDir::new("rewind-point");
+    let f = t.0.join("s.jsonl");
+    fs::write(&f, TWO_BRANCHES.join("\n")).unwrap();
+    assert_eq!(rewind_point(&f, "u3").unwrap().as_deref(), Some("a1"));
+    assert_eq!(rewind_point(&f, "u1").unwrap(), None, "the first message has nothing before it");
+    assert!(rewind_point(&f, "u2").is_err(), "abandoned branch");
+    assert!(rewind_point(&f, "a1").is_err(), "not a user message");
+    assert!(rewind_point(&f, "nope").is_err());
+}

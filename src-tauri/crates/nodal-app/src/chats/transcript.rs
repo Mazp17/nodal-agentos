@@ -9,7 +9,7 @@ use nodal_domain::sessions::transcript::user_item;
 pub(super) fn with_first_message(mut t: Transcript) -> Transcript {
     if t.omitted == 0 {
         if let Some(p) = t.prompt.take() {
-            t.items.insert(0, user_item(&p));
+            t.items.insert(0, user_item(&p, t.prompt_uuid.take()));
             t.total_items += 1;
         }
     }

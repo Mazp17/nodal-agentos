@@ -10,7 +10,7 @@
 .chat-empty { flex: 1; min-height: 0; display: grid; place-items: center; padding: 40px 24px; }
 .chat-empty-text { margin: 0; font-size: var(--fs-lg); color: var(--text-muted); line-height: 1.55; text-wrap: pretty; }
 
-.chat-user { display: flex; justify-content: flex-end; }
+.chat-user { display: flex; flex-direction: column; align-items: flex-end; }
 /* What you said: a warm capsule on the right, tinted from the brand accent. */
 .chat-bubble {
   max-width: 78%;
@@ -26,6 +26,30 @@
   text-wrap: pretty;
 }
 .chat-bubble-pending { opacity: 0.65; }
+/* A message the user stopped: faded with a dashed edge, a quiet note and its way back under it. */
+.chat-bubble-stopped { opacity: 0.7; border-style: dashed; }
+.chat-stopped { display: flex; align-items: center; gap: var(--sp-2); margin-top: 6px; font-size: var(--fs-xs); color: var(--text-dim); }
+.chat-stopped-label { display: inline-flex; align-items: center; gap: 5px; }
+.chat-stopped-actions { display: inline-flex; align-items: center; gap: 2px; padding-left: var(--sp-2); border-left: 1px solid var(--border-3); }
+.chat-stopped-btn {
+  display: inline-flex; align-items: center; gap: 5px; height: 22px; padding: 0 7px;
+  border: 0; border-radius: var(--r-md); background: transparent; color: var(--text-muted);
+  font: inherit; cursor: pointer; transition: background-color 120ms ease-out, color 120ms ease-out;
+}
+.chat-stopped-btn:hover:not(:disabled) { background: var(--fill-4); color: var(--text); }
+.chat-stopped-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.chat-stopped-actions-solo { padding-left: 0; border-left: 0; }
+.chat-stopped-send { color: var(--accent); }
+/* Editing a stopped message: the bubble itself becomes the field, at full width of its column. */
+.chat-bubble-edit { width: 78%; resize: none; font: inherit; font-size: var(--fs-lg); outline: none; field-sizing: content; max-height: 40vh; }
+.chat-bubble-edit:focus-visible { border-color: color-mix(in oklch, var(--accent) 55%, transparent); }
+.chat-stopped-btn:disabled { opacity: 0.45; cursor: default; }
+.chat-stopped-hint { color: var(--text-dim); }
+/* Rewind/Edit under any message: out of the way until the message is hovered or focused into. */
+.chat-user-tools { margin-top: 2px; opacity: 0; transition: opacity 120ms ease-out; }
+.chat-user-actionable:hover .chat-user-tools,
+.chat-user-tools:focus-within { opacity: 1; }
+@media (hover: none) { .chat-user-tools { opacity: 1; } }
 
 /* An answer: the mark on top and a trail down its left, the tool calls as nodes on it. */
 .chat-ai { position: relative; display: flex; gap: 12px; }

@@ -30,6 +30,23 @@ struct RawTranscriptLine {
     kind: Option<String>,
     #[serde(default)]
     message: Option<Value>,
+    #[serde(default, deserialize_with = "lenient")]
+    uuid: Option<String>,
+}
+
+/// Just what links a line to the conversation tree (`parentUuid` is null at a compaction
+/// boundary, where `logicalParentUuid` says what it continues).
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RawLink {
+    #[serde(default, deserialize_with = "lenient")]
+    uuid: Option<String>,
+    #[serde(default, rename = "type", deserialize_with = "lenient")]
+    kind: Option<String>,
+    #[serde(default, deserialize_with = "lenient")]
+    parent_uuid: Option<String>,
+    #[serde(default, deserialize_with = "lenient")]
+    logical_parent_uuid: Option<String>,
 }
 
 /// Structured result of a line's tool call (for `Edit`/`Write`: `structuredPatch`). Read in a
@@ -45,6 +62,8 @@ struct RawToolUseResult {
 #[derive(Debug, Default)]
 pub struct ParsedTranscript {
     pub prompt: Option<String>,
+    /// Uuid of the line `prompt` starts at.
+    pub prompt_uuid: Option<String>,
     pub items: Vec<TranscriptItem>,
     pub total: usize,
     /// `tool_use` blocks in what was read, including the ones dropped by `limit`.
@@ -331,6 +350,7 @@ pub(crate) fn tool_input_summary(input: &Value) -> Option<String> {
 /// `limit` items. Tolerates broken lines and unknown types.
 pub fn parse_transcript(text: &str, limit: usize) -> ParsedTranscript {
     let mut prompts: Vec<String> = Vec::new();
+    let mut prompt_uuid: Option<String> = None;
     let mut items: Vec<TranscriptItem> = Vec::new();
     let mut seen_assistant = false;
     let mut last_text: Option<String> = None;
@@ -352,8 +372,11 @@ pub fn parse_transcript(text: &str, limit: usize) -> ParsedTranscript {
                 Some(Value::String(s)) => {
                     if seen_assistant {
                         let (text, truncated) = clip(s, TEXT_MAX);
-                        items.push(TranscriptItem::User { text, truncated });
+                        items.push(TranscriptItem::User { text, truncated, uuid: entry.uuid.clone() });
                     } else {
+                        if prompts.is_empty() {
+                            prompt_uuid = entry.uuid.clone();
+                        }
                         prompts.push(s.clone());
                     }
                 }
@@ -387,8 +410,11 @@ pub fn parse_transcript(text: &str, limit: usize) -> ParsedTranscript {
                                 };
                                 if seen_assistant {
                                     let (text, truncated) = clip(s, TEXT_MAX);
-                                    items.push(TranscriptItem::User { text, truncated });
+                                    items.push(TranscriptItem::User { text, truncated, uuid: entry.uuid.clone() });
                                 } else {
+                                    if prompts.is_empty() {
+                                        prompt_uuid = entry.uuid.clone();
+                                    }
                                     prompts.push(s.to_string());
                                 }
                             }
@@ -446,6 +472,7 @@ pub fn parse_transcript(text: &str, limit: usize) -> ParsedTranscript {
     }
     ParsedTranscript {
         prompt,
+        prompt_uuid,
         items,
         total,
         tool_calls,
@@ -523,11 +550,75 @@ pub(crate) fn read_transcript_text(path: &Path) -> std::io::Result<(String, bool
 
 /// Without the sidechain lines (subagents launched with `Task` inside the session). Claude
 /// Code writes compact JSON, so searching for the literal is enough.
-fn main_thread_lines(text: &str) -> String {
+fn main_thread_lines(text: &str) -> Vec<&str> {
     text.lines()
         .filter(|l| !l.contains("\"isSidechain\":true"))
-        .collect::<Vec<_>>()
-        .join("\n")
+        .collect()
+}
+
+/// The lines of the active branch, in file order. Rewinding with `--resume-session-at` appends
+/// to the same file from an earlier message, leaving the abandoned branch in it: the active
+/// one ends at the last line with a `uuid` and is walked back through `parentUuid`. Lines
+/// without a `uuid` (titles, snapshots…) are kept. `None` if the walk can't be resolved.
+fn active_branch<'a>(lines: &[&'a str]) -> Option<Vec<&'a str>> {
+    let links: Vec<Option<RawLink>> = lines
+        .iter()
+        .map(|l| {
+            // Cheap filter, as in `parse_transcript`: only conversation lines have a `uuid`.
+            l.contains("\"uuid\"").then(|| serde_json::from_str::<RawLink>(l).ok()).flatten()
+        })
+        .collect();
+    let parents: std::collections::HashMap<&str, Option<&str>> = links
+        .iter()
+        .flatten()
+        .filter_map(|l| {
+            let parent = l.parent_uuid.as_deref().or(l.logical_parent_uuid.as_deref());
+            Some((l.uuid.as_deref()?, parent))
+        })
+        .collect();
+    let mut cur = links.iter().rev().flatten().find_map(|l| l.uuid.as_deref());
+    let mut chain = std::collections::HashSet::new();
+    while let Some(id) = cur {
+        if !chain.insert(id) {
+            return None;
+        }
+        // A parent that isn't in the file (a truncated one) can't be walked: don't guess.
+        cur = *parents.get(id)?;
+    }
+    Some(
+        lines
+            .iter()
+            .zip(&links)
+            .filter(|(_, l)| match l.as_ref().and_then(|l| l.uuid.as_deref()) {
+                Some(id) => chain.contains(id),
+                None => true,
+            })
+            .map(|(l, _)| *l)
+            .collect(),
+    )
+}
+
+/// The assistant message right before the user message `user_uuid` on the active branch (what
+/// `--resume-session-at` takes to rewind the conversation to just before it); `None` if that
+/// message is the first of the session.
+pub fn rewind_point(path: &Path, user_uuid: &str) -> Result<Option<String>, String> {
+    let (text, partial, _) = read_transcript_text(path).map_err(|e| format!("Couldn't read the transcript: {e}"))?;
+    // shortcut: a session over TRANSCRIPT_MAX_READ can't be rewound, upgrade to streaming the file backwards.
+    if partial {
+        return Err("This conversation is too long to rewind.".into());
+    }
+    let main = main_thread_lines(&text);
+    let branch = active_branch(&main).ok_or("Couldn't follow this conversation's history to rewind it.")?;
+    let links: Vec<RawLink> = branch.iter().filter_map(|l| serde_json::from_str(l).ok()).collect();
+    let at = links
+        .iter()
+        .position(|l| l.uuid.as_deref() == Some(user_uuid) && l.kind.as_deref() == Some("user"))
+        .ok_or("That message isn't in the conversation anymore.")?;
+    Ok(links[..at]
+        .iter()
+        .rev()
+        .find(|l| l.kind.as_deref() == Some("assistant"))
+        .and_then(|l| l.uuid.clone()))
 }
 
 /// Main transcript of a session (`<sid>.jsonl`): agent, Claude or reviewer runs.
@@ -544,13 +635,17 @@ pub fn read_session_transcript(
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
         Err(e) => return Err(format!("Couldn't read the transcript: {e}")),
     };
-    let parsed = parse_transcript(&main_thread_lines(&text), limit);
+    let main = main_thread_lines(&text);
+    // shortcut: a partial read (head + tail) keeps every branch, as it can't be walked back.
+    let lines = if partial { None } else { active_branch(&main) }.unwrap_or(main);
+    let parsed = parse_transcript(&lines.join("\n"), limit);
     Ok(Some(Transcript {
         agent_id: id.to_string(),
         label,
         model,
         phase: None,
         prompt: parsed.prompt,
+        prompt_uuid: parsed.prompt_uuid,
         omitted: (parsed.total - parsed.items.len()) as u32,
         total_items: parsed.total as u32,
         tool_calls: parsed.tool_calls as u32,
@@ -636,6 +731,7 @@ pub fn read_subagent_transcript(
         model,
         phase: None,
         prompt: parsed.prompt,
+        prompt_uuid: None,
         omitted: (parsed.total - parsed.items.len()) as u32,
         total_items: parsed.total as u32,
         tool_calls: parsed.tool_calls as u32,

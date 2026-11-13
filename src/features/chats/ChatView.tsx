@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { relUnder } from "../../domain/hooks/projects";
-import { cleanupWorktree, createChat, interruptChat, sendChatMessage, updateChat, updateTask, type ChatPatch } from "../../domain/api";
+import { cleanupWorktree, createChat, interruptChat, rewindChat, sendChatMessage, updateChat, updateTask, type ChatPatch } from "../../domain/api";
 import { useChatWorkspace } from "../../domain/hooks/branches";
 import { useChatAgents, useChats, useClaudeDefaults } from "../../domain/hooks/chats";
 import { hiddenSetOf, invalidate, isExecutorHidden, setData, useHiddenExecutors, useTask } from "../../domain/hooks/store";
@@ -22,6 +22,7 @@ import {
   pushOutbox,
   seedChat,
   setViewedChat,
+  truncateAt,
   useChatStream,
 } from "./stream";
 import "./transcript.css";
@@ -225,6 +226,33 @@ export function ChatView({ project, repos, chatId: tabChatId, onCreated, onShowC
     });
   };
 
+  /**
+   * Goes back to just before the message `uuid`: asks first when files Claude edited would be
+   * restored (the user's own edits to them would go too), then `then()` (resend or refill).
+   */
+  const rewind = async (uuid: string, then: () => void) => {
+    if (!chatId || busy) return;
+    try {
+      const dry = await rewindChat(chatId, uuid, true);
+      if (dry.filesChanged.length > 0) {
+        const names = dry.filesChanged.map((f) => f.split(/[\\/]/).pop()).slice(0, 5).join(", ");
+        const more = dry.filesChanged.length > 5 ? ` and ${dry.filesChanged.length - 5} more` : "";
+        const ok = await ask({
+          title: "Go back to this message?",
+          body: `The conversation after it is removed, and ${dry.filesChanged.length} ${dry.filesChanged.length === 1 ? "file Claude edited goes" : "files Claude edited go"} back to how they were (+${dry.insertions} −${dry.deletions}): ${names}${more}. Your own changes to those files are lost too.`,
+          confirmLabel: "Go back",
+        });
+        if (!ok) return;
+      }
+      const done = await rewindChat(chatId, uuid, false);
+      truncateAt(chatId, uuid);
+      if (done.filesError) toast("Files weren't restored", done.filesError, "warn");
+      then();
+    } catch (e) {
+      toast("Couldn't go back to that message", String(e), "danger");
+    }
+  };
+
   const firstRepo = repos[0]?.name;
   const scopeRepo = repos.find((r) => r.id === settings.repoId)?.name;
   const suggestions = [
@@ -301,6 +329,8 @@ export function ChatView({ project, repos, chatId: tabChatId, onCreated, onShowC
                 repos={repos}
                 onOpenTask={onOpenTask}
                 onOpenDiff={openDiff}
+                onRewind={(uuid, text) => void rewind(uuid, () => setDraft(text))}
+                onResend={(uuid, text) => void rewind(uuid, () => void send(text))}
               />
             )}
           </div>
