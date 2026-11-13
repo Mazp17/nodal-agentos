@@ -152,7 +152,13 @@ export interface ComposerProps {
 
 export function Composer(p: ComposerProps) {
   const ref = useRef<HTMLTextAreaElement>(null);
-  useEffect(() => ref.current?.focus(), [p.focusKey]);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    el.focus();
+    // A restored draft would otherwise get the caret at its start (WebKit).
+    el.setSelectionRange(el.value.length, el.value.length);
+  }, [p.focusKey]);
 
   const lines = p.draft.split("\n").length;
   const canSend = !!p.draft.trim() && !p.busy;

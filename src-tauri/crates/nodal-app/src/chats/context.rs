@@ -26,14 +26,26 @@ pub const MCP_SERVER: &str = "nodal";
 /// Nodal tools the chat uses without asking: they only read the board or show a card.
 const PRE_ALLOWED: [&str; 4] = ["list_projects", "list_tasks", "get_task", PROPOSE_TASK];
 const DESCRIPTION_MAX: usize = 2000;
+/// First part of the system prompt; Settings can replace it (`Settings.chat_system_prompt`).
+pub const DEFAULT_CHAT_INTRO: &str = "You are chatting with the user inside Nodal, a macOS app that keeps a board of tasks per project \
+     and runs each task with a Claude Code agent. This chat belongs to one Nodal project. It is mostly \
+     for thinking work through with the user and turning it into well-scoped tasks; you can also read \
+     and edit code, and the user approves each action in the app.";
 
 pub fn tool_name(tool: &str) -> String {
     format!("mcp__{MCP_SERVER}__{tool}")
 }
 
 /// Flags that give the chat its Nodal context, each value its own argument. `cwd` is where
-/// it runs; `mcp` is `nodal-mcp`, when found.
-pub fn args(chat: &Chat, project: &Project, repos: &[Repo], cwd: ChatCwd, mcp: Option<&Path>) -> Vec<String> {
+/// it runs; `mcp` is `nodal-mcp`, when found; `intro` replaces `DEFAULT_CHAT_INTRO` when not blank.
+pub fn args(
+    chat: &Chat,
+    project: &Project,
+    repos: &[Repo],
+    cwd: ChatCwd,
+    mcp: Option<&Path>,
+    intro: Option<&str>,
+) -> Vec<String> {
     let mut out = Vec::new();
     if let Some(bin) = mcp {
         let config = json!({"mcpServers": {MCP_SERVER: {"command": bin.to_string_lossy(), "args": [CHAT_FLAG]}}});
@@ -50,18 +62,21 @@ pub fn args(chat: &Chat, project: &Project, repos: &[Repo], cwd: ChatCwd, mcp: O
         }
     }
     out.push("--append-system-prompt".into());
-    out.push(system_prompt(chat, project, repos, cwd, mcp.is_some()));
+    out.push(system_prompt(chat, project, repos, cwd, mcp.is_some(), intro));
     out
 }
 
 /// The project, its repos and the chat's scope, plus how to turn the conversation into tasks.
-pub fn system_prompt(chat: &Chat, project: &Project, repos: &[Repo], cwd: ChatCwd, has_mcp: bool) -> String {
-    let mut s = String::from(
-        "You are chatting with the user inside Nodal, a macOS app that keeps a board of tasks per project \
-         and runs each task with a Claude Code agent. This chat belongs to one Nodal project. It is mostly \
-         for thinking work through with the user and turning it into well-scoped tasks; you can also read \
-         and edit code, and the user approves each action in the app.\n\n",
-    );
+pub fn system_prompt(
+    chat: &Chat,
+    project: &Project,
+    repos: &[Repo],
+    cwd: ChatCwd,
+    has_mcp: bool,
+    intro: Option<&str>,
+) -> String {
+    let mut s = intro.map(str::trim).filter(|i| !i.is_empty()).unwrap_or(DEFAULT_CHAT_INTRO).to_string();
+    s.push_str("\n\n");
     s.push_str(&format!("Project: {} (key {}, id {})\n", one_line(&project.name), project.key, project.id));
     if let Some(d) = project.description.as_deref().map(str::trim).filter(|d| !d.is_empty()) {
         s.push_str(&format!("Description: {}\n", clip_chars(d, DESCRIPTION_MAX)));

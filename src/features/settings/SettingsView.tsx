@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import {
   claudeVersion,
+  defaultChatSystemPrompt,
   gitVersion,
   mcpRestart,
   mcpStatus,
@@ -32,6 +33,7 @@ import "./settings.css";
 const SECTIONS: { id: SettingsSection; label: string }[] = [
   { id: "integrations", label: "Integrations" },
   { id: "editor", label: "Editor" },
+  { id: "chats", label: "Chats" },
   { id: "appearance", label: "Appearance" },
   { id: "updates", label: "Updates" },
   { id: "diagnostics", label: "Diagnostics" },
@@ -70,6 +72,7 @@ export function SettingsView({ section, onSection, updates }: Props) {
         <div className="settings-col">
           {section === "integrations" && <IntegrationsSettings />}
           {section === "editor" && <EditorSettings onSaved={onSettingsSaved} />}
+          {section === "chats" && <ChatSettings />}
           {section === "appearance" && <AppearanceSettings />}
           {section === "updates" && <UpdatesSettings updates={updates} />}
           {section === "diagnostics" && <DiagnosticsSettings />}
@@ -227,6 +230,89 @@ function EditorSettings({ onSaved }: { onSaved: (s: Settings) => void }) {
             disabled={saving}
             onChange={(editor) => void save({ ...s, editor })}
           />
+        </div>
+      </div>
+    </>
+  );
+}
+
+// ---------- Chats ----------
+
+function ChatSettings() {
+  const toast = useToast();
+  const settings = useSettings();
+  const s = settings.data;
+  const [fallback, setFallback] = useState<string | null>(null);
+  const [draft, setDraft] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    defaultChatSystemPrompt().then(setFallback, (e) => toast("Couldn't read the default prompt", String(e), "danger"));
+  }, [toast]);
+
+  const current = s?.chatSystemPrompt ?? fallback;
+  const text = draft ?? current ?? "";
+
+  const save = async (chatSystemPrompt: string | null) => {
+    if (!s) return;
+    setSaving(true);
+    try {
+      onSettingsSaved(await setSettings({ ...s, chatSystemPrompt }));
+      setDraft(null);
+    } catch (e) {
+      toast("Couldn't save settings", String(e), "danger");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (!s || fallback === null) {
+    return settings.error ? (
+      <>
+        <SectionHead title="Chats" />
+        <div className="field-error" role="alert">
+          Couldn't read the settings: {settings.error}
+        </div>
+      </>
+    ) : (
+      <SectionHead title="Chats" text="Loading…" />
+    );
+  }
+
+  return (
+    <>
+      <SectionHead
+        title="Chats"
+        text="Applies to chats started after saving: a chat keeps the prompt it started with. The project, its repos, the chat's scope and how to use Nodal's tools are added after it automatically."
+      />
+      <div className="panel settings-card">
+        <label className="settings-row settings-row-top" style={{ flexDirection: "column", alignItems: "stretch" }}>
+          <span className="settings-row-title">System prompt</span>
+          <textarea
+            className="textarea field-textarea mono"
+            rows={8}
+            value={text}
+            disabled={saving}
+            onChange={(e) => setDraft(e.target.value)}
+          />
+        </label>
+        <div className="settings-row" style={{ justifyContent: "flex-end", gap: 8 }}>
+          <button
+            type="button"
+            className="btn"
+            disabled={saving || (s.chatSystemPrompt === null && draft === null)}
+            onClick={() => void save(null)}
+          >
+            Restore default
+          </button>
+          <button
+            type="button"
+            className="btn btn-primary"
+            disabled={saving || draft === null || draft === current}
+            onClick={() => void save(text.trim() === fallback.trim() ? null : text)}
+          >
+            {saving ? "Saving…" : "Save"}
+          </button>
         </div>
       </div>
     </>

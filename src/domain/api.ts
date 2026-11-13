@@ -503,8 +503,14 @@ export const deleteChat = (id: string) => invoke<void>("delete_chat", { id });
 /** Starts or resumes the chat's `claude` process if needed; the answer streams as `nodal://chat`. */
 export const sendChatMessage = (id: string, text: string) => invoke<Chat>("send_chat_message", { id, text });
 /** `message` is what Claude reads on a denial. */
-export const respondChatPermission = (id: string, requestId: string, allow: boolean, message: string | null = null) =>
-  invoke<void>("respond_chat_permission", { id, requestId, allow, message });
+/** `answers` (question text -> chosen labels) answer an `AskUserQuestion` request. */
+export const respondChatPermission = (
+  id: string,
+  requestId: string,
+  allow: boolean,
+  message: string | null = null,
+  answers: Record<string, string> | null = null,
+) => invoke<void>("respond_chat_permission", { id, requestId, allow, message, answers });
 export const interruptChat = (id: string) => invoke<void>("interrupt_chat", { id });
 
 /** What rewinding a chat to a message does (or would do, on a dry run) to the files Claude edited. */
@@ -596,6 +602,8 @@ export const mcpStop = () => invoke<McpStatus>("mcp_stop");
 
 export const getSettings = () => invoke<Settings>("get_settings");
 export const setSettings = (settings: Settings) => invoke<Settings>("set_settings", { settings });
+/** The built-in `chatSystemPrompt`. */
+export const defaultChatSystemPrompt = () => invoke<string>("default_chat_system_prompt");
 
 // ---------- Events ----------
 

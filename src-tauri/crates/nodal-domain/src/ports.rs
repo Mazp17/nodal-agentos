@@ -194,12 +194,14 @@ pub trait ChatRuntime: Send + Sync {
         spec: ChatSpec,
         text: &str,
     ) -> Result<(), HostError>;
+    /// `answers` (question text -> chosen labels) fill an `AskUserQuestion` request when allowing.
     fn respond(
         &self,
         chat_id: &str,
         request_id: &str,
         allow: bool,
         message: Option<&str>,
+        answers: Option<&std::collections::BTreeMap<String, String>>,
     ) -> Result<(), HostError>;
     fn interrupt(&self, chat_id: &str) -> Result<(), HostError>;
     /// Restores the files Claude edited to their state before the user message `message_uuid`

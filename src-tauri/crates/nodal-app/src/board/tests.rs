@@ -114,6 +114,7 @@ impl ChatRuntime for FakeChatRuntime {
         _request_id: &str,
         _allow: bool,
         _message: Option<&str>,
+        _answers: Option<&std::collections::BTreeMap<String, String>>,
     ) -> Result<(), HostError> {
         unimplemented!()
     }

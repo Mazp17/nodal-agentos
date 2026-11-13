@@ -36,6 +36,7 @@ impl ChatRuntime for UnusedChats {
         _request_id: &str,
         _allow: bool,
         _message: Option<&str>,
+        _answers: Option<&std::collections::BTreeMap<String, String>>,
     ) -> Result<(), HostError> {
         unreachable!("system doesn't use chats")
     }

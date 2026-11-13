@@ -91,7 +91,8 @@ function set(chatId: string, update: (s: ChatStream) => ChatStream) {
 
 /** What a chat waits on from the user: an approval, or a turn that failed. */
 export type ChatNeed =
-  | { kind: "approval"; requestId: string; tool: string; summary: string | null; more: number }
+  /** `question`: Claude asks via `AskUserQuestion`, answered only in the chat. */
+  | { kind: "approval"; requestId: string; tool: string; summary: string | null; more: number; question: boolean }
   | { kind: "failed"; message: string };
 
 let needs: ReadonlyMap<string, ChatNeed> = new Map();
@@ -99,7 +100,10 @@ const needsListeners = new Set<() => void>();
 
 function needOf(s: ChatStream): ChatNeed | null {
   const p = s.pending[0];
-  if (p) return { kind: "approval", requestId: p.requestId, tool: toolLabel(p.toolName), summary: p.summary, more: s.pending.length - 1 };
+  if (p) {
+    const question = p.toolName === "AskUserQuestion";
+    return { kind: "approval", requestId: p.requestId, tool: toolLabel(p.toolName), summary: p.summary, more: s.pending.length - 1, question };
+  }
   if (s.notice && s.state !== "busy") return { kind: "failed", message: s.notice };
   return null;
 }

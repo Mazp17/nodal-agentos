@@ -51,6 +51,8 @@ const EXIT_GRACE: Duration = Duration::from_secs(3);
 /// What the model reads when the user denies without a message.
 pub const DENY_MESSAGE: &str = "The user denied this in Nodal.";
 const DENY_MESSAGE_MAX: usize = 2000;
+/// The tool Claude Code asks the user questions with; allowing it carries the answers.
+const ASK_USER_QUESTION: &str = "AskUserQuestion";
 const STDERR_TAIL: usize = 2000;
 /// How long a `rewind_files` request waits for its answer.
 const REWIND_TIMEOUT: Duration = Duration::from_secs(20);
@@ -534,6 +536,7 @@ impl ChatRuntime for ChatProcesses {
         request_id: &str,
         allow: bool,
         message: Option<&str>,
+        answers: Option<&std::collections::BTreeMap<String, String>>,
     ) -> Result<(), HostError> {
         let mut procs = self.procs();
         let p = procs
@@ -549,11 +552,15 @@ impl ChatRuntime for ChatProcesses {
             .filter(|m| !m.is_empty())
             .unwrap_or(DENY_MESSAGE);
         let deny = nodal_domain::util::clip_chars(deny, DENY_MESSAGE_MAX);
-        let line = stream_json::permission_response(
-            request_id,
-            allow.then_some(&p.pending[i].input),
-            &deny,
-        );
+        let mut input = p.pending[i].input.clone();
+        if let Some(answers) = answers.filter(|_| allow) {
+            let obj = input
+                .as_object_mut()
+                .filter(|_| p.pending[i].tool_name == ASK_USER_QUESTION)
+                .ok_or("Only a question from Claude takes answers.")?;
+            obj.insert("answers".into(), serde_json::json!(answers));
+        }
+        let line = stream_json::permission_response(request_id, allow.then_some(&input), &deny);
         p.write(line)?;
         p.pending.remove(i);
         p.last_active = Instant::now();

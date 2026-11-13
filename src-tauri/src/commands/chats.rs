@@ -123,8 +123,9 @@ pub async fn respond_chat_permission(
     request_id: String,
     allow: bool,
     message: Option<String>,
+    answers: Option<std::collections::BTreeMap<String, String>>,
 ) -> Result<(), CommandError> {
-    Ok(state.chats.respond_chat_permission(id, request_id, allow, message).await?)
+    Ok(state.chats.respond_chat_permission(id, request_id, allow, message, answers).await?)
 }
 
 /// Stops the running turn; the chat keeps its process for the next message.
@@ -174,6 +175,12 @@ pub async fn list_chat_agents(
 
 /// The model and effort Claude Code uses when a chat leaves them unset, as configured in its
 /// settings for `repo_id` (or only the user's settings without one).
+/// The built-in intro of the chat system prompt (Settings shows it and restores it).
+#[tauri::command]
+pub fn default_chat_system_prompt() -> &'static str {
+    nodal_app::chats::context::DEFAULT_CHAT_INTRO
+}
+
 #[tauri::command]
 #[tracing::instrument(skip_all, level = "info")]
 pub async fn get_claude_defaults(state: State<'_, Arc<App>>, repo_id: Option<String>) -> Result<ClaudeDefaults, CommandError> {
