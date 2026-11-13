@@ -130,9 +130,12 @@ fn a_closed_app_means_open_nodal_first() {
         OPEN_NODAL
     );
     // Stale socket file left by an app that quit.
-    drop(std::os::unix::net::UnixListener::bind(&missing).unwrap());
-    assert_eq!(
-        forward(&missing, "list_projects", json!({})).unwrap_err(),
-        OPEN_NODAL
-    );
+    #[cfg(unix)]
+    {
+        drop(std::os::unix::net::UnixListener::bind(&missing).unwrap());
+        assert_eq!(
+            forward(&missing, "list_projects", json!({})).unwrap_err(),
+            OPEN_NODAL
+        );
+    }
 }

@@ -12,15 +12,16 @@ use nodal_app::{App, Deps, Env, HubDeps};
 use nodal_domain::error::HostError;
 use nodal_domain::model::chat::{ChatLive, ChatSpec};
 use nodal_domain::model::claude::Transcript;
-use nodal_domain::ports::{
-    ChangeNotifier, ChatRuntime, Clock, SecretStore, SessionFiles,
-};
+use nodal_domain::ports::{ChangeNotifier, ChatRuntime, Clock, SecretStore, SessionFiles};
 use nodal_host::adapters::{HostClaudeConfig, HostGit, HostLocalFs, HostPlanFiles, SystemClock};
 use nodal_host::testutil::TempDir;
+#[cfg(unix)]
 use nodal_store::board::projects;
 use nodal_store::Db;
 
+#[cfg(unix)]
 use nodal_app::board::ops;
+#[cfg(unix)]
 use nodal_domain::board::dto::{NewProject, NewRepo};
 use nodal_mcp_proto::stdio::{forward, OPEN_NODAL};
 
@@ -143,6 +144,7 @@ fn test_app(root: &Path) -> (Arc<App>, Db, Env) {
     (app, db, env)
 }
 
+#[cfg(unix)]
 #[test]
 fn socket_is_private_and_serves_the_same_ops_as_the_ui() {
     let t = TempDir::new("mcps");
@@ -241,6 +243,7 @@ fn socket_is_private_and_serves_the_same_ops_as_the_ui() {
     drop(other);
 }
 
+#[cfg(unix)]
 #[test]
 fn stale_socket_is_replaced_and_other_files_are_kept() {
     let t = TempDir::new("mcpst");
@@ -263,4 +266,25 @@ fn stale_socket_is_replaced_and_other_files_are_kept() {
     fs::write(&file, "x").unwrap();
     assert!(bind_private(&file).unwrap_err().contains("not a socket"));
     assert_eq!(fs::read_to_string(&file).unwrap(), "x");
+}
+
+#[cfg(windows)]
+#[test]
+fn pipe_serves_the_same_ops_and_refuses_a_second_listener() {
+    let t = TempDir::new("mcpwin");
+    let (app, _db, env) = test_app(&t.0);
+    let socket = mcp_socket(&env.data_dir);
+    assert_eq!(
+        forward(&socket, "list_projects", json!({})).unwrap_err(),
+        OPEN_NODAL
+    );
+    let listening = start(app.clone()).unwrap();
+    assert_eq!(listening.path(), socket);
+    assert!(forward(&socket, "list_projects", json!({}))
+        .unwrap()
+        .is_array());
+    assert!(start(app.clone())
+        .unwrap_err()
+        .contains("already listening"));
+    listening.stop();
 }
