@@ -101,9 +101,10 @@ jobs:
         working-directory: src-tauri
         run: cargo clippy -p nodal-domain -p nodal-app --lib --locked -- -D clippy::disallowed_methods
 
+      # Lives in nodal-domain so it doesn't compile the Tauri app: it only reads `cargo metadata`.
       - name: Architecture test
         working-directory: src-tauri
-        run: cargo test -p nodal --test architecture --locked
+        run: cargo test -p nodal-domain --test architecture --locked
 
       # Resolver 2 can merge dev-dependency features (e.g. test-support) into the
       # normal build graph; building lib+bins without dev-deps catches that leak.
