@@ -465,6 +465,8 @@
 }
 .file-edit-hl { color: var(--text-2); }
 .file-edit-line { min-height: 20px; }
+.file-edit-line.on { background: color-mix(in oklch, var(--text) 7%, transparent); }
+.file-edit-gutter .on { color: var(--text-strong); }
 .file-edit-input {
   position: absolute;
   inset: 0;
