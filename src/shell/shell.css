@@ -275,9 +275,11 @@
 .tab.dirty:hover .tab-close, .tab.dirty .tab-close:focus-visible { color: var(--text-dim); }
 .tab.dirty:hover .tab-close::after, .tab.dirty .tab-close:focus-visible::after { display: none; }
 
-/* Sidebar resize handle: a 6px strip over its right edge. */
+/* Side panel resize handle: a 6px strip over its inner edge. */
 .sidebar { position: relative; }
-.side-resizer { position: absolute; top: 0; right: -3px; width: 6px; height: 100%; z-index: 2; cursor: col-resize; }
+.side-resizer { position: absolute; top: 0; width: 6px; height: 100%; z-index: 2; cursor: col-resize; }
+.side-resizer.at-right { right: -3px; }
+.side-resizer.at-left { left: -3px; }
 .side-resizer:hover, .side-resizer:focus-visible { background: var(--accent-tint-50); outline: none; }
 body.resizing-col { cursor: col-resize; user-select: none; }
 .side-group-live { flex: none; display: inline-flex; align-items: center; gap: 5px; font-size: var(--fs-2xs); font-weight: var(--fw-regular, 400); color: var(--accent); }

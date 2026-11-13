@@ -34,6 +34,7 @@ import { useToast } from "../ui/Toasts";
 import { Topbar } from "./Topbar";
 import { PAGE_TITLE, useNav, type Page } from "./useNav";
 import { readJsonPref, writePref } from "./storage";
+import { Resizer, clampWidth } from "./Resizer";
 import { useWorkStatus } from "./useWorkStatus";
 import "./shell.css";
 import { projectColor } from "../features/projects/create";
@@ -42,6 +43,9 @@ import { projectColor } from "../features/projects/create";
 const SHORTCUT_PAGES: Record<string, Page> = { "1": "chat", "2": "board", "3": "overview" };
 /** Board tab id of the pinned "All projects". */
 const ALL_BOARD = "__all";
+const FILES_MIN = 200;
+const FILES_MAX = 720;
+const FILES_DEFAULT = 260;
 
 export function AppShell() {
   const ctx = useProjects();
@@ -69,6 +73,10 @@ export function AppShell() {
   );
   /** Checkouts picked by hand in the files panel, per tab (`null`: the repo's own). */
   const [wtPicked, setWtPicked] = useState<Readonly<Record<string, string | null>>>({});
+  const [filesWidth, setFilesWidth] = useState(() =>
+    clampWidth(readJsonPref("filesWidth", FILES_DEFAULT, (v): v is number => typeof v === "number"), FILES_MIN, FILES_MAX),
+  );
+  useEffect(() => writePref("filesWidth", JSON.stringify(filesWidth)), [filesWidth]);
   useEffect(() => writePref("filesPanel", JSON.stringify(filesOpen)), [filesOpen]);
   useEffect(() => writePref("filesMode", JSON.stringify(filesMode)), [filesMode]);
   // The chat's working folder: the files panel follows it into a worktree.
@@ -647,6 +655,19 @@ export function AppShell() {
                   mode={filesMode}
                   onMode={setFilesMode}
                   onClose={() => setFilesOpen(false)}
+                  width={filesWidth}
+                  resizer={
+                    <Resizer
+                      edge="left"
+                      label="Resize files panel"
+                      width={filesWidth}
+                      min={FILES_MIN}
+                      max={FILES_MAX}
+                      initial={FILES_DEFAULT}
+                      onWidth={setFilesWidth}
+                      onCollapse={(c) => setFilesOpen(!c)}
+                    />
+                  }
                 />
               )}
             </div>
