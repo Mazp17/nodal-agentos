@@ -228,3 +228,36 @@ fn real_interrupt_then_resume() {
         assert!(last["result"].as_str().unwrap_or_default().contains("ALIVE"), "{last}");
     });
 }
+
+/// `AskUserQuestion` reaches the host as a `can_use_tool` request; allowing it with
+/// `updatedInput.answers` (question text -> chosen label) is what the model reads back.
+#[test]
+#[ignore]
+fn real_questions_take_answers_from_the_host() {
+    let dir = scratch();
+    block_on(async {
+        let mut chat = Chat::start(&dir, &[]);
+        chat.say(
+            "Use the AskUserQuestion tool to ask me which color I want, with the options Blue and Red. \
+             Then reply with exactly the color I answered and nothing else.",
+        )
+        .await;
+        let mut asked = false;
+        let (result, _) = chat
+            .turn(|ev| {
+                (is_permission_request(ev) && ev["request"]["tool_name"] == "AskUserQuestion").then(|| {
+                    asked = true;
+                    let mut input = ev["request"]["input"].clone();
+                    let q = input["questions"][0]["question"].as_str().unwrap().to_string();
+                    // Not one of the options: it can only come from the answer.
+                    input["answers"] = json!({ q: "Chartreuse" });
+                    json!({"type": "control_response", "response": {"subtype": "success", "request_id": ev["request_id"],
+                        "response": {"behavior": "allow", "updatedInput": input}}})
+                })
+            })
+            .await;
+        chat.close().await;
+        assert!(asked, "no AskUserQuestion request");
+        assert!(result["result"].as_str().unwrap_or_default().contains("Chartreuse"), "{result}");
+    });
+}
