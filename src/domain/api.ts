@@ -522,6 +522,30 @@ export const importLegacyData = (folder: string) => invoke<LegacyImportReport>("
 /** Output of `claude --version` (e.g. `2.1.0 (Claude Code)`); rejects if the CLI isn't found. */
 export const claudeVersion = () => invoke<string>("claude_version");
 
+export interface UsageTotals {
+  input: number;
+  output: number;
+  cacheRead: number;
+  cacheWrite: number;
+  /** API responses. */
+  messages: number;
+}
+/** Tokens of every Claude Code session on this machine, read from its transcripts. */
+export interface UsageSummary {
+  last24h: UsageTotals;
+  last7d: UsageTotals;
+  last30d: UsageTotals;
+  allTime: UsageTotals;
+  /** Tokens per rolling day, oldest first: the last entry is the last 24 hours. */
+  daily30d: number[];
+  /** Last 30 days, most tokens first. */
+  models30d: { model: string; totals: UsageTotals }[];
+  sessions: number;
+  /** Oldest message seen (epoch ms). */
+  since: number | null;
+}
+export const claudeUsage = () => invoke<UsageSummary>("claude_usage");
+
 /** `false` in debug builds ("Nodal Dev"): they never check for updates. */
 export const updatesEnabled = () => invoke<boolean>("updates_enabled");
 /** Relaunch after an update was installed. */

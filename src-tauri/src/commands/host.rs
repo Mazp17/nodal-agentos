@@ -61,3 +61,12 @@ pub async fn open_terminal_at(path: String, run_claude: Option<bool>) -> Result<
 
 #[cfg(test)]
 mod tests;
+
+/// Tokens used by every Claude Code session on this machine (from its transcripts on disk).
+#[tauri::command]
+#[tracing::instrument(skip_all, level = "info")]
+pub async fn claude_usage() -> Result<nodal_host::claude::usage::UsageSummary, String> {
+    use nodal_domain::ports::Clock;
+    let now = nodal_host::adapters::SystemClock.now_ms();
+    blocking(move || nodal_host::claude::usage::usage_summary(now)).await
+}

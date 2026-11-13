@@ -77,8 +77,54 @@ function notify(chatId: string) {
 function set(chatId: string, update: (s: ChatStream) => ChatStream) {
   const cur = streams.get(chatId);
   if (!cur) return;
-  streams.set(chatId, update(cur));
+  const next = update(cur);
+  streams.set(chatId, next);
+  setNeeds(chatId, needOf(next));
   notify(chatId);
+}
+
+// ---------- Needs you ----------
+
+/** What a chat waits on from the user: an approval, or a turn that failed. */
+export type ChatNeed =
+  | { kind: "approval"; requestId: string; tool: string; summary: string | null; more: number }
+  | { kind: "failed"; message: string };
+
+let needs: ReadonlyMap<string, ChatNeed> = new Map();
+const needsListeners = new Set<() => void>();
+
+function needOf(s: ChatStream): ChatNeed | null {
+  const p = s.pending[0];
+  if (p) return { kind: "approval", requestId: p.requestId, tool: toolLabel(p.toolName), summary: p.summary, more: s.pending.length - 1 };
+  // A stop the user asked for ("Stopped.") isn't a problem to look at.
+  if (s.notice && s.notice !== "Stopped." && s.state !== "busy") return { kind: "failed", message: s.notice };
+  return null;
+}
+
+function setNeeds(chatId: string, need: ChatNeed | null) {
+  const cur = needs.get(chatId) ?? null;
+  if (cur === need || (cur && need && JSON.stringify(cur) === JSON.stringify(need))) return;
+  const next = new Map(needs);
+  if (need) next.set(chatId, need);
+  else next.delete(chatId);
+  needs = next;
+  needsListeners.forEach((l) => l());
+}
+
+/** First line of the chat's last answer, if its history is loaded this session. */
+export function lastAnswer(chatId: string): string | null {
+  const items = streams.get(chatId)?.items ?? [];
+  const last = [...items].reverse().find((i) => i.kind === "text");
+  return last?.kind === "text" ? preview(last.text, 140) || null : null;
+}
+
+/** Chats waiting on the user, for the overview's "Needs you" (only chats loaded this session). */
+export function useChatNeeds(): ReadonlyMap<string, ChatNeed> {
+  const subscribe = useCallback((l: () => void) => {
+    needsListeners.add(l);
+    return () => needsListeners.delete(l);
+  }, []);
+  return useSyncExternalStore(subscribe, () => needs);
 }
 
 // ---------- Finished at ----------
@@ -346,6 +392,7 @@ export function markInterrupting(chatId: string, on: boolean) {
 
 export function forgetChat(chatId: string) {
   streams.delete(chatId);
+  setNeeds(chatId, null);
   setUnread(chatId, null);
   setRunState(chatId, null);
   notify(chatId);

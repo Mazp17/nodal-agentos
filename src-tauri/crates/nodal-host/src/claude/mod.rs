@@ -12,3 +12,4 @@ pub mod stream_json;
 #[cfg(test)]
 mod stream_json_live;
 pub mod trust;
+pub mod usage;
