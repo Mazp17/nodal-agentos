@@ -2,7 +2,7 @@
 // turns, the `propose_task` card and the context ring.
 
 import { relUnder } from "../../domain/hooks/projects";
-import { PROPOSE_TASK_TOOL, type ExecutorInfo, type NewTask } from "../../domain/api";
+import { PROPOSE_TASK_TOOL, type ExecutorInfo, type NewTask, type PermissionRequest } from "../../domain/api";
 import type { Chat, Priority, Repo, TaskStatus } from "../../domain/types";
 import { formatTokens } from "../../lib/format";
 import type { AgentResultInfo, SubagentRef, TranscriptItem } from "./types";
@@ -401,4 +401,29 @@ export function shortAgo(ms: number, now: number): string {
   if (s < 3600) return `${Math.floor(s / 60)}m`;
   if (s < 86400) return `${Math.floor(s / 3600)}h`;
   return `${Math.floor(s / 86400)}d`;
+}
+
+/** One question of Claude's `AskUserQuestion` tool. */
+export interface Question {
+  question: string;
+  header: string | null;
+  multiSelect: boolean;
+  options: { label: string; description: string }[];
+}
+
+/** The questions of an `AskUserQuestion` request, or null for any other prompt (or an unreadable one). */
+export function readQuestions(req: PermissionRequest): Question[] | null {
+  if (req.toolName !== "AskUserQuestion") return null;
+  const raw = (req.input as { questions?: unknown } | null)?.questions;
+  if (!Array.isArray(raw) || raw.length === 0) return null;
+  const out: Question[] = [];
+  for (const q of raw as Record<string, unknown>[]) {
+    const question = str(q?.question);
+    if (!question || !Array.isArray(q.options)) return null;
+    const options = (q.options as Record<string, unknown>[])
+      .map((o) => ({ label: str(o?.label) ?? "", description: str(o?.description) ?? "" }))
+      .filter((o) => o.label);
+    out.push({ question, header: str(q.header), multiSelect: q.multiSelect === true, options });
+  }
+  return out;
 }
