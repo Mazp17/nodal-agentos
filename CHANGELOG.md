@@ -51,6 +51,31 @@ P10 (a reader-connection pool ahead of the single-mutex `Db`) was evaluated with
 
 ADR-013 (replace the 5 s poll with push) was re-evaluated after S1's re-measurement (`measure_s1_claude_agents_spawns_per_5s`) found the pump's and the UI's independent 5 s timers still missed `LiveSessions`' cache at both ends of a `pump_offset` ∈ [2 s, 3 s) phase band, spawning `claude agents` twice per window there instead of once. Root cause was the cache's 2 s TTL being less than half the shared 5 s tick, not the polling model itself, so push was **discarded**: raising the TTL to 4 s (`> half` of 5 s, so any phase still leaves at least one side inside the other's cache, with 1.5 s of margin for timer jitter) closes the band instead. Re-measured across the same offsets (0, 1.5 s, 2.5 s, 4 s), 6 runs: 1 spawn / 5 s in 24/24 samples, meeting S1 (a 3 s TTL gave 23/24: one 5/15 s at offset 2.5 s). Push (ADR-013) remains a valid alternative fix — it would close the same gap by leaving only one reader — but is unneeded scope for a target this fix already meets.
 
+## [1.0.0](https://github.com/Mazp17/nodal-agentos/compare/v0.7.0...v1.0.0) (2026-11-13)
+
+
+### ⚠ BREAKING CHANGES
+
+* work tasks in chats with their own worktree, drop runs ([#73](https://github.com/Mazp17/nodal-agentos/issues/73))
+
+### Features
+
+* build and ship for Windows x64 ([#77](https://github.com/Mazp17/nodal-agentos/issues/77)) ([6469514](https://github.com/Mazp17/nodal-agentos/commit/6469514112b4c95da2a29b0817330150236fb314))
+* Chats/Tasks sidebar with tabs, files panel and editor ([#70](https://github.com/Mazp17/nodal-agentos/issues/70)) ([42423b2](https://github.com/Mazp17/nodal-agentos/commit/42423b2359b9624d69cded80a956b028eaa345ea))
+* **chats:** rewind to an earlier message, retry and edit stopped ones ([#83](https://github.com/Mazp17/nodal-agentos/issues/83)) ([6b63f20](https://github.com/Mazp17/nodal-agentos/commit/6b63f20e26eb5f25dd0325099a2b78fe86336238))
+* **chats:** show subagents in the chat, live and as history ([#78](https://github.com/Mazp17/nodal-agentos/issues/78)) ([b1616a8](https://github.com/Mazp17/nodal-agentos/commit/b1616a8f9056d28345c56300fc400bdb76e67ada))
+* **editor:** highlight the caret's line ([#79](https://github.com/Mazp17/nodal-agentos/issues/79)) ([2172bd4](https://github.com/Mazp17/nodal-agentos/commit/2172bd4aa73cb551d28b20d172fc4c761b6be318))
+* Grafito dark and Papel light themes ([#75](https://github.com/Mazp17/nodal-agentos/issues/75)) ([f34c9ab](https://github.com/Mazp17/nodal-agentos/commit/f34c9abaa993b38c71b5c9078917ab2777714482))
+* **overview:** inbox-first overview with approvals and Claude Code usage ([#76](https://github.com/Mazp17/nodal-agentos/issues/76)) ([a34d5ac](https://github.com/Mazp17/nodal-agentos/commit/a34d5ac9ca1a0a69ab3aeff6f7aa43a615e33434))
+* pick a chat's agent and drive runs from MCP ([#67](https://github.com/Mazp17/nodal-agentos/issues/67)) ([9f3e93b](https://github.com/Mazp17/nodal-agentos/commit/9f3e93b7c96a070f5fe1093b74e652b291647002))
+* work tasks in chats with their own worktree, drop runs ([#73](https://github.com/Mazp17/nodal-agentos/issues/73)) ([49eda0e](https://github.com/Mazp17/nodal-agentos/commit/49eda0ef137cbf8b5134a958e0e9c10b7889b528))
+
+
+### Bug Fixes
+
+* **host:** retry spawning on ETXTBSY ([#81](https://github.com/Mazp17/nodal-agentos/issues/81)) ([b205ba6](https://github.com/Mazp17/nodal-agentos/commit/b205ba6bf8676340f288136c29fe01db126fb099))
+* **sidebar:** status dot with tooltip, keep mode on settings ([#71](https://github.com/Mazp17/nodal-agentos/issues/71)) ([8cdb28c](https://github.com/Mazp17/nodal-agentos/commit/8cdb28ce018a1f86316366638838c723ed85aac9))
+
 ## [0.7.0](https://github.com/Mazp17/nodal-agentos/compare/v0.6.1...v0.7.0) (2026-10-02)
 
 
