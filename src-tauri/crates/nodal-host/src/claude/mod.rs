@@ -6,6 +6,7 @@ pub mod catalog;
 pub mod chats;
 pub mod cli;
 pub mod fs;
+pub mod plan_usage;
 pub mod session_location;
 pub mod settings;
 pub mod stream_json;

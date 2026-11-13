@@ -1,6 +1,18 @@
 /* Shell: 224px sidebar + rounded (8px) main panel with a 46px bar. */
 
-.desk { position: relative; height: 100%; display: flex; background: var(--bg-sidebar); }
+/* Columns: rail | sidebar (absent in some modes → 0 wide) | main. The status bar spans the
+   bottom row except under the rail. Dialogs inside are position: fixed, out of the grid. */
+.desk {
+  position: relative;
+  height: 100%;
+  display: grid;
+  grid-template-columns: auto auto minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr) auto;
+  background: var(--bg-sidebar);
+}
+.desk > .rail { grid-row: 1 / -1; grid-column: 1; }
+.desk > .main-wrap { grid-row: 1; grid-column: 3; }
+.desk > .status-bar { grid-row: 2; grid-column: 2 / -1; }
 .loading-screen {
   height: 100%;
   display: grid;
@@ -310,3 +322,24 @@ body.resizing-col { cursor: col-resize; user-select: none; }
 .side-head { flex: none; display: flex; align-items: center; justify-content: space-between; min-height: 30px; padding: 0 var(--sp-2) 0 var(--sp-3); margin-bottom: var(--sp-3); }
 .side-title { margin: 0; font-size: var(--fs-lg); font-weight: var(--fw-semibold); color: var(--text-strong); }
 .side-head-add { width: 26px; height: 26px; border-radius: 7px; background: var(--fill-3); }
+
+/* ---- Status bar (Claude plan usage) ---- */
+.status-bar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-7);
+  height: 24px;
+  padding: 0 var(--sp-5);
+  border-top: 1px solid var(--border);
+  font-size: var(--fs-xs);
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+.status-bar-muted { color: var(--text-muted); opacity: 0.8; }
+.status-meters { display: inline-flex; align-items: center; gap: var(--sp-7); }
+.status-meter { display: inline-flex; align-items: center; gap: var(--sp-3); }
+.status-meter.tone-warn, .status-meter.tone-danger { color: var(--tone); }
+.status-meter-track { width: 48px; height: 3px; border-radius: 2px; background: var(--border-3); overflow: hidden; }
+.status-meter-fill { display: block; height: 100%; background: var(--tone); }
+.status-meter.tone-ok .status-meter-fill { background: var(--text-muted); }

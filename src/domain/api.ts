@@ -581,6 +581,18 @@ export interface UsageSummary {
 }
 export const claudeUsage = () => invoke<UsageSummary>("claude_usage");
 
+export interface PlanWindow {
+  /** % used, 0–100. */
+  pct: number;
+  /** Epoch ms; null once passed (the window rolled over, next reset unknown). */
+  resetsAt: number | null;
+}
+/** Claude plan limits as of the last `rate_limit_event` a chat printed; never rejects. */
+export type PlanUsage =
+  | { status: "available"; fiveHour: PlanWindow; weekly: PlanWindow; updatedAt: number }
+  | { status: "unavailable"; reason: string };
+export const getPlanUsage = () => invoke<PlanUsage>("get_plan_usage");
+
 /** `false` in debug builds ("Nodal Dev"): they never check for updates. */
 export const updatesEnabled = () => invoke<boolean>("updates_enabled");
 /** Relaunch after an update was installed. */

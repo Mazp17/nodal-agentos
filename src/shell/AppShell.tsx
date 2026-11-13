@@ -37,6 +37,7 @@ import { PAGE_TITLE, useNav, type Page } from "./useNav";
 import { readJsonPref, writePref } from "./storage";
 import { Resizer, clampWidth } from "./Resizer";
 import { useWorkStatus } from "./useWorkStatus";
+import { StatusBar } from "./StatusBar";
 import "./shell.css";
 import { projectColor } from "../features/projects/create";
 
@@ -887,6 +888,7 @@ export function AppShell() {
           )}
         </main>
       </div>
+      <StatusBar />
 
       {newTask && (
         <NewTaskDialog

@@ -386,6 +386,11 @@ impl ChatProcesses {
             }
             return;
         }
+        if line.contains("\"rate_limit_event\"") {
+            use nodal_domain::ports::Clock;
+            super::plan_usage::record(line, crate::adapters::SystemClock.now_ms());
+            return;
+        }
         for ev in stream_json::parse_line(line) {
             match ev {
                 StreamEvent::TextDelta { text } => self.on_delta(chat_id, gen, DeltaKind::Text, &text),
