@@ -93,7 +93,7 @@
 /* Running: the node filled with the accent, pulsing, like the mark's own dot. */
 .chat-mk-running { color: var(--accent); border-width: 0; background: transparent; }
 .chat-mk-running::after { content: ""; width: 9px; height: 9px; border-radius: 50%; background: var(--accent); animation: var(--pulse); }
-.chat-mk-changed { color: var(--amber); }
+.chat-mk-changed { border: 0; background: transparent; color: var(--text-dim); }
 
 .chat-mk-text { display: flex; align-items: baseline; gap: 6px; overflow: hidden; white-space: nowrap; }
 .chat-mk-verb { flex: none; font-weight: var(--fw-medium); color: var(--text-3); }
