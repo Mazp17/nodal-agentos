@@ -89,7 +89,7 @@ export type Part =
   | { kind: "tools"; items: ToolUse[] }
   | { kind: "proposal"; item: ToolUse };
 
-export type Turn = { kind: "user"; text: string; pending: boolean } | { kind: "ai"; parts: Part[] };
+export type Turn = { kind: "user"; text: string; pending: boolean; uuid: string | null } | { kind: "ai"; parts: Part[] };
 
 export const isProposal = (item: ToolUse) => item.name === PROPOSE_TASK_TOOL;
 
@@ -108,7 +108,7 @@ export function toTurns(items: TranscriptItem[], outbox: string[] = []): Turn[] 
   };
   for (const it of items) {
     if (it.kind === "user") {
-      turns.push({ kind: "user", text: it.text, pending: false });
+      turns.push({ kind: "user", text: it.text, pending: false, uuid: it.uuid ?? null });
     } else if (it.kind === "toolUse") {
       const parts = ai();
       const last = parts[parts.length - 1];
@@ -119,7 +119,7 @@ export function toTurns(items: TranscriptItem[], outbox: string[] = []): Turn[] 
       ai().push({ kind: it.kind, text: it.text });
     }
   }
-  for (const text of outbox) turns.push({ kind: "user", text, pending: true });
+  for (const text of outbox) turns.push({ kind: "user", text, pending: true, uuid: null });
   return turns;
 }
 
@@ -136,11 +136,15 @@ export function agentMeta(it: ToolUse): { type: string; description: string | nu
 
 /**
  * A user turn Claude Code injects itself, not something the user typed: a background
- * subagent's report (`<agent-message from="<agentId>">`) or a task notification.
+ * subagent's report (`<agent-message from="<agentId>">`), a task notification, or the
+ * marker of a stop the user asked for (`[Request interrupted by user]`, also `… for tool use]`).
  */
-export function harnessMessage(text: string): { kind: "report"; agentId: string } | { kind: "notification" } | null {
+export function harnessMessage(
+  text: string,
+): { kind: "report"; agentId: string } | { kind: "notification" } | { kind: "interrupted" } | null {
   const m = /^\s*<agent-message from="([A-Za-z0-9]+)">/.exec(text);
   if (m) return { kind: "report", agentId: m[1] };
+  if (/^\s*\[Request interrupted by user/.test(text)) return { kind: "interrupted" };
   return /^\s*<task-notification>/.test(text) ? { kind: "notification" } : null;
 }
 

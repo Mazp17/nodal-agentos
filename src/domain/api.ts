@@ -504,6 +504,21 @@ export const sendChatMessage = (id: string, text: string) => invoke<Chat>("send_
 export const respondChatPermission = (id: string, requestId: string, allow: boolean, message: string | null = null) =>
   invoke<void>("respond_chat_permission", { id, requestId, allow, message });
 export const interruptChat = (id: string) => invoke<void>("interrupt_chat", { id });
+
+/** What rewinding a chat to a message does (or would do, on a dry run) to the files Claude edited. */
+export interface RewindResult {
+  filesChanged: string[];
+  insertions: number;
+  deletions: number;
+  /** Why the files can't be restored (e.g. a session from before checkpoints); the conversation still rewinds. */
+  filesError: string | null;
+}
+/**
+ * Rewinds a chat to just before the user message `messageUuid`: restores the files Claude edited
+ * since, and the next message continues from there. `dryRun` only reports what would change.
+ */
+export const rewindChat = (id: string, messageUuid: string, dryRun: boolean) =>
+  invoke<RewindResult>("rewind_chat", { id, messageUuid, dryRun });
 export const stopChat = (id: string) => invoke<void>("stop_chat", { id });
 export const getChatLive = (id: string) => invoke<ChatLive>("get_chat_live", { id });
 /** History from the Claude Code session; `null` before the first message. */

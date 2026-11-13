@@ -43,7 +43,8 @@ export interface ToolPatch {
 export type TranscriptItem =
   | { kind: "text"; text: string; truncated: boolean }
   | { kind: "thinking"; text: string; truncated: boolean }
-  | { kind: "user"; text: string; truncated: boolean }
+  /** `uuid`: the message's id in the Claude Code session (what a rewind targets); absent on old items. */
+  | { kind: "user"; text: string; truncated: boolean; uuid?: string | null }
   | {
       kind: "toolUse";
       id: string | null;

@@ -31,7 +31,7 @@ import {
   type Turn,
 } from "./model";
 import type { ChatStream } from "./stream";
-import { FileDiff } from "lucide-react";
+import { CircleStop, FileDiff, History, Pencil, RotateCcw } from "lucide-react";
 
 // ---------- Tool block ----------
 
@@ -447,6 +447,10 @@ export interface ConversationProps {
   repos: Repo[];
   onOpenTask: (taskId: string) => void;
   onOpenDiff?: (path: string) => void;
+  /** Goes back to just before a message (conversation and files), its text back in the composer. */
+  onRewind?: (uuid: string, text: string) => void;
+  /** Goes back to just before a message and sends `text` from there. */
+  onResend?: (uuid: string, text: string) => void;
 }
 
 function AiTurn({ children }: { children: ReactNode }) {
@@ -497,8 +501,111 @@ function AgentReport({ chatId, agentId, stream }: { chatId: string; agentId: str
   );
 }
 
-export function Conversation({ chatId, turns, stream, projectId, projectKey, repos, onOpenTask, onOpenDiff }: ConversationProps) {
+type Act = (uuid: string, text: string) => void;
+
+/**
+ * A message the user typed. With its session id it can be rewound to (the conversation and the
+ * files Claude edited go back to just before it) or edited in place and sent from there. A
+ * stopped one is faded, says so, and offers Retry. Actions show on hover except on a stop.
+ */
+function UserMessage({ turn, stopped, busy, onRewind, onResend }: { turn: Extract<Turn, { kind: "user" }>; stopped: boolean; busy: boolean; onRewind?: Act; onResend?: Act }) {
+  const [draft, setDraft] = useState<string | null>(null);
+  const icon = { size: 12, strokeWidth: 2, "aria-hidden": true, focusable: "false" } as const;
+  const { text, uuid } = turn;
+  const can = !!uuid && !turn.pending;
+  const send = () => {
+    const t = draft?.trim();
+    if (!t || busy || !uuid || !onResend) return;
+    onResend(uuid, t);
+    setDraft(null);
+  };
+
+  if (draft !== null)
+    return (
+      <div className="chat-user">
+        <textarea
+          className="chat-bubble chat-bubble-edit"
+          value={draft}
+          aria-label="Edit message"
+          autoFocus
+          rows={Math.min(10, draft.split("\n").length)}
+          onFocus={(e) => e.currentTarget.setSelectionRange(draft.length, draft.length)}
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Escape") setDraft(null);
+            else if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+              e.preventDefault();
+              send();
+            }
+          }}
+        />
+        <div className="chat-stopped">
+          <span className="chat-stopped-hint">Sends from here · later messages are removed</span>
+          <span className="chat-stopped-actions">
+            <button type="button" className="chat-stopped-btn" onClick={() => setDraft(null)}>
+              Cancel
+            </button>
+            <button type="button" className="chat-stopped-btn chat-stopped-send" disabled={busy || !draft.trim()} onClick={send}>
+              Send
+            </button>
+          </span>
+        </div>
+      </div>
+    );
+
+  const actions = can && (
+    <span className={`chat-stopped-actions ${stopped ? "" : "chat-stopped-actions-solo"}`}>
+      {stopped && onResend && (
+        <button type="button" className="chat-stopped-btn" disabled={busy} title="Send this message again from here" onClick={() => onResend(uuid, text)}>
+          <RotateCcw {...icon} />
+          Retry
+        </button>
+      )}
+      {!stopped && onRewind && (
+        <button type="button" className="chat-stopped-btn" disabled={busy} title="Go back to before this message" onClick={() => onRewind(uuid, text)}>
+          <History {...icon} />
+          Rewind
+        </button>
+      )}
+      {onResend && (
+        <button type="button" className="chat-stopped-btn" disabled={busy} title="Edit this message and send it from here" onClick={() => setDraft(text)}>
+          <Pencil {...icon} />
+          Edit
+        </button>
+      )}
+    </span>
+  );
+
+  return (
+    <div className={`chat-user ${can && !stopped ? "chat-user-actionable" : ""}`}>
+      <div className={`chat-bubble ${turn.pending ? "chat-bubble-pending" : ""} ${stopped ? "chat-bubble-stopped" : ""}`}>{text}</div>
+      {stopped ? (
+        <div className="chat-stopped">
+          <span className="chat-stopped-label" role="status">
+            <CircleStop {...icon} />
+            Stopped by you
+          </span>
+          {actions}
+        </div>
+      ) : (
+        actions && <div className="chat-stopped chat-user-tools">{actions}</div>
+      )}
+    </div>
+  );
+}
+
+export function Conversation({ chatId, turns, stream, projectId, projectKey, repos, onOpenTask, onOpenDiff, onRewind, onResend }: ConversationProps) {
   const busy = stream.state === "busy" || stream.outbox.length > 0;
+  // Messages the user typed (not ones Claude Code injects), by turn index.
+  const typed = turns.map((t) => t.kind === "user" && !harnessMessage(t.text));
+  // Each stop marks the latest message typed before it as stopped.
+  const stopped = new Set<number>();
+  turns.forEach((t, i) => {
+    if (t.kind === "user" && harnessMessage(t.text)?.kind === "interrupted") {
+      const prev = typed.lastIndexOf(true, i);
+      if (prev >= 0) stopped.add(prev);
+    }
+  });
   const last = turns[turns.length - 1];
   const lastPart = last?.kind === "ai" ? last.parts[last.parts.length - 1] : undefined;
   const waiting = new Set(stream.pending.map((p) => p.toolUseId).filter(Boolean));
@@ -539,11 +646,8 @@ export function Conversation({ chatId, turns, stream, projectId, projectKey, rep
           const h = harnessMessage(turn.text);
           if (h?.kind === "notification") return null;
           if (h?.kind === "report") return <AgentReport key={i} chatId={chatId} agentId={h.agentId} stream={stream} />;
-          return (
-            <div key={i} className="chat-user">
-              <div className={`chat-bubble ${turn.pending ? "chat-bubble-pending" : ""}`}>{turn.text}</div>
-            </div>
-          );
+          if (h?.kind === "interrupted") return null;
+          return <UserMessage key={i} turn={turn} stopped={stopped.has(i)} busy={busy} onRewind={onRewind} onResend={onResend} />;
         }
         const current = i === turns.length - 1;
         const changes = current && busy ? null : turnChanges(turn.parts);

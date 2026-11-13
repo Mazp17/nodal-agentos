@@ -100,8 +100,7 @@ const needsListeners = new Set<() => void>();
 function needOf(s: ChatStream): ChatNeed | null {
   const p = s.pending[0];
   if (p) return { kind: "approval", requestId: p.requestId, tool: toolLabel(p.toolName), summary: p.summary, more: s.pending.length - 1 };
-  // A stop the user asked for ("Stopped.") isn't a problem to look at.
-  if (s.notice && s.notice !== "Stopped." && s.state !== "busy") return { kind: "failed", message: s.notice };
+  if (s.notice && s.state !== "busy") return { kind: "failed", message: s.notice };
   return null;
 }
 
@@ -285,6 +284,8 @@ export function useUnreadChats(): ReadonlyMap<string, string> {
   return useSyncExternalStore(subscribe, () => unread);
 }
 
+const INTERRUPTED = "[Request interrupted by user]";
+
 /** Applies one streamed event (exported for tests of the reducer). */
 export function reduce(s: ChatStream, e: ChatEvent): ChatStream {
   switch (e.type) {
@@ -317,9 +318,13 @@ export function reduce(s: ChatStream, e: ChatEvent): ChatStream {
     case "usage":
       return { ...s, contextTokens: e.contextTokens };
     case "turnEnd": {
-      const notice = e.ok ? null : s.interrupting ? "Stopped." : (e.result ?? `The answer ended early (${e.subtype}).`);
+      // A stop the user asked for shows as the marker Claude Code writes to the session (the
+      // live stream doesn't carry it), so it looks the same before and after a reload.
+      const stopped = !e.ok && s.interrupting;
+      const notice = e.ok || stopped ? null : (e.result ?? `The answer ended early (${e.subtype}).`);
       return {
         ...s,
+        items: stopped ? [...s.items, { kind: "user", text: INTERRUPTED, truncated: false }] : s.items,
         streaming: "",
         thinking: false,
         interrupting: false,
@@ -416,6 +421,14 @@ export function dropOutbox(chatId: string, text: string) {
   set(chatId, (s) => {
     const i = s.outbox.lastIndexOf(text);
     return i < 0 ? s : { ...s, outbox: s.outbox.filter((_, j) => j !== i) };
+  });
+}
+
+/** After a rewind: drops the message `uuid` and everything after it from the view. */
+export function truncateAt(chatId: string, uuid: string) {
+  set(chatId, (s) => {
+    const i = s.items.findIndex((it) => it.kind === "user" && it.uuid === uuid);
+    return i < 0 ? s : { ...s, items: s.items.slice(0, i), notice: null };
   });
 }
 
