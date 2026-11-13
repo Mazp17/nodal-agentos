@@ -123,8 +123,9 @@ pub async fn respond_chat_permission(
     request_id: String,
     allow: bool,
     message: Option<String>,
+    answers: Option<std::collections::BTreeMap<String, String>>,
 ) -> Result<(), CommandError> {
-    Ok(state.chats.respond_chat_permission(id, request_id, allow, message).await?)
+    Ok(state.chats.respond_chat_permission(id, request_id, allow, message, answers).await?)
 }
 
 /// Stops the running turn; the chat keeps its process for the next message.

@@ -21,12 +21,14 @@ import {
   isAgentCall,
   latestToolUse,
   readProposal,
+  readQuestions,
   resultMeta,
   shortArg,
   toolLabel,
   toolVerb,
   turnChanges,
   type Proposal,
+  type Question,
   type ToolUse,
   type Turn,
 } from "./model";
@@ -310,6 +312,103 @@ export function ApprovalCard({ chatId, req }: { chatId: string; req: PermissionR
         </button>
       </div>
     </div>
+  );
+}
+
+// ---------- Question card ----------
+
+const OTHER = "\u0000other";
+
+/** Claude's `AskUserQuestion`: pick an option (or write one) per question, then send. */
+function QuestionCard({ chatId, req, questions }: { chatId: string; req: PermissionRequest; questions: Question[] }) {
+  const toast = useToast();
+  const [picked, setPicked] = useState<string[][]>(() => questions.map(() => []));
+  const [other, setOther] = useState<string[]>(() => questions.map(() => ""));
+  const [busy, setBusy] = useState(false);
+
+  const answerOf = (i: number) =>
+    picked[i]
+      .map((l) => (l === OTHER ? other[i].trim() : l))
+      .filter(Boolean)
+      .join(", ");
+  const ready = questions.every((_, i) => answerOf(i) !== "");
+
+  const toggle = (i: number, label: string, multi: boolean) =>
+    setPicked((all) =>
+      all.map((p, j) => (j !== i ? p : !multi ? [label] : p.includes(label) ? p.filter((l) => l !== label) : [...p, label])),
+    );
+
+  const send = (allow: boolean) => {
+    setBusy(true);
+    const answers = allow ? Object.fromEntries(questions.map((q, i) => [q.question, answerOf(i)])) : null;
+    respondChatPermission(chatId, req.requestId, allow, allow ? null : "The user chose not to answer.", answers).then(
+      // The card goes away with `permissionResolved`.
+      () => {},
+      (e: unknown) => {
+        setBusy(false);
+        toast("Couldn't send the answer", String(e), "danger");
+      },
+    );
+  };
+
+  return (
+    <form
+      className="chat-approval chat-question"
+      aria-label="Claude has a question"
+      onSubmit={(e) => {
+        e.preventDefault();
+        if (ready && !busy) send(true);
+      }}
+    >
+      {questions.map((q, i) => {
+        const type = q.multiSelect ? "checkbox" : "radio";
+        const name = `${req.requestId}-${i}`;
+        return (
+          <fieldset key={i} className="chat-question-set" disabled={busy}>
+            <legend className="chat-approval-head">
+              <span className="dot dot-sm tone-warn" aria-hidden />
+              <span>
+                {q.header && <strong>{q.header}: </strong>}
+                {q.question}
+              </span>
+            </legend>
+            {[...q.options, { label: OTHER, description: "" }].map((o) => (
+              <label key={o.label} className="chat-question-opt">
+                <input
+                  type={type}
+                  name={name}
+                  checked={picked[i].includes(o.label)}
+                  onChange={() => toggle(i, o.label, q.multiSelect)}
+                />
+                {o.label === OTHER ? (
+                  <input
+                    className="input chat-approval-note"
+                    value={other[i]}
+                    placeholder="Other…"
+                    aria-label={`Other answer to: ${q.question}`}
+                    onFocus={() => !picked[i].includes(OTHER) && toggle(i, OTHER, q.multiSelect)}
+                    onChange={(e) => setOther((all) => all.map((v, j) => (j === i ? e.target.value : v)))}
+                  />
+                ) : (
+                  <span>
+                    <span className="chat-question-label">{o.label}</span>
+                    {o.description && <span className="chat-approval-desc"> {o.description}</span>}
+                  </span>
+                )}
+              </label>
+            ))}
+          </fieldset>
+        );
+      })}
+      <div className="chat-approval-actions">
+        <button type="button" className="btn btn-sm" disabled={busy} onClick={() => send(false)}>
+          Don't answer
+        </button>
+        <button type="submit" className="btn btn-sm btn-amber" disabled={busy || !ready}>
+          Send
+        </button>
+      </div>
+    </form>
   );
 }
 
@@ -696,9 +795,14 @@ export function Conversation({ chatId, turns, stream, projectId, projectKey, rep
           <div className="chat-text chat-streaming">{stream.streaming}</div>
         </AiTurn>
       )}
-      {stream.pending.map((req) => (
-        <ApprovalCard key={req.requestId} chatId={chatId} req={req} />
-      ))}
+      {stream.pending.map((req) => {
+        const questions = readQuestions(req);
+        return questions ? (
+          <QuestionCard key={req.requestId} chatId={chatId} req={req} questions={questions} />
+        ) : (
+          <ApprovalCard key={req.requestId} chatId={chatId} req={req} />
+        );
+      })}
       <span className="sr-only" role="status">
         {announced}
       </span>
