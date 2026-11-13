@@ -5,7 +5,7 @@ use crate::json::to_json;
 use crate::rows::{get_task, insert_task, task_from_row, SqlEnum};
 use crate::Conn as Connection;
 use crate::{DbError, SqliteError};
-use nodal_domain::model::{PlanRef, Task, TaskStatus};
+use nodal_domain::model::{PlanRef, Task, TaskPr, TaskStatus};
 
 /// `None`: all of them. Order: project, status, position. Two fixed queries (rather than a
 /// `?1 IS NULL OR project_id = ?1` filter) so a present `project_id` can use `tasks_board`'s
@@ -85,6 +85,26 @@ pub fn set_status(conn: &Connection, id: &str, status: TaskStatus, now: i64) -> 
         return Err(not_found("task"));
     }
     Ok(())
+}
+
+/// Stores the task's PR (`None` keeps the one already linked) and when it was looked up.
+pub fn set_pr(conn: &Connection, id: &str, pr: Option<&TaskPr>, checked_at: i64) -> Result<(), DbError> {
+    let n = conn.execute(
+        "UPDATE tasks SET pr_url = COALESCE(?2, pr_url), pr_number = COALESCE(?3, pr_number),
+                          pr_state = COALESCE(?4, pr_state), pr_head = CASE WHEN ?2 IS NULL THEN pr_head ELSE ?6 END,
+                          pr_checked_at = ?5
+         WHERE id = ?1",
+        rusqlite::params![id, pr.map(|p| &p.url), pr.map(|p| p.number), pr.map(|p| SqlEnum(p.state)), checked_at, pr.and_then(|p| p.head.as_ref())],
+    )?;
+    if n == 0 {
+        return Err(not_found("task"));
+    }
+    Ok(())
+}
+
+/// When the task's PR was last looked up (`None`: never).
+pub fn pr_checked_at(conn: &Connection, id: &str) -> Result<Option<i64>, DbError> {
+    Ok(conn.query_row("SELECT pr_checked_at FROM tasks WHERE id = ?1", [id], |r| r.get(0))?)
 }
 
 pub fn delete(conn: &Connection, id: &str) -> Result<(), DbError> {

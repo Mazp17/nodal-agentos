@@ -62,6 +62,7 @@ fn local_task(id: &str, project_id: &str, repo_id: &str, number: i64) -> Task {
         source: None,
         created_at: 10,
         updated_at: 11,
+        pr: None,
         closed_at: None,
     }
 }
@@ -99,6 +100,7 @@ fn imported_task(id: &str, project_id: &str, repo_id: &str, number: i64, ext: &s
             }),
         }),
         status: TaskStatus::InReview,
+        pr: None,
         closed_at: Some(123),
         ..local_task(id, project_id, repo_id, number)
     }
@@ -370,8 +372,37 @@ fn migrates_v9_chats_to_v10_without_a_worktree() {
     .unwrap();
     let c = Conn::wrap_mut(&mut raw);
     migrate(c).unwrap();
-    assert_eq!(user_version(c).unwrap(), 10);
+    assert_eq!(user_version(c).unwrap(), MIGRATIONS.len() as i64);
     assert_eq!(get_chat(c, "c1").unwrap().unwrap().worktree, None);
+}
+
+#[test]
+fn migrates_v10_tasks_to_v11_without_a_pr_then_links_one() {
+    let mut raw = rusqlite::Connection::open_in_memory().unwrap();
+    raw.pragma_update(None, "foreign_keys", "ON").unwrap();
+    for sql in &MIGRATIONS[..10] {
+        raw.execute_batch(sql).unwrap();
+    }
+    raw.pragma_update(None, "user_version", 10).unwrap();
+    raw.execute_batch(
+        r#"INSERT INTO projects (id, name, key, color, created_at) VALUES ('p1', 'Pay', 'PAY', '#fff', 1);
+         INSERT INTO repos (id, project_id, path, name, created_at) VALUES ('r1', 'p1', '/r1', 'web', 1);
+         INSERT INTO tasks (id, project_id, repo_id, number, title, status, plan_kind, created_at, updated_at)
+             VALUES ('t1', 'p1', 'r1', 1, 'T', 'todo', 'text', 1, 1);"#,
+    )
+    .unwrap();
+    let c = Conn::wrap_mut(&mut raw);
+    migrate(c).unwrap();
+    assert_eq!(user_version(c).unwrap(), MIGRATIONS.len() as i64);
+    assert_eq!(get_task(c, "t1").unwrap().unwrap().pr, None);
+    assert_eq!(board::tasks::pr_checked_at(c, "t1").unwrap(), None);
+
+    // `None` only stamps the check time and keeps a linked PR.
+    let pr = TaskPr { url: "https://github.com/o/r/pull/7".into(), number: 7, state: PrState::Draft, head: Some("abc123".into()) };
+    board::tasks::set_pr(c, "t1", Some(&pr), 5).unwrap();
+    board::tasks::set_pr(c, "t1", None, 9).unwrap();
+    assert_eq!(get_task(c, "t1").unwrap().unwrap().pr, Some(pr));
+    assert_eq!(board::tasks::pr_checked_at(c, "t1").unwrap(), Some(9));
 }
 
 #[test]

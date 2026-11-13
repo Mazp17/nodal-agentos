@@ -288,10 +288,20 @@ const V10: &str = r#"
 ALTER TABLE chats ADD COLUMN worktree TEXT;
 "#;
 
+/// v11: the PR opened from the task's branch (`Task.pr`), and when it was last looked up
+/// (throttles `gh` calls). All NULL until one is found.
+const V11: &str = r#"
+ALTER TABLE tasks ADD COLUMN pr_url TEXT;
+ALTER TABLE tasks ADD COLUMN pr_number INTEGER;
+ALTER TABLE tasks ADD COLUMN pr_state TEXT CHECK (pr_state IN ('open', 'draft', 'merged', 'closed'));
+ALTER TABLE tasks ADD COLUMN pr_head TEXT;
+ALTER TABLE tasks ADD COLUMN pr_checked_at INTEGER;
+"#;
+
 // Unused since v9 (run-era config; kept, never read or written): projects.default_executor_json,
 // projects.reviewer, repos.default_executor_json / default_isolation / default_finish /
 // default_review / reviewer, tasks.assignee_json / isolation / finish / review.
-pub const MIGRATIONS: &[&str] = &[V1, V2, V3, V4, V5, V6, V7, V8, V9, V10];
+pub const MIGRATIONS: &[&str] = &[V1, V2, V3, V4, V5, V6, V7, V8, V9, V10, V11];
 
 pub fn user_version(conn: &Conn) -> Result<i64, DbError> {
     Ok(conn.query_row("PRAGMA user_version", [], |r| r.get(0))?)
