@@ -17,8 +17,7 @@ concurrency:
 
 jobs:
   check:
-    # macOS only for now: the keychain backend (keyring apple-native) and the Terminal integration.
-    runs-on: macos-latest
+    runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
       # Minimum Rust line coverage. PRs that drop below it fail.
@@ -48,6 +47,12 @@ jobs:
       # which tauri::generate_context! needs to compile the Rust crate.
       - name: Typecheck and build frontend
         run: pnpm build
+
+      # Tauri's Linux system libraries (webkit2gtk etc.), needed to compile the `nodal` crate.
+      - name: Install Tauri system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
 
       - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
         with:
@@ -120,3 +125,32 @@ jobs:
           echo "Line coverage: $lines% (minimum $COVERAGE_MIN%)"
           jq -e --argjson min "$COVERAGE_MIN" '.data[0].totals.lines.percent >= $min' coverage.json > /dev/null \
             || { echo "::error::Line coverage $lines% is below the $COVERAGE_MIN% minimum"; exit 1; }
+
+  # The app only ships for macOS: compile and lint the macOS-only code paths there
+  # (keyring apple-native, osascript/Terminal, `cfg!(target_os = "macos")` branches).
+  # Tests, coverage and the other checks run once, in `check` on Linux.
+  macos:
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      # tauri::generate_context! only needs dist/ to exist; the frontend is built in `check`.
+      - name: Stub frontend dist
+        run: mkdir -p dist && echo '<!doctype html>' > dist/index.html
+
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+        with:
+          toolchain: stable
+          components: clippy
+
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          workspaces: src-tauri
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Clippy (macOS)
+        working-directory: src-tauri
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
