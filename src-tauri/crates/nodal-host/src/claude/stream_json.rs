@@ -419,7 +419,8 @@ pub fn parse_line(line: &str) -> Vec<StreamEvent> {
         "user" => parse_user(line),
         "control_request" => parse_control_request(line),
         "result" => parse_result(line),
-        // `control_response`, `rate_limit_event` and anything else observed or future.
+        // `control_response`, `rate_limit_event` (handled by `chats` via `plan_usage`) and
+        // anything else observed or future.
         _ => vec![],
     }
 }
