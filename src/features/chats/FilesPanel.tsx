@@ -545,7 +545,6 @@ function GitBox({
     ? () => void sendToChat(taskChat.id, OPEN_PR_PROMPT).catch((e: unknown) => toast("Couldn't ask the chat", String(e), "danger"))
     : onAskChatForPr;
   const startPr = () => (askChat ? askChat() : setPr({ title: latest?.subject ?? "", body: "" }));
-  // In a worktree, "changes" also counts committed work; the box commits what's on disk.
   const files = picked.length || (changes?.length ?? 0);
   const canCommit = !!message.trim() && files > 0 && !busy;
 

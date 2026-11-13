@@ -86,12 +86,11 @@ impl System {
         self.with_root(repo_id, worktree, move |git, root| git.list_dir(root, &dir).map_err(|e| e.0)).await
     }
 
-    /// Changes of the checkout, per file with its hunks, for the files panel's "Changes" view.
-    /// The repo's own checkout: uncommitted vs HEAD. A worktree is a branch of work, so it's
-    /// diffed from where it branched off (committed work included). Untracked files included.
+    /// Uncommitted changes of the checkout (vs HEAD, untracked files included), per file with its
+    /// hunks, for the files panel's "Changes" view and commit box; committed work is in `repo_commits`.
     pub async fn repo_changes(&self, repo_id: String, worktree: Option<String>) -> Result<Vec<FileDiff>, AppError> {
-        self.with_base(repo_id, worktree, true, |git, root, base| {
-            let (patch, _) = git.diff(root, base.as_deref()).map_err(|e| e.0)?;
+        self.with_root(repo_id, worktree, |git, root| {
+            let (patch, _) = git.diff(root, None).map_err(|e| e.0)?;
             Ok(nodal_domain::diff::parse(&patch))
         })
         .await
