@@ -133,6 +133,16 @@ export function agentMeta(it: ToolUse): { type: string; description: string | nu
   return { type: str(input?.subagent_type) ?? it.result?.agent?.agentType ?? "agent", description: str(input?.description) ?? it.summary };
 }
 
+/**
+ * A user turn Claude Code injects itself, not something the user typed: a background
+ * subagent's report (`<agent-message from="<agentId>">`) or a task notification.
+ */
+export function harnessMessage(text: string): { kind: "report"; agentId: string } | { kind: "notification" } | null {
+  const m = /^\s*<agent-message from="([A-Za-z0-9]+)">/.exec(text);
+  if (m) return { kind: "report", agentId: m[1] };
+  return /^\s*<task-notification>/.test(text) ? { kind: "notification" } : null;
+}
+
 export type AgentState = "running" | "ok" | "error" | "stopped";
 
 /**

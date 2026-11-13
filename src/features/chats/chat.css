@@ -580,6 +580,10 @@
 .chat-agent-time { flex: none; font-size: var(--fs-2xs); color: var(--text-dim); }
 .chat-agent-view { flex: none; font-size: var(--fs-2xs); color: var(--text-dim); }
 .chat-agent:hover .chat-agent-view { color: var(--text); }
+.chat-agent-report { align-self: flex-start; max-width: 100%; display: flex; align-items: center; gap: 6px; margin: 2px 0; padding: 4px 10px; border: 1px solid var(--border-2); border-radius: 999px; background: transparent; color: var(--text-muted); font: inherit; font-size: var(--fs-sm); cursor: pointer; transition: background var(--dur-fast) ease-out; }
+.chat-agent-report:hover { background: var(--fill-3); }
+.chat-agent-report:hover .chat-agent-view { color: var(--text); }
+.chat-agent-report:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .chat-agent-detail { padding-left: 22px; font-family: var(--font-mono); font-size: var(--fs-2xs); color: var(--text-dim); }
 .chat-agent-detail.shimmer { --shimmer-color: var(--text-2); --shimmer-duration: 1.8s; }
 /* A subagent row: two lines (what / how long) in one hover target. */

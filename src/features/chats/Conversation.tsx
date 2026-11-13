@@ -17,6 +17,7 @@ import {
   agentMeta,
   agentState,
   agentStats,
+  harnessMessage,
   isAgentCall,
   latestToolUse,
   readProposal,
@@ -476,6 +477,26 @@ function ChangesMarker({ changes }: { changes: NonNullable<ReturnType<typeof tur
   );
 }
 
+/** A background subagent's report, which Claude Code hands back as a user message: one line that opens it. */
+function AgentReport({ chatId, agentId, stream }: { chatId: string; agentId: string; stream: ChatStream }) {
+  const call = stream.items.find((i): i is ToolUse => i.kind === "toolUse" && i.result?.agent?.agentId === agentId);
+  const { type, description } = call ? agentMeta(call) : { type: "Subagent", description: null };
+  return (
+    <button
+      type="button"
+      className="chat-agent-report"
+      title="View the subagent's transcript"
+      onClick={() => openSubagent({ chatId, toolUseId: call?.id ?? null, agentId, title: description ?? type })}
+    >
+      <span aria-hidden>↩</span>
+      <span className="chat-agent-type">{type}</span>
+      <span>reported back</span>
+      {description && <span className="chat-agent-desc ellipsis">· {description}</span>}
+      <span className="chat-agent-view">View</span>
+    </button>
+  );
+}
+
 export function Conversation({ chatId, turns, stream, projectId, projectKey, repos, onOpenTask, onOpenDiff }: ConversationProps) {
   const busy = stream.state === "busy" || stream.outbox.length > 0;
   const last = turns[turns.length - 1];
@@ -515,6 +536,9 @@ export function Conversation({ chatId, turns, stream, projectId, projectKey, rep
       )}
       {turns.map((turn, i) => {
         if (turn.kind === "user") {
+          const h = harnessMessage(turn.text);
+          if (h?.kind === "notification") return null;
+          if (h?.kind === "report") return <AgentReport key={i} chatId={chatId} agentId={h.agentId} stream={stream} />;
           return (
             <div key={i} className="chat-user">
               <div className={`chat-bubble ${turn.pending ? "chat-bubble-pending" : ""}`}>{turn.text}</div>
