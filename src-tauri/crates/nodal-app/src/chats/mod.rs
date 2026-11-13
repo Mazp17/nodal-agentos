@@ -373,9 +373,10 @@ impl Chats {
         request_id: String,
         allow: bool,
         message: Option<String>,
+        answers: Option<std::collections::BTreeMap<String, String>>,
     ) -> Result<(), AppError> {
         check_id(&id, "chat")?;
-        Ok(self.core.chats.respond(&id, &request_id, allow, message.as_deref())?)
+        Ok(self.core.chats.respond(&id, &request_id, allow, message.as_deref(), answers.as_ref())?)
     }
 
     /// Stops the running turn; the chat keeps its process for the next message.

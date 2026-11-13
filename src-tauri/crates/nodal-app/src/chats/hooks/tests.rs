@@ -25,7 +25,8 @@ use crate::testutil::{block_on, rt, NoopNotifier};
 const SESSION: &str = "00000000-0000-4000-8000-000000000009";
 
 /// Records its arguments in `args.txt` (in its cwd) and answers each stdin line: `write`
-/// asks for permission first, `slow` waits for an interrupt, `crash` fails.
+/// asks for permission first, `question` asks the user and saves the answer line in
+/// `answer.txt`, `slow` waits for an interrupt, `crash` fails.
 const FAKE_CLAUDE: &str = r#"#!/bin/sh
 echo "$@" >> args.txt
 echo "$CLAUDE_CODE_ENTRYPOINT" > entrypoint.txt
@@ -37,6 +38,11 @@ while IFS= read -r line; do
     *'"type":"user"'*)
       echo "$line"
       case "$line" in
+        *question*)
+          echo '{"type":"control_request","request_id":"req-q","request":{"subtype":"can_use_tool","tool_name":"AskUserQuestion","input":{"questions":[{"question":"Color?","header":"Color","multiSelect":false,"options":[{"label":"Blue","description":""},{"label":"Red","description":""}]}]},"tool_use_id":"toolu_q"}}'
+          IFS= read -r answer
+          echo "$answer" > answer.txt
+          echo '{"type":"result","subtype":"success","is_error":false}' ;;
         *write*)
           echo '{"type":"assistant","message":{"content":[{"type":"tool_use","id":"toolu_01","name":"Write","input":{"file_path":"/Users/me/Code/acme/a.txt","content":"x"}}]},"parent_tool_use_id":null}'
           echo '{"type":"control_request","request_id":"req-1","request":{"subtype":"can_use_tool","tool_name":"Write","input":{"file_path":"/Users/me/Code/acme/a.txt","content":"x"},"tool_use_id":"toolu_01"}}'
@@ -214,8 +220,8 @@ fn permission_requests_are_answered_from_the_host() {
         assert_eq!(live.pending[0].request_id, "req-1");
         assert_eq!(live.pending[0].summary.as_deref(), Some("/Users/me/Code/acme/a.txt"));
 
-        assert!(f.chats.respond("c1", "nope", true, None).unwrap_err().to_string().contains("no longer pending"));
-        f.chats.respond("c1", "req-1", true, None).unwrap();
+        assert!(f.chats.respond("c1", "nope", true, None, None).unwrap_err().to_string().contains("no longer pending"));
+        f.chats.respond("c1", "req-1", true, None, None).unwrap();
         f.wait_turn_end(1).await;
         let ev = f.events();
         assert!(ev.contains(&ChatEvent::Host(HostEvent::PermissionResolved { request_id: "req-1".into(), allowed: true })));
@@ -225,12 +231,47 @@ fn permission_requests_are_answered_from_the_host() {
 
         f.chats.send("c1", "p1", None, f.spec(&[]), "write it again").unwrap();
         f.wait_for(2, "permission request", |e| matches!(e, ChatEvent::Stream(StreamEvent::PermissionRequest(_)))).await;
-        f.chats.respond("c1", "req-1", false, Some("Not that file.")).unwrap();
+        f.chats.respond("c1", "req-1", false, Some("Not that file."), None).unwrap();
         f.wait_turn_end(2).await;
         assert!(f.events().iter().any(|e| matches!(e, ChatEvent::Stream(StreamEvent::ToolResult { result, .. }) if result.is_error)));
         assert_eq!(f.args().len(), 1, "one process for the whole chat");
     });
-    assert!(f.chats.respond("missing", "req-1", true, None).unwrap_err().to_string().contains("isn't running"));
+    assert!(f.chats.respond("missing", "req-1", true, None, None).unwrap_err().to_string().contains("isn't running"));
+}
+
+#[test]
+#[cfg_attr(windows, ignore = "the fake claude is a sh script")]
+fn questions_are_answered_with_the_chosen_labels() {
+    let f = Fixture::new("question");
+    block_on(async {
+        f.chats.send("c1", "p1", None, f.spec(&[]), "a question").unwrap();
+        f.wait_for(1, "question", |e| matches!(e, ChatEvent::Stream(StreamEvent::PermissionRequest(_)))).await;
+        let answers = std::collections::BTreeMap::from([("Color?".to_string(), "Blue".to_string())]);
+        f.chats.respond("c1", "req-q", true, None, Some(&answers)).unwrap();
+        f.wait_turn_end(1).await;
+        let line: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(f.dir.join("answer.txt")).unwrap()).unwrap();
+        let resp = &line["response"]["response"];
+        assert_eq!(resp["behavior"], "allow");
+        assert_eq!(resp["updatedInput"]["answers"], serde_json::json!({"Color?": "Blue"}));
+        assert_eq!(resp["updatedInput"]["questions"][0]["question"], "Color?", "the questions go back too");
+    });
+}
+
+#[test]
+#[cfg_attr(windows, ignore = "the fake claude is a sh script")]
+fn answers_only_fill_questions() {
+    let f = Fixture::new("answers-only-questions");
+    block_on(async {
+        f.chats.send("c1", "p1", None, f.spec(&[]), "please write a.txt").unwrap();
+        f.wait_for(1, "permission request", |e| matches!(e, ChatEvent::Stream(StreamEvent::PermissionRequest(_)))).await;
+        let answers = std::collections::BTreeMap::from([("x".to_string(), "y".to_string())]);
+        let err = f.chats.respond("c1", "req-1", true, None, Some(&answers)).unwrap_err();
+        assert!(err.to_string().contains("Only a question"), "{err}");
+        assert_eq!(f.chats.live("c1").pending.len(), 1, "still pending");
+        f.chats.respond("c1", "req-1", false, None, None).unwrap();
+        f.wait_turn_end(1).await;
+    });
 }
 
 #[test]
@@ -330,7 +371,7 @@ fn real_chat_asks_then_resumes() {
         let deadline = Instant::now() + Duration::from_secs(120);
         loop {
             if let Some(r) = f.chats.live("c1").pending.first().cloned() {
-                f.chats.respond("c1", &r.request_id, true, None).unwrap();
+                f.chats.respond("c1", &r.request_id, true, None, None).unwrap();
             }
             if f.events().iter().any(|e| matches!(e, ChatEvent::Stream(StreamEvent::TurnEnd { .. }))) {
                 break;

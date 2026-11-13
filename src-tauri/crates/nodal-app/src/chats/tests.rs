@@ -410,7 +410,14 @@ impl ChatRuntime for FakeChatRuntime {
             .push((chat_id.into(), project_id.into(), session_id.map(String::from), spec, text.into()));
         Ok(())
     }
-    fn respond(&self, _chat_id: &str, request_id: &str, _allow: bool, _message: Option<&str>) -> Result<(), HostError> {
+    fn respond(
+        &self,
+        _chat_id: &str,
+        request_id: &str,
+        _allow: bool,
+        _message: Option<&str>,
+        _answers: Option<&std::collections::BTreeMap<String, String>>,
+    ) -> Result<(), HostError> {
         if request_id == "bad" {
             return Err("that permission request is gone".into());
         }
@@ -562,8 +569,8 @@ fn respond_interrupt_stop_and_live_delegate_to_the_runtime() {
     let f = fx("chats-runtime-passthrough");
     let chat = block_on(f.chats.create_chat("p1".into(), NewChat::default())).unwrap();
 
-    block_on(f.chats.respond_chat_permission(chat.id.clone(), "req-1".into(), true, None)).unwrap();
-    let err = block_on(f.chats.respond_chat_permission(chat.id.clone(), "bad".into(), true, None)).unwrap_err();
+    block_on(f.chats.respond_chat_permission(chat.id.clone(), "req-1".into(), true, None, None)).unwrap();
+    let err = block_on(f.chats.respond_chat_permission(chat.id.clone(), "bad".into(), true, None, None)).unwrap_err();
     assert!(err.to_string().contains("gone"));
 
     block_on(f.chats.interrupt_chat(chat.id.clone())).unwrap();
