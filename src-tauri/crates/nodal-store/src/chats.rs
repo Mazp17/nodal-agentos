@@ -1,4 +1,4 @@
-use rusqlite::named_params;
+use rusqlite::{named_params, OptionalExtension};
 
 use crate::error::not_found;
 use crate::rows::{chat_from_row, get_chat, insert_chat};
@@ -22,6 +22,13 @@ pub fn list_all(conn: &Connection) -> Result<Vec<Chat>, DbError> {
 
 pub fn get(conn: &Connection, id: &str) -> Result<Chat, DbError> {
     get_chat(conn, id)?.ok_or_else(|| not_found("chat"))
+}
+
+/// The chat working on the task, if any (the oldest one).
+pub fn for_task(conn: &Connection, task_id: &str) -> Result<Option<Chat>, DbError> {
+    Ok(conn
+        .query_row("SELECT * FROM chats WHERE task_id = ?1 ORDER BY created_at, id LIMIT 1", [task_id], chat_from_row)
+        .optional()?)
 }
 
 pub fn insert(conn: &Connection, c: &Chat) -> Result<(), DbError> {

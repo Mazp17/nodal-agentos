@@ -586,34 +586,6 @@ fn pull_respects_overridden_plan() {
 }
 
 #[test]
-fn pull_does_not_touch_status_with_active_run() {
-    let env = Env::new();
-    let t = env.import(1, "s-progress");
-    env.db
-        .lock()
-        .unwrap()
-        .execute(
-            "INSERT INTO runs (id, task_id, cwd, executor_json, kind, prompt, finish, status, queue_position, queued_at)
-             VALUES ('run1', ?1, '/tmp', '{\"kind\":\"claude\"}', 'work', 'p', 'pr', 'launched', 1, 1)",
-            [&t.id],
-        )
-        .unwrap();
-    env.fake.data().items.get_mut("uuid-1").unwrap().state = state("s-canceled");
-    env.run(10);
-    let t2 = env.task(&t.id);
-    assert_eq!(t2.status, TaskStatus::InProgress);
-    // The change is consumed: it is not applied late when the run finishes.
-    assert_eq!(t2.source.unwrap().external_state.unwrap().id, "s-canceled");
-    env.db
-        .lock()
-        .unwrap()
-        .execute("UPDATE runs SET status = 'finished'", [])
-        .unwrap();
-    env.run(20);
-    assert_eq!(env.task(&t.id).status, TaskStatus::InProgress);
-}
-
-#[test]
 fn pull_marks_unmapped_and_missing() {
     let env = Env::new();
     let t = env.import(1, "s-todo");
@@ -949,28 +921,9 @@ fn project_change_flags_rule_tasks_and_resolves() {
     env.run(20);
     assert_eq!(env.task(&t.id).source.unwrap().moved, None);
 
-    // It leaves again; with an active run it cannot be moved, without one it can.
+    // It leaves again; with a worktree it cannot be moved.
     move_to(&env, 40, Some("guides"));
     env.run(30);
-    env.db
-        .lock()
-        .unwrap()
-        .execute(
-            "INSERT INTO runs (id, task_id, cwd, executor_json, kind, prompt, finish, status, queue_position, queued_at)
-             VALUES ('run1', ?1, '/tmp', '{\"kind\":\"claude\"}', 'work', 'p', 'pr', 'queued', 1, 1)",
-            [&t.id],
-        )
-        .unwrap();
-    let err = resolve(&env, &t.id, MovedAction::Move)
-        .unwrap_err()
-        .to_string();
-    assert!(err.contains("queued or running run"), "{err}");
-    assert_eq!(env.task(&t.id).repo_id, "r-web");
-    env.db
-        .lock()
-        .unwrap()
-        .execute("UPDATE runs SET status = 'finished'", [])
-        .unwrap();
     env.db
         .lock()
         .unwrap()
@@ -1072,21 +1025,17 @@ fn decide_pull_is_pure() {
     let t = env.import(1, "s-todo");
     let mut it = item(1, None);
     it.state = state("s-review");
-    let d = decide_pull(&t, &it, &env.link.state_map, false, false);
+    let d = decide_pull(&t, &it, &env.link.state_map, false);
     assert_eq!(d.status, Some(TaskStatus::InReview));
     assert_eq!(d.title, None);
-    assert_eq!(
-        decide_pull(&t, &it, &env.link.state_map, true, false).status,
-        None
-    );
-    let pending = decide_pull(&t, &it, &env.link.state_map, false, true);
+    let pending = decide_pull(&t, &it, &env.link.state_map, true);
     assert_eq!(
         (pending.status, pending.record_state, pending.unmapped),
         (None, false, false)
     );
     it.state = state("s-todo");
     assert_eq!(
-        decide_pull(&t, &it, &env.link.state_map, false, false).status,
+        decide_pull(&t, &it, &env.link.state_map, false).status,
         None
     );
 }

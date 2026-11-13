@@ -41,7 +41,7 @@ export function ProjectSourcesSettings({ projectId, onOpenIntegrations }: Projec
             Sources
           </h2>
           <p className="pv-page-sub">
-            Task managers that feed this project. Imported tasks stay linked: Nodal pushes run state back and pulls
+            Task managers that feed this project. Imported tasks stay linked: Nodal pushes status changes back and pulls
             title, description and state changes.
           </p>
         </div>

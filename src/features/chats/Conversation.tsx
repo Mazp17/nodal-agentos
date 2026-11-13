@@ -1,15 +1,14 @@
 import { useState, type ReactNode } from "react";
 import { createTask, respondChatPermission, type PermissionRequest } from "../../domain/api";
-import { invalidate, useProjectList, useSettings } from "../../domain/hooks/store";
+import { invalidate } from "../../domain/hooks/store";
 import { taskKey, type Repo } from "../../domain/types";
 import { readJsonPref, writePref } from "../../shell/storage";
 import { BrandMark } from "../../ui/BrandMark";
 import { Marker, MarkerContent, MarkerIcon } from "@/ui/marker";
 import { SafeMarkdown } from "../../ui/Markdown";
 import { useToast } from "../../ui/Toasts";
-import { inheritedExecutor } from "../executors";
-import { DiffLines } from "../runs/DiffLines";
-import { useAskLaunch, useLaunch, type RunConfig } from "../tasks";
+import { DiffLines } from "./DiffLines";
+import { useOpenTaskChat } from "../tasks";
 import { PriorityBars } from "../tasks/bits";
 import { PRIORITY_LABEL, STATUS_META } from "../tasks/status";
 import {
@@ -35,8 +34,16 @@ type ToolState = "running" | "asking" | "ok" | "error" | "stopped";
 /** The badge before a tool row: a check once done, a pulsing dot while it runs. */
 function ToolIcon({ state }: { state: ToolState }) {
   return (
+    // A node on the answer's trail: the state is its ring and glyph.
     <MarkerIcon className={`chat-mk-icon chat-mk-${state}`}>
-      {state === "ok" ? "✓" : state === "error" ? "✕" : state === "asking" ? "!" : state === "stopped" ? "–" : null}
+      {state !== "running" && (
+        <svg width="8" height="8" viewBox="0 0 8 8" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden focusable="false">
+          {state === "ok" && <path d="M1.6 4.2l1.6 1.6 3.2-3.6" />}
+          {state === "error" && <path d="M2 2l4 4M6 2L2 6" />}
+          {state === "asking" && <path d="M4 1.6v2.6M4 6.2v.1" />}
+          {state === "stopped" && <path d="M2 4h4" />}
+        </svg>
+      )}
     </MarkerIcon>
   );
 }
@@ -47,12 +54,14 @@ function ToolRow({
   denied,
   asking,
   live,
+  onOpenDiff,
 }: {
   item: ToolUse;
   repos: Repo[];
   denied: string | undefined;
   asking: boolean;
   live: boolean;
+  onOpenDiff?: (path: string) => void;
 }) {
   const [toggled, setOpen] = useState<boolean | null>(null);
   const r = item.result;
@@ -93,26 +102,48 @@ function ToolRow({
   );
   return (
     <div className="chat-tool">
-      {expandable ? (
-        <Marker asChild className="chat-mk chat-mk-btn">
-          <button type="button" aria-expanded={open} onClick={() => setOpen(!open)}>
+      <div className="chat-tool-line">
+        {expandable ? (
+          <Marker asChild className="chat-mk chat-mk-btn">
+            <button type="button" aria-expanded={open} onClick={() => setOpen(!open)}>
+              {label}
+            </button>
+          </Marker>
+        ) : (
+          <Marker className="chat-mk">
             {label}
+          </Marker>
+        )}
+        {patch && onOpenDiff && (
+          <button type="button" className="chat-tool-open" title="Open in git diff" onClick={() => onOpenDiff(patch.file.path)}>
+            Open diff
           </button>
-        </Marker>
-      ) : (
-        <Marker className="chat-mk">
-          {label}
-        </Marker>
-      )}
+        )}
+      </div>
       {open && patch && (
         <div className="chat-tool-panel">
           <div className="chat-tool-panel-head">
-            <span className="chat-tool-panel-path ellipsis">{shortArg(patch.file.path, repos)}</span>
-            <span className="chat-tool-panel-hunks">
-              {patch.file.hunks.length} {patch.file.hunks.length === 1 ? "hunk" : "hunks"}
+            {(() => {
+              const rel = shortArg(patch.file.path, repos) || patch.file.path;
+              const slash = rel.lastIndexOf("/");
+              return (
+                <span className="chat-tool-panel-path ellipsis" title={patch.file.path}>
+                  {slash >= 0 && <span className="chat-tool-panel-dir">{rel.slice(0, slash + 1)}</span>}
+                  <span className="chat-tool-panel-name">{rel.slice(slash + 1)}</span>
+                </span>
+              );
+            })()}
+            <span className="chat-tool-panel-stat num">
+              <span className="diff-add">+{patch.file.additions}</span>
+              <span className="diff-del">−{patch.file.deletions}</span>
             </span>
+            {onOpenDiff && (
+              <button type="button" className="chat-tool-panel-open" onClick={() => onOpenDiff(patch.file.path)}>
+                Open diff
+              </button>
+            )}
           </div>
-          <DiffLines file={patch.file} />
+          <DiffLines file={patch.file} compact />
           {patch.truncated && <p className="diff-note">Showing the first {lines} lines.</p>}
         </div>
       )}
@@ -137,12 +168,15 @@ export function ToolBlock({
   stream,
   repos,
   live,
+  onOpenDiff,
 }: {
   items: ToolUse[];
   stream: ChatStream;
   repos: Repo[];
   /** The answer is still being written: calls without a result are running. */
   live: boolean;
+  /** Opens the file's uncommitted changes (the edited path, as the tool reported it). */
+  onOpenDiff?: (path: string) => void;
 }) {
   const asking = new Set(stream.pending.map((p) => p.toolUseId).filter(Boolean));
   return (
@@ -155,6 +189,7 @@ export function ToolBlock({
           denied={it.id ? stream.denied[it.id] : undefined}
           asking={!!it.id && asking.has(it.id)}
           live={live}
+          onOpenDiff={onOpenDiff}
         />
       ))}
     </div>
@@ -256,10 +291,7 @@ function ProposalCard({
     item.id ? (readJsonPref<Created>(CREATED_PREF, {}, isCreated)[item.id] ?? null) : null,
   );
   const [busy, setBusy] = useState(false);
-  const askLaunch = useAskLaunch();
-  const launch = useLaunch();
-  const project = useProjectList().data?.find((p) => p.id === projectId) ?? null;
-  const globalExecutor = useSettings().data?.defaultExecutor;
+  const openTaskChat = useOpenTaskChat();
   const st = readProposal(item, projectId, repos);
 
   if (st.status === "pending") {
@@ -286,14 +318,7 @@ function ProposalCard({
   const priority = t.priority ?? "none";
   const status = STATUS_META[t.status ?? "todo"].label;
 
-  const create = async (run: boolean) => {
-    let config: RunConfig | null = null;
-    if (run) {
-      const repo = repos.find((r) => r.id === t.repoId);
-      const executor = t.assignee ?? inheritedExecutor(repo, project, globalExecutor);
-      config = await askLaunch({ name: t.title, repo, executor });
-      if (!config) return;
-    }
+  const create = async (chat: boolean) => {
     setBusy(true);
     try {
       const task = await createTask(t);
@@ -301,7 +326,7 @@ function ProposalCard({
       if (item.id) rememberCreated(item.id, task.id, key);
       setCreated({ taskId: task.id, key });
       void invalidate("tasks");
-      if (config) void launch(task.id, key, { kind: "run", config });
+      if (chat) await openTaskChat(task.id);
       else toast("Task created", `${key} · ${task.title}`, "ok");
     } catch (e) {
       toast("Couldn't create the task", String(e), "danger");
@@ -348,7 +373,7 @@ function ProposalCard({
               Create task
             </button>
             <button type="button" className="btn btn-primary" disabled={busy} onClick={() => void create(true)}>
-              Create &amp; run
+              Create &amp; open chat
             </button>
           </>
         )}
@@ -367,6 +392,7 @@ export interface ConversationProps {
   projectKey: string;
   repos: Repo[];
   onOpenTask: (taskId: string) => void;
+  onOpenDiff?: (path: string) => void;
 }
 
 function AiTurn({ children }: { children: ReactNode }) {
@@ -384,7 +410,11 @@ function AiTurn({ children }: { children: ReactNode }) {
 function ChangesMarker({ changes }: { changes: NonNullable<ReturnType<typeof turnChanges>> }) {
   return (
     <Marker variant="border" className="chat-mk chat-mk-changes">
-      <MarkerIcon className="chat-mk-icon chat-mk-changed">●</MarkerIcon>
+      <MarkerIcon className="chat-mk-icon chat-mk-changed">
+        <svg width="8" height="8" viewBox="0 0 8 8" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" aria-hidden focusable="false">
+          <path d="M4 1.5v5M1.5 4h5" />
+        </svg>
+      </MarkerIcon>
       <MarkerContent className="chat-mk-text">
         {changes.files} {changes.files === 1 ? "file" : "files"} changed
         <span className="chat-mk-meta">
@@ -395,7 +425,7 @@ function ChangesMarker({ changes }: { changes: NonNullable<ReturnType<typeof tur
   );
 }
 
-export function Conversation({ chatId, turns, stream, projectId, projectKey, repos, onOpenTask }: ConversationProps) {
+export function Conversation({ chatId, turns, stream, projectId, projectKey, repos, onOpenTask, onOpenDiff }: ConversationProps) {
   const busy = stream.state === "busy" || stream.outbox.length > 0;
   const last = turns[turns.length - 1];
   const lastPart = last?.kind === "ai" ? last.parts[last.parts.length - 1] : undefined;
@@ -463,7 +493,7 @@ export function Conversation({ chatId, turns, stream, projectId, projectKey, rep
                     </details>
                   );
                 case "tools":
-                  return <ToolBlock key={j} items={p.items} stream={stream} repos={repos} live={current && stream.state === "busy"} />;
+                  return <ToolBlock key={j} items={p.items} stream={stream} repos={repos} live={current && stream.state === "busy"} onOpenDiff={onOpenDiff} />;
                 case "proposal":
                   return (
                     <ProposalCard

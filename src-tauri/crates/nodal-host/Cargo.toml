@@ -8,7 +8,6 @@ publish = false
 nodal-domain = { workspace = true }
 tokio = { workspace = true, features = ["rt", "process", "io-util", "time", "sync"] }
 keyring = { workspace = true }
-portable-pty = { workspace = true }
 libc = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
@@ -30,16 +29,6 @@ required-features = ["test-support"]
 
 [[bench]]
 name = "run_diff"
-harness = false
-required-features = ["test-support"]
-
-[[bench]]
-name = "transcript"
-harness = false
-required-features = ["test-support"]
-
-[[bench]]
-name = "catalog"
 harness = false
 required-features = ["test-support"]
 

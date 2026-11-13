@@ -8,7 +8,7 @@ use std::sync::Arc;
 use nodal_domain::error::HostError;
 use nodal_domain::model::chat::{ChatLive, ChatSpec};
 use nodal_domain::ports::ChatRuntime;
-use nodal_host::adapters::{HostClaudeCli, HostSessionFiles, SystemClock};
+use nodal_host::adapters::{HostSessionFiles, SystemClock};
 use nodal_host::testutil::TempDir;
 use nodal_store::Db;
 
@@ -56,7 +56,6 @@ fn system_with(root: &std::path::Path, db: Db) -> System {
         env: env_for(root, None),
         rt: rt(),
         clock: Arc::new(SystemClock),
-        claude: Arc::new(HostClaudeCli::new(rt())),
         sessions: Arc::new(HostSessionFiles),
         notifier: Arc::new(NoopNotifier),
         chats: Arc::new(UnusedChats),
@@ -169,4 +168,90 @@ fn repo_file_commands_only_accept_the_repos_own_worktrees() {
     }
     let err = block_on(system.revert_repo_file("r1".into(), "x".into(), Some("/".into()))).unwrap_err();
     assert_eq!(err.to_string(), "Not a worktree of this repo.");
+}
+
+/// A system with one repo `r1` at `<root>/repo` (git-initialised), or `None` without git.
+fn system_with_repo(name: &str) -> Option<(TempDir, std::path::PathBuf, System)> {
+    use nodal_domain::testutil::{project_of, repo_of};
+    use nodal_host::testutil::{git_available, init_repo};
+    use nodal_store::rows::{insert_project, insert_repo};
+
+    if !git_available() {
+        return None;
+    }
+    let root = TempDir::new(name);
+    let repo = root.0.join("repo");
+    init_repo(&repo);
+    let db = Db::open_in_memory().unwrap();
+    {
+        let c = db.lock().unwrap();
+        insert_project(&c, &project_of("p1", "PAY")).unwrap();
+        insert_repo(&c, &repo_of("r1", "p1", repo.to_str().unwrap())).unwrap();
+    }
+    let system = system_with(&root.0, db);
+    Some((root, repo, system))
+}
+
+fn git_in(dir: &std::path::Path, args: &[&str]) {
+    let st = std::process::Command::new("git").arg("-C").arg(dir).args(args).status().unwrap();
+    assert!(st.success(), "git {args:?}");
+}
+
+#[test]
+fn repo_commit_stages_tracked_and_untracked_files() {
+    let Some((_root, repo, system)) = system_with_repo("system-commit") else { return };
+    std::fs::write(repo.join("README.md"), "# changed\n").unwrap();
+    std::fs::write(repo.join("new.txt"), "new\n").unwrap();
+
+    let info = block_on(system.repo_commit("r1".into(), None, "  add things \n".into(), vec![])).unwrap();
+    assert_eq!(info.subject, "add things");
+    let tree = std::process::Command::new("git").arg("-C").arg(&repo).args(["status", "--porcelain"]).output().unwrap();
+    assert!(tree.stdout.is_empty(), "tree not clean");
+    let shown = std::process::Command::new("git").arg("-C").arg(&repo).args(["show", "--name-only", "--format="]).output().unwrap();
+    let files = String::from_utf8_lossy(&shown.stdout).into_owned();
+    assert!(files.contains("README.md") && files.contains("new.txt"), "{files}");
+}
+
+#[test]
+fn repo_commit_with_paths_commits_only_those() {
+    let Some((_root, repo, system)) = system_with_repo("system-commit-paths") else { return };
+    std::fs::write(repo.join("a.txt"), "a\n").unwrap();
+    std::fs::write(repo.join("b.txt"), "b\n").unwrap();
+    block_on(system.repo_commit("r1".into(), None, "only a".into(), vec!["a.txt".into()])).unwrap();
+    let shown = std::process::Command::new("git").arg("-C").arg(&repo).args(["show", "--name-only", "--format="]).output().unwrap();
+    assert_eq!(String::from_utf8_lossy(&shown.stdout).trim(), "a.txt");
+    let left = std::process::Command::new("git").arg("-C").arg(&repo).args(["status", "--porcelain"]).output().unwrap();
+    assert!(String::from_utf8_lossy(&left.stdout).contains("b.txt"), "b.txt should still be pending");
+    assert!(block_on(system.repo_commit("r1".into(), None, "x".into(), vec!["../etc".into()])).is_err());
+}
+
+#[test]
+fn repo_commit_rejects_an_empty_message_and_a_clean_tree() {
+    let Some((_root, repo, system)) = system_with_repo("system-commit-bad") else { return };
+    std::fs::write(repo.join("new.txt"), "new\n").unwrap();
+    let err = block_on(system.repo_commit("r1".into(), None, "  \n".into(), vec![])).unwrap_err();
+    assert_eq!(err.to_string(), "Write a commit message.");
+    block_on(system.repo_commit("r1".into(), None, "first".into(), vec![])).unwrap();
+    let err = block_on(system.repo_commit("r1".into(), None, "second".into(), vec![])).unwrap_err();
+    assert_eq!(err.to_string(), "Nothing to commit.");
+}
+
+#[test]
+fn repo_open_pr_refuses_before_pushing() {
+    let Some((root, repo, system)) = system_with_repo("system-open-pr") else { return };
+    let pr = |wt: Option<&std::path::Path>, title: &str| {
+        block_on(system.repo_open_pr("r1".into(), wt.map(|p| p.display().to_string()), title.into(), "".into()))
+            .unwrap_err()
+            .to_string()
+    };
+    assert_eq!(pr(None, " "), "Write a title for the pull request.");
+    // The repo's own checkout with no known remote default branch.
+    assert_eq!(pr(None, "t"), "Open a PR from a worktree branch.");
+    // The remote default branch is the checked-out branch.
+    git_in(&repo, &["symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main"]);
+    assert!(pr(None, "t").contains("is the base branch"));
+    // A detached worktree.
+    let wt = root.0.join("wt-detached");
+    git_in(&repo, &["worktree", "add", "-q", "--detach", wt.to_str().unwrap()]);
+    assert!(pr(Some(&wt), "t").contains("HEAD is detached"));
 }

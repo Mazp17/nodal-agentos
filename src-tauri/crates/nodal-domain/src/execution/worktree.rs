@@ -78,6 +78,8 @@ pub struct WorktreeStatus {
     pub unpushed: u32,
     /// Uncommitted changes (including new, non-ignored files).
     pub dirty: bool,
+    /// The repo has at least one remote, so the branch can be pushed and opened as a PR.
+    pub has_remote: bool,
 }
 
 /// Why it can't be cleaned up without `force` (`None`: it's safe).

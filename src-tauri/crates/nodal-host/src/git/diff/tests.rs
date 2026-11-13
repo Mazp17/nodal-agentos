@@ -320,3 +320,30 @@ fn measure_run_diff_latency() {
         warm[(warm.len() as f64 * 0.95) as usize]
     );
 }
+
+#[test]
+fn log_lists_a_branch_since_its_base_and_show_gives_a_commit_patch() {
+    if !git_available() {
+        eprintln!("git not available: skipping");
+        return;
+    }
+    let t = TempDir::new("log");
+    let repo = t.0.join("repo");
+    init_repo(&repo);
+    let git = |args: &[&str]| ok(&repo, args).unwrap();
+    git(&["checkout", "-q", "-b", "feat"]);
+    std::fs::write(repo.join("a.txt"), "one\n").unwrap();
+    git(&["add", "a.txt"]);
+    git(&["commit", "-q", "-m", "Add a"]);
+
+    let since = log(&repo, Some("main")).unwrap();
+    assert_eq!(since.len(), 1);
+    assert_eq!(since[0].subject, "Add a");
+    assert!(log(&repo, None).unwrap().len() >= 2, "without a base: the latest, base's too");
+
+    let files = parse(&show(&repo, &since[0].sha).unwrap());
+    assert_eq!(files.len(), 1);
+    assert_eq!(files[0].path, "a.txt");
+    assert!(show(&repo, "--output=x").is_err());
+    assert!(log(&repo, Some("-x")).is_err());
+}

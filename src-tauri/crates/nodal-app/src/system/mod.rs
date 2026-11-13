@@ -1,17 +1,18 @@
 //! System context: legacy data import. Host diagnostics (`claude_version`, `git_version`,
-//! `resolve_git_root`, `scan_git_repos`, `repo_trust`, `attach_run`, `open_terminal_at`) and
-//! the PTY commands need no database, so they call `nodal_host` straight from the shell
-//! (`SRC/commands/{host,pty}.rs`) instead of going through this facade.
+//! `resolve_git_root`, `scan_git_repos`, `repo_trust`, `open_terminal_at`) need no database,
+//! so they call `nodal_host` straight from the shell (`SRC/commands/host.rs`) instead of going through this facade.
 
 use std::path::PathBuf;
 use std::sync::Arc;
 
 use std::path::Path;
 
-use nodal_domain::diff::FileDiff;
+use nodal_domain::diff::{CommitInfo, FileDiff};
+use nodal_domain::model::events::ChangeKind;
 use nodal_domain::model::{DirEntry, Repo, RepoFile, RepoWorktree};
 use nodal_domain::ports::Git;
 use nodal_domain::util::check_id;
+use nodal_store::board::tasks;
 use nodal_store::{rows, with_db};
 
 use crate::core::{blocking, AppError, Core};
@@ -75,17 +76,116 @@ impl System {
         .await?)
     }
 
+    /// Every file of the checkout (relative paths) for the quick-open search.
+    pub async fn list_repo_files(&self, repo_id: String, worktree: Option<String>) -> Result<Vec<String>, AppError> {
+        self.with_root(repo_id, worktree, |git, root| git.list_files(root).map_err(|e| e.0)).await
+    }
+
     /// Direct children of `dir` (relative to the checkout root) for the UI's file picker.
     pub async fn list_repo_dir(&self, repo_id: String, dir: String, worktree: Option<String>) -> Result<Vec<DirEntry>, AppError> {
         self.with_root(repo_id, worktree, move |git, root| git.list_dir(root, &dir).map_err(|e| e.0)).await
     }
 
-    /// Uncommitted changes of the checkout vs HEAD (untracked files included), per file with
-    /// its hunks, for the files panel's "Changes" view.
+    /// Changes of the checkout, per file with its hunks, for the files panel's "Changes" view.
+    /// The repo's own checkout: uncommitted vs HEAD. A worktree is a branch of work, so it's
+    /// diffed from where it branched off (committed work included). Untracked files included.
     pub async fn repo_changes(&self, repo_id: String, worktree: Option<String>) -> Result<Vec<FileDiff>, AppError> {
-        self.with_root(repo_id, worktree, |git, root| {
-            let (patch, _) = git.diff(root, None).map_err(|e| e.0)?;
+        self.with_base(repo_id, worktree, |git, root, base| {
+            let (patch, _) = git.diff(root, base.as_deref()).map_err(|e| e.0)?;
             Ok(nodal_domain::diff::parse(&patch))
+        })
+        .await
+    }
+
+    /// The checkout's commits, newest first: a worktree's since it branched off, the repo's
+    /// own checkout its latest ones.
+    pub async fn repo_commits(&self, repo_id: String, worktree: Option<String>) -> Result<Vec<CommitInfo>, AppError> {
+        self.with_base(repo_id, worktree, |git, root, base| git.log(root, base.as_deref()).map_err(|e| e.0)).await
+    }
+
+    /// Commits the checkout's changes with `message`: all of them, or only `paths` when given.
+    pub async fn repo_commit(&self, repo_id: String, worktree: Option<String>, message: String, paths: Vec<String>) -> Result<CommitInfo, AppError> {
+        let message = message.trim().to_string();
+        if message.is_empty() {
+            return Err("Write a commit message.".into());
+        }
+        let repo = self.repo(repo_id.clone()).await?;
+        let info = self.with_root(repo_id, worktree, move |git, root| git.commit_all(root, &message, &paths).map_err(|e| e.0)).await?;
+        self.core.notifier.notify(ChangeKind::Chats, Some(&repo.project_id));
+        Ok(info)
+    }
+
+    /// Pushes the checkout's branch and opens a PR against its base (see `with_base`; the repo's
+    /// own checkout uses the remote's default branch). Returns the PR URL.
+    pub async fn repo_open_pr(&self, repo_id: String, worktree: Option<String>, title: String, body: String) -> Result<String, AppError> {
+        let title = title.trim().to_string();
+        if title.is_empty() {
+            return Err("Write a title for the pull request.".into());
+        }
+        let own_checkout = worktree.is_none();
+        self.with_base(repo_id, worktree, move |git, root, base| {
+            let base = if own_checkout { git.default_branch(root) } else { base };
+            let base = base.ok_or(if own_checkout {
+                "Open a PR from a worktree branch."
+            } else {
+                "Couldn't tell which branch to open the PR against."
+            })?;
+            let branch = git.current_branch(root).ok_or("HEAD is detached: check out a branch to open a PR.")?;
+            if branch == base {
+                return Err(format!("`{branch}` is the base branch: open the PR from another branch."));
+            }
+            git.open_pr(root, &base, &branch, &title, &body).map_err(|e| e.0)
+        })
+        .await
+    }
+
+    /// One commit's files with their hunks.
+    pub async fn repo_commit_diff(&self, repo_id: String, worktree: Option<String>, sha: String) -> Result<Vec<FileDiff>, AppError> {
+        self.with_root(repo_id, worktree, move |git, root| {
+            let patch = git.show_commit(root, &sha).map_err(|e| e.0)?;
+            Ok(nodal_domain::diff::parse(&patch))
+        })
+        .await
+    }
+
+    /// `with_root` plus where the checkout branched off: `None` for the repo's own checkout; for
+    /// a worktree, its task's base, else the branch checked out in the repo's folder.
+    async fn with_base<T: Send + 'static>(
+        &self,
+        repo_id: String,
+        worktree: Option<String>,
+        f: impl FnOnce(&dyn Git, &Path, Option<String>) -> Result<T, String> + Send + 'static,
+    ) -> Result<T, AppError> {
+        let repo = self.repo(repo_id.clone()).await?;
+        let task_bases = match worktree {
+            None => Vec::new(),
+            Some(_) => {
+                let (rid, pid) = (repo.id.clone(), repo.project_id.clone());
+                with_db(&self.core.db, move |c| {
+                    Ok(tasks::list(c, Some(&pid))?
+                        .into_iter()
+                        .filter(|t| t.repo_id == rid)
+                        .filter_map(|t| t.worktree.map(|w| (w.path, w.base)))
+                        .collect::<Vec<_>>())
+                })
+                .await?
+            }
+        };
+        let (env, main) = (self.core.env.clone(), PathBuf::from(&repo.path));
+        let is_wt = worktree.is_some();
+        self.with_root(repo_id, worktree, move |git, root| {
+            let base = if is_wt {
+                let canon = |p: &Path| env.fs.canonicalize(p).ok();
+                let here = canon(root);
+                task_bases
+                    .into_iter()
+                    .find(|(p, _)| here.is_some() && canon(Path::new(p)) == here)
+                    .map(|(_, b)| b)
+                    .or_else(|| git.current_branch(&main))
+            } else {
+                None
+            };
+            f(git, root, base)
         })
         .await
     }

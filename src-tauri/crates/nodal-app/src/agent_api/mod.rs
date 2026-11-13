@@ -1,6 +1,6 @@
 //! Agent API context: MCP tool dispatch for `nodal-mcp`. One request: the same `ops` as the
 //! UI with the database locked, then the same `nodal://changed` the Tauri commands emit (was
-//! `mcp::server::respond`). Run tools (`runs`) go through the `Execution` facade instead.
+//! `mcp::server::respond`). `start_task_chat` goes through the async `Chats` facade instead.
 
 use std::future::Future;
 use std::path::Path;
@@ -10,37 +10,46 @@ use nodal_domain::model::events::ChangeKind;
 use serde_json::Value;
 
 use crate::core::Core;
-use crate::execution::Execution;
+use crate::chats::Chats;
 
-mod runs;
 pub mod tools;
 
-const RUN_TOOL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(25);
+const CHAT_TOOL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(25);
 
 pub struct AgentApi {
     core: Arc<Core>,
-    execution: Arc<Execution>,
+    chats: Chats,
 }
 
 impl AgentApi {
-    pub(crate) fn new(core: Arc<Core>, execution: Arc<Execution>) -> Self {
-        Self { core, execution }
+    pub(crate) fn new(core: Arc<Core>) -> Self {
+        Self { chats: Chats::new(core.clone()), core }
     }
 
-    /// Drives an `Execution` call to completion. `call` runs on the socket's own connection
+    /// Drives a `Chats` call to completion. `call` runs on the socket's own connection
     /// threads, never on the runtime, where blocking would panic.
     /// Gives up before `nodal-mcp`'s own 30s socket timeout, so the agent gets a clear error.
     fn block_on<F: Future>(&self, fut: F) -> Result<F::Output, String> {
         if tokio::runtime::Handle::try_current().is_ok() {
-            return Err("Internal error: run tools can't be called from the async runtime.".into());
+            return Err("Internal error: chat tools can't be called from the async runtime.".into());
         }
         self.core
             .rt
-            .block_on(async { tokio::time::timeout(RUN_TOOL_TIMEOUT, fut).await })
+            .block_on(async { tokio::time::timeout(CHAT_TOOL_TIMEOUT, fut).await })
             .map_err(|_| {
-                "Nodal took too long to answer; it may still be doing it. Check with get_run or get_queue."
+                "Nodal took too long to answer; it may still be doing it. Check the Nodal app."
                     .to_string()
             })
+    }
+
+    /// Opens (or returns) the task's chat; the UI picks it up through the `Tasks` notification.
+    fn start_task_chat(&self, args: Value) -> Result<Value, String> {
+        let task = args.get("task").and_then(Value::as_str).ok_or("Pass `task`.")?;
+        let task = tools::resolve_task(&self.core.db.guard(), task)?;
+        let chat = self
+            .block_on(self.chats.start_task_chat(task.id))?
+            .map_err(|e| e.to_string())?;
+        Ok(serde_json::json!({"chatId": chat.id, "title": chat.title, "taskId": chat.task_id}))
     }
 
     /// Where the MCP socket adapter binds `mcp.sock` (`Env::data_dir`).
@@ -51,9 +60,8 @@ impl AgentApi {
     /// Runs one MCP tool call with the database locked, then notifies `Tasks` for the
     /// project the tool changed, if any.
     pub fn call(&self, tool: &str, args: Value) -> Result<Value, String> {
-        if runs::TOOLS.contains(&tool) {
-            let args = if args.is_null() { serde_json::json!({}) } else { args };
-            return runs::call(self, tool, args);
+        if tool == "start_task_chat" {
+            return self.start_task_chat(args);
         }
         // The lock is released before notifying, as before.
         let outcome = {

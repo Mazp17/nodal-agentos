@@ -1,7 +1,6 @@
 use rusqlite::named_params;
 
 use crate::error::{is_constraint, not_found};
-use crate::json::opt_json;
 use crate::rows::{get_project, insert_project, project_from_row};
 use crate::Conn as Connection;
 use crate::DbError;
@@ -49,13 +48,12 @@ pub fn update(conn: &Connection, p: &Project) -> Result<(), DbError> {
     }
     let n = conn
         .execute(
-            "UPDATE projects SET name = :name, key = :key, color = :color, default_executor_json = :exec,
-                                 reviewer = :reviewer, archived_at = :archived,
+            "UPDATE projects SET name = :name, key = :key, color = :color, archived_at = :archived,
                                  description = :description, root_path = :root_path
              WHERE id = :id",
             named_params! {
                 ":id": p.id, ":name": p.name, ":key": p.key, ":color": p.color,
-                ":exec": opt_json(&p.default_executor)?, ":reviewer": p.reviewer, ":archived": p.archived_at,
+                ":archived": p.archived_at,
                 ":description": p.description, ":root_path": p.root_path,
             },
         )

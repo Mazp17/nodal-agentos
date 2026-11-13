@@ -164,18 +164,6 @@ pub fn is_unlinked(conn: &Connection, provider: &str, external_id: &str) -> Resu
         .is_some())
 }
 
-/// A run that hasn't finished yet (queued, launching or running).
-pub fn has_active_run(conn: &Connection, task_id: &str) -> Result<bool, DbError> {
-    Ok(conn
-        .query_row(
-            "SELECT 1 FROM runs WHERE task_id = ?1 AND status IN ('queued', 'launching', 'launched') LIMIT 1",
-            [task_id],
-            |_| Ok(()),
-        )
-        .optional()?
-        .is_some())
-}
-
 /// Data for a new imported task.
 pub struct NewImported<'a> {
     pub id: String,
@@ -221,10 +209,6 @@ pub fn insert_imported(conn: &Connection, n: NewImported) -> Result<Task, DbErro
         plan: PlanRef::Text,
         plan_overridden: false,
         acceptance: n.acceptance,
-        assignee: None,
-        isolation: None,
-        finish: None,
-        review: None,
         worktree: None,
         source: Some(TaskSource {
             provider: n.link.provider.clone(),

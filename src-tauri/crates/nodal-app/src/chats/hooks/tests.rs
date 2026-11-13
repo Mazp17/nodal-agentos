@@ -10,9 +10,8 @@ use std::time::{Duration, Instant};
 use std::path::Path;
 
 use nodal_domain::error::HostError;
-use nodal_domain::model::activity::{AgentSession, AppRuns, ExternalSessions};
 use nodal_domain::model::chat::{ChatEnvelope, ChatEvent, ChatLive, ChatSpec, HostEvent, RunState, StreamEvent};
-use nodal_domain::model::claude::{LaunchBlocker, RunDetail, SessionReadout, Transcript, TranscriptItem};
+use nodal_domain::model::claude::{Transcript, TranscriptItem};
 use nodal_domain::model::{Chat, LaunchOptions};
 use nodal_domain::ports::{ChatHooks, ChatRuntime, ChatSink, SessionFiles};
 use nodal_domain::testutil::project_of;
@@ -96,6 +95,8 @@ impl Fixture {
                 title: None,
                 session_title: None,
                 agent: None,
+                task_id: None,
+                worktree: None,
                 session_id: None,
                 launch: LaunchOptions::default(),
                 created_at: 1,
@@ -374,28 +375,6 @@ struct FakeSessionFiles {
 }
 
 impl SessionFiles for FakeSessionFiles {
-    fn read_session(&self, _session_id: &str, _cwd: &str) -> SessionReadout {
-        unimplemented!()
-    }
-    fn session_tokens(&self, _session_id: &str, _cwd: &str) -> Option<i64> {
-        unimplemented!()
-    }
-    fn run_detail(&self, _session_id: &str, _cwd: &str) -> Result<Option<RunDetail>, HostError> {
-        unimplemented!()
-    }
-    fn launch_blocker(&self, _session_id: &str, _cwd: &str) -> Result<Option<LaunchBlocker>, HostError> {
-        unimplemented!()
-    }
-    fn agent_transcript(
-        &self,
-        _session_id: &str,
-        _cwd: &str,
-        _run_id: &str,
-        _agent_id: &str,
-        _limit: usize,
-    ) -> Result<Option<Transcript>, HostError> {
-        unimplemented!()
-    }
     fn find_session_jsonl(&self, _projects: &Path, _cwd: &str, _session_id: &str) -> Option<std::path::PathBuf> {
         self.jsonl.clone()
     }
@@ -412,15 +391,6 @@ impl SessionFiles for FakeSessionFiles {
     fn session_title(&self, _path: &Path) -> Option<String> {
         self.title.clone()
     }
-    fn external_sessions(
-        &self,
-        _repos: &[(String, std::path::PathBuf)],
-        _agents: &[AgentSession],
-        _app: &AppRuns,
-        _now: i64,
-    ) -> Result<ExternalSessions, HostError> {
-        unimplemented!()
-    }
 }
 
 fn seeded_db(session_id: Option<&str>) -> Db {
@@ -436,6 +406,8 @@ fn seeded_db(session_id: Option<&str>) -> Db {
             title: None,
             session_title: None,
             agent: None,
+            task_id: None,
+            worktree: None,
             session_id: session_id.map(String::from),
             launch: LaunchOptions::default(),
             created_at: 1,
@@ -489,28 +461,6 @@ struct CountingSessionFiles {
 }
 
 impl SessionFiles for CountingSessionFiles {
-    fn read_session(&self, _session_id: &str, _cwd: &str) -> SessionReadout {
-        unimplemented!()
-    }
-    fn session_tokens(&self, _session_id: &str, _cwd: &str) -> Option<i64> {
-        unimplemented!()
-    }
-    fn run_detail(&self, _session_id: &str, _cwd: &str) -> Result<Option<RunDetail>, HostError> {
-        unimplemented!()
-    }
-    fn launch_blocker(&self, _session_id: &str, _cwd: &str) -> Result<Option<LaunchBlocker>, HostError> {
-        unimplemented!()
-    }
-    fn agent_transcript(
-        &self,
-        _session_id: &str,
-        _cwd: &str,
-        _run_id: &str,
-        _agent_id: &str,
-        _limit: usize,
-    ) -> Result<Option<Transcript>, HostError> {
-        unimplemented!()
-    }
     fn find_session_jsonl(&self, _projects: &Path, _cwd: &str, _session_id: &str) -> Option<std::path::PathBuf> {
         self.jsonl.clone()
     }
@@ -527,15 +477,6 @@ impl SessionFiles for CountingSessionFiles {
     fn session_title(&self, _path: &Path) -> Option<String> {
         self.title_reads.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         self.title.clone()
-    }
-    fn external_sessions(
-        &self,
-        _repos: &[(String, std::path::PathBuf)],
-        _agents: &[AgentSession],
-        _app: &AppRuns,
-        _now: i64,
-    ) -> Result<ExternalSessions, HostError> {
-        unimplemented!()
     }
 }
 
@@ -555,6 +496,8 @@ fn turn_ended_does_not_rescan_an_established_title_right_away() {
                 session_title: Some("Already named".into()),
                 session_id: Some(SESSION.into()),
                 agent: None,
+                task_id: None,
+                worktree: None,
                 launch: LaunchOptions::default(),
                 created_at: 1,
                 updated_at: 1,
@@ -588,4 +531,60 @@ fn turn_ended_does_not_rescan_an_established_title_right_away() {
     block_on(async { tokio::time::sleep(Duration::from_millis(100)).await });
     assert_eq!(sessions.title_reads.load(std::sync::atomic::Ordering::SeqCst), 1, "must not re-scan so soon");
     assert_eq!(chats::get(&db.lock().unwrap(), "c1").unwrap().session_title.as_deref(), Some("Renamed by claude"));
+}
+
+// ---------- task chats: a finished turn with changes moves the task to Review ----------
+
+#[test]
+fn turn_end_moves_an_in_progress_task_to_review_only_with_changes() {
+    use nodal_domain::execution::worktree::{branch_for, dir_for};
+    use nodal_domain::model::TaskStatus;
+    use nodal_domain::ports::Git;
+    use nodal_host::adapters::HostGit;
+    use nodal_store::rows::{insert_repo, insert_task};
+
+    let t = nodal_host::testutil::TempDir::new("hooks-task-review");
+    let repo_dir = t.0.join("repo");
+    nodal_host::testutil::init_repo(&repo_dir);
+    let wt_dir = dir_for(&t.0.join("wt"), "repo", "pay-1");
+    let git = HostGit;
+    let wt = git.ensure_worktree(&repo_dir, &wt_dir, &branch_for("pay-1"), None).unwrap();
+
+    let db = Db::open_in_memory().unwrap();
+    {
+        let c = db.lock().unwrap();
+        rows::insert_project(&c, &project_of("p1", "PAY")).unwrap();
+        insert_repo(&c, &nodal_domain::testutil::repo_of("r1", "p1", &repo_dir.to_string_lossy())).unwrap();
+        let mut task = nodal_domain::testutil::task_of("t1");
+        task.status = TaskStatus::InProgress;
+        task.worktree = Some(wt);
+        insert_task(&c, &task).unwrap();
+        let chat = Chat {
+            id: "c1".into(),
+            project_id: "p1".into(),
+            repo_id: Some("r1".into()),
+            title: None,
+            session_title: None,
+            session_id: None,
+            agent: None,
+            task_id: Some("t1".into()),
+            worktree: None,
+            launch: Default::default(),
+            created_at: 1,
+            updated_at: 1,
+        };
+        rows::insert_chat(&c, &chat).unwrap();
+    }
+    let status = || nodal_store::board::tasks::get(&db.lock().unwrap(), "t1").unwrap().status;
+
+    // Clean worktree: nothing to review yet.
+    assert!(!super::review_if_changed(&db, &git, 5, "c1").unwrap());
+    assert_eq!(status(), TaskStatus::InProgress);
+
+    std::fs::write(wt_dir.join("new.txt"), "x").unwrap();
+    assert!(super::review_if_changed(&db, &git, 6, "c1").unwrap());
+    assert_eq!(status(), TaskStatus::InReview);
+
+    // Already in review: left alone.
+    assert!(!super::review_if_changed(&db, &git, 7, "c1").unwrap());
 }

@@ -1,6 +1,6 @@
 import { useEffect, useId, useState, type ReactNode } from "react";
 import { useProjects } from "../../domain/hooks/projects";
-import type { Finish, Isolation, Project, Repo, RepoRule, SourceLink } from "../../domain/types";
+import type { Project, Repo, RepoRule, SourceLink } from "../../domain/types";
 import { ProjectSourcesSettings } from "../providers";
 import {
   useProviderStatus,
@@ -13,11 +13,10 @@ import {
 import { newProjectRule, useRuleBackfill, type RuleEdit } from "../providers/ruleBackfill";
 import { SectionHead } from "../settings/SettingsView";
 import type { ProjectSection } from "../../shell/useNav";
+import { WorktreesSection } from "./WorktreesSection";
 import { EmptyState } from "../../ui/EmptyState";
 import { useToast } from "../../ui/Toasts";
-import { AgentsWorkflowsSection } from "./AgentsWorkflowsSection";
-import { ExecutorSelect, executorLabel } from "./executors";
-import { useSettings } from "../../domain/hooks/store";
+import { AgentsSection } from "./AgentsSection";
 import { ColorSwatches, Segmented, type SegOption } from "./fields";
 import {
   pickFolder,
@@ -34,7 +33,8 @@ const SECTIONS: { id: ProjectSection; label: string }[] = [
   { id: "general", label: "General" },
   { id: "repos", label: "Repos" },
   { id: "sources", label: "Sources" },
-  { id: "agents", label: "Agents & workflows" },
+  { id: "agents", label: "Agents" },
+  { id: "worktrees", label: "Worktrees" },
 ];
 
 interface Props {
@@ -67,7 +67,8 @@ export function ProjectSettings({ project, section, onSection, onDeleted, onOpen
           {section === "general" && <GeneralSection key={project.id} project={project} onDeleted={onDeleted} />}
           {section === "repos" && <ReposSection key={project.id} project={project} onOpenSources={() => onSection("sources")} />}
           {section === "sources" && <ProjectSourcesSettings projectId={project.id} onOpenIntegrations={onOpenIntegrations} />}
-          {section === "agents" && <AgentsWorkflowsSection key={project.id} project={project} />}
+          {section === "agents" && <AgentsSection key={project.id} project={project} />}
+          {section === "worktrees" && <WorktreesSection key={project.id} project={project} />}
         </div>
       </div>
     </div>
@@ -81,18 +82,13 @@ function GeneralSection({ project, onDeleted }: { project: Project; onDeleted: (
   const toast = useToast();
   const nameId = useId();
   const descId = useId();
-  const execId = useId();
-  const reviewerId = useId();
   const [name, setName] = useState(project.name);
   const [description, setDescription] = useState(project.description ?? "");
-  const globalExecutor = useSettings().data?.defaultExecutor ?? null;
-  const [reviewer, setReviewer] = useState(project.reviewer ?? "");
   const [confirming, setConfirming] = useState(false);
   const [deleting, setDeleting] = useState(false);
 
   useEffect(() => setName(project.name), [project.name]);
   useEffect(() => setDescription(project.description ?? ""), [project.description]);
-  useEffect(() => setReviewer(project.reviewer ?? ""), [project.reviewer]);
 
   const patch = async (p: Parameters<typeof ctx.updateProject>[1]) => {
     try {
@@ -101,7 +97,6 @@ function GeneralSection({ project, onDeleted }: { project: Project; onDeleted: (
       toast("Couldn't save the project", String(e), "danger");
       setName(project.name);
       setDescription(project.description ?? "");
-      setReviewer(project.reviewer ?? "");
     }
   };
 
@@ -114,10 +109,6 @@ function GeneralSection({ project, onDeleted }: { project: Project; onDeleted: (
     const n = name.trim();
     if (!n) setName(project.name);
     else if (n !== project.name) void patch({ name: n });
-  };
-  const commitReviewer = () => {
-    const r = reviewer.trim();
-    if ((r || null) !== project.reviewer) void patch({ reviewer: r || null });
   };
 
   const remove = async () => {
@@ -172,36 +163,6 @@ function GeneralSection({ project, onDeleted }: { project: Project; onDeleted: (
         <div className="field field-tight">
           <span className="field-label">Task prefix</span>
           <span className="mono muted field-prefix">{project.key}-</span>
-        </div>
-        <div className="field">
-          <label className="field-label" htmlFor={execId}>
-            Default executor
-          </label>
-          <ExecutorSelect
-            id={execId}
-            repoId={null}
-            projectId={project.id}
-            value={project.defaultExecutor}
-            inheritLabel={`Global default (${globalExecutor ? executorLabel(globalExecutor) : "Claude"})`}
-            onChange={(defaultExecutor) => void patch({ defaultExecutor })}
-          />
-          <span className="field-hint">Used when neither the task nor its repo picks one. The global default is in Settings → Execution.</span>
-        </div>
-        <div className="field">
-          <label className="field-label" htmlFor={reviewerId}>
-            Reviewer
-          </label>
-          <input
-            id={reviewerId}
-            className="input input-mono field-w-md"
-            placeholder="Global default"
-            spellCheck={false}
-            value={reviewer}
-            onChange={(e) => setReviewer(e.target.value)}
-            onBlur={commitReviewer}
-            onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()}
-          />
-          <span className="field-hint">Agent that reviews finished runs. Empty uses the one in Settings → Execution.</span>
         </div>
       </div>
 
@@ -265,7 +226,7 @@ function ReposSection({ project, onOpenSources }: { project: Project; onOpenSour
 
   return (
     <>
-      <SectionHead title="Repos" text="Local git checkouts in this project. Each task runs in exactly one of them.">
+      <SectionHead title="Repos" text="Local git checkouts in this project. Each task belongs to exactly one of them.">
         <button type="button" className="btn" disabled={picker.busy} onClick={() => void picker.pick()}>
           Add repo…
         </button>
@@ -417,30 +378,11 @@ const PERMS: SegOption<string | null>[] = [
   { value: "auto", label: "auto" },
   { value: "bypassPermissions", label: "bypass" },
 ];
-const FINISHES: SegOption<Finish>[] = [
-  { value: "changes", label: "Changes only" },
-  { value: "commit", label: "Commit" },
-  { value: "pr", label: "Open PR" },
-];
-const ISOLATIONS: SegOption<Isolation>[] = [
-  { value: "worktree", label: "Worktree" },
-  { value: "in_place", label: "In place" },
-];
-const REVIEW: SegOption<boolean>[] = [
-  { value: true, label: "On" },
-  { value: false, label: "Off" },
-];
-
-const FINISH_SUMMARY: Record<Finish, string> = { changes: "changes only", commit: "commit", pr: "open PR" };
-
 function repoSummary(r: Repo): string {
   return [
     r.model ?? "default model",
     `${r.effort ?? "default"} effort`,
     r.permissionMode ?? "default permissions",
-    FINISH_SUMMARY[r.defaultFinish],
-    r.defaultIsolation === "worktree" ? "worktree" : "in place",
-    r.defaultReview ? "review on" : "review off",
   ].join(" · ");
 }
 
@@ -457,10 +399,7 @@ function RepoCard({
 }) {
   const ctx = useProjects();
   const toast = useToast();
-  const execId = useId();
-  const reviewerId = useId();
   const [git, setGit] = useState<"checking" | "ok" | "missing">("checking");
-  const [reviewer, setReviewer] = useState(repo.reviewer ?? "");
   const [confirmRemove, setConfirmRemove] = useState(false);
   const [removing, setRemoving] = useState(false);
 
@@ -474,7 +413,6 @@ function RepoCard({
       alive = false;
     };
   }, [repo.path]);
-  useEffect(() => setReviewer(repo.reviewer ?? ""), [repo.reviewer]);
 
   const patch = async (p: Parameters<typeof ctx.updateRepo>[1]) => {
     try {
@@ -482,10 +420,6 @@ function RepoCard({
     } catch (e) {
       toast("Couldn't save the repo options", String(e), "danger");
     }
-  };
-  const commitReviewer = () => {
-    const r = reviewer.trim();
-    if ((r || null) !== repo.reviewer) void patch({ reviewer: r || null });
   };
 
   const remove = async () => {
@@ -556,55 +490,6 @@ function RepoCard({
               onChange={(permissionMode) => void patch({ permissionMode })}
             />
           </OptRow>
-          <OptRow label="Finish">
-            <Segmented
-              label="Finish"
-              value={repo.defaultFinish}
-              options={FINISHES}
-              onChange={(defaultFinish) => void patch({ defaultFinish })}
-            />
-          </OptRow>
-          <OptRow label="Isolation">
-            <Segmented
-              label="Isolation"
-              value={repo.defaultIsolation}
-              options={ISOLATIONS}
-              onChange={(defaultIsolation) => void patch({ defaultIsolation })}
-            />
-          </OptRow>
-          <OptRow label="Executor" htmlFor={execId}>
-            <ExecutorSelect
-              id={execId}
-              repoId={repo.id}
-              projectId={repo.projectId}
-              value={repo.defaultExecutor}
-              inheritLabel="Project default"
-              onChange={(defaultExecutor) => void patch({ defaultExecutor })}
-            />
-          </OptRow>
-          <OptRow label="Review">
-            <Segmented
-              label="Review"
-              value={repo.defaultReview}
-              options={REVIEW}
-              onChange={(defaultReview) => void patch({ defaultReview })}
-            />
-          </OptRow>
-          <OptRow label="Reviewer" htmlFor={reviewerId}>
-            <input
-              id={reviewerId}
-              className="input input-mono repo-opt-input"
-              placeholder="Project default"
-              spellCheck={false}
-              value={reviewer}
-              onChange={(e) => setReviewer(e.target.value)}
-              onBlur={commitReviewer}
-              onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()}
-            />
-          </OptRow>
-          <p className="field-hint repo-opts-note">
-            Workflows manage their own worktree and review; isolation and review apply to agents and Claude.
-          </p>
         </div>
       )}
     </div>

@@ -3,12 +3,12 @@
 .palette-scrim { position: fixed; inset: 0; z-index: 50; background: var(--scrim-strong); }
 .palette {
   position: fixed;
-  top: 84px;
+  top: 72px;
   left: 0;
   right: 0;
   margin-inline: auto;
   z-index: 51;
-  width: min(600px, calc(100% - 40px));
+  width: min(720px, calc(100% - 40px));
   border-radius: var(--r-3xl);
   background: var(--surface-palette);
   border: 1px solid var(--border-3);
@@ -18,7 +18,7 @@
 }
 .palette-input {
   width: 100%;
-  height: 48px;
+  height: 58px;
   padding: 0 var(--sp-7);
   border: 0;
   border-bottom: 1px solid var(--border);
@@ -28,10 +28,10 @@
 .palette-input:focus-visible { outline: none; }
 .palette:focus-within { box-shadow: var(--shadow-palette), 0 0 0 2px var(--accent-tint-50); }
 .palette-input::placeholder { color: var(--text-dim); }
-.palette-list { padding: var(--sp-2); max-height: 380px; overflow: auto; display: flex; flex-direction: column; gap: 1px; }
+.palette-list { padding: var(--sp-2) var(--sp-3) var(--sp-3); max-height: min(520px, 62vh); overflow: auto; display: flex; flex-direction: column; gap: 1px; }
 .palette-item {
-  flex: none; /* keep 34px rows; the list scrolls instead of squeezing them */
-  height: 34px;
+  flex: none; /* keep 40px rows; the list scrolls instead of squeezing them */
+  height: 40px;
   display: flex;
   align-items: center;
   gap: var(--sp-4);
@@ -40,10 +40,8 @@
   font-size: var(--fs-lg);
 }
 .palette-item.on { background: var(--fill-5); }
-.palette-kind { width: 48px; flex: none; font-size: var(--fs-2xs); color: var(--text-dim); }
-.palette-kind-run { color: var(--accent); }
-.palette-label { flex: 1; }
-.palette-sub { font-size: var(--fs-xs); color: var(--text-dim); flex: none; }
+.palette-label { flex: 0 1 auto; min-width: 0; }
+.palette-sub { flex: 1 1 0; min-width: 0; font-size: var(--fs-sm); color: var(--text-muted); }
 .palette-empty { padding: var(--sp-8) var(--sp-4); font-size: var(--fs-base); color: var(--text-faint); }
 .palette-foot {
   display: flex;
@@ -54,3 +52,7 @@
   color: var(--text-dim);
 }
 .palette-foot > span { display: inline-flex; align-items: center; gap: var(--sp-2); }
+.palette-group { padding: var(--sp-4) var(--sp-4) var(--sp-2); font-size: var(--fs-2xs); font-weight: var(--fw-semibold); color: var(--text-muted); }
+.palette-icon { flex: none; width: 26px; height: 26px; display: flex; align-items: center; justify-content: center; border-radius: 7px; background: var(--fill-3); color: var(--text-muted); }
+.palette-item.on .palette-icon { background: var(--fill-6, var(--fill-5)); color: var(--text); }
+.palette-icon-chat { color: var(--accent); }

@@ -1,7 +1,7 @@
 use rusqlite::named_params;
 
 use crate::error::not_found;
-use crate::json::{opt_json, to_json};
+use crate::json::to_json;
 use crate::rows::{get_task, insert_task, task_from_row, SqlEnum};
 use crate::Conn as Connection;
 use crate::{DbError, SqliteError};
@@ -54,16 +54,14 @@ pub fn update(conn: &Connection, t: &Task) -> Result<(), DbError> {
         "UPDATE tasks SET repo_id = :repo, title = :title, status = :status, priority = :priority,
                           labels_json = :labels, position = :position, plan_kind = :plan_kind,
                           plan_path = :plan_path, plan_overridden = :plan_overridden,
-                          acceptance_json = :acceptance, assignee_json = :assignee, isolation = :isolation,
-                          finish = :finish, review = :review, wt_path = :wt_path, wt_branch = :wt_branch,
+                          acceptance_json = :acceptance, wt_path = :wt_path, wt_branch = :wt_branch,
                           wt_base = :wt_base, updated_at = :updated, closed_at = :closed
          WHERE id = :id",
         named_params! {
             ":id": t.id, ":repo": t.repo_id, ":title": t.title, ":status": SqlEnum(t.status), ":priority": SqlEnum(t.priority),
             ":labels": to_json(&t.labels)?, ":position": t.position, ":plan_kind": plan_kind,
             ":plan_path": plan_path, ":plan_overridden": t.plan_overridden,
-            ":acceptance": to_json(&t.acceptance)?, ":assignee": opt_json(&t.assignee)?,
-            ":isolation": t.isolation.map(SqlEnum), ":finish": t.finish.map(SqlEnum), ":review": t.review,
+            ":acceptance": to_json(&t.acceptance)?,
             ":wt_path": wt.map(|w| &w.path), ":wt_branch": wt.map(|w| &w.branch), ":wt_base": wt.map(|w| &w.base),
             ":updated": t.updated_at, ":closed": t.closed_at,
         },

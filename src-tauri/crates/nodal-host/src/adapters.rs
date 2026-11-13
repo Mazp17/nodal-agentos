@@ -5,22 +5,16 @@
 use std::io;
 use std::path::{Path, PathBuf};
 
-use tokio::runtime::Handle;
-
 use nodal_domain::diff::CommitInfo;
 use nodal_domain::error::HostError;
 use nodal_domain::execution::worktree::{MergeOutcome, WorktreeStatus};
-use nodal_domain::model::activity::{AgentSession, AppRuns, ExternalSessions};
 use nodal_domain::model::chat::ClaudeDefaults;
-use nodal_domain::model::claude::{
-    ExtraFlags, LaunchBlocker, LaunchError, RunDetail, RunRef, RunSummary, SessionReadout, Transcript,
-};
-use nodal_domain::model::executors::{AgentDef, ExecutorInfo};
-use nodal_domain::model::{DiffStat, DirEntry, RepoFile, RepoWorktree, LaunchOptions, WorktreeRef};
-use nodal_domain::ports::{BoxFut, ClaudeCli, ClaudeConfig, Clock, Git, LocalFs, PlanFiles, SessionFiles};
+use nodal_domain::model::claude::Transcript;
+use nodal_domain::model::executors::AgentDef;
+use nodal_domain::model::{DiffStat, DirEntry, RepoFile, RepoWorktree, WorktreeRef};
+use nodal_domain::ports::{ClaudeConfig, Clock, Git, LocalFs, PlanFiles, SessionFiles};
 
-use crate::claude::live::AgentsRaw;
-use crate::claude::{activity, catalog, cli, fs, settings};
+use crate::claude::{catalog, fs, settings};
 use crate::git;
 use crate::{paths, plans, repo};
 
@@ -33,106 +27,16 @@ impl Clock for SystemClock {
     }
 }
 
-/// The `claude` CLI (`nodal_domain::ports::ClaudeCli`). `agents`: the single-flight cache
-/// (P01) `list_sessions`/`list_agent_sessions` share instead of each spawning `claude agents`;
-/// `launch_bg`/`stop` invalidate it, since either can change the live set.
-pub struct HostClaudeCli {
-    rt: Handle,
-    agents: AgentsRaw,
-}
-
-impl HostClaudeCli {
-    pub fn new(rt: Handle) -> Self {
-        Self { rt, agents: AgentsRaw::new() }
-    }
-
-    /// `claude agents` served by a fake `program` instead of the real `claude`.
-    #[cfg(any(test, feature = "test-support"))]
-    pub fn with_program(rt: Handle, program: std::path::PathBuf) -> Self {
-        Self { rt, agents: AgentsRaw::with_program(program) }
-    }
-}
-
-impl ClaudeCli for HostClaudeCli {
-    fn list_sessions(&self) -> BoxFut<'_, Result<Vec<RunSummary>, HostError>> {
-        Box::pin(async move { Ok(cli::list_runs(&self.agents).await?) })
-    }
-
-    fn list_agent_sessions(&self) -> BoxFut<'_, Result<Vec<AgentSession>, HostError>> {
-        Box::pin(async move { Ok(activity::list_agents(&self.agents).await?) })
-    }
-
-    fn launch_bg<'a>(
-        &'a self,
-        cwd: String,
-        prompt: String,
-        opts: &'a LaunchOptions,
-        extra: &'a ExtraFlags,
-    ) -> BoxFut<'a, Result<RunRef, LaunchError>> {
-        Box::pin(async move {
-            let r = cli::launch_bg(cwd, prompt, opts, extra, &self.rt).await;
-            self.agents.invalidate().await;
-            r
-        })
-    }
-
-    fn stop<'a>(&'a self, short_id: &'a str) -> BoxFut<'a, Result<(), HostError>> {
-        Box::pin(async move {
-            let r = cli::stop(short_id).await;
-            self.agents.invalidate().await;
-            Ok(r?)
-        })
-    }
-}
-
 /// `~/.claude/projects` (`nodal_domain::ports::SessionFiles`).
 pub struct HostSessionFiles;
 
 impl SessionFiles for HostSessionFiles {
-    fn read_session(&self, session_id: &str, cwd: &str) -> SessionReadout {
-        fs::readout::read_session(session_id, cwd)
-    }
-
-    fn session_tokens(&self, session_id: &str, cwd: &str) -> Option<i64> {
-        fs::readout::session_tokens(session_id, cwd)
-    }
-
-    fn session_close(&self, session_id: &str, cwd: &str) -> (SessionReadout, Option<i64>) {
-        fs::readout::read_session_close(session_id, cwd)
-    }
-
-    fn run_detail(&self, session_id: &str, cwd: &str) -> Result<Option<RunDetail>, HostError> {
-        let projects = fs::readout::projects_dir()?;
-        Ok(fs::paths::find_session_dir(&projects, cwd, session_id).and_then(|dir| fs::workflow_detail::read_run_detail(&dir)))
-    }
-
-    fn launch_blocker(&self, session_id: &str, cwd: &str) -> Result<Option<LaunchBlocker>, HostError> {
-        let projects = fs::readout::projects_dir()?;
-        Ok(fs::paths::find_session_jsonl(&projects, cwd, session_id)
-            .and_then(|p| fs::review_denial::read_workflow_review_denial(&p))
-            .map(|workflow| LaunchBlocker::WorkflowReview { workflow }))
-    }
-
-    fn agent_transcript(
-        &self,
-        session_id: &str,
-        cwd: &str,
-        run_id: &str,
-        agent_id: &str,
-        limit: usize,
-    ) -> Result<Option<Transcript>, HostError> {
-        let projects = fs::readout::projects_dir()?;
-        let Some(dir) = fs::paths::find_session_dir(&projects, cwd, session_id) else { return Ok(None) };
-        Ok(fs::transcript::read_agent_transcript(&dir, run_id, agent_id, limit)?)
-    }
-
     fn find_session_jsonl(&self, projects: &Path, cwd: &str, session_id: &str) -> Option<PathBuf> {
         fs::paths::find_session_jsonl(projects, cwd, session_id)
     }
 
     fn session_location(&self, path: &Path) -> (Option<String>, Option<String>) {
-        let info = crate::claude::activity_files::read_tail(path, 256 * 1024).map(|t| crate::claude::activity_files::parse_tail(&t)).unwrap_or_default();
-        (info.cwd, info.git_branch)
+        crate::claude::session_location::session_location(path)
     }
 
     fn read_session_transcript(
@@ -149,37 +53,12 @@ impl SessionFiles for HostSessionFiles {
     fn session_title(&self, path: &Path) -> Option<String> {
         fs::transcript::session_title(path)
     }
-
-    fn count_new_tool_calls(&self, path: &Path, from: u64) -> io::Result<(u32, u64)> {
-        fs::transcript::count_new_tool_calls(path, from)
-    }
-
-    fn external_sessions(
-        &self,
-        repos: &[(String, PathBuf)],
-        agents: &[AgentSession],
-        app: &AppRuns,
-        now: i64,
-    ) -> Result<ExternalSessions, HostError> {
-        let projects = fs::paths::claude_config_dir()
-            .ok_or("Couldn't locate the Claude Code folder ($HOME is not set).")?
-            .join("projects");
-        Ok(activity::external_sessions_of(repos, agents, &projects, app, now, activity::existing_roots))
-    }
 }
 
 /// Claude Code config on disk (`nodal_domain::ports::ClaudeConfig`).
 pub struct HostClaudeConfig;
 
 impl ClaudeConfig for HostClaudeConfig {
-    fn catalog(&self, claude_dir: Option<&Path>, repo: Option<&Path>) -> Vec<ExecutorInfo> {
-        catalog::catalog(claude_dir, repo)
-    }
-
-    fn find_workflow(&self, claude_dir: Option<&Path>, repo: Option<&Path>, name: &str) -> Option<ExecutorInfo> {
-        catalog::find_workflow(claude_dir, repo, name)
-    }
-
     fn list_agents(&self, claude_dir: Option<&Path>, repo: Option<&Path>) -> Vec<AgentDef> {
         catalog::list_agents(claude_dir, repo)
     }
@@ -231,12 +110,24 @@ impl Git for HostGit {
         Ok(git::diff::commits(dir, base, head)?)
     }
 
+    fn log(&self, dir: &Path, base: Option<&str>) -> Result<Vec<CommitInfo>, HostError> {
+        Ok(git::diff::log(dir, base)?)
+    }
+
+    fn show_commit(&self, dir: &Path, sha: &str) -> Result<String, HostError> {
+        Ok(git::diff::show(dir, sha)?)
+    }
+
     fn current_branch(&self, dir: &Path) -> Option<String> {
         git::diff::current_branch(dir)
     }
 
     fn list_dir(&self, repo: &Path, rel: &str) -> Result<Vec<DirEntry>, HostError> {
         Ok(git::ls::list_dir(repo, rel)?)
+    }
+
+    fn list_files(&self, repo: &Path) -> Result<Vec<String>, HostError> {
+        Ok(git::ls::list_files(repo)?)
     }
 
     fn read_file(&self, repo: &Path, rel: &str) -> Result<RepoFile, HostError> {
@@ -269,6 +160,18 @@ impl Git for HostGit {
 
     fn push_base(&self, repo: &Path, base: &str) -> Result<String, HostError> {
         Ok(git::merge::push_base(repo, base)?)
+    }
+
+    fn commit_all(&self, dir: &Path, message: &str, paths: &[String]) -> Result<CommitInfo, HostError> {
+        Ok(git::pr::commit_all(dir, message, paths)?)
+    }
+
+    fn default_branch(&self, dir: &Path) -> Option<String> {
+        git::pr::default_branch(dir)
+    }
+
+    fn open_pr(&self, dir: &Path, base: &str, branch: &str, title: &str, body: &str) -> Result<String, HostError> {
+        Ok(git::pr::open_pr(dir, base, branch, title, body)?)
     }
 }
 

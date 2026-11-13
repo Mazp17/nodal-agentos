@@ -7,15 +7,6 @@ fn enums_serialize_snake_case_and_match_as_str() {
         assert_eq!(serde_json::to_value(s).unwrap(), json!(s.as_str()));
         assert_eq!(TaskStatus::parse(s.as_str()), Some(*s));
     }
-    for s in Isolation::ALL {
-        assert_eq!(serde_json::to_value(s).unwrap(), json!(s.as_str()));
-    }
-    for s in RunStatus::ALL {
-        assert_eq!(serde_json::to_value(s).unwrap(), json!(s.as_str()));
-    }
-    for s in RunOutcome::ALL {
-        assert_eq!(serde_json::to_value(s).unwrap(), json!(s.as_str()));
-    }
     for s in Priority::ALL {
         assert_eq!(serde_json::to_value(s).unwrap(), json!(s.as_str()));
     }
@@ -76,17 +67,11 @@ fn repo_flattens_launch_options() {
             model: Some("opus".into()),
             ..Default::default()
         },
-        default_executor: None,
-        default_isolation: Isolation::InPlace,
-        default_finish: Finish::Pr,
-        default_review: true,
-        reviewer: None,
         position: 0,
         created_at: 1,
     };
     let v = serde_json::to_value(&r).unwrap();
     assert_eq!(v["model"], "opus");
-    assert_eq!(v["defaultIsolation"], "in_place");
     assert!(v.get("effort").is_none());
     assert_eq!(serde_json::from_value::<Repo>(v).unwrap(), r);
 }
@@ -107,8 +92,6 @@ fn state_map_keys_are_status_strings() {
 #[test]
 fn settings_defaults_fill_missing_fields() {
     let s: Settings = serde_json::from_value(json!({"editor": "code"})).unwrap();
-    assert_eq!(s.concurrency, DEFAULT_CONCURRENCY);
-    assert_eq!(s.reviewer, DEFAULT_REVIEWER);
     assert_eq!(s.editor.as_deref(), Some("code"));
     assert_eq!(task_key("PAY", 1), "PAY-1");
 }

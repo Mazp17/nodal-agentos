@@ -1,14 +1,14 @@
 ---
 name: nodal-tasks
-description: Create, update, launch and follow tasks on a Nodal board through the `nodal` MCP server (list_projects, list_tasks, get_task, create_task, update_task, list_executors, launch_run, review_task, cancel_run, get_run, list_runs, get_queue). Use when work should be queued as a task instead of done now — follow-ups found while finishing a task, a plan to split into tasks, work for another repo — to launch a task's run with a given model, effort or workflow, or to check a task's status or a run's result.
+description: Create, update and start work on tasks on a Nodal board through the `nodal` MCP server (list_projects, list_tasks, get_task, create_task, update_task, start_task_chat). Use when work should be queued as a task instead of done now — follow-ups found while finishing a task, a plan to split into tasks, work for another repo — or to open the chat that works a task.
 ---
 
 # Nodal tasks
 
-Nodal is a macOS app that keeps a board of tasks per project and runs each task with an executor
-(plain Claude, an agent or a workflow). While Nodal is open, the `nodal` MCP server lets you read
-the board, create and update tasks, launch, review and cancel runs, and read their status and
-results. Launch a run only when the user asks for it: it spends their slots and tokens.
+Nodal is a macOS app that keeps a board of tasks per project; each task is worked in a Claude chat
+in its own git worktree. While Nodal is open, the `nodal` MCP server lets you read the board,
+create and update tasks, and open a task's chat. Start a task chat only when the user asks for it:
+it spends their tokens.
 
 If the tools fail with "Open Nodal first", the app is not running or its MCP server is off. Say so and stop; do not retry in
 a loop and do not fall back to another tracker unless you are asked to.
@@ -17,11 +17,9 @@ a loop and do not fall back to another tracker unless you are asked to.
 
 - **Project**: a group of repos with a `key` (`PAY`). Task keys are `{key}-{number}` (`PAY-12`).
   Every tool that takes a task accepts the key or the internal id (`t01…`).
-- **Repo**: a git repo of one project. Every task belongs to exactly one repo, and runs happen there.
-- **Task**: title, plan (markdown), acceptance criteria, priority, labels, executor and status.
+- **Repo**: a git repo of one project. Every task belongs to exactly one repo, and its chat works there.
+- **Task**: title, plan (markdown), acceptance criteria, priority, labels and status.
 - **Status**: `backlog`, `todo`, `in_progress`, `in_review`, `blocked`, `done`, `canceled`.
-- **Run**: one execution of a task. `kind: work` does the work; `kind: review` checks it against the
-  acceptance criteria and points to the work run with `parentRunId`.
 
 ## When to create a task instead of doing the work now
 
@@ -46,7 +44,7 @@ otherwise call `create_task`. It puts the task on the board and does not launch 
 
 ## How to write a good task
 
-The executor gets the title, the plan and the acceptance criteria and nothing else: it has not seen
+The agent gets the title, the plan and the acceptance criteria and nothing else: it has not seen
 your conversation. Write for someone who starts from zero in the repo.
 
 **Title**: one line, under 200 characters, imperative and specific.
@@ -66,7 +64,7 @@ long logs; quote the lines that matter. Use made-up names in examples, never sec
 When the plan already lives in the repo as a `.md` file, pass `planFile` (a path inside the repo)
 instead of `plan`, so the task follows the file.
 
-**Acceptance criteria**: the reviewer checks each one and fails the run if one is unmet, so each
+**Acceptance criteria**: the reviewer checks each one, so each
 must be checkable by reading the diff or running a command:
 
 - good: "`cargo test --lib` passes and a test covers an expired signature";
@@ -81,106 +79,46 @@ something broken for users now. **Labels**: short and reused; check the labels e
 **Status**: new tasks start in `todo` (ready to run). Use `backlog` for ideas, or when the task
 needs a person's decision before it can run.
 
-## How to pick the repo and the executor
+## How to pick the repo
 
 **Repo**: call `list_projects`; it returns each project with its repos (id, name, path). Pass
 `repo` as the repo id, its name, or a path at or inside it — the path of the repo you are working
 in is usually the right answer for follow-ups. If two projects have a repo with the same name, also
 pass `project` (key or id). A task that touches two repos is two tasks, one per repo.
 
-**Executor** (`executor`): omit it unless you have a reason. Without one, the task uses the repo's default,
-then the project's, then the app's (plain Claude at the end). Set it when the work clearly fits a
-specialist:
-
-- `{"kind": "claude"}`: a plain session with the task as the prompt;
-- `{"kind": "agent", "name": "<agent>", "source": "user" | "repo" | "plugin"}`: an agent defined in
-  `~/.claude/agents/<agent>.md` (`user`), `<repo>/.claude/agents/<agent>.md` (`repo`) or an enabled
-  plugin (`plugin`, named `<plugin>:<agent>`);
-- `{"kind": "workflow", "name": "<workflow>"}`: a workflow from `~/.claude/workflows` or
-  `<repo>/.claude/workflows`.
-
-Only name an agent or a workflow you have seen exist in one of those places: the name is not
-checked when the task is created, and the run fails when it is launched. To go back to the default,
-call `update_task` with `"executor": null`.
-
 ## Proposing a task from a Nodal chat
 
 Inside a chat in the Nodal app, the server also has `propose_task`. It takes the same fields as
-`create_task` (`repo`, `project`, `title`, `plan`, `acceptance`, `priority`, `labels`, `executor`,
+`create_task` (`repo`, `project`, `title`, `plan`, `acceptance`, `priority`, `labels`,
 `status`; `plan` is required and there is no `planFile`) and validates them the same way, but
 creates nothing: the chat shows the task as a card and the user creates it with one click. It
 returns the task as it would be created (`newTask`), with `created: false`. In a chat, prefer it to
 `create_task` unless the user asks you to create the task yourself. Outside a chat the tool is not
 listed.
 
+## Reading tasks
+
+`list_tasks` lists a project's tasks by status; `get_task` returns one task with its plan text.
+
 ## Updating tasks
 
 `update_task` changes only the fields you pass. Useful moves:
 
 - refine the plan or the acceptance criteria after learning something;
-- `done` or `canceled` when the work is finished or no longer needed (the queue never overrides
-  those two);
+- `done` or `canceled` when the work is finished or no longer needed;
 - `blocked` with the reason in the plan, when it cannot go on without someone;
-- `repo` to move it to another repo of the same project (refused while a run is pending or the task
-  has a worktree).
+- `repo` to move it to another repo of the same project (refused while the task has a worktree).
 
-Setting `in_progress` does not launch anything. Tasks imported from Linear only accept status,
-plan, acceptance criteria, executor and repo; their title, priority and labels come from Linear.
+Tasks imported from Linear only accept status,
+plan, acceptance criteria and repo; their title, priority and labels come from Linear.
 
-## Launching a run
+## Starting work on a task
 
-`launch_run` queues a work run for a task; Nodal launches it when a slot is free (`get_queue`
-shows the slots, the queue and what waits on the user). It fails if the task already has a queued
-or running run. Every option is optional and falls back to the task's, then the repo's:
-
-- `executor`: as above; a workflow manages its own worktree, so `isolation` is ignored for it;
-- `model`: `fable`, `opus`, `sonnet`, `haiku` or a full name (`claude-sonnet-5-5`, `[1m]` allowed);
-- `effort`: `low`, `medium`, `high`, `xhigh` or `max`;
-- `permissionMode`: `default`, `manual`, `acceptEdits`, `auto`, `dontAsk`, `plan` or
-  `bypassPermissions`;
-- `isolation`: `worktree` (its own branch) or `in_place` (in the repo folder);
-- `finish`: `changes` (left uncommitted), `commit`, or `pr` (commit, push and open a PR);
-- `review`: queue a review run when the work finishes;
-- `extraInstructions`: added to the prompt of this run only.
-
-Call `list_executors` with the task's repo first when you need an agent or a workflow: it lists the
-ones that exist there, the accepted values and the repo's defaults. `review_task` queues a review of
-the task's current work (`reviewer` overrides the agent). `cancel_run` dequeues a queued run or
-stops a running one; a stopped run leaves its half-done work as a patch and the task `blocked`.
-
-After launching, tell the user the run id and come back with `get_run` later instead of polling in
-a loop. `list_runs` lists runs (newest first) by `project`, `task` and `status`.
-
-## How to read a run's result
-
-`get_task` returns the task, its plan text and its latest runs (newest first). `get_run` with
-`task` returns the latest work run of the task and its review; with `runId`, that run.
-
-Read it in this order:
-
-1. **`run.status`**: `queued`, `launching` or `launched` means it is not over; check again later
-   instead of waiting in a loop. `failed` or `canceled` means it did not finish: read `run.error`.
-2. **`run.outcome`** once `finished`:
-   - `green`: the executor reports the work done;
-   - `yellow`: done with caveats (workflows) — read the summary before trusting it;
-   - `red`: the executor reports it is blocked;
-   - `stopped`: someone stopped it;
-   - `unknown`: it ended without a result Nodal could read.
-3. **`run.summary`**: what the executor says it did, or why it is blocked. **`run.prUrl`** and
-   **`run.branch`**: where the changes are.
-4. **`review`** (may be `null`): the review of that work run. `review.verdict.pass` is the gate;
-   `review.verdict.unmet` lists the acceptance criteria or problems that failed it, and
-   `review.verdict.nits` minor suggestions that did not. A review still running has a `status` but no
-   `verdict` yet. `null` means the task had no review, so `green` is only the executor's word.
-
-The task status follows the result: a failed, stopped or `red` run, or a failed review, moves the
-task to `blocked`; a passed review (or a `green`/`yellow` run without review) moves it to
-`in_review`, waiting for a person. So a `blocked` task is the one to look at: read the summary and
-the unmet criteria, then fix the plan or the criteria with `update_task`, or create a follow-up
-task, and ask the user before launching it again.
-
-Report a run's result to the user as it is: say "the review failed on X" rather than "done" when
-`verdict.pass` is false, and do not call a change merged or shipped because a run is `green`.
+`start_task_chat` takes a `task` and opens the chat that works it, in the task's own worktree: it
+returns the existing chat, or creates one, sends the task as the first message and moves the task
+to `in_progress`. Returns `chatId`, `title` and `taskId`. Tell the user the chat is open in Nodal;
+follow the work there. When a turn leaves changes the task moves to `in_review` on its own.
+Do it only when the user asks.
 
 ## Example
 
@@ -201,4 +139,4 @@ A finished task left a follow-up in the repo at `/Users/me/Code/acme-web`:
 }
 ```
 
-Then tell the user the key it got (`PAY-13`) and that it is on the board, not launched.
+Then tell the user the key it got (`PAY-13`) and that it is on the board.

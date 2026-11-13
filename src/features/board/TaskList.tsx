@@ -1,5 +1,4 @@
-import type { Project, Repo, RunLight, Task, TaskStatus } from "../../domain/types";
-import { RunBadge } from "../runs";
+import type { Project, Repo, Task, TaskStatus } from "../../domain/types";
 import { PriorityBars, StatusRing } from "../tasks/bits";
 import { STATUS_META } from "../tasks/status";
 import "./board.css";
@@ -15,14 +14,13 @@ export interface TaskListProps {
   showProject: boolean;
   projectById: Map<string, Project>;
   repoById: Map<string, Repo>;
-  latest: Map<string, RunLight>;
   keyOf: (t: Task) => string;
   onOpen: (taskId: string) => void;
   onMenu: (taskId: string, at: { x: number; y: number }) => void;
 }
 
 /** The board's List view: tasks grouped by status. */
-export function TaskList({ tasks, statuses, order, showProject, projectById, repoById, latest, keyOf, onOpen, onMenu }: TaskListProps) {
+export function TaskList({ tasks, statuses, order, showProject, projectById, repoById, keyOf, onOpen, onMenu }: TaskListProps) {
   const groups = statuses
     .map((status) => ({
       status,
@@ -43,7 +41,6 @@ export function TaskList({ tasks, statuses, order, showProject, projectById, rep
             {g.rows.map((t) => {
               const p = projectById.get(t.projectId);
               const repo = repoById.get(t.repoId);
-              const run = latest.get(t.id);
               return (
                 <li key={t.id}>
                   <button
@@ -84,7 +81,6 @@ export function TaskList({ tasks, statuses, order, showProject, projectById, rep
                         </>
                       )}
                     </span>
-                    <span className="tv-run">{run && <RunBadge run={run} />}</span>
                     <span className="tv-prio">
                       <PriorityBars priority={t.priority} />
                     </span>

@@ -1,3 +1,4 @@
+#![allow(clippy::disallowed_methods)] // builds git fixtures directly on disk
 use std::path::{Path, PathBuf};
 
 use nodal_domain::testutil::{project_of, repo_of};
@@ -174,6 +175,8 @@ fn spec_runs_in_the_chat_repo_or_the_first_one() {
         title: None,
         session_title: None,
         agent: None,
+        task_id: None,
+        worktree: None,
         session_id: None,
         launch: LaunchOptions {
             model: Some("haiku".into()),
@@ -183,7 +186,7 @@ fn spec_runs_in_the_chat_repo_or_the_first_one() {
         created_at: 1,
         updated_at: 1,
     };
-    let s = spec(&chat, &project, &repos, None).unwrap();
+    let s = spec(&chat, &project, &repos, None, None).unwrap();
     assert_eq!(s.cwd, PathBuf::from("/Users/me/Code/acme-api"));
     assert_eq!(
         s.args[..6],
@@ -203,6 +206,7 @@ fn spec_runs_in_the_chat_repo_or_the_first_one() {
         &chat,
         &project,
         &repos,
+        None,
         Some(Path::new("/Users/me/nodal-mcp")),
     )
     .unwrap();
@@ -214,14 +218,14 @@ fn spec_runs_in_the_chat_repo_or_the_first_one() {
     );
 
     chat.agent = Some("code-reviewer".into());
-    let s = spec(&chat, &project, &repos, None).unwrap();
+    let s = spec(&chat, &project, &repos, None, None).unwrap();
     assert!(s.args.windows(2).any(|w| w == ["--agent", "code-reviewer"]));
     chat.agent = None;
 
     chat.repo_id = Some("gone".into());
-    assert!(spec(&chat, &project, &repos, None).is_err());
+    assert!(spec(&chat, &project, &repos, None, None).is_err());
     chat.repo_id = None;
-    assert!(spec(&chat, &project, &[], None)
+    assert!(spec(&chat, &project, &[], None, None)
         .unwrap_err()
         .contains("Add a repo"));
 }
@@ -242,12 +246,14 @@ fn a_repo_less_chat_runs_at_the_project_root_when_it_has_one() {
         title: None,
         session_title: None,
         agent: None,
+        task_id: None,
+        worktree: None,
         session_id: None,
         launch: LaunchOptions::default(),
         created_at: 1,
         updated_at: 1,
     };
-    let s = spec(&chat, &project, &repos, None).unwrap();
+    let s = spec(&chat, &project, &repos, None, None).unwrap();
     assert_eq!(s.cwd, PathBuf::from("/Users/me/Code/acme"));
     assert_eq!(
         s.args[..2],
@@ -261,11 +267,11 @@ fn a_repo_less_chat_runs_at_the_project_root_when_it_has_one() {
         .contains("This chat runs at the project root."));
     assert_eq!(
         s.cwd,
-        PathBuf::from(chat_cwd(&chat, &project, &repos).unwrap().path()),
+        PathBuf::from(chat_cwd(&chat, &project, &repos, None).unwrap().path()),
         "the transcript looks it up here"
     );
 
-    let s = spec(&chat, &project, &[], None).unwrap();
+    let s = spec(&chat, &project, &[], None, None).unwrap();
     assert_eq!(
         s.cwd,
         PathBuf::from("/Users/me/Code/acme"),
@@ -273,7 +279,7 @@ fn a_repo_less_chat_runs_at_the_project_root_when_it_has_one() {
     );
 
     chat.repo_id = Some("r2".into());
-    let s = spec(&chat, &project, &repos, None).unwrap();
+    let s = spec(&chat, &project, &repos, None, None).unwrap();
     assert_eq!(
         s.cwd,
         PathBuf::from("/Users/me/Code/acme/web"),
@@ -284,7 +290,7 @@ fn a_repo_less_chat_runs_at_the_project_root_when_it_has_one() {
     chat.repo_id = None;
     project.root_path = None;
     assert_eq!(
-        chat_cwd(&chat, &project, &repos).unwrap(),
+        chat_cwd(&chat, &project, &repos, None).unwrap(),
         ChatCwd::Repo(&repos[0])
     );
 }
@@ -349,40 +355,14 @@ fn first_message_goes_back_into_the_items() {
 use std::sync::{Arc, Mutex};
 
 use nodal_domain::error::HostError;
-use nodal_domain::model::activity::{AgentSession, AppRuns, ExternalSessions};
 use nodal_domain::model::chat::RunState;
-use nodal_domain::model::claude::{ExtraFlags, LaunchBlocker, LaunchError, RunDetail, RunRef, RunSummary, SessionReadout};
+use nodal_domain::model::claude::Transcript;
 use nodal_domain::model::events::ChangeKind;
-use nodal_domain::ports::{BoxFut, ChangeNotifier, ChatRuntime, ClaudeCli, Clock, SessionFiles};
+use nodal_domain::ports::{ChangeNotifier, ChatRuntime, Clock, SessionFiles};
 use nodal_host::testutil::TempDir;
 
 use crate::core::Core;
 use crate::testutil::{block_on, env_for};
-
-/// Chats never calls `claude` directly (only `core.sessions`/`core.chats`): this fake exists
-/// only so `Core` can be built.
-struct FakeClaude;
-
-impl ClaudeCli for FakeClaude {
-    fn list_sessions(&self) -> BoxFut<'_, Result<Vec<RunSummary>, HostError>> {
-        unimplemented!()
-    }
-    fn list_agent_sessions(&self) -> BoxFut<'_, Result<Vec<AgentSession>, HostError>> {
-        unimplemented!()
-    }
-    fn launch_bg<'a>(
-        &'a self,
-        _cwd: String,
-        _prompt: String,
-        _opts: &'a LaunchOptions,
-        _extra: &'a ExtraFlags,
-    ) -> BoxFut<'a, Result<RunRef, LaunchError>> {
-        unimplemented!()
-    }
-    fn stop<'a>(&'a self, _short_id: &'a str) -> BoxFut<'a, Result<(), HostError>> {
-        unimplemented!()
-    }
-}
 
 #[derive(Default)]
 struct FakeSessionFiles {
@@ -392,28 +372,6 @@ struct FakeSessionFiles {
 }
 
 impl SessionFiles for FakeSessionFiles {
-    fn read_session(&self, _session_id: &str, _cwd: &str) -> SessionReadout {
-        unimplemented!()
-    }
-    fn session_tokens(&self, _session_id: &str, _cwd: &str) -> Option<i64> {
-        unimplemented!()
-    }
-    fn run_detail(&self, _session_id: &str, _cwd: &str) -> Result<Option<RunDetail>, HostError> {
-        unimplemented!()
-    }
-    fn launch_blocker(&self, _session_id: &str, _cwd: &str) -> Result<Option<LaunchBlocker>, HostError> {
-        unimplemented!()
-    }
-    fn agent_transcript(
-        &self,
-        _session_id: &str,
-        _cwd: &str,
-        _run_id: &str,
-        _agent_id: &str,
-        _limit: usize,
-    ) -> Result<Option<Transcript>, HostError> {
-        unimplemented!()
-    }
     fn find_session_jsonl(&self, _projects: &Path, _cwd: &str, _session_id: &str) -> Option<PathBuf> {
         self.jsonl.clone()
     }
@@ -429,15 +387,6 @@ impl SessionFiles for FakeSessionFiles {
     }
     fn session_title(&self, _path: &Path) -> Option<String> {
         self.title.clone()
-    }
-    fn external_sessions(
-        &self,
-        _repos: &[(String, PathBuf)],
-        _agents: &[AgentSession],
-        _app: &AppRuns,
-        _now: i64,
-    ) -> Result<ExternalSessions, HostError> {
-        unimplemented!()
     }
 }
 
@@ -536,7 +485,6 @@ fn fx_with(name: &str, sessions: Arc<dyn SessionFiles>) -> Fx {
         env: env_for(&t.0, Some(t.0.join("claude"))),
         rt: crate::testutil::rt(),
         clock: Arc::new(FixedClock(1_000)),
-        claude: Arc::new(FakeClaude),
         sessions,
         notifier: notifier.clone(),
         chats: runtime.clone(),
@@ -742,4 +690,71 @@ fn pick_cwd_prefers_the_session_then_the_launch_folder_when_they_exist() {
     assert_eq!(pick_cwd(s("/gone"), s("/repo"), exists), s("/repo"));
     assert_eq!(pick_cwd(s("/gone"), s("/gone"), exists), None);
     assert_eq!(pick_cwd(None, None, exists), None);
+}
+
+#[test]
+fn start_task_chat_runs_in_the_task_worktree_and_is_idempotent() {
+    use nodal_domain::model::TaskStatus;
+    use nodal_store::rows::insert_task;
+
+    let f = fx("chats-task");
+    nodal_host::testutil::init_repo(&f.repo_path);
+    insert_task(&f.db.lock().unwrap(), &nodal_domain::testutil::task_of("t1")).unwrap();
+
+    let chat = block_on(f.chats.start_task_chat("t1".into())).unwrap();
+    assert_eq!(chat.task_id.as_deref(), Some("t1"));
+    assert_eq!(chat.repo_id.as_deref(), Some("r1"));
+    let task = tasks::get(&f.db.lock().unwrap(), "t1").unwrap();
+    let wt = task.worktree.expect("worktree persisted on the task");
+    assert_eq!(task.status, TaskStatus::InProgress);
+    {
+        let calls = f.runtime.sent.lock().unwrap();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].3.cwd, PathBuf::from(&wt.path));
+        assert!(calls[0].4.contains("PAY-1: New logo in the header"));
+        assert!(calls[0].4.contains("The new logo shows up in the header"));
+    }
+
+    let ws = block_on(f.chats.chat_workspace(chat.id.clone())).unwrap();
+    assert!(ws.is_worktree);
+    assert_eq!(ws.cwd.as_deref(), Some(wt.path.as_str()));
+
+    let again = block_on(f.chats.start_task_chat("t1".into())).unwrap();
+    assert_eq!(again.id, chat.id);
+    assert_eq!(f.runtime.sent.lock().unwrap().len(), 1);
+    assert_eq!(chats::list(&f.db.lock().unwrap(), "p1").unwrap().len(), 1);
+}
+
+#[test]
+fn create_chat_in_a_worktree_runs_there_and_rejects_other_paths() {
+    let f = fx("chats-free-wt");
+    nodal_host::testutil::init_repo(&f.repo_path);
+    let wt = f._t.0.join("wt-feat");
+    let git = |args: &[&str]| {
+        let out = std::process::Command::new("git").arg("-C").arg(&f.repo_path).args(args).output().unwrap();
+        assert!(out.status.success());
+    };
+    git(&["worktree", "add", "-q", "-b", "feat", &wt.to_string_lossy()]);
+    let new = |path: &Path, repo: Option<&str>| NewChat {
+        repo_id: repo.map(Into::into),
+        worktree: Some(path.to_string_lossy().into_owned()),
+        ..Default::default()
+    };
+
+    // Not a worktree, the main checkout, and no repo: all rejected.
+    assert!(block_on(f.chats.create_chat("p1".into(), new(&f._t.0, Some("r1")))).is_err());
+    assert!(block_on(f.chats.create_chat("p1".into(), new(&f.repo_path, Some("r1")))).is_err());
+    assert!(block_on(f.chats.create_chat("p1".into(), new(&wt, None))).is_err());
+
+    let chat = block_on(f.chats.create_chat("p1".into(), new(&wt, Some("r1")))).unwrap();
+    assert_eq!(chat.worktree.as_deref(), Some(wt.to_string_lossy().as_ref()));
+    block_on(f.chats.send_chat_message(chat.id.clone(), "hi".into())).unwrap();
+    assert_eq!(f.runtime.sent.lock().unwrap()[0].3.cwd, wt);
+    let ws = block_on(f.chats.chat_workspace(chat.id.clone())).unwrap();
+    assert!(ws.is_worktree);
+
+    // The folder is gone: the chat falls back to the repo.
+    std::fs::remove_dir_all(&wt).unwrap();
+    block_on(f.chats.send_chat_message(chat.id, "again".into())).unwrap();
+    assert_eq!(f.runtime.sent.lock().unwrap()[1].3.cwd, f.repo_path);
 }

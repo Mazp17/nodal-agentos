@@ -1,14 +1,18 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
+import { ContextMenu } from "radix-ui";
 import { useChatWorkspace, useRepoBranch } from "../domain/hooks/branches";
 import type { Chat, Project } from "../domain/types";
+import { useTask } from "../domain/hooks/store";
 import { chatTitle, shortAgo } from "../features/chats/model";
+import { taskTag } from "../features/tasks/status";
 import { BrandMark } from "../ui/BrandMark";
 import { Kbd, KbdGroup } from "../ui/Kbd";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../ui/Tooltip";
 import { readJsonPref, writePref } from "./storage";
+import type { ProjectSection } from "./useNav";
 
 export type SideMode = "chat" | "tasks";
-type IconName = "chat" | "board" | "settings" | "plus" | "chevron" | "branch" | "trash";
+type IconName = "update" | "overview" | "chat" | "board" | "settings" | "plus" | "chevron" | "branch" | "trash";
 
 const GEAR =
   "M5.9 1.5h2.2l.35 1.55c.4.15.77.36 1.1.62l1.52-.48 1.1 1.9-1.17 1.08a4 4 0 0 1 0 1.26l1.17 1.08-1.1 1.9-1.52-.48c-.33.26-.7.47-1.1.62L8.1 12.5H5.9l-.35-1.55a4 4 0 0 1-1.1-.62l-1.52.48-1.1-1.9 1.17-1.08a4 4 0 0 1 0-1.26L1.83 5.49l1.1-1.9 1.52.48c.33-.26.7-.47 1.1-.62z";
@@ -29,6 +33,20 @@ function SideIcon({ name, size = 14 }: { name: IconName; size?: number }) {
       aria-hidden
       focusable="false"
     >
+      {name === "update" && (
+        <>
+          <circle cx="7" cy="7" r="5.5" />
+          <path d="M7 4v5M4.8 6.8L7 9l2.2-2.2" />
+        </>
+      )}
+      {name === "overview" && (
+        <>
+          <rect x="1.5" y="1.5" width="4.5" height="4.5" rx="1" />
+          <rect x="8" y="1.5" width="4.5" height="4.5" rx="1" />
+          <rect x="1.5" y="8" width="4.5" height="4.5" rx="1" />
+          <rect x="8" y="8" width="4.5" height="4.5" rx="1" />
+        </>
+      )}
       {name === "board" && (
         <>
           <rect x="1.5" y="2" width="3" height="10" rx="1" />
@@ -93,6 +111,8 @@ interface Props {
   /** Board showing: `null` is "All projects"; `undefined` when not on a board. */
   activeBoard: string | null | undefined;
   settingsOpen: boolean;
+  overviewOpen: boolean;
+  onOverview: () => void;
   openTotal: number;
   openByProject: ReadonlyMap<string, number>;
   needYouByProject: ReadonlySet<string>;
@@ -112,11 +132,15 @@ interface Props {
   onDeleteChat: (chat: Chat) => void;
   onOpenBoard: (projectId: string | null) => void;
   onNewTask: () => void;
-  onProjectSettings: (projectId: string) => void;
+  onProjectSettings: (projectId: string, section?: ProjectSection) => void;
   onSettings: () => void;
   onNewProject: () => void;
   onOpenPalette: () => void;
 }
+
+const SIDE_MIN = 232;
+const SIDE_MAX = 360;
+const SIDE_DEFAULT = 248;
 
 export function Sidebar(p: Props) {
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(() => new Set(readJsonPref("collapsedProjects", [], isStrings)));
@@ -156,39 +180,134 @@ export function Sidebar(p: Props) {
     else chatsOf.set(c.projectId, [c]);
   }
 
+  // Resizable: dragged or arrow-keyed between SIDE_MIN and SIDE_MAX, remembered.
+  const [width, setWidthRaw] = useState(() => readJsonPref("sideWidth", SIDE_DEFAULT, (v): v is number => typeof v === "number"));
+  const setWidth = (w: number) => setWidthRaw(Math.max(SIDE_MIN, Math.min(SIDE_MAX, Math.round(w))));
+  useEffect(() => writePref("sideWidth", JSON.stringify(width)), [width]);
+  const startResize = (e: React.PointerEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    const el = e.currentTarget;
+    el.setPointerCapture(e.pointerId);
+    const left = el.parentElement!.getBoundingClientRect().left;
+    const move = (ev: PointerEvent) => setWidth(ev.clientX - left);
+    const up = () => {
+      el.removeEventListener("pointermove", move);
+      el.removeEventListener("pointerup", up);
+      document.body.classList.remove("resizing-col");
+    };
+    document.body.classList.add("resizing-col");
+    el.addEventListener("pointermove", move);
+    el.addEventListener("pointerup", up);
+  };
+
+  const showChats = p.mode === "chat";
+  const railOn = (m: "overview" | SideMode) =>
+    m === "overview" ? p.overviewOpen : !p.overviewOpen && !p.settingsOpen && p.mode === m;
+  const needYou = p.needYouByProject.size;
+  const rail: { id: "overview" | SideMode; label: string; key: string; icon: IconName; badge: number; tone: "live" | "need" }[] = [
+    { id: "overview", label: "Overview", key: "3", icon: "overview", badge: p.liveChats.size, tone: "live" },
+    { id: "chat", label: "Chats", key: "1", icon: "chat", badge: p.unreadChats.size, tone: "live" },
+    { id: "tasks", label: "Tasks", key: "2", icon: "board", badge: needYou, tone: "need" },
+  ];
+
   return (
-    <aside className="sidebar" aria-label="Sidebar">
-      <div className="brand">
-        <BrandMark size={22} />
-        <span className="brand-text">
-          <span className="brand-name">Nodal</span>
-          <span className="brand-tag">Agent OS for Claude</span>
+    <>
+      {/* The places, as an activity rail: the panel beside it shows only the one picked. */}
+      <nav className="rail" aria-label="Places">
+        <span className="rail-brand" title="Nodal · Agent OS for Claude">
+          <BrandMark size={24} />
         </span>
+        {rail.map((r) => {
+          const on = railOn(r.id);
+          return (
+            <button
+              key={r.id}
+              type="button"
+              className={`rail-btn ${on ? "on" : ""}`}
+              aria-current={on ? "page" : undefined}
+              aria-label={r.badge ? `${r.label}, ${r.badge} ${r.tone === "need" ? "need you" : r.id === "chat" ? "unread" : "working"}` : r.label}
+              aria-keyshortcuts={`Meta+${r.key}`}
+              title={`${r.label} (⌘${r.key})`}
+              onClick={() => (r.id === "overview" ? p.onOverview() : p.onMode(r.id))}
+            >
+              <SideIcon name={r.icon} size={18} />
+              {r.badge > 0 && <span className={`rail-badge rail-badge-${r.tone}`}>{r.badge > 9 ? "9+" : r.badge}</span>}
+            </button>
+          );
+        })}
+        <span className="rail-spacer" />
+        {p.updateAvailable && (
+          <button
+            type="button"
+            className="rail-btn rail-update"
+            disabled={p.updating || p.checkingUpdates}
+            onClick={p.onUpdate}
+            title={p.updating ? "Updating…" : `Update to v${p.updateAvailable}${p.version ? ` (installed v${p.version})` : ""}`}
+            aria-label={`Update to v${p.updateAvailable}`}
+          >
+            <SideIcon name="update" size={18} />
+          </button>
+        )}
+        <button
+          type="button"
+          className={`rail-btn ${p.settingsOpen ? "on" : ""}`}
+          aria-current={p.settingsOpen ? "page" : undefined}
+          aria-keyshortcuts="Meta+,"
+          aria-label="Settings"
+          title={p.version ? `Settings (⌘,) · v${p.version}` : "Settings (⌘,)"}
+          onClick={p.onSettings}
+        >
+          <SideIcon name="settings" size={18} />
+        </button>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <span className="rail-status" role="status" aria-label={p.provider.label}>
+              <span className={`dot dot-sm tone-${p.provider.tone}`} aria-hidden />
+            </span>
+          </TooltipTrigger>
+          <TooltipContent side="right">{p.provider.label}</TooltipContent>
+        </Tooltip>
+      </nav>
+
+      {/* Overview and Settings are pages of their own: no list beside them. */}
+      {!p.overviewOpen && !p.settingsOpen && (
+    <aside className="sidebar" aria-label={showChats ? "Chats" : "Tasks"} style={{ width }}>
+      <div
+        role="separator"
+        className="side-resizer"
+        aria-orientation="vertical"
+        aria-label="Resize sidebar"
+        aria-valuemin={SIDE_MIN}
+        aria-valuemax={SIDE_MAX}
+        aria-valuenow={width}
+        tabIndex={0}
+        title="Drag to resize, double-click to reset"
+        onPointerDown={startResize}
+        onDoubleClick={() => setWidth(SIDE_DEFAULT)}
+        onKeyDown={(e) => {
+          const step = e.shiftKey ? 32 : 8;
+          if (e.key === "ArrowLeft") setWidth(width - step);
+          else if (e.key === "ArrowRight") setWidth(width + step);
+          else return;
+          e.preventDefault();
+        }}
+      />
+      <div className="side-head">
+        <h2 className="side-title">{showChats ? "Chats" : "Tasks"}</h2>
+        <button
+          type="button"
+          className="icon-btn side-head-add"
+          aria-label="New project"
+          title="New project"
+          onClick={p.onNewProject}
+        >
+          <SideIcon name="plus" size={13} />
+        </button>
       </div>
       <button type="button" className="btn side-search" onClick={p.onOpenPalette} aria-keyshortcuts="Meta+K">
-        <span className="ellipsis">Search or run…</span>
+        <span className="ellipsis">Search chats, files, tasks…</span>
         <Keys keys={["⌘", "K"]} />
       </button>
-      <button type="button" className="btn side-new-project" onClick={p.onNewProject}>
-        <SideIcon name="plus" size={13} />
-        <span className="side-item-label">New project</span>
-      </button>
-
-      <div className="side-mode" role="group" aria-label="View">
-        {(["chat", "tasks"] as const).map((m) => (
-          <button
-            key={m}
-            type="button"
-            className={`side-mode-btn ${p.mode === m ? "on" : ""}`}
-            aria-pressed={p.mode === m}
-            aria-keyshortcuts={m === "chat" ? "Meta+1" : "Meta+2"}
-            onClick={() => p.onMode(m)}
-          >
-            <SideIcon name={m === "chat" ? "chat" : "board"} />
-            {m === "chat" ? "Chats" : "Tasks"}
-          </button>
-        ))}
-      </div>
 
       {p.mode === "chat" ? (
         <nav className="side-groups" aria-label="Chats by project">
@@ -201,6 +320,7 @@ export function Sidebar(p: Props) {
             const repoId = p.defaultRepo(proj.id);
             return (
               <section key={proj.id} className="side-group" aria-label={proj.name}>
+                <ProjectMenu p={p} projectId={proj.id} canChat={!!repoId}>
                 <div className="side-group-head">
                   <button
                     type="button"
@@ -210,6 +330,16 @@ export function Sidebar(p: Props) {
                   >
                     <span className="project-dot" style={{ ["--project-color" as string]: proj.color }} aria-hidden />
                     <span className="side-group-name ellipsis">{proj.name}</span>
+                    {(() => {
+                      // Seen even with the project folded: how many of its chats are answering now.
+                      const live = all.filter((c) => p.liveChats.has(c.id)).length;
+                      return live > 0 ? (
+                        <span className="side-group-live">
+                          <span className="side-live-dot" aria-hidden />
+                          {live} running
+                        </span>
+                      ) : null;
+                    })()}
                     <span className="side-count num">{all.length || ""}</span>
                     <span className={`side-group-chev ${open ? "open" : ""}`}>
                       <SideIcon name="chevron" size={12} />
@@ -226,6 +356,7 @@ export function Sidebar(p: Props) {
                     <SideIcon name="plus" size={13} />
                   </button>
                 </div>
+                </ProjectMenu>
                 {open && (
                   <>
                     {list.map((c) => (
@@ -233,6 +364,7 @@ export function Sidebar(p: Props) {
                         key={c.id}
                         chat={c}
                         repoId={c.repoId ?? repoId}
+                        projectKey={proj.key}
                         on={p.activeChat === c.id}
                         live={p.liveChats.has(c.id)}
                         unread={p.unreadChats.has(c.id)}
@@ -282,7 +414,8 @@ export function Sidebar(p: Props) {
               const on = p.activeBoard === proj.id;
               const open = p.openByProject.get(proj.id) ?? 0;
               return (
-                <div key={proj.id} className={`side-project-row ${on ? "on-soft" : ""}`}>
+                <ProjectMenu key={proj.id} p={p} projectId={proj.id} canChat={!!p.defaultRepo(proj.id)}>
+                <div className={`side-project-row ${on ? "on-soft" : ""}`}>
                   <button
                     type="button"
                     className="side-project-pick"
@@ -304,6 +437,7 @@ export function Sidebar(p: Props) {
                     {p.mappingDrift.has(proj.id) ? <span className="dot dot-sm tone-warn" aria-hidden /> : <SideIcon name="settings" size={13} />}
                   </button>
                 </div>
+                </ProjectMenu>
               );
             })}
             {p.projects.length === 0 && <div className="side-empty">No projects yet.</div>}
@@ -311,46 +445,17 @@ export function Sidebar(p: Props) {
         </>
       )}
 
-      <div className="side-foot">
-        <button
-          type="button"
-          className={`side-item ${p.settingsOpen ? "on" : ""}`}
-          aria-current={p.settingsOpen ? "page" : undefined}
-          aria-keyshortcuts="Meta+,"
-          onClick={p.onSettings}
-        >
-          <SideIcon name="settings" />
-          <span className="side-item-label">Settings</span>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <span className="side-foot-status" role="status" aria-label={p.provider.label}>
-                <span className={`dot dot-sm tone-${p.provider.tone}`} aria-hidden />
-              </span>
-            </TooltipTrigger>
-            <TooltipContent side="top">{p.provider.label}</TooltipContent>
-          </Tooltip>
-        </button>
-        {p.updateAvailable ? (
-          <button
-            type="button"
-            className="side-version side-update"
-            disabled={p.updating || p.checkingUpdates}
-            onClick={p.onUpdate}
-            aria-label={p.version ? `Update to v${p.updateAvailable} (installed v${p.version})` : undefined}
-          >
-            {p.updating ? "Updating…" : `Update to v${p.updateAvailable}`}
-          </button>
-        ) : (
-          p.version && <span className="side-version">v{p.version}</span>
-        )}
-      </div>
     </aside>
+      )}
+    </>
   );
 }
 
 interface ChatRowProps {
   chat: Chat;
   repoId: string | null;
+  /** Project key, for the linked task's local id. */
+  projectKey: string;
   on: boolean;
   live: boolean;
   unread: boolean;
@@ -359,13 +464,14 @@ interface ChatRowProps {
   onDelete: () => void;
 }
 
-function ChatRow({ chat, repoId, on, live, unread, now, onOpen, onDelete }: ChatRowProps) {
+function ChatRow({ chat, repoId, projectKey, on, live, unread, now, onOpen, onDelete }: ChatRowProps) {
   // Where the chat works now (it may have moved into a worktree); the repo's branch until known.
   const ws = useChatWorkspace(chat.id).data;
   const repoBranch = useRepoBranch(ws ? null : repoId).data ?? null;
   const branch = ws?.branch ?? repoBranch;
   const changes = ws && ws.files > 0 ? `+${ws.additions} −${ws.deletions}` : null;
   const title = chatTitle(chat);
+  const task = useTask(chat.taskId).data;
   return (
     <div className={`side-chat ${on ? "on" : ""} ${unread ? "unread" : ""}`}>
       <button
@@ -377,7 +483,10 @@ function ChatRow({ chat, repoId, on, live, unread, now, onOpen, onDelete }: Chat
       >
         <span className={`side-chat-dot ${live ? "live pulse" : unread ? "unread" : ""}`} aria-hidden />
         <span className="side-chat-text">
-          <span className="side-chat-title ellipsis">{title}</span>
+          <span className="side-chat-title ellipsis">
+            {task && <span className="side-chat-task mono">{taskTag(task, projectKey)}</span>}
+            {title}
+          </span>
           {branch && (
             <span className="side-chat-branch" title={ws?.cwd ?? undefined}>
               <SideIcon name="branch" size={11} />
@@ -400,5 +509,41 @@ function ChatRow({ chat, repoId, on, live, unread, now, onOpen, onDelete }: Chat
         <SideIcon name="trash" size={12} />
       </button>
     </div>
+  );
+}
+
+/** Right-click on a project (either sidebar mode): its chat, board and settings pages. */
+function ProjectMenu({ p, projectId, canChat, children }: { p: Props; projectId: string; canChat: boolean; children: ReactNode }) {
+  const settings = (section: ProjectSection) => () => p.onProjectSettings(projectId, section);
+  return (
+    <ContextMenu.Root>
+      <ContextMenu.Trigger asChild>{children}</ContextMenu.Trigger>
+      <ContextMenu.Portal>
+        <ContextMenu.Content className="menu tab-menu" collisionPadding={8}>
+          <ContextMenu.Item className="menu-item" disabled={!canChat} onSelect={() => p.onNewChat(projectId)}>
+            New chat
+          </ContextMenu.Item>
+          <ContextMenu.Item className="menu-item" onSelect={() => p.onOpenBoard(projectId)}>
+            Open board
+          </ContextMenu.Item>
+          <ContextMenu.Separator className="menu-sep" />
+          <ContextMenu.Item className="menu-item" onSelect={settings("general")}>
+            Project settings
+          </ContextMenu.Item>
+          <ContextMenu.Item className="menu-item" onSelect={settings("repos")}>
+            Repositories
+          </ContextMenu.Item>
+          <ContextMenu.Item className="menu-item" onSelect={settings("worktrees")}>
+            Worktrees
+          </ContextMenu.Item>
+          <ContextMenu.Item className="menu-item" onSelect={settings("sources")}>
+            Sources
+          </ContextMenu.Item>
+          <ContextMenu.Item className="menu-item" onSelect={settings("agents")}>
+            Agents
+          </ContextMenu.Item>
+        </ContextMenu.Content>
+      </ContextMenu.Portal>
+    </ContextMenu.Root>
   );
 }

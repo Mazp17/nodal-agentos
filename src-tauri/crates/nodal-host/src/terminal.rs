@@ -1,11 +1,7 @@
-//! Actions on background sessions that don't go through the queue: attach in Terminal.app
-//! (`claude attach`) and open Terminal in a folder. The other way to attach, a `claude
-//! attach` in an in-app pty for the drawer's embedded terminal, lives in `pty`.
+//! Opens Terminal.app in a folder (`osascript`).
 
 use std::path::Path;
 use std::time::Duration;
-
-use nodal_domain::execution::worktree::is_valid_run_id;
 
 use crate::claude::bin as claude_bin;
 
@@ -21,18 +17,6 @@ fn applescript_string(s: &str) -> String {
     format!("\"{}\"", s.replace('\\', r"\\").replace('"', "\\\""))
 }
 
-/// `-e` lines for osascript: opens a Terminal window with `claude attach <id>`.
-/// `run_id` is already validated; the binary path is quoted anyway in case it has spaces.
-fn attach_script(claude: &Path, run_id: &str) -> Vec<String> {
-    let cmd = format!("{} attach {}", shell_quote(&claude.to_string_lossy()), run_id);
-    vec![
-        "tell application \"Terminal\"".into(),
-        "activate".into(),
-        format!("do script {}", applescript_string(&cmd)),
-        "end tell".into(),
-    ]
-}
-
 async fn osascript(lines: Vec<String>) -> Result<(), String> {
     let mut cmd = tokio::process::Command::new("/usr/bin/osascript");
     for line in lines {
@@ -44,18 +28,6 @@ async fn osascript(lines: Vec<String>) -> Result<(), String> {
         return Err(format!("Couldn't open Terminal: {}", claude_bin::error_text(&out)));
     }
     Ok(())
-}
-
-/// Opens Terminal.app running `claude attach <run_id>` on a background session.
-pub async fn attach(run_id: &str) -> Result<(), String> {
-    if !is_valid_run_id(run_id) {
-        return Err(format!("Invalid run id: \"{run_id}\"."));
-    }
-    if !cfg!(target_os = "macos") {
-        return Err("Attach is only available on macOS (it uses Terminal.app).".into());
-    }
-    let claude = claude_bin::resolve_claude()?;
-    osascript(attach_script(&claude, run_id)).await
 }
 
 /// `-e` lines for osascript: opens a Terminal window in `dir` and, if `claude` is given,

@@ -1,13 +1,13 @@
 //! Board context: projects, repos, tasks, relations, executors and settings.
 
+mod cleaning;
 pub mod ops;
+mod worktrees;
 
-use std::path::Path;
 use std::sync::Arc;
 
 use nodal_domain::board::dto::{NewProject, NewRepo, NewTask, ProjectPatch, RepoPatch, TaskPatch};
 use nodal_domain::model::events::ChangeKind;
-use nodal_domain::model::executors::ExecutorInfo;
 use nodal_domain::model::{HiddenExecutor, Project, RelationKind, Repo, Settings, Task, TaskRelation, TaskStatus};
 use nodal_domain::util::check_id;
 use nodal_store::board::{hidden_executors, projects, relations, repos, tasks};
@@ -32,11 +32,12 @@ async fn blocking<T: Send + 'static>(f: impl FnOnce() -> Result<T, String> + Sen
 /// Board context: projects, repos, tasks, relations, executors and settings.
 pub struct Board {
     core: Arc<Core>,
+    cleaning: cleaning::Cleaning,
 }
 
 impl Board {
     pub(crate) fn new(core: Arc<Core>) -> Self {
-        Self { core }
+        Self { core, cleaning: cleaning::Cleaning::default() }
     }
 
     /// Runs `f` with the connection; `ops` errors already come ready to display.
@@ -217,18 +218,7 @@ impl Board {
 
     // ---------- Executors ----------
 
-    pub async fn list_executors(&self, repo_id: Option<String>) -> Result<Vec<ExecutorInfo>, AppError> {
-        let repo_id = opt_id(repo_id, "repo")?;
-        let repo_path = match repo_id {
-            Some(id) => Some(self.db(move |c| Ok(repos::get(c, &id)?.path)).await?),
-            None => None,
-        };
-        let claude_dir = self.core.env.claude_dir.clone();
-        let claude_config = self.core.env.claude_config.clone();
-        blocking(move || Ok(claude_config.catalog(claude_dir.as_deref(), repo_path.as_deref().map(Path::new)))).await
-    }
-
-    /// Agents and workflows the project hides from its pickers. `list_executors` stays unfiltered.
+    /// Agents and workflows the project hides from its pickers.
     pub async fn list_hidden_executors(&self, project_id: String) -> Result<Vec<HiddenExecutor>, AppError> {
         check_id(&project_id, "project")?;
         self.db(move |c| Ok(hidden_executors::list(c, &project_id)?)).await
@@ -257,8 +247,6 @@ impl Board {
         self.db(|c| Ok(rows::load_settings(c)?)).await
     }
 
-    /// Doesn't kick the queue itself: the command does that right after this returns (today's
-    /// order), since concurrency changes may free up room for queued runs.
     pub async fn set_settings(&self, settings: Settings) -> Result<Settings, AppError> {
         let s = self.db(move |c| ops::set_settings(c, &settings)).await?;
         self.core.notifier.notify(ChangeKind::Projects, None);

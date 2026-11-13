@@ -26,7 +26,8 @@ pub fn changes(dir: &Path) -> DiffStat {
     let Ok(out) = ok(dir, &["ls-files", "--others", "--exclude-standard", "-z"]) else {
         return stat;
     };
-    for (i, name) in out.split('\0').filter(|s| !s.is_empty()).enumerate() {
+    // A trailing `/` is a nested repo (e.g. a worktree inside the repo): not a change here.
+    for (i, name) in out.split('\0').filter(|s| !s.is_empty() && !s.ends_with('/')).enumerate() {
         stat.files += 1;
         if i < UNTRACKED_COUNTED_MAX {
             stat.additions += count_lines(&dir.join(name));

@@ -4,10 +4,8 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use nodal_domain::board::dto::{NewProject, NewRepo};
-use nodal_domain::testutil::run_of;
 use nodal_host::adapters::{HostClaudeConfig, HostGit, HostLocalFs, HostPlanFiles};
 use nodal_host::testutil::TempDir;
-use nodal_store::execution::runs as qruns;
 use nodal_store::Db;
 use serde_json::json;
 
@@ -82,8 +80,7 @@ fn create_task_numbers_validates_and_reports_the_project() {
         "create_task",
         json!({
             "repo": "web", "title": "Add a logo", "plan": "# Plan\nDo it",
-            "acceptance": ["The logo shows"], "priority": "high", "labels": ["ui"],
-            "executor": {"kind": "workflow", "name": "ship"}
+            "acceptance": ["The logo shows"], "priority": "high", "labels": ["ui"]
         }),
     );
     assert_eq!(out.changed.as_deref(), Some(p.id.as_str()));
@@ -92,10 +89,6 @@ fn create_task_numbers_validates_and_reports_the_project() {
     assert_eq!(out.value["status"], "todo");
     assert_eq!(out.value["priority"], "high");
     assert_eq!(out.value["acceptance"], json!(["The logo shows"]));
-    assert_eq!(
-        out.value["assignee"],
-        json!({"kind": "workflow", "name": "ship"})
-    );
     let id = out.value["id"].as_str().unwrap().to_string();
     assert_eq!(
         ops::read_task_plan(&c, &f.env, &id).unwrap(),
@@ -217,31 +210,21 @@ fn list_get_and_update_tasks_by_key() {
     );
 
     let t = call_ok(&mut c, &f, "get_task", json!({"task": "PAY-1"})).value;
-    assert_eq!(
-        (t["planText"].as_str(), t["runs"].as_array().map(Vec::len)),
-        (Some("x"), Some(0))
-    );
+    assert_eq!(t["planText"].as_str(), Some("x"));
     let id = t["id"].as_str().unwrap().to_string();
     assert_eq!(
         call_ok(&mut c, &f, "get_task", json!({"task": id})).value["key"],
         "PAY-1"
     );
 
-    // `executor: null` clears; omitted fields stay.
-    call_ok(
-        &mut c,
-        &f,
-        "update_task",
-        json!({"task": "PAY-1", "executor": {"kind": "claude"}}),
-    );
+    // Omitted fields stay.
     let t = call_ok(
         &mut c,
         &f,
         "update_task",
-        json!({"task": "PAY-1", "executor": null}),
+        json!({"task": "PAY-1", "priority": "low"}),
     )
     .value;
-    assert!(t["assignee"].is_null());
     assert_eq!(t["title"], "One");
 
     let err =
@@ -255,81 +238,6 @@ fn list_get_and_update_tasks_by_key() {
     assert!(err(&mut c, "update_task", json!({"task": "PAY-1", "title": ""})).contains("title"));
     assert!(err(&mut c, "get_task", json!({"task": "../etc"})).contains("No task"));
     assert!(err(&mut c, "launch_task", json!({})).contains("Unknown tool"));
-}
-
-#[test]
-fn get_run_reports_the_review_result() {
-    let f = fx("mcp-run");
-    let db = Db::open_in_memory().unwrap();
-    let mut c = db.lock().unwrap();
-    seed(&c, &f);
-    let t = call_ok(
-        &mut c,
-        &f,
-        "create_task",
-        json!({"repo": "web", "title": "One", "plan": "x"}),
-    )
-    .value;
-    let task_id = t["id"].as_str().unwrap().to_string();
-
-    let err = call(&mut c, &f.env, "get_run", json!({"task": "PAY-1"}), 10).unwrap_err();
-    assert!(err.contains("no runs"), "{err}");
-
-    let mut work = run_of(Executor::Claude, RunKind::Work, true);
-    work.id = "run-work".into();
-    work.task_id = Some(task_id.clone());
-    work.repo_id = None;
-    work.status = RunStatus::Finished;
-    work.outcome = Some(RunOutcome::Green);
-    work.summary = Some("Added the logo".into());
-    qruns::insert(&c, &work).unwrap();
-
-    let out = call_ok(&mut c, &f, "get_run", json!({"task": "PAY-1"})).value;
-    assert_eq!(
-        (out["run"]["id"].as_str(), out["taskKey"].as_str()),
-        (Some("run-work"), Some("PAY-1"))
-    );
-    assert_eq!(
-        (
-            out["run"]["outcome"].as_str(),
-            out["run"]["summary"].as_str()
-        ),
-        (Some("green"), Some("Added the logo"))
-    );
-    assert!(out["run"].get("prompt").is_none());
-    assert!(out["review"].is_null());
-
-    let mut review = run_of(Executor::Claude, RunKind::Review, false);
-    review.id = "run-review".into();
-    review.task_id = Some(task_id);
-    review.repo_id = None;
-    review.parent_run_id = Some("run-work".into());
-    review.queued_at = 5;
-    review.status = RunStatus::Finished;
-    review.verdict = Some(Verdict {
-        pass: false,
-        unmet: vec!["The logo shows".into()],
-        nits: vec![],
-        summary: Some("Missing".into()),
-    });
-    qruns::insert(&c, &review).unwrap();
-
-    let out = call_ok(&mut c, &f, "get_run", json!({"runId": "run-work"})).value;
-    assert_eq!(out["review"]["runId"], "run-review");
-    assert_eq!(out["review"]["verdict"]["pass"], false);
-    assert_eq!(out["review"]["verdict"]["unmet"], json!(["The logo shows"]));
-    // The last work run of the task is still the work run, not its review.
-    assert_eq!(
-        call_ok(&mut c, &f, "get_run", json!({"task": "PAY-1"})).value["run"]["id"],
-        "run-work"
-    );
-    assert_eq!(
-        call_ok(&mut c, &f, "get_run", json!({"runId": "run-review"})).value["review"]["runId"],
-        "run-review"
-    );
-    assert!(call(&mut c, &f.env, "get_run", json!({}), 10)
-        .unwrap_err()
-        .contains("either"));
 }
 
 #[test]
@@ -349,13 +257,7 @@ fn definitions_cover_every_tool() {
             "get_task",
             "create_task",
             "update_task",
-            "get_run",
-            "list_runs",
-            "list_executors",
-            "launch_run",
-            "review_task",
-            "cancel_run",
-            "get_queue"
+            "start_task_chat"
         ]
     );
     for d in defs.as_array().unwrap() {
@@ -377,8 +279,7 @@ fn propose_task_validates_and_creates_nothing() {
         "propose_task",
         json!({
             "repo": "web", "title": "  Add a\n logo ", "plan": "# Plan\nDo it",
-            "acceptance": ["The logo shows", " "], "priority": "high", "labels": ["ui"],
-            "executor": {"kind": "claude"}
+            "acceptance": ["The logo shows", " "], "priority": "high", "labels": ["ui"]
         }),
     );
     assert_eq!(out.changed, None);
@@ -405,7 +306,6 @@ fn propose_task_validates_and_creates_nothing() {
     );
     assert_eq!(t["plan"], json!({"kind": "text", "text": "# Plan\nDo it"}));
     assert_eq!(t["acceptance"], json!(["The logo shows"]));
-    assert_eq!(t["assignee"], json!({"kind": "claude"}));
     let input: NewTask = serde_json::from_value(t.clone()).expect("the card creates it as is");
     assert_eq!(
         input.plan,
@@ -466,17 +366,11 @@ fn the_skill_describes_every_tool_and_value() {
     for word in tools
         .chain(STATUSES)
         .chain(PRIORITIES)
-        .chain(["planFile", "executor", "verdict"])
+        .chain(["planFile"])
     {
         assert!(
             skill.contains(&format!("`{word}`")),
             "SKILL.md does not mention `{word}`"
         );
     }
-}
-
-#[test]
-fn launch_options_in_the_schema_match_the_domain() {
-    assert_eq!(nodal_mcp_proto::tools::EFFORTS, options::EFFORTS);
-    assert_eq!(nodal_mcp_proto::tools::PERMISSION_MODES, options::PERMISSION_MODES);
 }

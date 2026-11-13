@@ -46,7 +46,7 @@ macro_rules! sql_enum {
         }
     )+};
 }
-sql_enum!(TaskStatus, Priority, Isolation, Finish, RelationKind, RunKind, RunStatus, RunOutcome);
+sql_enum!(TaskStatus, Priority, RelationKind);
 
 // ---------- Project ----------
 
@@ -59,8 +59,6 @@ pub fn project_from_row(row: &Row) -> rusqlite::Result<Project> {
         color: row.get("color")?,
         description: row.get("description")?,
         root_path: row.get("root_path")?,
-        default_executor: get_opt_json(row, "default_executor_json")?,
-        reviewer: row.get("reviewer")?,
         created_at: row.get("created_at")?,
         archived_at: row.get("archived_at")?,
     })
@@ -68,13 +66,12 @@ pub fn project_from_row(row: &Row) -> rusqlite::Result<Project> {
 
 pub fn insert_project(conn: &Connection, p: &Project) -> Result<(), DbError> {
     conn.execute(
-        "INSERT INTO projects (id, name, key, next_task_number, color, default_executor_json,
-                               reviewer, created_at, archived_at, description, root_path)
-         VALUES (:id, :name, :key, :next, :color, :exec, :reviewer, :created, :archived, :description,
-                 :root_path)",
+        "INSERT INTO projects (id, name, key, next_task_number, color, created_at, archived_at,
+                               description, root_path)
+         VALUES (:id, :name, :key, :next, :color, :created, :archived, :description, :root_path)",
         named_params! {
             ":id": p.id, ":name": p.name, ":key": p.key, ":next": p.next_task_number,
-            ":color": p.color, ":exec": opt_json(&p.default_executor)?, ":reviewer": p.reviewer,
+            ":color": p.color,
             ":created": p.created_at, ":archived": p.archived_at, ":description": p.description,
             ":root_path": p.root_path,
         },
@@ -99,11 +96,6 @@ pub fn repo_from_row(row: &Row) -> rusqlite::Result<Repo> {
             effort: row.get("effort")?,
             permission_mode: row.get("permission_mode")?,
         },
-        default_executor: get_opt_json(row, "default_executor_json")?,
-        default_isolation: row.get::<_, SqlEnum<Isolation>>("default_isolation")?.0,
-        default_finish: row.get::<_, SqlEnum<Finish>>("default_finish")?.0,
-        default_review: row.get("default_review")?,
-        reviewer: row.get("reviewer")?,
         position: row.get("position")?,
         created_at: row.get("created_at")?,
     })
@@ -112,15 +104,11 @@ pub fn repo_from_row(row: &Row) -> rusqlite::Result<Repo> {
 pub fn insert_repo(conn: &Connection, r: &Repo) -> Result<(), DbError> {
     conn.execute(
         "INSERT INTO repos (id, project_id, path, name, model, effort, permission_mode,
-                            default_executor_json, default_isolation, default_finish,
-                            default_review, reviewer, position, created_at)
-         VALUES (:id, :project, :path, :name, :model, :effort, :perm, :exec, :iso, :finish,
-                 :review, :reviewer, :pos, :created)",
+                            position, created_at)
+         VALUES (:id, :project, :path, :name, :model, :effort, :perm, :pos, :created)",
         named_params! {
             ":id": r.id, ":project": r.project_id, ":path": r.path, ":name": r.name,
             ":model": r.launch.model, ":effort": r.launch.effort, ":perm": r.launch.permission_mode,
-            ":exec": opt_json(&r.default_executor)?, ":iso": SqlEnum(r.default_isolation),
-            ":finish": SqlEnum(r.default_finish), ":review": r.default_review, ":reviewer": r.reviewer,
             ":pos": r.position, ":created": r.created_at,
         },
     )?;
@@ -142,6 +130,8 @@ pub fn chat_from_row(row: &Row) -> rusqlite::Result<Chat> {
         session_title: row.get("session_title")?,
         session_id: row.get("session_id")?,
         agent: row.get("agent")?,
+        task_id: row.get("task_id")?,
+        worktree: row.get("worktree")?,
         launch: LaunchOptions {
             model: row.get("model")?,
             effort: row.get("effort")?,
@@ -154,12 +144,12 @@ pub fn chat_from_row(row: &Row) -> rusqlite::Result<Chat> {
 
 pub fn insert_chat(conn: &Connection, c: &Chat) -> Result<(), DbError> {
     conn.execute(
-        "INSERT INTO chats (id, project_id, repo_id, title, session_title, session_id, agent, model, effort,
-                            permission_mode, created_at, updated_at)
-         VALUES (:id, :project, :repo, :title, :stitle, :session, :agent, :model, :effort, :perm, :created, :updated)",
+        "INSERT INTO chats (id, project_id, repo_id, title, session_title, session_id, agent, task_id, worktree, model,
+                            effort, permission_mode, created_at, updated_at)
+         VALUES (:id, :project, :repo, :title, :stitle, :session, :agent, :task, :worktree, :model, :effort, :perm, :created, :updated)",
         named_params! {
             ":id": c.id, ":project": c.project_id, ":repo": c.repo_id, ":title": c.title, ":stitle": c.session_title,
-            ":session": c.session_id, ":agent": c.agent, ":model": c.launch.model, ":effort": c.launch.effort,
+            ":session": c.session_id, ":agent": c.agent, ":task": c.task_id, ":worktree": c.worktree, ":model": c.launch.model, ":effort": c.launch.effort,
             ":perm": c.launch.permission_mode, ":created": c.created_at, ":updated": c.updated_at,
         },
     )?;
@@ -221,10 +211,6 @@ pub fn task_from_row(row: &Row) -> rusqlite::Result<Task> {
         plan,
         plan_overridden: row.get("plan_overridden")?,
         acceptance: get_json(row, "acceptance_json")?,
-        assignee: get_opt_json(row, "assignee_json")?,
-        isolation: row.get::<_, Option<SqlEnum<Isolation>>>("isolation")?.map(|s| s.0),
-        finish: row.get::<_, Option<SqlEnum<Finish>>>("finish")?.map(|s| s.0),
-        review: row.get("review")?,
         worktree,
         source,
         created_at: row.get("created_at")?,
@@ -244,14 +230,14 @@ pub fn insert_task(conn: &Connection, t: &Task) -> Result<(), DbError> {
     conn.execute(
         "INSERT INTO tasks (id, project_id, repo_id, number, title, status, priority, labels_json,
                             position, plan_kind, plan_path, plan_overridden, acceptance_json,
-                            assignee_json, isolation, finish, review, wt_path, wt_branch, wt_base,
+                            wt_path, wt_branch, wt_base,
                             src_provider, src_link_id, src_external_id, src_identifier, src_url,
                             src_state_json, src_last_synced_at, src_sync_error, src_unmapped,
                             src_project_id, src_project_name, src_rule_id, src_moved,
                             created_at, updated_at, closed_at)
          VALUES (:id, :project, :repo, :number, :title, :status, :priority, :labels,
                  :position, :plan_kind, :plan_path, :plan_overridden, :acceptance,
-                 :assignee, :isolation, :finish, :review, :wt_path, :wt_branch, :wt_base,
+                 :wt_path, :wt_branch, :wt_base,
                  :src_provider, :src_link, :src_ext, :src_ident, :src_url,
                  :src_state, :src_synced, :src_error, :src_unmapped,
                  :src_project, :src_project_name, :src_rule, :src_moved,
@@ -261,8 +247,7 @@ pub fn insert_task(conn: &Connection, t: &Task) -> Result<(), DbError> {
             ":title": t.title, ":status": SqlEnum(t.status), ":priority": SqlEnum(t.priority),
             ":labels": to_json(&t.labels)?, ":position": t.position,
             ":plan_kind": plan_kind, ":plan_path": plan_path, ":plan_overridden": t.plan_overridden,
-            ":acceptance": to_json(&t.acceptance)?, ":assignee": opt_json(&t.assignee)?,
-            ":isolation": t.isolation.map(SqlEnum), ":finish": t.finish.map(SqlEnum), ":review": t.review,
+            ":acceptance": to_json(&t.acceptance)?,
             ":wt_path": wt.map(|w| &w.path), ":wt_branch": wt.map(|w| &w.branch),
             ":wt_base": wt.map(|w| &w.base),
             ":src_provider": src.map(|s| &s.provider), ":src_link": src.and_then(|s| s.link_id.as_ref()),
@@ -316,109 +301,6 @@ pub fn relations_of(conn: &Connection, task_id: &str) -> Result<Vec<TaskRelation
     )?;
     let rows = stmt.query_map([task_id], relation_from_row)?;
     Ok(rows.collect::<rusqlite::Result<_>>()?)
-}
-
-// ---------- Run ----------
-
-pub fn run_from_row(row: &Row) -> rusqlite::Result<Run> {
-    Ok(Run {
-        id: row.get("id")?,
-        task_id: row.get("task_id")?,
-        repo_id: row.get("repo_id")?,
-        cwd: row.get("cwd")?,
-        executor: get_json(row, "executor_json")?,
-        kind: row.get::<_, SqlEnum<RunKind>>("kind")?.0,
-        parent_run_id: row.get("parent_run_id")?,
-        prompt: row.get("prompt")?,
-        extra_instructions: row.get("extra_instructions")?,
-        options: get_json(row, "options_json")?,
-        finish: row.get::<_, SqlEnum<Finish>>("finish")?.0,
-        isolation: row.get::<_, Option<SqlEnum<Isolation>>>("isolation")?.map(|s| s.0),
-        review: row.get("review")?,
-        verdict: get_opt_json(row, "verdict_json")?,
-        status: row.get::<_, SqlEnum<RunStatus>>("status")?.0,
-        queue_position: row.get("queue_position")?,
-        claude_run_id: row.get("claude_run_id")?,
-        session_id: row.get("session_id")?,
-        queued_at: row.get("queued_at")?,
-        launched_at: row.get("launched_at")?,
-        finished_at: row.get("finished_at")?,
-        outcome: row.get::<_, Option<SqlEnum<RunOutcome>>>("outcome")?.map(|s| s.0),
-        summary: row.get("summary")?,
-        pr_url: row.get("pr_url")?,
-        branch: row.get("branch")?,
-        error: row.get("error")?,
-        legacy_label: row.get("legacy_label")?,
-        tokens: row.get("tokens")?,
-    })
-}
-
-pub fn insert_run(conn: &Connection, r: &Run) -> Result<(), DbError> {
-    conn.execute(
-        "INSERT INTO runs (id, task_id, repo_id, cwd, executor_json, kind, parent_run_id, prompt,
-                           extra_instructions, options_json, finish, isolation, review, verdict_json, status,
-                           queue_position, claude_run_id, session_id, queued_at, launched_at,
-                           finished_at, outcome, summary, pr_url, branch, error, legacy_label, tokens)
-         VALUES (:id, :task, :repo, :cwd, :exec, :kind, :parent, :prompt,
-                 :extra, :options, :finish, :isolation, :review, :verdict, :status,
-                 :qpos, :claude_id, :session, :queued, :launched,
-                 :finished, :outcome, :summary, :pr, :branch, :error, :legacy, :tokens)",
-        named_params! {
-            ":id": r.id, ":task": r.task_id, ":repo": r.repo_id, ":cwd": r.cwd,
-            ":exec": to_json(&r.executor)?, ":kind": SqlEnum(r.kind), ":parent": r.parent_run_id,
-            ":prompt": r.prompt, ":extra": r.extra_instructions, ":options": to_json(&r.options)?,
-            ":finish": SqlEnum(r.finish), ":isolation": r.isolation.map(SqlEnum), ":review": r.review,
-            ":verdict": opt_json(&r.verdict)?, ":status": SqlEnum(r.status),
-            ":qpos": r.queue_position, ":claude_id": r.claude_run_id, ":session": r.session_id,
-            ":queued": r.queued_at, ":launched": r.launched_at, ":finished": r.finished_at,
-            ":outcome": r.outcome.map(SqlEnum), ":summary": r.summary, ":pr": r.pr_url, ":branch": r.branch,
-            ":error": r.error, ":legacy": r.legacy_label, ":tokens": r.tokens,
-        },
-    )?;
-    Ok(())
-}
-
-pub fn get_run(conn: &Connection, id: &str) -> Result<Option<Run>, DbError> {
-    let mut stmt = conn.prepare_cached("SELECT * FROM runs WHERE id = ?1")?;
-    Ok(stmt.query_row([id], run_from_row).optional()?)
-}
-
-/// Explicit columns of `run_from_row`, minus `prompt`/`extra_instructions`: for lists that
-/// map straight to `RunLight` (history, board), so the prompt blob never leaves SQLite.
-pub const RUN_LIGHT_COLUMNS: &str = "r.id, r.task_id, r.repo_id, r.cwd, r.executor_json, r.kind, \
-    r.parent_run_id, r.options_json, r.finish, r.isolation, r.review, r.verdict_json, r.status, \
-    r.queue_position, r.claude_run_id, r.session_id, r.queued_at, r.launched_at, r.finished_at, \
-    r.outcome, r.summary, r.pr_url, r.branch, r.error, r.legacy_label, r.tokens";
-
-pub fn run_light_from_row(row: &Row) -> rusqlite::Result<RunLight> {
-    Ok(RunLight {
-        id: row.get("id")?,
-        task_id: row.get("task_id")?,
-        repo_id: row.get("repo_id")?,
-        cwd: row.get("cwd")?,
-        executor: get_json(row, "executor_json")?,
-        kind: row.get::<_, SqlEnum<RunKind>>("kind")?.0,
-        parent_run_id: row.get("parent_run_id")?,
-        options: get_json(row, "options_json")?,
-        finish: row.get::<_, SqlEnum<Finish>>("finish")?.0,
-        isolation: row.get::<_, Option<SqlEnum<Isolation>>>("isolation")?.map(|s| s.0),
-        review: row.get("review")?,
-        verdict: get_opt_json(row, "verdict_json")?,
-        status: row.get::<_, SqlEnum<RunStatus>>("status")?.0,
-        queue_position: row.get("queue_position")?,
-        claude_run_id: row.get("claude_run_id")?,
-        session_id: row.get("session_id")?,
-        queued_at: row.get("queued_at")?,
-        launched_at: row.get("launched_at")?,
-        finished_at: row.get("finished_at")?,
-        outcome: row.get::<_, Option<SqlEnum<RunOutcome>>>("outcome")?.map(|s| s.0),
-        summary: row.get("summary")?,
-        pr_url: row.get("pr_url")?,
-        branch: row.get("branch")?,
-        error: row.get("error")?,
-        legacy_label: row.get("legacy_label")?,
-        tokens: row.get("tokens")?,
-    })
 }
 
 // ---------- SourceLink ----------
@@ -505,7 +387,7 @@ pub fn get_outbox(conn: &Connection, id: i64) -> Result<Option<OutboxItem>, DbEr
 // ---------- Settings ----------
 
 /// One row per `Settings` field. Missing or unreadable ones take their default
-/// (a corrupt value doesn't invalidate the rest); `concurrency` is clamped to `1..=MAX_CONCURRENCY`.
+/// (a corrupt value doesn't invalidate the rest).
 pub fn load_settings(conn: &Connection) -> Result<Settings, DbError> {
     let serde_json::Value::Object(mut obj) = serde_json::to_value(Settings::default()).expect("Settings serializes")
     else {
@@ -521,9 +403,7 @@ pub fn load_settings(conn: &Connection) -> Result<Settings, DbError> {
             obj.insert(k, default);
         }
     }
-    let mut out: Settings = serde_json::from_value(serde_json::Value::Object(obj)).expect("valid defaults");
-    out.concurrency = out.concurrency.clamp(1, MAX_CONCURRENCY);
-    Ok(out)
+    Ok(serde_json::from_value(serde_json::Value::Object(obj)).expect("valid defaults"))
 }
 
 /// Saves every field in a single transaction.

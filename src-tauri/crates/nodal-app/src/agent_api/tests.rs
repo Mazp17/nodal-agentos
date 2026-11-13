@@ -3,79 +3,24 @@ use std::sync::{Arc, Mutex};
 
 use nodal_domain::board::dto::{NewProject, NewRepo};
 use nodal_domain::error::HostError;
-use nodal_domain::model::activity::{AgentSession, AppRuns, ExternalSessions};
 use nodal_domain::model::chat::{ChatLive, ChatSpec};
-use nodal_domain::model::claude::{
-    ExtraFlags, LaunchBlocker, LaunchError, RunDetail, RunRef, RunSummary, SessionReadout,
-    Transcript,
-};
+use nodal_domain::model::claude::Transcript;
 use nodal_domain::model::events::ChangeKind;
-use nodal_domain::model::LaunchOptions;
-use nodal_domain::ports::{BoxFut, ChangeNotifier, ChatRuntime, ClaudeCli, Clock, SessionFiles};
+use nodal_domain::ports::{ChangeNotifier, ChatRuntime, Clock, SessionFiles};
 use nodal_host::adapters::{HostClaudeConfig, HostGit, HostLocalFs, HostPlanFiles};
 use nodal_host::testutil::TempDir;
 use nodal_store::Db;
-use serde_json::{json, Value};
+use serde_json::json;
 
 use crate::board::ops;
 use crate::core::{Core, Env};
 
 use super::AgentApi;
 
-/// Only `list_sessions` is reached (`get_queue`); concurrency 0 keeps the queue from launching.
-struct NoopClaude;
-
-impl ClaudeCli for NoopClaude {
-    fn list_sessions(&self) -> BoxFut<'_, Result<Vec<RunSummary>, HostError>> {
-        Box::pin(async move { Ok(Vec::new()) })
-    }
-    fn list_agent_sessions(&self) -> BoxFut<'_, Result<Vec<AgentSession>, HostError>> {
-        Box::pin(async move { unimplemented!("not exercised by the agent_api tests") })
-    }
-    fn launch_bg<'a>(
-        &'a self,
-        _cwd: String,
-        _prompt: String,
-        _opts: &'a LaunchOptions,
-        _extra: &'a ExtraFlags,
-    ) -> BoxFut<'a, Result<RunRef, LaunchError>> {
-        Box::pin(async move { unimplemented!("not exercised by the agent_api tests") })
-    }
-    fn stop<'a>(&'a self, _short_id: &'a str) -> BoxFut<'a, Result<(), HostError>> {
-        Box::pin(async move { unimplemented!("not exercised by the agent_api tests") })
-    }
-}
-
 /// Not exercised: `AgentApi::call` never reaches `Core::sessions`.
 struct NoopSessionFiles;
 
 impl SessionFiles for NoopSessionFiles {
-    fn read_session(&self, _session_id: &str, _cwd: &str) -> SessionReadout {
-        unimplemented!("not exercised by the agent_api tests")
-    }
-    fn session_tokens(&self, _session_id: &str, _cwd: &str) -> Option<i64> {
-        unimplemented!("not exercised by the agent_api tests")
-    }
-    fn run_detail(&self, _session_id: &str, _cwd: &str) -> Result<Option<RunDetail>, HostError> {
-        unimplemented!("not exercised by the agent_api tests")
-    }
-    fn launch_blocker(
-        &self,
-        _session_id: &str,
-        _cwd: &str,
-    ) -> Result<Option<LaunchBlocker>, HostError> {
-        unimplemented!("not exercised by the agent_api tests")
-    }
-    fn agent_transcript(
-        &self,
-        _session_id: &str,
-        _cwd: &str,
-        _run_id: &str,
-        _agent_id: &str,
-        _limit: usize,
-    ) -> Result<Option<Transcript>, HostError> {
-        unimplemented!("not exercised by the agent_api tests")
-    }
     fn find_session_jsonl(
         &self,
         _projects: &Path,
@@ -95,15 +40,6 @@ impl SessionFiles for NoopSessionFiles {
         unimplemented!("not exercised by the agent_api tests")
     }
     fn session_title(&self, _path: &Path) -> Option<String> {
-        unimplemented!("not exercised by the agent_api tests")
-    }
-    fn external_sessions(
-        &self,
-        _repos: &[(String, PathBuf)],
-        _agents: &[AgentSession],
-        _app: &AppRuns,
-        _now: i64,
-    ) -> Result<ExternalSessions, HostError> {
         unimplemented!("not exercised by the agent_api tests")
     }
 }
@@ -186,15 +122,11 @@ fn agent_api(env: Env, notifier: Arc<SpyNotifier>) -> (AgentApi, Db) {
         env,
         rt: crate::testutil::rt(),
         clock: Arc::new(FixedClock(10)),
-        claude: Arc::new(NoopClaude),
         sessions: Arc::new(NoopSessionFiles),
         notifier,
         chats: Arc::new(NoopChatRuntime),
     });
-    let execution = crate::execution::Execution::new(core.clone());
-    // No background pass: `launch_run` would otherwise launch a run (settings clamp concurrency to >= 1).
-    execution.no_kick.store(true, std::sync::atomic::Ordering::SeqCst);
-    (AgentApi::new(core, execution), db)
+    (AgentApi::new(core), db)
 }
 
 /// Project PAY with one repo, seeded directly through `board::ops` (bypassing MCP dispatch).
@@ -287,120 +219,10 @@ fn call_reports_unknown_tools_without_notifying() {
     assert!(notifier.calls.lock().unwrap().is_empty());
 }
 
-/// A task PAY-1 in a repo folder on disk (in place, so no worktree is needed).
-#[allow(clippy::disallowed_methods)] // builds the repo folder directly on disk
-fn seed_task(api: &AgentApi, db: &Db, env: &Env, root: &Path) -> String {
-    let (project_id, _) = seed(db, env);
-    let dir = root.join("web");
-    std::fs::create_dir_all(&dir).unwrap();
-    let repo = ops::add_repo(
-        &db.lock().unwrap(),
-        &project_id,
-        &serde_json::from_value(json!({"path": "web", "defaultIsolation": "in_place"})).unwrap(),
-        &dir,
-        3,
-    )
-    .unwrap();
-    let task = api
-        .call(
-            "create_task",
-            json!({"repo": repo.id, "title": "Logo", "plan": "# Plan"}),
-        )
-        .unwrap();
-    task["key"].as_str().unwrap().to_string()
-}
-
 #[test]
-fn launch_run_queues_with_the_given_options_and_the_run_tools_follow_it() {
-    let t = TempDir::new("agent-api-launch");
-    let env = test_env(&t.0);
-    let notifier = Arc::new(SpyNotifier::default());
-    let (api, db) = agent_api(env.clone(), notifier.clone());
-    let key = seed_task(&api, &db, &env, &t.0);
-    notifier.calls.lock().unwrap().clear();
-
-    let run = api
-        .call(
-            "launch_run",
-            json!({"task": key, "model": "sonnet", "effort": "high", "finish": "commit",
-                   "review": false, "extraInstructions": "Be brief."}),
-        )
-        .unwrap();
-    assert_eq!(run["status"], "queued");
-    assert_eq!(run["taskKey"], "PAY-1");
-    assert_eq!(run["options"]["model"], "sonnet");
-    assert_eq!(run["options"]["effort"], "high");
-    assert_eq!(run["finish"], "commit");
-    assert_eq!(run["isolation"], "in_place");
-    assert!(notifier
-        .calls
-        .lock()
-        .unwrap()
-        .contains(&(ChangeKind::Runs, None)));
-
-    let err = api.call("launch_run", json!({"task": "PAY-1"})).unwrap_err();
-    assert!(err.contains("already has a queued run"), "{err}");
-
-    let queue = api.call("get_queue", json!({"project": "pay"})).unwrap();
-    assert_eq!(queue["queued"], 1);
-    assert_eq!(queue["runs"][0]["id"], run["id"]);
-
-    let listed = api
-        .call("list_runs", json!({"task": "PAY-1", "status": "queued"}))
-        .unwrap();
-    assert_eq!(listed.as_array().unwrap().len(), 1);
-    assert_eq!(listed[0]["taskKey"], "PAY-1");
-    let got = api.call("get_run", json!({"task": "PAY-1"})).unwrap();
-    assert_eq!(got["run"]["id"], run["id"]);
-
-    let canceled = api
-        .call("cancel_run", json!({"runId": run["id"]}))
-        .unwrap();
-    assert_eq!(canceled["status"], "canceled");
-    let listed = api
-        .call("list_runs", json!({"status": ["queued", "launched"]}))
-        .unwrap();
-    assert_eq!(listed, json!([]));
-}
-
-#[test]
-fn launch_run_rejects_invalid_options_and_unknown_tasks() {
-    let t = TempDir::new("agent-api-launch-invalid");
-    let env = test_env(&t.0);
-    let (api, db) = agent_api(env.clone(), Arc::new(SpyNotifier::default()));
-    let key = seed_task(&api, &db, &env, &t.0);
-
-    let err = api
-        .call("launch_run", json!({"task": key, "effort": "huge"}))
-        .unwrap_err();
-    assert!(err.contains("Invalid effort"), "{err}");
-    let err = api
-        .call(
-            "launch_run",
-            json!({"task": key, "executor": {"kind": "workflow", "name": "nope"}}),
-        )
-        .unwrap_err();
-    assert!(err.contains("Workflow \"nope\" not found"), "{err}");
-    let err = api.call("launch_run", json!({"task": "PAY-9"})).unwrap_err();
-    assert!(err.contains("No task"), "{err}");
-    let err = api
-        .call("launch_run", json!({"task": key, "bogus": 1}))
-        .unwrap_err();
-    assert!(err.contains("Invalid arguments"), "{err}");
-}
-
-#[test]
-fn list_executors_reports_the_launch_options_and_the_repo_defaults() {
-    let t = TempDir::new("agent-api-executors");
-    let env = test_env(&t.0);
-    let (api, db) = agent_api(env.clone(), Arc::new(SpyNotifier::default()));
-    let (_, repo_id) = seed(&db, &env);
-
-    let out = api.call("list_executors", json!({"repo": repo_id})).unwrap();
-    assert!(out["executors"].is_array());
-    assert!(out["efforts"].as_array().unwrap().contains(&json!("max")));
-    assert!(out["models"].as_array().unwrap().contains(&json!("opus")));
-    assert_eq!(out["repoDefaults"]["repoId"], repo_id);
-    let out = api.call("list_executors", json!({})).unwrap();
-    assert_eq!(out["repoDefaults"], Value::Null);
+fn start_task_chat_rejects_unknown_tasks_and_missing_args() {
+    let t = TempDir::new("agent-api-chat");
+    let (api, _db) = agent_api(test_env(&t.0), Arc::new(SpyNotifier::default()));
+    assert!(api.call("start_task_chat", json!({})).unwrap_err().contains("task"));
+    assert!(api.call("start_task_chat", json!({"task": "PAY-9"})).is_err());
 }

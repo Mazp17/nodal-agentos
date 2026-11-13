@@ -3,7 +3,6 @@ use std::path::{Path, PathBuf};
 
 use super::*;
 use crate::Db;
-use nodal_domain::execution::queue::awaiting_confirmation;
 
 const T0: i64 = 1_800_000_000_000;
 
@@ -64,14 +63,10 @@ fn count(conn: &Connection, table: &str) -> i64 {
 }
 
 fn counts(conn: &Connection) -> Vec<i64> {
-    ["projects", "repos", "source_links", "tasks", "runs", "settings", "legacy_imports"]
+    ["projects", "repos", "source_links", "tasks", "settings", "legacy_imports"]
         .iter()
         .map(|t| count(conn, t))
         .collect()
-}
-
-fn run_by_label(conn: &Connection, label: &str) -> Run {
-    conn.query_row("SELECT * FROM runs WHERE legacy_label = ?1", [label], rows::run_from_row).unwrap()
 }
 
 fn repo_id_of(conn: &Connection, path: &str) -> String {
@@ -85,18 +80,17 @@ fn legacy_import_is_idempotent_and_maps_everything() {
     let mut conn = db.lock().unwrap();
 
     let r1 = import_folder(&mut conn, &fixture("legacy"), &data.0, T0).unwrap();
-    assert_eq!((r1.projects, r1.repos, r1.tasks, r1.runs), (4, 4, 3, 6), "{r1:#?}");
+    assert_eq!((r1.projects, r1.repos, r1.tasks, r1.runs), (4, 4, 3, 0), "{r1:#?}");
     assert_eq!(r1.already_imported, 0);
-    assert_eq!(r1.skipped.len(), 2, "{:?}", r1.skipped);
+    assert_eq!(r1.skipped.len(), 1, "{:?}", r1.skipped);
     assert!(r1.skipped.iter().any(|s| s.starts_with("config.json: record #4")));
-    assert!(r1.skipped.iter().any(|s| s.starts_with("issue-runs.json: record #3")));
     let after_first = counts(&conn);
 
     // Second time: nothing new, everything counts as already imported.
     let r2 = import_folder(&mut conn, &fixture("legacy"), &data.0, T0 + 1).unwrap();
     assert_eq!((r2.projects, r2.repos, r2.tasks, r2.runs), (0, 0, 0, 0), "{r2:#?}");
-    // 3 repos + 3 links + concurrency + 3 tasks + 6 runs.
-    assert_eq!(r2.already_imported, 16);
+    // 3 repos + 3 links + 3 tasks.
+    assert_eq!(r2.already_imported, 9);
     assert_eq!(counts(&conn), after_first);
     assert_eq!(r1.backup_dir, r2.backup_dir, "same content: the backup is reused");
 
@@ -115,11 +109,10 @@ fn legacy_import_is_idempotent_and_maps_everything() {
             .map(|(a, b)| (a.to_string(), b.to_string()))
     );
 
-    // Repos: options and finish from the mapping; the trailing `/` is normalized.
+    // Repos: options from the mapping; the trailing `/` is normalized.
     let api = rows::get_repo(&conn, &repo_id_of(&conn, "/Users/me/Code/acme-api")).unwrap().unwrap();
     assert_eq!(api.launch.model.as_deref(), Some("opus"));
     assert_eq!(api.launch.effort.as_deref(), Some("high"));
-    assert_eq!(api.default_finish, Finish::Commit);
     let web_id = repo_id_of(&conn, "/Users/me/Code/acme-web");
 
     // SourceLinks: team alone → team; team + project → project. Mapping pending.
@@ -140,7 +133,6 @@ fn legacy_import_is_idempotent_and_maps_everything() {
     let t1 = rows::get_task(&conn, "t01aaaaaaaa").unwrap().unwrap();
     assert_eq!((t1.number, t1.status, t1.plan.clone()), (1, TaskStatus::Todo, PlanRef::Text));
     assert_eq!(t1.repo_id, api.id);
-    assert_eq!(t1.assignee, Some(Executor::Workflow { name: "plan-task".into() }));
     let t2 = rows::get_task(&conn, "t02bbbbbbbb").unwrap().unwrap();
     let local = rows::get_project(&conn, &t2.project_id).unwrap().unwrap();
     assert_eq!(local.name, "Local");
@@ -157,43 +149,6 @@ fn legacy_import_is_idempotent_and_maps_everything() {
     );
     assert!(data.0.join("tasks/t02bbbbbbbb/plan.md").is_file());
 
-    // Runs.
-    let r = run_by_label(&conn, "Agregar endpoint de salud");
-    assert_eq!(r.task_id.as_deref(), Some("t01aaaaaaaa"));
-    assert_eq!((r.status, r.outcome), (RunStatus::Finished, None));
-    assert_eq!(r.executor, Executor::Workflow { name: "plan-task".into() });
-    assert_eq!((r.finish, r.claude_run_id.as_deref()), (Finish::Commit, Some("a1b2c3d4")));
-
-    let q = run_by_label(&conn, "Limpiar scripts de deploy");
-    assert_eq!((q.status, q.error.as_deref()), (RunStatus::Queued, None));
-    assert!(awaiting_confirmation(&q), "not launched without confirmation");
-
-    let orphan = run_by_label(&conn, "t09zzzzzzzz");
-    assert_eq!(orphan.task_id, None);
-    assert_eq!(orphan.repo_id.as_deref(), Some(api.id.as_str()));
-    assert_eq!(orphan.executor, Executor::Claude);
-    assert_eq!((orphan.status, orphan.error.as_deref()), (RunStatus::Failed, Some("claude exited with code 1")));
-
-    let launching = run_by_label(&conn, "Rebrand del header");
-    assert_eq!((launching.status, launching.error.as_deref()), (RunStatus::Failed, Some(LAUNCHING_ERROR)));
-
-    let eng1 = run_by_label(&conn, "ENG-1");
-    assert_eq!(eng1.task_id, None);
-    assert_eq!(eng1.repo_id.as_deref(), Some(api.id.as_str()));
-    assert_eq!(eng1.prompt, "/linear-issue ENG-1");
-    assert_eq!(eng1.options.model.as_deref(), Some("opus"));
-    assert_eq!(eng1.finish, Finish::Commit, "finish comes from the mapped repo");
-    let eng2 = run_by_label(&conn, "ENG-2");
-    assert_eq!((eng2.repo_id.as_deref(), eng2.status), (None, RunStatus::Queued));
-
-    // Whatever was left queued awaits confirmation: none without `legacy_label`.
-    let unconfirmed: i64 = conn
-        .query_row("SELECT COUNT(*) FROM runs WHERE status = 'queued' AND legacy_label IS NULL", [], |r| r.get(0))
-        .unwrap();
-    assert_eq!(unconfirmed, 0);
-    assert!(awaiting_confirmation(&eng2));
-
-    assert_eq!(rows::load_settings(&conn).unwrap().concurrency, 5);
 }
 
 #[test]
@@ -243,12 +198,8 @@ fn corrupt_files_are_skipped_without_aborting() {
     let db = Db::open_in_memory().unwrap();
     let mut conn = db.lock().unwrap();
     let r = import_folder(&mut conn, &fixture("corrupt"), &data.0, T0).unwrap();
-    assert_eq!((r.projects, r.repos, r.tasks, r.runs), (1, 1, 0, 1), "{r:#?}");
+    assert_eq!((r.projects, r.repos, r.tasks, r.runs), (1, 1, 0, 0), "{r:#?}");
     assert!(r.skipped.iter().any(|s| s.starts_with("tasks.json: corrupt JSON")), "{:?}", r.skipped);
-    assert!(r.skipped.iter().any(|s| s.starts_with("task-runs.json: corrupt JSON")), "{:?}", r.skipped);
-    assert_eq!(rows::load_settings(&conn).unwrap().concurrency, MAX_CONCURRENCY, "it is clamped");
-    let eng1 = run_by_label(&conn, "ENG-1");
-    assert_eq!((eng1.status, eng1.error.as_deref()), (RunStatus::Failed, Some(LAUNCHING_ERROR)));
 }
 
 #[test]
@@ -273,10 +224,9 @@ fn current_config_format_with_links() {
         [("linear", "project", "Checkout"), ("linear", "team", "Payments")]
             .map(|(a, b, c)| (a.to_string(), b.to_string(), c.to_string()))
     );
-    assert_eq!(rows::load_settings(&conn).unwrap().concurrency, 2);
 
     let again = import_folder(&mut conn, &fixture("current"), &data.0, T0 + 5).unwrap();
-    assert_eq!((again.projects, again.repos, again.already_imported), (0, 0, 4));
+    assert_eq!((again.projects, again.repos, again.already_imported), (0, 0, 3));
 }
 
 #[test]
@@ -294,8 +244,6 @@ fn existing_repo_is_reused_and_keys_do_not_collide() {
                 key: key.into(),
                 next_task_number: 1,
                 color: "#fff".into(),
-                default_executor: None,
-                reviewer: None,
                 created_at: 1,
                 archived_at: None,
                 root_path: None,
@@ -312,11 +260,6 @@ fn existing_repo_is_reused_and_keys_do_not_collide() {
             path: "/Users/me/Code/acme-web".into(),
             name: "acme-web".into(),
             launch: LaunchOptions::default(),
-            default_executor: None,
-            default_isolation: Isolation::InPlace,
-            default_finish: Finish::Changes,
-            default_review: false,
-            reviewer: None,
             position: 0,
             created_at: 1,
         },
@@ -339,8 +282,6 @@ fn existing_repo_is_reused_and_keys_do_not_collide() {
         )
         .unwrap();
     assert_eq!(api_key, "AA2");
-    // The user's repo is left untouched.
-    assert_eq!(rows::get_repo(&conn, "web").unwrap().unwrap().default_finish, Finish::Changes);
 }
 
 #[test]
@@ -352,9 +293,6 @@ fn helpers() {
     assert_eq!(canon_path("/Users/me/Code/x/"), "/Users/me/Code/x");
     assert_eq!(fnv("abc"), fnv("abc"));
     assert_eq!(fnv(""), "cbf29ce484222325");
-    assert_eq!(executor_from_prompt("/plan-task {}"), Executor::Workflow { name: "plan-task".into() });
-    assert_eq!(executor_from_prompt("hello"), Executor::Claude);
-    assert!(map_run_status("weird", None).is_err());
 }
 
 #[test]
@@ -368,23 +306,11 @@ fn reimport_after_state_changes_and_duplicate_entries() {
                      {"projectId":"proj-b","path":"/Users/me/Code/acme-one/"}]}"#,
     )
     .unwrap();
-    let queued = r#"{"runs":[{"issueId":"i1","identifier":"ENG-9","workflow":"linear-issue",
-        "cwd":"/Users/me/Code/acme-one","queuedAt":10,"status":"queued"}]}"#;
-    fs::write(src.0.join("issue-runs.json"), queued).unwrap();
-
     let db = Db::open_in_memory().unwrap();
     let mut conn = db.lock().unwrap();
     let r1 = import_folder(&mut conn, &src.0, &data.0, T0).unwrap();
-    assert_eq!((r1.projects, r1.repos, r1.runs, r1.already_imported), (1, 1, 1, 0), "{r1:#?}");
+    assert_eq!((r1.projects, r1.repos, r1.runs, r1.already_imported), (1, 1, 0, 0), "{r1:#?}");
     assert_eq!(count(&conn, "source_links"), 2);
-
-    // The old version launched the run later: now it has a runId. It isn't duplicated.
-    let launched = queued.replace(r#""status":"queued""#, r#""status":"launched","runId":"abcd1234""#);
-    fs::write(src.0.join("issue-runs.json"), launched).unwrap();
-    let r2 = import_folder(&mut conn, &src.0, &data.0, T0 + 1).unwrap();
-    // Per record: 2 repo entries + 2 links + 1 run.
-    assert_eq!((r2.runs, r2.already_imported), (0, 5), "{r2:#?}");
-    assert_eq!(count(&conn, "runs"), 1);
 }
 
 #[test]
@@ -409,16 +335,6 @@ fn reimport_reuses_a_repo_whose_path_changed() {
     assert_eq!((r.tasks, r.repos), (1, 0), "{r:#?}");
     let repo_of: String = conn.query_row("SELECT repo_id FROM tasks WHERE id = 'ta2'", [], |r| r.get(0)).unwrap();
     assert_eq!(repo_of, repo);
-}
-
-#[test]
-fn first_import_keeps_a_configured_concurrency() {
-    let data = TempDir::new("conc");
-    let db = Db::open_in_memory().unwrap();
-    let mut conn = db.lock().unwrap();
-    conn.execute("INSERT INTO settings (key, value_json) VALUES ('concurrency', '1')", []).unwrap();
-    import_folder(&mut conn, &fixture("legacy"), &data.0, T0).unwrap();
-    assert_eq!(rows::load_settings(&conn).unwrap().concurrency, 1);
 }
 
 #[test]

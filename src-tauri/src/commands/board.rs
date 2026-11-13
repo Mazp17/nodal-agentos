@@ -8,7 +8,6 @@ use tauri::State;
 use nodal_app::App;
 
 use nodal_domain::board::dto::*;
-use nodal_domain::model::executors::ExecutorInfo;
 use nodal_domain::model::*;
 
 use crate::commands::CommandError;
@@ -147,13 +146,7 @@ pub async fn remove_task_relation(
 
 // ---------- Executors ----------
 
-#[tauri::command]
-#[tracing::instrument(skip_all, level = "info")]
-pub async fn list_executors(state: State<'_, Arc<App>>, repo_id: Option<String>) -> Result<Vec<ExecutorInfo>, CommandError> {
-    Ok(state.board.list_executors(repo_id).await?)
-}
-
-/// Agents and workflows the project hides from its pickers. `list_executors` stays unfiltered.
+/// Agents and workflows the project hides from its pickers. 
 #[tauri::command]
 #[tracing::instrument(skip_all, level = "info")]
 pub async fn list_hidden_executors(state: State<'_, Arc<App>>, project_id: String) -> Result<Vec<HiddenExecutor>, CommandError> {
@@ -183,5 +176,5 @@ pub async fn get_settings(state: State<'_, Arc<App>>) -> Result<Settings, Comman
 #[tauri::command]
 #[tracing::instrument(skip_all, level = "info")]
 pub async fn set_settings(state: State<'_, Arc<App>>, settings: Settings) -> Result<Settings, CommandError> {
-    Ok(state.inner().set_settings(settings).await?)
+    Ok(state.board.set_settings(settings).await?)
 }

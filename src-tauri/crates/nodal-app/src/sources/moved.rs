@@ -10,7 +10,7 @@ use std::sync::Arc;
 use nodal_domain::model::{PlanRef, Task};
 use nodal_domain::ports::PlanFiles;
 use nodal_domain::sources::routing::project_rule;
-use nodal_store::sources::{check_repo_in_project, has_active_run, set_moved_resolution};
+use nodal_store::sources::{check_repo_in_project, set_moved_resolution};
 use nodal_store::{rows, Conn as Connection};
 
 /// What to do with a task whose issue changed project.
@@ -23,7 +23,7 @@ pub enum MovedAction {
     Keep,
 }
 
-/// Resolves the project-change warning. `Move` rejects with an active run, a worktree or a
+/// Resolves the project-change warning. `Move` rejects with a worktree or a
 /// plan file outside the new repo. In both cases the task gets tied to the current project's
 /// rule if that rule points to its repo (so the next pull doesn't warn again about the same
 /// change).
@@ -53,12 +53,6 @@ pub fn resolve_moved(
             };
             if target != task.repo_id {
                 check_repo_in_project(conn, &target, &task.project_id)?;
-                if has_active_run(conn, &task.id)? {
-                    return Err(
-                        "The task has a queued or running run: wait for it or cancel it before moving it to another repo."
-                            .into(),
-                    );
-                }
                 if task.worktree.is_some() {
                     return Err("Clean up the task's worktree before moving it to another repo.".into());
                 }

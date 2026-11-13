@@ -40,7 +40,7 @@ fn write(p: &Path, s: &str) {
 }
 
 #[test]
-fn catalog_merges_user_repo_plugins_and_workflows() {
+fn list_agents_merges_user_repo_and_plugins() {
     let t = TempDir::new("executors");
     let claude = t.0.join("claude");
     let repo = t.0.join("repo");
@@ -90,54 +90,17 @@ fn catalog_merges_user_repo_plugins_and_workflows() {
         &claude.join("plugins/installed_plugins.json"),
         &installed.to_string(),
     );
-    write(
-        &claude.join("workflows/plan-task.js"),
-        "export const meta = { name: 'plan-task', reviews: true }\n",
-    );
-    write(
-        &claude.join("workflows/linear-issue.js"),
-        "export const meta = { name: 'linear-issue', managesSource: 'linear', reviews: true }\n",
-    );
-
-    let list = catalog(Some(&claude), Some(&repo));
-    let names: Vec<String> = list
-        .iter()
-        .map(|e| match &e.executor {
-            Executor::Claude => "claude".to_string(),
-            Executor::Agent { name, source } => format!("agent:{name}:{}", source.as_str()),
-            Executor::Workflow { name } => format!("wf:{name}"),
-        })
-        .collect();
+    let list = list_agents(Some(&claude), Some(&repo));
+    let names: Vec<String> = list.iter().map(|a| format!("{}:{}", a.name, a.source.as_str())).collect();
     assert_eq!(
         names,
-        [
-            "claude",
-            "agent:code-reviewer:repo",
-            "agent:frontend-developer:user",
-            "agent:toolkit:security:plugin",
-            "wf:linear-issue",
-            "wf:plan-task"
-        ]
+        ["code-reviewer:repo", "frontend-developer:user", "toolkit:security:plugin"]
     );
-    assert_eq!(list[1].description.as_deref(), Some("repo version"));
-    let li = &list[4];
-    assert_eq!(li.manages_source.as_deref(), Some("linear"));
-    assert!(li.reviews);
-    assert_eq!(li.source, Some(AgentSource::User));
-    assert!(
-        find_workflow(Some(&claude), Some(&repo), "plan-task")
-            .unwrap()
-            .reviews
-    );
-    assert!(find_workflow(Some(&claude), None, "nope").is_none());
+    assert_eq!(list[0].description.as_deref(), Some("repo version"));
     // No repo: only the user's agents and user-scoped plugins.
-    let no_repo = catalog(Some(&claude), None);
-    assert!(no_repo
-        .iter()
-        .any(|e| e.description.as_deref() == Some("user version")));
-    assert!(!no_repo.iter().any(
-        |e| matches!(&e.executor, Executor::Agent { name, .. } if name.contains("elsewhere"))
-    ));
+    let no_repo = list_agents(Some(&claude), None);
+    assert!(no_repo.iter().any(|a| a.description.as_deref() == Some("user version")));
+    assert!(!no_repo.iter().any(|a| a.name.contains("elsewhere")));
 }
 
 #[test]
@@ -182,19 +145,4 @@ fn list_agents_picks_up_an_edited_file() {
     write(&path, "---\nname: edited\ndescription: brand new and longer\n---\n");
     let after = list_agents(Some(&claude), None);
     assert_eq!(after[0].description.as_deref(), Some("brand new and longer"));
-}
-
-/// Against this machine's `~/.claude`: `cargo test -- --ignored`.
-#[test]
-#[ignore]
-fn real_catalog() {
-    let dir = crate::paths::claude_config_dir().unwrap();
-    for e in catalog(Some(&dir), None) {
-        eprintln!(
-            "{:?} · {:?} · {:?}",
-            e.executor,
-            e.tools,
-            e.description.map(|d| clip_chars(&d, 60))
-        );
-    }
 }

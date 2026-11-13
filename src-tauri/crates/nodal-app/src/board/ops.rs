@@ -39,8 +39,6 @@ pub fn create_project(conn: &Connection, env: &Env, input: &NewProject, now: i64
         key,
         next_task_number: 1,
         color,
-        default_executor: None,
-        reviewer: None,
         created_at: now,
         archived_at: None,
         description: validate::description(input.description.as_deref())?,
@@ -67,15 +65,6 @@ pub fn update_project(conn: &Connection, env: &Env, id: &str, patch: &ProjectPat
     if let Some(r) = &patch.root_path {
         p.root_path = root_path(env, r.as_deref())?;
     }
-    if let Some(e) = &patch.default_executor {
-        if let Some(e) = e {
-            validate::executor(e)?;
-        }
-        p.default_executor = e.clone();
-    }
-    if let Some(r) = &patch.reviewer {
-        p.reviewer = r.as_deref().map(validate::reviewer).transpose()?;
-    }
     if let Some(a) = patch.archived {
         p.archived_at = if a { p.archived_at.or(Some(now)) } else { None };
     }
@@ -83,14 +72,10 @@ pub fn update_project(conn: &Connection, env: &Env, id: &str, patch: &ProjectPat
     Ok(p)
 }
 
-/// Cascade-deletes repos, tasks and sources. Refuses if there are runs in progress or tasks
-/// with a worktree (the folder and the `nodal/*` branch would be orphaned). Returns the ids
+/// Cascade-deletes repos, tasks and sources. Refuses if tasks have a worktree (the folder and the `nodal/*` branch would be orphaned). Returns the ids
 /// of the deleted tasks (to clean up their plans on disk).
 pub fn delete_project(conn: &mut Connection, id: &str) -> Result<Vec<String>, String> {
     projects::get(conn, id)?;
-    if nodal_store::execution::runs::pending_in_project(conn, id)? > 0 {
-        return Err("The project has queued or running runs: cancel them first.".into());
-    }
     let tx = conn.transaction().map_err(|e| e.to_string())?;
     let all = tasks::list(&tx, Some(id))?;
     let with_wt: Vec<&str> = all.iter().filter(|t| t.worktree.is_some()).map(|t| t.title.as_str()).collect();
@@ -121,20 +106,12 @@ pub fn add_repo(conn: &Connection, project_id: &str, input: &NewRepo, root: &Pat
         None => dir_name,
     };
     let launch = options::normalize(&input.launch).map_err(|e| e.join("\n"))?;
-    if let Some(e) = &input.default_executor {
-        validate::executor(e)?;
-    }
     let r = Repo {
         id: new_id('r', now),
         project_id: project_id.to_string(),
         path,
         name,
         launch,
-        default_executor: input.default_executor.clone(),
-        default_isolation: input.default_isolation.unwrap_or(Isolation::Worktree),
-        default_finish: input.default_finish.unwrap_or(Finish::Pr),
-        default_review: input.default_review.unwrap_or(true),
-        reviewer: input.reviewer.as_deref().map(str::trim).filter(|s| !s.is_empty()).map(validate::reviewer).transpose()?,
         position: repos::next_position(conn, project_id)?,
         created_at: now,
     };
@@ -146,24 +123,6 @@ pub fn update_repo(conn: &Connection, id: &str, patch: &RepoPatch) -> Result<Rep
     let mut r = repos::get(conn, id)?;
     if let Some(n) = &patch.name {
         r.name = validate::name(n, "repo")?;
-    }
-    if let Some(e) = &patch.default_executor {
-        if let Some(e) = e {
-            validate::executor(e)?;
-        }
-        r.default_executor = e.clone();
-    }
-    if let Some(i) = patch.default_isolation {
-        r.default_isolation = i;
-    }
-    if let Some(f) = patch.default_finish {
-        r.default_finish = f;
-    }
-    if let Some(v) = patch.default_review {
-        r.default_review = v;
-    }
-    if let Some(rv) = &patch.reviewer {
-        r.reviewer = rv.as_deref().map(validate::reviewer).transpose()?;
     }
     let mut launch = r.launch.clone();
     if let Some(m) = &patch.model {
@@ -255,9 +214,6 @@ pub fn create_task(conn: &mut Connection, env: &Env, input: &NewTask, now: i64) 
     if repo.project_id != input.project_id {
         return Err("The repo belongs to another project.".into());
     }
-    if let Some(e) = &input.assignee {
-        validate::executor(e)?;
-    }
     let labels = validate::labels(input.labels.as_deref().unwrap_or_default())?;
     let acceptance = validate::acceptance(input.acceptance.as_deref().unwrap_or_default())?;
     let id = new_id('t', now);
@@ -280,10 +236,6 @@ pub fn create_task(conn: &mut Connection, env: &Env, input: &NewTask, now: i64) 
             plan,
             plan_overridden: false,
             acceptance,
-            assignee: input.assignee.clone(),
-            isolation: input.isolation,
-            finish: input.finish,
-            review: input.review,
             worktree: None,
             source: None,
             created_at: now,
@@ -314,9 +266,6 @@ pub fn update_task(conn: &mut Connection, env: &Env, id: &str, patch: &TaskPatch
         if target.project_id != t.project_id {
             return Err("A task can only move to a repo of its own project.".into());
         }
-        if !nodal_store::execution::runs::pending_for_task(conn, id)?.is_empty() {
-            return Err("The task has a queued or running run: wait for it or cancel it first.".into());
-        }
         if t.worktree.is_some() {
             return Err("Clean up the task's worktree before moving it to another repo.".into());
         }
@@ -339,21 +288,6 @@ pub fn update_task(conn: &mut Connection, env: &Env, id: &str, patch: &TaskPatch
     }
     if let Some(a) = &patch.acceptance {
         t.acceptance = validate::acceptance(a)?;
-    }
-    if let Some(a) = &patch.assignee {
-        if let Some(e) = a {
-            validate::executor(e)?;
-        }
-        t.assignee = a.clone();
-    }
-    if let Some(i) = patch.isolation {
-        t.isolation = i;
-    }
-    if let Some(f) = patch.finish {
-        t.finish = f;
-    }
-    if let Some(r) = patch.review {
-        t.review = r;
     }
     let text_path = env.text_plan_path(id);
     let staged = text_path.with_extension("md.new");
@@ -466,14 +400,10 @@ pub fn apply_task_transition(
     Ok(status)
 }
 
-/// Deletes the task and its text plan. Refuses if it has queued or running runs, or if it
-/// has a worktree: that's cleaned up first with "Clean up" (which checks for unpushed work),
+/// Deletes the task and its text plan. Refuses if it has a worktree: that's cleaned up first with "Clean up" (which checks for unpushed work),
 /// so the folder and the `nodal/*` branch aren't orphaned.
 pub fn delete_task(conn: &Connection, env: &Env, id: &str) -> Result<(), String> {
     let t = tasks::get(conn, id)?;
-    if !nodal_store::execution::runs::pending_for_task(conn, id)?.is_empty() {
-        return Err("The task has a queued or running run: cancel it first.".into());
-    }
     if t.worktree.is_some() {
         return Err("The task has a worktree: clean up the worktree first (Clean up), then delete the task.".into());
     }
@@ -507,16 +437,7 @@ pub fn remove_relation(conn: &Connection, task_id: &str, other_id: &str, kind: R
 
 pub fn set_settings(conn: &mut Connection, s: &Settings) -> Result<Settings, String> {
     let clean = Settings {
-        concurrency: validate::concurrency(s.concurrency)?,
         editor: s.editor.as_deref().map(str::trim).filter(|e| !e.is_empty()).map(validate::editor).transpose()?,
-        reviewer: validate::reviewer(&s.reviewer)?,
-        default_executor: match &s.default_executor {
-            Some(e) => {
-                validate::executor(e)?;
-                Some(e.clone())
-            }
-            None => None,
-        },
     };
     rows::save_settings(conn, &clean)?;
     Ok(rows::load_settings(conn)?)

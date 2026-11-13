@@ -228,6 +228,15 @@ fn unstage_and_delete(root: &Path, full: &Path, norm: &str) -> Result<(), String
     }
 }
 
+/// `git ls-files` (tracked + untracked, ignored left out), capped at `REPO_FILES_MAX`.
+pub fn list_files(repo: &Path) -> Result<Vec<String>, String> {
+    let out = ok(repo, &["ls-files", "--cached", "--others", "--exclude-standard", "-z"])?;
+    let mut files: Vec<String> = out.split('\0').filter(|s| !s.is_empty() && !s.ends_with('/')).map(str::to_string).collect();
+    files.dedup();
+    files.truncate(nodal_domain::model::REPO_FILES_MAX);
+    Ok(files)
+}
+
 pub fn list_dir(repo: &Path, rel: &str) -> Result<Vec<DirEntry>, String> {
     let dir = resolve(repo, rel)?;
     let mut all: Vec<DirEntry> = std::fs::read_dir(&dir)

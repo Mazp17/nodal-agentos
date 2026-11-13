@@ -88,8 +88,6 @@
 /* Agents & workflows */
 .aw-toolbar { display: flex; align-items: center; gap: var(--sp-4); flex-wrap: wrap; }
 .aw-search { width: 200px; }
-.aw-kind { display: inline-flex; align-items: center; gap: var(--sp-2); }
-.aw-kind-count { font-size: var(--fs-2xs); color: var(--text-dim); }
 .aw-summary { margin-left: auto; font-size: var(--fs-sm); color: var(--text-dim); white-space: nowrap; }
 .aw-group { overflow: hidden; }
 .aw-group-head {
@@ -142,9 +140,21 @@
   background: color-mix(in oklch, var(--tone) 14%, transparent);
 }
 .aw-mark-agent { --tone: var(--accent); }
-.aw-mark-workflow { --tone: var(--info); }
 .aw-mark-claude { --tone: var(--accent); background: var(--accent); color: var(--on-accent); }
 .aw-row-text { min-width: 0; display: flex; flex-direction: column; gap: var(--sp-0); }
 .aw-row-name { font-size: var(--fs-base); color: var(--text); }
 .aw-row-desc { font-size: var(--fs-sm); color: var(--text-muted); }
 .aw-flags { display: flex; gap: var(--sp-2); flex: none; }
+
+/* Worktrees section: one row per worktree, its purpose under its name, actions at the end. */
+.wt-group { padding: 0; overflow: hidden; }
+.wt-group .aw-group-head { padding: var(--sp-3) var(--sp-4); }
+.wt-note { margin: 0; padding: var(--sp-4); border-top: 1px solid var(--border); font-size: var(--fs-sm); color: var(--text-muted); }
+.wt-list { list-style: none; margin: 0; padding: 0; }
+.wt-row { display: flex; align-items: center; gap: var(--sp-3); min-height: 52px; padding: var(--sp-2) var(--sp-4); border-top: 1px solid var(--border); }
+.wt-icon { flex: none; color: var(--text-muted); }
+.wt-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.wt-name { font-size: var(--fs-base); color: var(--text-2); }
+.wt-meta { font-size: var(--fs-2xs); color: var(--text-muted); }
+.wt-task { color: var(--text-3); }
+.wt-delete:hover:not(:disabled) { color: var(--red-text); }

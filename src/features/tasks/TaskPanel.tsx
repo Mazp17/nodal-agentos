@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
+import { useCallback, useEffect, useId, useRef, useState, type ReactNode, type RefObject } from "react";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import {
   addTaskRelation,
@@ -6,13 +6,14 @@ import {
   deleteTask,
   removeTaskRelation,
   resolveMovedTask,
+  sendChatMessage,
   unlinkTask,
   updateTask,
   worktreeStatus,
   type TaskPatch,
   type WorktreeStatus,
 } from "../../domain/api";
-import { isRunActive, useQueueSummary, useTaskRuns } from "../../domain/hooks/runs";
+import { useAllChats } from "../../domain/hooks/chats";
 import {
   invalidate,
   KEYS,
@@ -23,33 +24,26 @@ import {
   useTaskPlan,
   useTaskRelations,
   useTasks,
-  useSettings,
   useWorktreeStatus,
 } from "../../domain/hooks/store";
-import { taskKey, TASK_STATUSES, type Executor, type RelationKind, type RunLight, type Task, type TaskStatus } from "../../domain/types";
-import { formatDateTime, formatDuration, formatTokens } from "../../lib/format";
-import { Kbd, KbdGroup } from "../../ui/Kbd";
+import { taskKey, TASK_STATUSES, type RelationKind, type Task, type TaskStatus } from "../../domain/types";
+import { formatDateTime } from "../../lib/format";
 import { SafeMarkdown } from "../../ui/Markdown";
 import { useConfirm } from "../../ui/ConfirmDialog";
 import { useFocusTrap } from "../../ui/useFocusTrap";
 import { useToast } from "../../ui/Toasts";
-import { ExecutorName, ExecutorPicker, executorLabel, inheritedExecutor, sameExecutor } from "../executors";
+import { ensureChatAttached } from "../chats/stream";
 import { SourceTab } from "../providers";
-import { PhaseSegments, RunBadge, useRunActions, useRunView } from "../runs";
 import { MergeDialog } from "./MergeDialog";
 import { NewTaskDialog } from "./NewTaskDialog";
 import { PriorityBars, StatusRing } from "./bits";
-import { useAskLaunch } from "./LaunchPopover";
 import { isClosed, PRIORITIES, PRIORITY_LABEL, providerLabel, STATUS_META } from "./status";
-import { useLaunch } from "./useLaunch";
+import { useOpenTaskChat } from "./useTaskChat";
 import "./tasks.css";
 
 export interface TaskPanelProps {
   taskId: string;
   onClose: () => void;
-  onOpenRun: (runId: string) => void;
-  /** Opens a run's diff (RunDiffDrawer). */
-  onOpenDiff: (runId: string) => void;
   /** Navigate to a related task; without it, relations aren't clickable. */
   onOpenTask?: (taskId: string) => void;
   /** "Review mapping" in the Source tab: Project settings → Sources. */
@@ -69,30 +63,24 @@ function useOutside(open: boolean, close: () => void) {
   return ref;
 }
 
-/** Task detail (drawer): status, repo, plan, criteria, relations, step chain and launch. */
-export function TaskPanel({ taskId, onClose, onOpenRun, onOpenDiff, onOpenTask, onOpenSources }: TaskPanelProps) {
+/** Task detail (drawer): status, repo, plan, criteria, relations, worktree and "Open in chat". */
+export function TaskPanel({ taskId, onClose, onOpenTask, onOpenSources }: TaskPanelProps) {
   const ref = useFocusTrap<HTMLElement>(onClose);
   const headingId = useId();
   const push = useToast();
-  const launch = useLaunch();
-  const askLaunch = useAskLaunch();
+  const openTaskChat = useOpenTaskChat();
   const ask = useConfirm();
-  const runActions = useRunActions();
 
   const taskQ = useTask(taskId);
   const task = taskQ.data;
   const projects = useProjectList();
   const repos = useRepos(task?.projectId ?? null);
-  const runsQ = useTaskRuns(taskId);
-  const summary = useQueueSummary();
-  const globalExecutor = useSettings().data?.defaultExecutor ?? null;
+  const chats = useAllChats(true);
 
   const [tab, setTab] = useState<"overview" | "source">("overview");
   const [menu, setMenu] = useState<"status" | "prio" | "repo" | "more" | null>(null);
   const [editing, setEditing] = useState(false);
   const [merging, setMerging] = useState(false);
-  const [launchExec, setLaunchExec] = useState<Executor | null>(null);
-  const [extra, setExtra] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
   /** Why the backend rejected the non-forced "Clean up". */
   const [cleanupBlocked, setCleanupBlocked] = useState<string | null>(null);
@@ -100,8 +88,6 @@ export function TaskPanel({ taskId, onClose, onOpenRun, onOpenDiff, onOpenTask, 
 
   useEffect(() => {
     setTab("overview");
-    setLaunchExec(null);
-    setExtra("");
     setMenu(null);
     setCleanupBlocked(null);
     setMerging(false);
@@ -112,18 +98,11 @@ export function TaskPanel({ taskId, onClose, onOpenRun, onOpenDiff, onOpenTask, 
   const repoRef = useOutside(menu === "repo", closeMenu);
   const prioRef = useOutside(menu === "prio", closeMenu);
   const moreRef = useOutside(menu === "more", closeMenu);
-  const runBtnRef = useRef<HTMLButtonElement>(null);
 
   const project = projects.data?.find((p) => p.id === task?.projectId);
   const projectRepos = (repos.data ?? []).filter((r) => r.projectId === task?.projectId);
   const repo = projectRepos.find((r) => r.id === task?.repoId);
-  const runs = runsQ.data ?? [];
-  const chain = useMemo(() => [...(runsQ.data ?? [])].reverse(), [runsQ.data]);
-  const current = runs[0];
-  const activeRun = runs.find(isRunActive);
-  const workRuns = runs.filter((r) => r.kind === "work" && r.launchedAt != null);
-  const lastWork = workRuns[0];
-  const heroRun = activeRun ?? current;
+  const chat = chats.data?.find((c) => c.taskId === taskId);
 
   if (!task) {
     return (
@@ -145,15 +124,10 @@ export function TaskPanel({ taskId, onClose, onOpenRun, onOpenDiff, onOpenTask, 
   }
 
   const key = project ? taskKey(project.key, task.number) : `#${task.number}`;
-  const inherited = inheritedExecutor(repo, project, globalExecutor);
-  const assignee = task.assignee ?? inherited;
-  const runExec = launchExec ?? assignee;
   const src = task.source;
   const closed = isClosed(task.status);
-  const canLaunch = !!repo && !activeRun && !closed;
-  const finish = lastWork?.finish ?? repo?.defaultFinish ?? "pr";
-  const canMerge = !!task.worktree && !!repo && finish !== "pr" && !closed;
-  const willQueue = summary.queued > 0 || (summary.capacity > 0 && summary.running >= summary.capacity);
+  const canOpenChat = !!repo && (!closed || !!chat);
+  const canMerge = !!task.worktree && !!repo && !closed;
 
   const act = async (label: string, fn: () => Promise<unknown>, okMsg?: [string, string?]) => {
     setBusy(label);
@@ -166,49 +140,15 @@ export function TaskPanel({ taskId, onClose, onOpenRun, onOpenDiff, onOpenTask, 
       return false;
     } finally {
       setBusy(null);
-      invalidate("tasks", "runs");
+      invalidate("tasks");
     }
   };
 
   const patch = (p: TaskPatch, label: string, ok?: [string, string?]) => act(label, () => updateTask(task.id, p), ok);
 
-  const setAssignee = (a: Executor | null) => {
-    if (a === null ? task.assignee === null : sameExecutor(a, task.assignee)) return;
-    void patch({ assignee: a }, "change the executor", [
-      `${key} now assigned to ${executorLabel(a ?? inherited)}`,
-      a ? task.title : "Inherited default",
-    ]);
-  };
-  const assigneeLocked = activeRun
-    ? "Can't change the executor while a run is active"
-    : busy !== null
-      ? "Wait for the current action to finish"
-      : undefined;
-
   const setStatus = (s: TaskStatus) => {
     setMenu(null);
     if (s !== task.status) void patch({ status: s }, "change the status", [`${key} → ${STATUS_META[s].label}`, task.title]);
-  };
-
-  const doLaunch = async (how: "run" | "handoff" | "review", anchor?: HTMLElement) => {
-    const config = how === "run" ? await askLaunch({ name: key, title: task.title, repo, executor: runExec, anchor }) : null;
-    if (how === "run" && !config) return;
-    setBusy(how);
-    const extraText = extra.trim() || null;
-    const run = config
-      ? await launch(task.id, key, {
-          kind: "run",
-          config,
-          input: { ...(launchExec ? { executor: launchExec } : {}), ...(extraText ? { extraInstructions: extraText } : {}) },
-        })
-      : how === "handoff"
-        ? await launch(task.id, key, { kind: "handoff", executor: runExec, extra: extraText })
-        : await launch(task.id, key, { kind: "review" });
-    setBusy(null);
-    if (run) {
-      setExtra("");
-      setLaunchExec(null);
-    }
   };
 
   /** Without forcing, the backend refuses if there are unpushed commits or uncommitted changes. */
@@ -235,7 +175,7 @@ export function TaskPanel({ taskId, onClose, onOpenRun, onOpenDiff, onOpenTask, 
       setCleanupBlocked(String(e));
     } finally {
       setBusy(null);
-      void invalidate("tasks", "runs");
+      void invalidate("tasks");
     }
   };
 
@@ -298,17 +238,16 @@ export function TaskPanel({ taskId, onClose, onOpenRun, onOpenDiff, onOpenTask, 
   };
 
   const provider = src ? providerLabel(src.provider) : null;
-  const canDiffLast = !!lastWork && (!!task.worktree || lastWork.isolation !== "worktree");
   const mergeButton =
     canMerge && task.worktree ? (
       <button
         type="button"
         className="btn btn-sm btn-primary"
-        disabled={busy !== null || !!activeRun}
-        title={activeRun ? "Cancel the running step first" : `Land ${task.worktree.branch} on ${task.worktree.base}`}
+        disabled={busy !== null}
+        title={`Land ${task.worktree.branch} on ${task.worktree.base}`}
         onClick={() => setMerging(true)}
       >
-        {finish === "changes" ? "Commit & merge" : `Merge into ${task.worktree.base} & done`}
+        {`Merge into ${task.worktree.base} & done`}
       </button>
     ) : null;
   /** Menu action: closes the menu first. */
@@ -383,17 +322,11 @@ export function TaskPanel({ taskId, onClose, onOpenRun, onOpenDiff, onOpenTask, 
                   ? [
                       {
                         key: "merge",
-                        label: finish === "changes" ? "Commit & merge…" : `Merge into ${task.worktree.base} & done…`,
-                        disabled: busy !== null || !!activeRun,
+                        label: `Merge into ${task.worktree.base} & done…`,
+                        disabled: busy !== null,
                         onPick: picked(() => setMerging(true)),
                       },
                     ]
-                  : []),
-                ...(heroRun
-                  ? [{ key: "run", label: activeRun ? "Open run" : "Open last run", onPick: picked(() => onOpenRun(heroRun.id)) }]
-                  : []),
-                ...(lastWork && canDiffLast
-                  ? [{ key: "diff", label: "View diff", onPick: picked(() => onOpenDiff(lastWork.id)) }]
                   : []),
                 ...(src
                   ? [{ key: "unlink", label: `Unlink from ${provider}…`, disabled: busy !== null, onPick: picked(() => void unlink()) }]
@@ -402,7 +335,7 @@ export function TaskPanel({ taskId, onClose, onOpenRun, onOpenDiff, onOpenTask, 
                   key: "delete",
                   label: "Delete task…",
                   danger: true,
-                  disabled: busy !== null || !!activeRun,
+                  disabled: busy !== null,
                   onPick: picked(() => void remove()),
                 },
               ]}
@@ -507,23 +440,12 @@ export function TaskPanel({ taskId, onClose, onOpenRun, onOpenDiff, onOpenTask, 
                     checked: r.id === task.repoId,
                     onPick: () => {
                       setMenu(null);
-                      if (r.id !== task.repoId) void patch({ repoId: r.id }, "move the task", [`${key} moved`, `Now runs in ${r.name}`]);
+                      if (r.id !== task.repoId) void patch({ repoId: r.id }, "move the task", [`${key} moved`, `Now in ${r.name}`]);
                     },
                   }))}
                 />
               )}
             </div>
-            <ExecutorPicker
-              variant="chip"
-              repoId={repo?.id ?? null}
-              projectId={task.projectId}
-              value={task.assignee}
-              inherited={inherited}
-              label="Assignee"
-              disabled={!!assigneeLocked}
-              title={assigneeLocked ?? "Assignee"}
-              onChange={setAssignee}
-            />
             {task.labels.map((l) => (
               <span key={l} className="tp-label">
                 {l}
@@ -555,7 +477,7 @@ export function TaskPanel({ taskId, onClose, onOpenRun, onOpenDiff, onOpenTask, 
               onMove={() =>
                 void act("move the task", () => resolveMovedTask(task.id, "move"), [
                   `${key} moved`,
-                  `Now runs in ${projectRepos.find((r) => r.id === src.moved?.suggestedRepoId)?.name ?? "the suggested repo"}`,
+                  `Now in ${projectRepos.find((r) => r.id === src.moved?.suggestedRepoId)?.name ?? "the suggested repo"}`,
                 ])
               }
               onKeep={() => void act("keep the task", () => resolveMovedTask(task.id, "keep"))}
@@ -566,7 +488,7 @@ export function TaskPanel({ taskId, onClose, onOpenRun, onOpenDiff, onOpenTask, 
               <span className="tp-banner-mark" aria-hidden>
                 !
               </span>
-              <span className="tp-banner-text">This task's repo was removed from the project. Choose another repo to run it.</span>
+              <span className="tp-banner-text">This task's repo was removed from the project. Choose another repo to work on it.</span>
               <button type="button" className="btn btn-sm" onClick={() => setMenu("repo")}>
                 Choose repo
               </button>
@@ -607,41 +529,12 @@ export function TaskPanel({ taskId, onClose, onOpenRun, onOpenDiff, onOpenTask, 
           />
         ) : (
           <>
-            {heroRun && (
-              <RunHero
-                run={heroRun}
-                canDiff={heroRun.kind === "work" && heroRun.launchedAt != null && (!!task.worktree || heroRun.isolation !== "worktree")}
-                prUrl={heroRun.prUrl ?? (heroRun.kind === "review" ? (lastWork?.prUrl ?? null) : null)}
-                busy={busy !== null || runActions.busy}
-                onOpenRun={onOpenRun}
-                onOpenDiff={onOpenDiff}
-                onStop={async (run) => {
-                  const done = run.status === "queued" ? await runActions.remove({ run }, key) : await runActions.stop({ run }, key);
-                  if (done) void invalidate("tasks");
-                }}
-                extra={mergeButton}
-              />
-            )}
-
             <PlanSection task={task} onEdit={() => setEditing(true)} />
             <AcceptanceSection
               key={task.id}
               task={task}
               onSave={(acceptance) => patch({ acceptance }, "update the criteria")}
             />
-
-            <section className="tp-section" aria-label="Run history">
-              <span className="section-label">Run history</span>
-              {chain.length === 0 ? (
-                <div className="tp-empty">No runs yet.</div>
-              ) : (
-                <ol className="tp-chain">
-                  {chain.map((r, i) => (
-                    <StepRow key={r.id} run={r} n={i + 1} onOpenRun={onOpenRun} onOpenDiff={onOpenDiff} />
-                  ))}
-                </ol>
-              )}
-            </section>
 
             <RelationsSection task={task} onOpenTask={onOpenTask} />
 
@@ -666,17 +559,11 @@ export function TaskPanel({ taskId, onClose, onOpenRun, onOpenDiff, onOpenTask, 
                     </span>
                   </div>
                   <div className="tp-wt-actions">
-                    {!heroRun && mergeButton}
-                    {lastWork && (
-                      <button type="button" className="btn btn-sm" onClick={() => onOpenDiff(lastWork.id)}>
-                        View diff
-                      </button>
-                    )}
+                    {mergeButton}
                     <button
                       type="button"
                       className="btn btn-sm btn-danger"
-                      disabled={!!activeRun || busy !== null}
-                      title={activeRun ? "Cancel the running step first" : undefined}
+                      disabled={busy !== null}
                       onClick={() => void cleanUp()}
                     >
                       Clean up
@@ -688,7 +575,7 @@ export function TaskPanel({ taskId, onClose, onOpenRun, onOpenDiff, onOpenTask, 
                       <button
                         type="button"
                         className="btn btn-sm btn-danger"
-                        disabled={!!activeRun || busy !== null}
+                        disabled={busy !== null}
                         onClick={() => void cleanUpAnyway()}
                       >
                         Clean up anyway
@@ -707,74 +594,28 @@ export function TaskPanel({ taskId, onClose, onOpenRun, onOpenDiff, onOpenTask, 
         )}
       </div>
 
-      {canLaunch && (
+      {canOpenChat && (
         <footer className="tp-foot">
-          <section className="tp-composer" aria-label="Launch">
-            <textarea
-              className="tp-extra"
-              value={extra}
-              onChange={(e) => setExtra(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key !== "Enter" || !(e.metaKey || e.ctrlKey) || e.nativeEvent.isComposing) return;
-                e.preventDefault();
-                if (busy === null) void doLaunch("run", runBtnRef.current ?? undefined);
+          <div className="tp-composer-bar">
+            <span className="tk-muted ellipsis">
+              {chat ? "A chat is working this task in its own worktree." : `Work on this task in a chat inside ${repo.name}.`}
+            </span>
+            <span className="tp-spacer" />
+            <button
+              type="button"
+              className="btn btn-primary"
+              disabled={busy !== null}
+              onClick={() => {
+                setBusy("chat");
+                void openTaskChat(task.id).then((c) => {
+                  setBusy(null);
+                  if (c) onClose();
+                });
               }}
-              placeholder="Extra instructions for this run (optional)"
-              aria-label="Extra instructions for this run"
-            />
-            <div className="tp-composer-bar">
-              <ExecutorPicker
-                variant="pill"
-                caption="Executor"
-                repoId={repo.id}
-                projectId={task.projectId}
-                value={launchExec}
-                inherited={assignee}
-                label="Executor for this run"
-                onChange={setLaunchExec}
-                dropUp
-              />
-              {lastWork && (
-                <button type="button" className="tp-pill" disabled={busy !== null} onClick={() => void doLaunch("review")}>
-                  Review now
-                </button>
-              )}
-              {lastWork && (
-                <button
-                  type="button"
-                  className="tp-pill"
-                  disabled={busy !== null}
-                  title="Next step on the same branch: gets the plan, criteria, previous summary and diff"
-                  onClick={() => void doLaunch("handoff")}
-                >
-                  Hand off → {executorLabel(runExec)}
-                </button>
-              )}
-              <span className="tp-spacer" />
-              <button
-                ref={runBtnRef}
-                type="button"
-                className="btn btn-primary tp-run"
-                disabled={busy !== null}
-                title={`Isolation, finish and review are chosen next · in ${repo.name}`}
-                onClick={(e) => void doLaunch("run", e.currentTarget)}
-              >
-                {willQueue ? "Run (will queue)" : current ? "Run again" : "Run"}
-                <KbdGroup aria-hidden>
-                  <Kbd>⌘</Kbd>
-                  <Kbd>↵</Kbd>
-                </KbdGroup>
-              </button>
-            </div>
-          </section>
-          {willQueue && (
-            <div className="tp-launch-warn">
-              <span className="tp-launch-warn-mark" aria-hidden>
-                !
-              </span>
-              <span>All run slots are busy: this run waits in the queue.</span>
-            </div>
-          )}
+            >
+              {chat ? "Open chat" : "Open in chat"}
+            </button>
+          </div>
         </footer>
       )}
 
@@ -783,7 +624,6 @@ export function TaskPanel({ taskId, onClose, onOpenRun, onOpenDiff, onOpenTask, 
           taskId={task.id}
           worktree={task.worktree}
           message={`${key}: ${task.title}`}
-          commitFirst={finish === "changes"}
           provider={provider}
           onClose={() => setMerging(false)}
           onMerged={(r) => {
@@ -796,13 +636,21 @@ export function TaskPanel({ taskId, onClose, onOpenRun, onOpenDiff, onOpenTask, 
             if (r.pushedTo) push(`${base} pushed`, r.pushedTo, "ok");
             if (r.pushError) push(`Couldn't push ${base}`, r.pushError, "danger");
             setCleanupBlocked(r.cleanupError);
-            void invalidate("tasks", "runs");
+            void invalidate("tasks");
           }}
           onHandOff={(instructions) => {
             setMerging(false);
             void (async () => {
               setBusy("handoff");
-              await launch(task.id, key, { kind: "handoff", executor: { kind: "claude" }, extra: instructions });
+              const c = await openTaskChat(task.id);
+              if (c) {
+                try {
+                  await ensureChatAttached(c.id);
+                  await sendChatMessage(c.id, instructions);
+                } catch (e) {
+                  push("Couldn't send the message", String(e), "danger");
+                }
+              }
               setBusy(null);
             })();
           }}
@@ -1088,7 +936,7 @@ function AcceptanceSection({ task, onSave }: { task: Task; onSave: (ac: string[]
           </button>
         </div>
       ))}
-      {n === 0 && <div className="tp-empty">No criteria yet. The reviewer infers them from the plan and says so in its verdict.</div>}
+      {n === 0 && <div className="tp-empty">No criteria yet.</div>}
       <div className="tp-crit">
         <span className="tp-box-plus" aria-hidden>
           +
@@ -1215,196 +1063,6 @@ function RelationsSection({ task, onOpenTask }: { task: Task; onOpenTask?: (id: 
         </div>
       )}
     </section>
-  );
-}
-
-/** Latest run up front: status, phase progress, what it's doing or what it produced, and its main actions. */
-function RunHero({
-  run: runProp,
-  canDiff,
-  prUrl,
-  busy,
-  onOpenRun,
-  onOpenDiff,
-  onStop,
-  extra,
-}: {
-  run: RunLight;
-  canDiff: boolean;
-  /** The run's PR, or the reviewed work run's when this is a review. */
-  prUrl: string | null;
-  busy: boolean;
-  onOpenRun: (id: string) => void;
-  onOpenDiff: (id: string) => void;
-  onStop: (run: RunLight) => Promise<void>;
-  /** Extra action (merge) after the run's own. */
-  extra?: ReactNode;
-}) {
-  const v = useRunView(runProp);
-  // The shared store refreshes faster than the task's run list: read everything from it.
-  const run = v.run;
-  const active = v.tab === "active" || v.tab === "queued";
-  const result = run.verdict?.summary ?? run.summary;
-  const message = run.error
-    ? null
-    : v.phase === "running"
-      ? run.kind === "review"
-        ? "Reviewing the changes."
-        : v.phaseName
-          ? `${v.phaseName} in progress.`
-          : "Working on it."
-      : v.phase === "waiting"
-        ? `${v.waitingFor === "permission prompt" ? "Waiting for a permission prompt" : "The agent needs input to continue"}. Open the run to answer it in Claude Code.`
-        : v.phase === "queued"
-          ? `Waiting in queue${v.queuePos != null ? ` at position #${v.queuePos}` : ""}. Starts when a slot frees up.`
-          : v.phase === "awaiting"
-            ? "Waiting for confirmation before it launches."
-            : v.phase === "launching" || v.phase === "starting"
-              ? v.label === "Not visible"
-                ? "The session isn't visible in Claude Code yet."
-                : "Starting the session…"
-              : v.phase === "finished"
-                ? result
-                  ? null
-                  : "Finished. Review the result before merging."
-                : v.phase === "canceled"
-                  ? v.label === "Stopped"
-                    ? "Stopped before finishing."
-                    : "Canceled before it launched."
-                  : "The run failed.";
-
-  return (
-    <section className={`tp-hero tone-${v.tone}`} aria-label="Latest run">
-      <div className="tp-hero-head">
-        <RunBadge run={v} />
-        <span className="mono tp-hero-id ellipsis">
-          {executorLabel(run.executor)} · {run.kind === "review" ? "review" : "work"}
-        </span>
-        <span className="tp-spacer" />
-        <span className="tp-hero-stats num">
-          <span>{formatDuration(v.durationMs)}</span>
-          {v.tokens != null && <span>{formatTokens(v.tokens)} tok</span>}
-        </span>
-      </div>
-      <PhaseSegments run={v} />
-      {run.error ? (
-        <div className="tp-hero-msg tp-step-err">{run.error}</div>
-      ) : message ? (
-        <div className="tp-hero-msg">{message}</div>
-      ) : (
-        result && <SafeMarkdown text={result} className="md-compact tp-hero-msg" breaks />
-      )}
-      {run.verdict && run.verdict.unmet.length > 0 && (
-        <span className="tp-warn">
-          {run.verdict.unmet.length} unmet criteri{run.verdict.unmet.length === 1 ? "on" : "a"}
-        </span>
-      )}
-      <div className="tp-hero-actions">
-        {!active && prUrl ? (
-          <>
-            <button type="button" className="btn btn-sm btn-primary" onClick={() => void openUrl(prUrl).catch(() => {})}>
-              Open PR ↗
-            </button>
-            <button type="button" className="btn btn-sm" onClick={() => onOpenRun(run.id)}>
-              View run
-            </button>
-          </>
-        ) : (
-          <button type="button" className="btn btn-sm btn-primary" onClick={() => onOpenRun(run.id)}>
-            Open run
-          </button>
-        )}
-        {canDiff && (
-          <button type="button" className="btn btn-sm" onClick={() => onOpenDiff(run.id)}>
-            View diff
-          </button>
-        )}
-        {active && (
-          <button type="button" className="btn btn-sm btn-danger" disabled={busy} onClick={() => void onStop(run)}>
-            {run.status === "queued" ? "Cancel" : "Stop"}
-          </button>
-        )}
-        {extra}
-      </div>
-    </section>
-  );
-}
-
-function StepRow({
-  run,
-  n,
-  onOpenRun,
-  onOpenDiff,
-}: {
-  run: RunLight;
-  n: number;
-  onOpenRun: (id: string) => void;
-  onOpenDiff: (id: string) => void;
-}) {
-  const start = run.launchedAt;
-  const dur = start ? (run.finishedAt ?? Date.now()) - start : null;
-  const v = run.verdict;
-  const hasDiff = run.launchedAt != null && run.kind === "work";
-  return (
-    <li className={`tp-step ${run.kind === "review" ? "review" : ""}`}>
-      <div className="tp-step-row">
-        <span className="tp-step-n num">{n}</span>
-        <ExecutorName executor={run.executor} />
-        <span className={`tp-kind ${run.kind}`}>{run.kind === "review" ? "Review" : "Work"}</span>
-        {run.parentRunId && run.kind === "work" && <span className="tk-muted tp-step-tag">hand-off</span>}
-        <span className="tp-spacer" />
-        <RunBadge run={run} />
-        <span className="tk-muted num tp-step-dur">{dur != null ? formatDuration(dur) : "—"}</span>
-      </div>
-      {(run.summary || v || run.error) && (
-        <div className="tp-step-detail">
-          {run.error && <div className="tp-step-err">{run.error}</div>}
-          {v?.summary && <SafeMarkdown text={v.summary} className="md-compact" breaks />}
-          {!v && run.summary && <SafeMarkdown text={run.summary} className="md-compact" breaks />}
-          {v && v.unmet.length > 0 && (
-            <div>
-              <span className="tp-step-sub">Unmet</span>
-              <ul>
-                {v.unmet.map((u, i) => (
-                  <li key={i}>
-                    <SafeMarkdown text={u} className="md-compact" breaks />
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
-          {v && v.nits.length > 0 && (
-            <details>
-              <summary className="tp-step-sub">{v.nits.length} nit{v.nits.length === 1 ? "" : "s"}</summary>
-              <ul>
-                {v.nits.map((u, i) => (
-                  <li key={i}>
-                    <SafeMarkdown text={u} className="md-compact" breaks />
-                  </li>
-                ))}
-              </ul>
-            </details>
-          )}
-        </div>
-      )}
-      <div className="tp-step-actions">
-        {run.prUrl && (
-          <button type="button" className="btn btn-ghost btn-xs" onClick={() => void openUrl(run.prUrl as string).catch(() => {})}>
-            Open PR ↗
-          </button>
-        )}
-        {run.branch && <span className="mono tk-muted ellipsis">{run.branch}</span>}
-        <span className="tp-spacer" />
-        {hasDiff && (
-          <button type="button" className="btn btn-ghost btn-xs" onClick={() => onOpenDiff(run.id)}>
-            View diff
-          </button>
-        )}
-        <button type="button" className="btn btn-ghost btn-xs" onClick={() => onOpenRun(run.id)}>
-          Open run
-        </button>
-      </div>
-    </li>
   );
 }
 

@@ -5,7 +5,7 @@
 //! auto-import. Push goes first so that pull already sees what Nodal pushed.
 //!
 //! - Pull: title and plan (unless overridden) always; the Nodal status only if the
-//!   `external_state.id` changed and the task has no active run (Nodal wins). An unmapped
+//!   `external_state.id` changed and the task has no pending push (Nodal wins). An unmapped
 //!   state does not change the Nodal status and is left in `sync_error`.
 //! - Push: exponential backoff per row; `set_state` rows with a pending mapping, "Don't
 //!   sync", no mapping or targeting a vanished state are dropped (comments are sent
@@ -375,9 +375,8 @@ fn apply_pull_task(
         store::set_sync_error(conn, &task.id, Some(&msg))?;
         return Ok(false);
     };
-    let active = store::has_active_run(conn, &task.id)?;
     let pending = store::has_pending_state_push(conn, &task.id)?;
-    let d = decide_pull(task, item, map, active, pending);
+    let d = decide_pull(task, item, map, pending);
     store::apply_pull(
         conn,
         &store::PullUpdate {

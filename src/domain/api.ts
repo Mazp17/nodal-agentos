@@ -20,17 +20,13 @@ import type {
   ExtKind,
   Executor,
   ExternalState,
-  Finish,
   HiddenExecutor,
-  Isolation,
   LaunchOptions,
   Priority,
   Project,
   RelationKind,
   Repo,
   RepoRule,
-  Run,
-  RunLight,
   ScopeRef,
   Settings,
   SourceLink,
@@ -39,7 +35,7 @@ import type {
   TaskRelation,
   TaskStatus,
 } from "./types";
-import type { RunProgress, ToolResultInfo, Transcript, TranscriptItem } from "../features/runs/types";
+import type { ToolResultInfo, Transcript, TranscriptItem } from "../features/chats/types";
 
 // ---------- DTOs ----------
 
@@ -55,20 +51,6 @@ export interface RepoTrust {
   matchedPath: string | null;
 }
 
-/**
- * `running`/`capacity`: occupied slots of the global concurrency (the pump's rule). `needYou`:
- * Blocked tasks or tasks moved to another project in the provider + unconfirmed migrated runs + sessions waiting for permission/input, without counting
- * the same task twice. `queued`: ready to go. `pumpError`: error from the queue's last
- * pass (e.g. `claude agents` fails on every tick), or `null`.
- */
-export interface WorkSummary {
-  running: number;
-  capacity: number;
-  needYou: number;
-  queued: number;
-  pumpError: string | null;
-}
-
 /** `exists`: the folder is a live worktree. `ahead`: commits outside the base; `unpushed`: also outside every remote. */
 export interface WorktreeStatus {
   exists: boolean;
@@ -77,6 +59,7 @@ export interface WorktreeStatus {
   ahead: number;
   unpushed: number;
   dirty: boolean;
+  hasRemote: boolean;
 }
 
 /**
@@ -94,7 +77,7 @@ export interface NewProject {
 }
 
 /** Only the present fields change; `null` clears the optional ones. */
-export type ProjectPatch = Partial<Pick<Project, "name" | "key" | "color" | "description" | "rootPath" | "defaultExecutor" | "reviewer">> & {
+export type ProjectPatch = Partial<Pick<Project, "name" | "key" | "color" | "description" | "rootPath">> & {
   archived?: boolean;
 };
 
@@ -102,11 +85,6 @@ export type ProjectPatch = Partial<Pick<Project, "name" | "key" | "color" | "des
 export interface NewRepo extends LaunchOptions {
   path: string;
   name?: string;
-  defaultExecutor?: Executor | null;
-  defaultIsolation?: Isolation;
-  defaultFinish?: Finish;
-  defaultReview?: boolean;
-  reviewer?: string | null;
 }
 
 export type RepoPatch = Partial<Omit<NewRepo, "path" | "model" | "effort" | "permissionMode">> & {
@@ -128,14 +106,13 @@ export interface NewTask {
   priority?: Priority;
   labels?: string[];
   acceptance?: string[];
-  assignee?: Executor | null;
 }
 
 /**
  * `repoId` moves the task to another repo of the same project (no runs in progress and no worktree; a
  * `.md` plan from the old repo requires sending another `plan`).
  * Imported tasks only accept `repoId`, `plan` (becomes `planOverridden`), `status`,
- * `acceptance` and the execution options.
+ * `acceptance`.
  */
 export type TaskPatch = Partial<Omit<NewTask, "projectId">>;
 
@@ -153,16 +130,6 @@ export interface ExecutorInfo {
   path: string | null;
   /** Agents: user/repo/plugin; workflows: user/repo; Claude: `null`. */
   source: AgentSource | null;
-}
-
-/** Overrides for this run; whatever is missing comes from the task → repo → project. */
-export interface LaunchInput {
-  executor?: Executor;
-  isolation?: Isolation;
-  finish?: Finish;
-  review?: boolean;
-  extraInstructions?: string;
-  options?: LaunchOptions;
 }
 
 export type DiffFileStatus = "added" | "modified" | "deleted" | "renamed";
@@ -191,32 +158,6 @@ export interface FileDiff {
   deletions: number;
   binary: boolean;
   hunks: DiffHunk[];
-}
-
-export interface CommitInfo {
-  sha: string;
-  shortSha: string;
-  subject: string;
-  author: string;
-  /** Author date, epoch ms. */
-  at: number;
-}
-
-export interface RunDiff {
-  /** Base ref (`git diff <base>...HEAD`). */
-  base: string;
-  /** The run's branch; `null` with a detached HEAD. */
-  branch: string | null;
-  /** Commits on the branch that aren't in `base`, newest to oldest (up to 200). */
-  commits: CommitInfo[];
-  /** The run is still active: the diff may change. */
-  live: boolean;
-  cwd: string;
-  /** Includes uncommitted changes (the run is still active). */
-  includesWorkingTree: boolean;
-  files: FileDiff[];
-  /** Full patch, for "Copy patch". */
-  patch: string;
 }
 
 export interface ProviderStatus {
@@ -363,6 +304,8 @@ export const cleanupWorktree = (taskId: string, force = false) =>
   invoke<Task>("cleanup_worktree", { taskId, force });
 /** Absolute path. Doesn't launch anything or write Claude Code's config. */
 export const repoTrust = (path: string) => invoke<RepoTrust>("repo_trust", { path });
+/** Opens Terminal.app at `path`; with `runClaude`, starts `claude` there. */
+export const openTerminalAt = (path: string, runClaude = false) => invoke<void>("open_terminal_at", { path, runClaude });
 /** `git version 2.x.y`; rejects if git isn't on the PATH. */
 export const gitVersion = () => invoke<string>("git_version");
 /** Squash defaults to true in the backend; `push` is opt-in; `cleanup` deletes the worktree and branch after merging. */
@@ -398,66 +341,14 @@ export const mergeWorktree = (taskId: string, input: MergeInput) =>
 /** Everything zero/false/null if the task has no worktree. */
 export const worktreeStatus = (taskId: string) => invoke<WorktreeStatus>("worktree_status", { taskId });
 
-// ---------- Executors and runs ----------
+// ---------- Chat agents ----------
 
-/** Agents, workflows and Claude; with `repoId` it adds the repo's own. */
-export const listExecutors = (repoId: string | null) => invoke<ExecutorInfo[]>("list_executors", { repoId });
-/** Agents and workflows the project hides from its pickers (`listExecutors` stays unfiltered). */
+/** Agents the project hides from its chat pickers (`listChatAgents` stays unfiltered). */
 export const listHiddenExecutors = (projectId: string) =>
   invoke<HiddenExecutor[]>("list_hidden_executors", { projectId });
-/** Hides or shows one agent or workflow in the project; resolves with the project's new set. */
+/** Hides or shows one agent in the project; resolves with the project's new set. */
 export const setExecutorHidden = (projectId: string, key: HiddenExecutor, hidden: boolean) =>
   invoke<HiddenExecutor[]>("set_executor_hidden", { projectId, key, hidden });
-/** The task's runs (or all with `null`), most recent first. */
-export const listTaskRuns = (taskId: string | null, projectId: string | null = null) =>
-  invoke<Run[]>("list_task_runs", { taskId, projectId });
-/** Like `listTaskRuns` (up to 500), without `prompt` or `extraInstructions`. A run without a task counts toward its repo's project. */
-export const listRunsLight = (projectId: string | null = null, taskId: string | null = null) =>
-  invoke<RunLight[]>("list_runs_light", { projectId, taskId });
-/** Full run (with `prompt`). */
-export const getRun = (runId: string) => invoke<Run>("get_run", { runId });
-/** The latest run of each task, with no history limit. */
-export const latestRunsByTask = (projectId: string | null = null) =>
-  invoke<RunLight[]>("latest_runs_by_task", { projectId });
-/** `null`: global (includes Claude Code sessions outside the app); with a project, only its runs and tasks. */
-export const workSummary = (projectId: string | null = null) => invoke<WorkSummary>("work_summary", { projectId });
-/** Global queue: `queued` runs, in launch order. */
-export const listQueue = () => invoke<Run[]>("list_queue");
-/** Queues a work run (or launches it if there's a slot). */
-export const launchTask = (taskId: string, input: LaunchInput = {}) => invoke<Run>("launch_task", { taskId, input });
-/** Next step of the chain with another executor, on the same branch/worktree. */
-export const handOff = (taskId: string, executor: Executor, extraInstructions: string | null = null) =>
-  invoke<Run>("hand_off", { taskId, executor, extraInstructions });
-/** Launches the reviewer now. `reviewer` null → the configured one. */
-export const reviewNow = (taskId: string, reviewer: string | null = null) =>
-  invoke<Run>("review_now", { taskId, reviewer });
-/** Removes a `queued` run from the queue, or stops a launched one (saves the partial patch). */
-export const cancelRun = (runId: string) => invoke<Run>("cancel_run", { runId });
-/**
- * A migrated run left in the queue (`status: "queued"` with `legacyLabel`) doesn't launch on its own:
- * this re-queues it as a new run (the old one is cancelled). To discard it, `cancelRun`.
- */
-export const confirmRun = (runId: string) => invoke<Run>("confirm_run", { runId });
-/** New queue order: ids of every `queued` run. */
-export const reorderQueue = (runIds: string[]) => invoke<void>("reorder_queue", { runIds });
-export const runDiff = (runId: string) => invoke<RunDiff>("run_diff", { runId });
-/**
- * Transcript of an agent, Claude or reviewer run (main session; `agentId` = the run's id).
- * Rejects for workflows (use `getAgentTranscript`). `null` if the session has no file yet.
- * `limit`: most recent items (default 200, max 2000).
- */
-export const getRunTranscript = (runId: string, limit?: number) =>
-  invoke<Transcript | null>("get_run_transcript", { runId, limit: limit ?? null });
-/**
- * Tool calls of a live, non-workflow run so far, read with an incremental cursor instead of
- * re-parsing the whole transcript on every poll. `null` if the run has no session yet.
- */
-export const runProgress = (runId: string) => invoke<RunProgress | null>("run_progress", { runId });
-/** Opens the run's folder (or `file` inside it) in the editor from Settings. */
-export const openInEditor = (runId: string, file: string | null = null) =>
-  invoke<void>("open_in_editor", { runId, file });
-/** Opens the run's folder in Finder. */
-export const openWorktree = (runId: string) => invoke<void>("open_worktree", { runId });
 
 // ---------- Providers ----------
 
@@ -505,6 +396,8 @@ export interface NewChat extends LaunchOptions {
   title?: string | null;
   /** Agent to talk to; absent → plain Claude. */
   agent?: string | null;
+  /** One of `repoId`'s worktrees (its path) to run in; absent → the repo's own checkout. */
+  worktree?: string | null;
 }
 
 export type ChatPatch = { [K in "title" | "repoId" | "agent" | "model" | "effort" | "permissionMode"]?: string | null };
@@ -588,6 +481,9 @@ export interface ClaudeDefaults {
 /** Agents a chat can talk to in the folder it runs in for `repoId` (`null`: the whole project). */
 export const listChatAgents = (projectId: string, repoId: string | null) =>
   invoke<ExecutorInfo[]>("list_chat_agents", { projectId, repoId });
+/** Creates (or returns the existing) chat that works the task in its own worktree; the task moves to In progress. */
+/** `prompt`: the task's first message, still unsent (`null` when the chat already existed). */
+export const startTaskChat = (taskId: string) => invoke<{ chat: Chat; prompt: string | null }>("start_task_chat", { taskId });
 export const getClaudeDefaults = (repoId: string | null) => invoke<ClaudeDefaults>("get_claude_defaults", { repoId });
 /** A project's chats (with `null`, every project's), most recently used first. */
 export const listChats = (projectId: string | null) => invoke<Chat[]>("list_chats", { projectId });
@@ -650,7 +546,7 @@ export const setSettings = (settings: Settings) => invoke<Settings>("set_setting
 
 // ---------- Events ----------
 
-export type ChangedKind = "tasks" | "runs" | "queue" | "sources" | "projects" | "chats";
+export type ChangedKind = "tasks" | "sources" | "projects" | "chats";
 
 /** Payload of `nodal://changed`. Without `projectId`: it may affect any project. */
 export interface ChangedEvent {
@@ -667,6 +563,8 @@ export const onChanged = (cb: (e: ChangedEvent) => void): Promise<UnlistenFn> =>
 
 /** "Check for Updates…" in the app menu (release builds only). Returns the unlisten. */
 export const onCheckForUpdates = (cb: () => void): Promise<UnlistenFn> => listen("nodal://check-updates", () => cb());
+/** ⌘W from the app menu (the native menu takes the key before the page sees it). */
+export const onCloseTab = (cb: () => void): Promise<UnlistenFn> => listen("nodal://close-tab", () => cb());
 
 export interface DirEntry { name: string; isDir: boolean }
 /** Current branch of a repo's checkout; `null` when detached or unknown. */
@@ -687,13 +585,32 @@ export const readRepoFile = (repoId: string, path: string, worktree: string | nu
 /** Uncommitted changes of a repo's checkout vs HEAD (untracked files included), per file with hunks. */
 export const repoChanges = (repoId: string, worktree: string | null = null) =>
   invoke<FileDiff[]>("repo_changes", { repoId, worktree });
+export interface CommitInfo { sha: string; shortSha: string; subject: string; author: string; at: number }
+/** A checkout's commits, newest first: a worktree's since it branched off, the repo's own its latest. */
+export const repoCommits = (repoId: string, worktree: string | null = null) =>
+  invoke<CommitInfo[]>("repo_commits", { repoId, worktree });
+/** One commit's files with their hunks. */
+export const repoCommitDiff = (repoId: string, sha: string, worktree: string | null = null) =>
+  invoke<FileDiff[]>("repo_commit_diff", { repoId, worktree, sha });
 /** Saves an edited repo file. `version` is the one it was read at; a newer one on disk fails with "File changed on disk…" unless `force`. */
 export const writeRepoFile = (repoId: string, path: string, content: string, version: string, force = false, worktree: string | null = null) =>
   invoke<RepoFile>("write_repo_file", { repoId, path, content, version, force, worktree });
 
 export interface RepoWorktree { path: string; branch: string | null; isMain: boolean }
 /** A repo's checkouts, main first; pass one's `path` as the `worktree` argument of the repo file bindings. */
+/** Stages everything in the checkout and commits it; returns the new commit. */
+export const repoCommit = (repoId: string, worktree: string | null, message: string, paths: string[] = []) =>
+  invoke<CommitInfo>("repo_commit", { repoId, worktree, message, paths });
+/** Pushes the checkout's branch and opens a PR with the GitHub CLI (or returns the open one's URL). */
+export const repoOpenPr = (repoId: string, worktree: string | null, title: string, body: string) =>
+  invoke<string>("repo_open_pr", { repoId, worktree, title, body });
+/** Every file of a checkout (relative paths, ignored ones left out) for the quick-open search. */
+export const listRepoFiles = (repoId: string, worktree: string | null = null) =>
+  invoke<string[]>("list_repo_files", { repoId, worktree });
 export const listRepoWorktrees = (repoId: string) => invoke<RepoWorktree[]>("list_repo_worktrees", { repoId });
+/** Deletes one of the repo's worktrees and its branch. Without `force` it refuses one with uncommitted or unpushed work. */
+export const removeRepoWorktree = (repoId: string, path: string, force: boolean) =>
+  invoke<void>("remove_repo_worktree", { repoId, path, force });
 /** Discards one file's uncommitted changes (restores it from HEAD, or deletes it if new). */
 export const revertRepoFile = (repoId: string, path: string, worktree: string | null = null) =>
   invoke<void>("revert_repo_file", { repoId, path, worktree });

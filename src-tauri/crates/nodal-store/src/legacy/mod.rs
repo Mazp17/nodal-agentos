@@ -18,14 +18,9 @@
 //!   project is used, otherwise one is created (name = scope if known, else the folder). Each
 //!   scope in the mapping → a SourceLink of that project (state mapping pending);
 //! - local tasks → the project of the repo with that path; if there's none, the "Local"
-//!   project (with a new repo for that path). They're assigned to `plan-task`, which is how
-//!   they used to run;
-//! - runs → `runs` table with `legacy_label` (issue identifier or task title) and a NULL
-//!   `task_id` if there's no task. `launching` → Failed("migrated"); `launched` → Finished
-//!   with no outcome (not re-evaluated: triggers no transitions); `queued` → stays **Queued**:
-//!   with `legacy_label` the queue doesn't launch it on its own
-//!   (`work::queue::awaiting_confirmation`) until it's confirmed (`confirm_run`) or canceled;
-//! - `concurrency` → settings (only the first time, and never overwrites one already set);
+//!   project (with a new repo for that path);
+//! - runs (`task-runs.json`, `issue-runs.json`) are no longer imported: Nodal dropped runs;
+//! - the old `concurrency` and per-repo `finish` keys are ignored (runs are gone);
 //! - a corrupt JSON (file or record) is skipped with a warning in `skipped`.
 
 // `legacy::legacy` mirrors the previous version's own module name (`config`/`tasks`/`issue_runs`
@@ -35,7 +30,7 @@ pub mod legacy;
 #[cfg(test)]
 mod tests;
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -50,9 +45,6 @@ use nodal_domain::model::*;
 
 pub const BACKUP_PREFIX: &str = "legacy-backup-";
 pub const LOCAL_PROJECT: &str = "Local";
-pub const LAUNCHING_ERROR: &str = "migrated";
-/// Name old runs used to launch local tasks.
-const LEGACY_TASK_WORKFLOW: &str = "plan-task";
 
 const COLORS: &[&str] = &[
     "oklch(0.74 0.15 55)",
@@ -72,6 +64,7 @@ pub struct LegacyImportReport {
     pub projects: u32,
     pub repos: u32,
     pub tasks: u32,
+    /// Always 0: runs are no longer imported (kept for the frontend's report type).
     pub runs: u32,
     /// Already imported before (idempotency).
     pub already_imported: u32,
@@ -253,14 +246,11 @@ pub fn import_backup(conn: &mut Connection, dir: &Path, data_dir: &Path, now: i6
         now,
         data_dir,
         report: LegacyImportReport { backup_dir: dir.display().to_string(), ..Default::default() },
-        finish_by_path: HashMap::new(),
         plans: Vec::new(),
         fresh: HashSet::new(),
     };
     ctx.import_config(dir)?;
     ctx.import_tasks(dir)?;
-    ctx.import_task_runs(dir)?;
-    ctx.import_issue_runs(dir)?;
     let Ctx { mut report, plans, .. } = ctx;
     tx.commit().map_err(sql)?;
 
@@ -288,8 +278,6 @@ struct Ctx<'c> {
     now: i64,
     data_dir: &'c Path,
     report: LegacyImportReport,
-    /// Repo finish by path (for issue runs, which didn't store it).
-    finish_by_path: HashMap<String, Finish>,
     /// Plans to copy after the commit: (source in the backup, destination).
     plans: Vec<(PathBuf, PathBuf)>,
     /// Keys marked in this same import (a duplicate within the file doesn't count as
@@ -353,32 +341,6 @@ pub fn key_base(name: &str) -> String {
         k.insert(0, 'P');
     }
     k
-}
-
-fn parse_finish(s: Option<&str>) -> Finish {
-    match s.map(str::trim) {
-        Some("branch") => Finish::Commit,
-        _ => Finish::Pr,
-    }
-}
-
-/// `/plan-task {...}` → workflow `plan-task`; anything else, a plain session.
-fn executor_from_prompt(prompt: &str) -> Executor {
-    match prompt.trim().strip_prefix('/').and_then(|r| r.split_whitespace().next()) {
-        Some(name) if !name.is_empty() => Executor::Workflow { name: name.into() },
-        _ => Executor::Claude,
-    }
-}
-
-/// Old status → (status, error, outcome). See the rules in the module doc.
-fn map_run_status(status: &str, error: Option<String>) -> Result<(RunStatus, Option<String>), String> {
-    Ok(match status {
-        "queued" => (RunStatus::Queued, None),
-        "launching" => (RunStatus::Failed, Some(LAUNCHING_ERROR.into())),
-        "launched" => (RunStatus::Finished, error),
-        "failed" => (RunStatus::Failed, Some(error.unwrap_or_else(|| LAUNCHING_ERROR.into()))),
-        other => return Err(format!("unknown status \"{other}\"")),
-    })
 }
 
 /// A list of records: `{<field>: [...]}` or just `[...]`.
@@ -512,8 +474,6 @@ impl Ctx<'_> {
             key: self.unique_key(name)?,
             next_task_number: 1,
             color: color.into(),
-            default_executor: None,
-            reviewer: None,
             created_at: self.now,
             archived_at: None,
             root_path: None,
@@ -537,7 +497,6 @@ impl Ctx<'_> {
         project_id: &str,
         path: &str,
         launch: LaunchOptions,
-        finish: Finish,
     ) -> Result<Option<(String, String)>, String> {
         let id = Self::repo_id_for(path);
         if let Some(found) = self.repo_by_id(&id)? {
@@ -553,11 +512,6 @@ impl Ctx<'_> {
             path: path.into(),
             name: folder_name(path),
             launch,
-            default_executor: None,
-            default_isolation: Isolation::Worktree,
-            default_finish: finish,
-            default_review: true,
-            reviewer: None,
             position,
             created_at: self.now,
         };
@@ -609,23 +563,6 @@ impl Ctx<'_> {
             }
         };
 
-        if let Some(c) = cfg.concurrency {
-            const KEY: &str = "settings:concurrency";
-            if self.seen(KEY)?.is_some() {
-                self.already(KEY);
-            } else {
-                let c = c.clamp(1, MAX_CONCURRENCY);
-                self.conn
-                    .execute(
-                        "INSERT INTO settings (key, value_json) VALUES ('concurrency', ?1)
-                         ON CONFLICT(key) DO NOTHING",
-                        [c.to_string()],
-                    )
-                    .map_err(sql)?;
-                self.mark(KEY, "setting", None)?;
-            }
-        }
-
         for (i, raw) in cfg.repos.into_iter().enumerate() {
             let Some(entry) = self.parse::<legacy::RepoEntry>(file, i, raw) else { continue };
             if entry.path.trim().is_empty() {
@@ -633,8 +570,6 @@ impl Ctx<'_> {
                 continue;
             }
             let path = canon_path(&entry.path);
-            let finish = parse_finish(entry.finish.as_deref());
-            self.finish_by_path.entry(path.clone()).or_insert(finish);
             let scopes = entry.scopes();
 
             // The key uses the path without resolving symlinks: it doesn't change if the folder
@@ -673,7 +608,7 @@ impl Ctx<'_> {
                             if new_project {
                                 self.create_project(&project_id, name.trim())?;
                             }
-                            let Some(found) = self.ensure_repo(&project_id, &path, entry.launch(), finish)? else {
+                            let Some(found) = self.ensure_repo(&project_id, &path, entry.launch())? else {
                                 // Don't leave an empty project behind because of a skipped repo.
                                 if new_project {
                                     self.conn.execute("DELETE FROM projects WHERE id = ?1", [&project_id]).map_err(sql)?;
@@ -783,8 +718,7 @@ impl Ctx<'_> {
                 Some(found) => found,
                 None => {
                     let project_id = self.local_project()?;
-                    let finish = self.finish_by_path.get(&path).copied().unwrap_or(Finish::Pr);
-                    match self.ensure_repo(&project_id, &path, LaunchOptions::default(), finish)? {
+                    match self.ensure_repo(&project_id, &path, LaunchOptions::default())? {
                         Some(found) => found,
                         None => {
                             self.skip(format!("{file}: task {} skipped, its repository could not be created", t.id));
@@ -819,10 +753,6 @@ impl Ctx<'_> {
                 plan,
                 plan_overridden: false,
                 acceptance: Vec::new(),
-                assignee: Some(Executor::Workflow { name: LEGACY_TASK_WORKFLOW.into() }),
-                isolation: None,
-                finish: None,
-                review: None,
                 worktree: None,
                 source: None,
                 created_at: t.created_at,
@@ -851,160 +781,6 @@ impl Ctx<'_> {
         }
         let to = self.data_dir.join(legacy::PLANS_DIR).join(new_id).join(legacy::PLAN_FILE);
         self.plans.push((from, to));
-    }
-
-    // --- runs ---
-
-    fn task_of(&self, legacy_task_id: &str) -> Result<Option<(String, String, String)>, String> {
-        let Some(Some(id)) = self.seen(&format!("task:{legacy_task_id}"))? else { return Ok(None) };
-        self.conn
-            .query_row("SELECT id, repo_id, title FROM tasks WHERE id = ?1", [&id], |r| {
-                Ok((r.get(0)?, r.get(1)?, r.get(2)?))
-            })
-            .optional()
-            .map_err(sql)
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    fn insert_run(
-        &mut self,
-        key: &str,
-        task_id: Option<String>,
-        repo_id: Option<String>,
-        cwd: String,
-        executor: Executor,
-        prompt: String,
-        options: LaunchOptions,
-        finish: Finish,
-        status: RunStatus,
-        error: Option<String>,
-        claude_run_id: Option<String>,
-        session_id: Option<String>,
-        queued_at: i64,
-        launched_at: Option<i64>,
-        legacy_label: String,
-    ) -> Result<(), String> {
-        let id = det_id("lrun_", key);
-        let run = Run {
-            id: id.clone(),
-            task_id,
-            repo_id,
-            cwd,
-            executor,
-            kind: RunKind::Work,
-            parent_run_id: None,
-            prompt,
-            extra_instructions: None,
-            options,
-            finish,
-            isolation: None,
-            review: false,
-            verdict: None,
-            status,
-            queue_position: queued_at as f64,
-            claude_run_id,
-            session_id,
-            queued_at,
-            launched_at,
-            finished_at: None,
-            outcome: None,
-            summary: None,
-            pr_url: None,
-            branch: None,
-            error,
-            legacy_label: Some(legacy_label),
-            tokens: None,
-        };
-        rows::insert_run(self.conn, &run).map_err(sql)?;
-        self.mark(key, "run", Some(&id))?;
-        self.report.runs += 1;
-        Ok(())
-    }
-
-    fn import_task_runs(&mut self, dir: &Path) -> Result<(), String> {
-        let file = legacy::TASK_RUNS_FILE;
-        let raws = self.read_records(dir, file, "runs");
-        for (i, v) in raws.into_iter().enumerate() {
-            let Some(r) = self.parse::<legacy::TaskRun>(file, i, v) else { continue };
-            // Without `run_id`: a run that was queued and later launched is still the same one.
-            let key = format!("task-run:{}:{}", r.task_id, r.queued_at);
-            if self.seen(&key)?.is_some() {
-                self.already(&key);
-                continue;
-            }
-            let (status, error) = match map_run_status(&r.status, r.error.clone()) {
-                Ok(s) => s,
-                Err(e) => {
-                    self.skip(format!("{file}: record #{} has an {e}, skipped", i + 1));
-                    continue;
-                }
-            };
-            let task = self.task_of(&r.task_id)?;
-            let cwd_repo = self.repo_by_path(&canon_path(&r.cwd))?.map(|(id, _)| id);
-            let (task_id, repo_id, label) = match task {
-                Some((id, repo, title)) => (Some(id), cwd_repo.or(Some(repo)), title),
-                None => (None, cwd_repo, r.task_id.clone()),
-            };
-            self.insert_run(
-                &key,
-                task_id,
-                repo_id,
-                r.cwd.clone(),
-                executor_from_prompt(&r.prompt),
-                r.prompt.clone(),
-                LaunchOptions::default(),
-                parse_finish(r.finish.as_deref()),
-                status,
-                error,
-                r.run_id.clone(),
-                r.session_id.clone(),
-                r.queued_at,
-                r.launched_at,
-                label,
-            )?;
-        }
-        Ok(())
-    }
-
-    fn import_issue_runs(&mut self, dir: &Path) -> Result<(), String> {
-        let file = legacy::ISSUE_RUNS_FILE;
-        let raws = self.read_records(dir, file, "runs");
-        for (i, v) in raws.into_iter().enumerate() {
-            let Some(r) = self.parse::<legacy::IssueRun>(file, i, v) else { continue };
-            let key = format!("issue-run:{}:{}", r.issue_id, r.queued_at);
-            if self.seen(&key)?.is_some() {
-                self.already(&key);
-                continue;
-            }
-            let (status, error) = match map_run_status(&r.status, r.error.clone()) {
-                Ok(s) => s,
-                Err(e) => {
-                    self.skip(format!("{file}: record #{} has an {e}, skipped", i + 1));
-                    continue;
-                }
-            };
-            let path = canon_path(&r.cwd);
-            let repo_id = self.repo_by_path(&path)?.map(|(id, _)| id);
-            let finish = self.finish_by_path.get(&path).copied().unwrap_or(Finish::Pr);
-            self.insert_run(
-                &key,
-                None,
-                repo_id,
-                r.cwd.clone(),
-                Executor::Workflow { name: r.workflow.clone() },
-                format!("/{} {}", r.workflow, r.identifier),
-                r.options.clone(),
-                finish,
-                status,
-                error,
-                r.run_id.clone(),
-                r.session_id.clone(),
-                r.queued_at,
-                r.launched_at,
-                r.identifier.clone(),
-            )?;
-        }
-        Ok(())
     }
 }
 

@@ -4,26 +4,24 @@
 import { useCallback, useEffect, useState } from "react";
 import { readJsonPref, writePref } from "./storage";
 
-/** Project pages (and the global `board`/`runs` with `projectId: null`). */
-export type ProjectPage = "board" | "chat" | "runs" | "project-settings";
-export type Page = ProjectPage | "settings" | "run";
+/** Project pages (and the global `board` with `projectId: null`). */
+export type ProjectPage = "board" | "chat" | "project-settings";
+export type Page = ProjectPage | "settings" | "overview";
 
 /** `debug` exists only in dev builds. */
-export type SettingsSection = "integrations" | "execution" | "updates" | "diagnostics" | "debug";
-export type ProjectSection = "general" | "repos" | "sources" | "agents";
+export type SettingsSection = "integrations" | "editor" | "updates" | "diagnostics" | "debug";
+export type ProjectSection = "general" | "repos" | "worktrees" | "sources" | "agents";
 
 export interface Route {
-  /** `null`: global view ("All projects", Runs, Settings). */
+  /** `null`: global view ("All projects", Settings). */
   projectId: string | null;
   page: Page;
-  /** Only with `page: "run"`. */
-  runId?: string;
 }
 
 /** These pages need a project; without one they fall back to the global `board`. */
 const NEEDS_PROJECT: ReadonlySet<Page> = new Set(["chat", "project-settings"]);
 // `tasks` is the old List page, now a view of the board; saved routes still carry it.
-const PAGES: ReadonlySet<string> = new Set(["board", "chat", "tasks", "runs", "project-settings", "settings", "run"]);
+const PAGES: ReadonlySet<string> = new Set(["board", "chat", "tasks", "project-settings", "settings", "overview"]);
 const HOME: Route = { projectId: null, page: "board" };
 
 const isRoute = (v: unknown): v is Route => {
@@ -35,22 +33,17 @@ const isStringArray = (v: unknown): v is string[] => Array.isArray(v) && v.every
 
 const normalize = (r: Route): Route => {
   if ((r.page as string) === "tasks") return { projectId: r.projectId, page: "board" };
-  if (r.page === "run" && !r.runId) return HOME;
-  if (r.page === "settings") return { projectId: null, page: "settings" };
+  if (r.page === "settings" || r.page === "overview") return { projectId: null, page: r.page };
   if (NEEDS_PROJECT.has(r.page) && !r.projectId) return { projectId: null, page: "board" };
   return r;
 };
 
 export interface Nav {
   route: Route;
-  /** Where the run was opened from (for "Back" and Esc). */
-  runFrom: Route;
   expanded: ReadonlySet<string>;
   settingsSection: SettingsSection;
   projectSection: ProjectSection;
   go: (page: Page, projectId?: string | null) => void;
-  openRun: (runId: string) => void;
-  back: () => void;
   toggleProject: (projectId: string) => void;
   setExpanded: (projectId: string, open: boolean) => void;
   setSettingsSection: (s: SettingsSection) => void;
@@ -60,24 +53,20 @@ export interface Nav {
 }
 
 export function useNav(): Nav {
-  const [route, setRoute] = useState<Route>(() => {
-    const saved = readJsonPref<Route>("route", HOME, isRoute);
-    // An open run is not restored: its context (where it came from) is lost.
-    return saved.page === "run" ? HOME : normalize(saved);
-  });
-  const [runFrom, setRunFrom] = useState<Route>(HOME);
+  // A saved `runs`/`run` page (removed) fails `isRoute` and falls back to HOME.
+  const [route, setRoute] = useState<Route>(() => normalize(readJsonPref<Route>("route", HOME, isRoute)));
   const [expanded, setExpandedState] = useState<ReadonlySet<string>>(
     () => new Set(readJsonPref<string[]>("expandedProjects", [], isStringArray)),
   );
   const [settingsSection, setSettingsSection] = useState<SettingsSection>(() => {
     const s = readJsonPref<string>("settingsSection", "integrations", (v): v is string => typeof v === "string");
     if (s === "debug") return import.meta.env.DEV ? s : "integrations";
-    return s === "execution" || s === "updates" || s === "diagnostics" ? s : "integrations";
+    return s === "editor" || s === "updates" || s === "diagnostics" ? s : "integrations";
   });
   const [projectSection, setProjectSection] = useState<ProjectSection>("general");
 
   useEffect(() => {
-    if (route.page !== "run") writePref("route", JSON.stringify(route));
+    writePref("route", JSON.stringify(route));
   }, [route]);
   useEffect(() => writePref("expandedProjects", JSON.stringify([...expanded])), [expanded]);
   useEffect(() => writePref("settingsSection", JSON.stringify(settingsSection)), [settingsSection]);
@@ -90,16 +79,6 @@ export function useNav(): Nav {
       setExpandedState((s) => (s.has(id) ? s : new Set(s).add(id)));
     }
   }, []);
-
-  const openRun = useCallback(
-    (runId: string) => {
-      if (route.page !== "run") setRunFrom(route);
-      setRoute({ projectId: route.projectId, page: "run", runId });
-    },
-    [route],
-  );
-
-  const back = useCallback(() => setRoute((cur) => (cur.page === "run" ? runFrom : cur)), [runFrom]);
 
   const setExpanded = useCallback((id: string, open: boolean) => {
     setExpandedState((s) => {
@@ -123,7 +102,6 @@ export function useNav(): Nav {
 
   const forgetProject = useCallback((id: string) => {
     setRoute((cur) => (cur.projectId === id ? HOME : cur));
-    setRunFrom((cur) => (cur.projectId === id ? HOME : cur));
     setExpandedState((s) => {
       if (!s.has(id)) return s;
       const n = new Set(s);
@@ -134,13 +112,10 @@ export function useNav(): Nav {
 
   return {
     route,
-    runFrom,
     expanded,
     settingsSection,
     projectSection,
     go,
-    openRun,
-    back,
     toggleProject,
     setExpanded,
     setSettingsSection,
@@ -152,8 +127,7 @@ export function useNav(): Nav {
 export const PAGE_TITLE: Record<Page, string> = {
   board: "Tasks",
   chat: "Chat",
-  runs: "Runs",
   "project-settings": "Settings",
   settings: "Settings",
-  run: "Run",
+  overview: "Overview",
 };

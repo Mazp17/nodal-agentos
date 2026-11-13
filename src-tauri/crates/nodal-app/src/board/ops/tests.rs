@@ -114,18 +114,18 @@ fn projects_crud_and_unique_keys() {
     .unwrap_err();
     assert!(err.contains("already used"));
     let patch: ProjectPatch = serde_json::from_value(
-        json!({"name": "Web 2", "reviewer": "code-reviewer", "archived": true}),
+        json!({"name": "Web 2", "archived": true}),
     )
     .unwrap();
     let q = update_project(&c, &env, &q.id, &patch, 14).unwrap();
     assert_eq!(
-        (q.name.as_str(), q.reviewer.as_deref(), q.archived_at),
-        ("Web 2", Some("code-reviewer"), Some(14))
+        (q.name.as_str(), q.archived_at),
+        ("Web 2", Some(14))
     );
     let patch: ProjectPatch =
-        serde_json::from_value(json!({"reviewer": null, "archived": false})).unwrap();
+        serde_json::from_value(json!({"archived": false})).unwrap();
     let q = update_project(&c, &env, &q.id, &patch, 15).unwrap();
-    assert_eq!((q.reviewer, q.archived_at), (None, None));
+    assert_eq!(q.archived_at, None);
     let patch: ProjectPatch =
         serde_json::from_value(json!({"description": "  Payments and billing  "})).unwrap();
     assert_eq!(
@@ -271,34 +271,22 @@ fn repos_unique_path_options_and_delete_guard() {
         .unwrap_err()
         .contains("Invalid effort"));
     let input: NewRepo = serde_json::from_value(
-        json!({"path": "x", "model": " opus ", "defaultIsolation": "in_place"}),
+        json!({"path": "x", "model": " opus "}),
     )
     .unwrap();
     let r = add_repo(&c, &p.id, &input, &f.repo_dir, 2).unwrap();
     assert_eq!(
-        (
-            r.name.as_str(),
-            r.launch.model.as_deref(),
-            r.default_isolation
-        ),
-        ("web", Some("opus"), Isolation::InPlace)
+        (r.name.as_str(), r.launch.model.as_deref()),
+        ("web", Some("opus"))
     );
-    assert!(r.default_review);
     let err = add_repo(&c, &q.id, &input, &f.repo_dir, 3).unwrap_err();
     assert!(err.contains("already added to Pay"), "{err}");
     let patch: RepoPatch = serde_json::from_value(
-        json!({"model": null, "reviewer": "sec-reviewer", "defaultFinish": "commit"}),
+        json!({"model": null}),
     )
     .unwrap();
     let r = update_repo(&c, &r.id, &patch).unwrap();
-    assert_eq!(
-        (
-            r.launch.model.as_deref(),
-            r.reviewer.as_deref(),
-            r.default_finish
-        ),
-        (None, Some("sec-reviewer"), Finish::Commit)
-    );
+    assert_eq!(r.launch.model, None);
     let t = create_task(&mut c, &f.env, &new_task(&p, &r, "One"), 4).unwrap();
     assert!(delete_repo(&c, &r.id).unwrap_err().contains("has 1 task"));
     // With a worktree neither the task nor the project is deleted (they'd be orphaned).
@@ -380,21 +368,6 @@ fn tasks_numbering_plan_move_and_patch() {
         (r2.id.as_str(), &PlanRef::Text)
     );
     assert_eq!(read_task_plan(&c, &f.env, &t1.id).unwrap(), "new");
-
-    // Options with null = back to the repo default.
-    let opts: TaskPatch = serde_json::from_value(json!({"isolation": "in_place", "review": false, "assignee": {"kind": "workflow", "name": "plan-task"}})).unwrap();
-    let t = update_task(&mut c, &f.env, &t1.id, &opts, 9).unwrap();
-    assert_eq!(
-        (t.isolation, t.review),
-        (Some(Isolation::InPlace), Some(false))
-    );
-    let clear: TaskPatch =
-        serde_json::from_value(json!({"isolation": null, "assignee": null})).unwrap();
-    let t = update_task(&mut c, &f.env, &t1.id, &clear, 10).unwrap();
-    assert_eq!(
-        (t.isolation, t.assignee, t.review),
-        (None, None, Some(false))
-    );
 
     // Manual status and closing.
     let t = move_task(&mut c, &t1.id, TaskStatus::Done, 0.5, 11).unwrap();
@@ -572,27 +545,15 @@ fn settings_validation() {
     let s = set_settings(
         &mut c,
         &Settings {
-            concurrency: 2,
             editor: Some("cursor".into()),
-            reviewer: "code-reviewer".into(),
-            default_executor: None,
         },
     )
     .unwrap();
-    assert_eq!((s.concurrency, s.editor.as_deref()), (2, Some("cursor")));
-    assert!(set_settings(
-        &mut c,
-        &Settings {
-            concurrency: 0,
-            ..s.clone()
-        }
-    )
-    .is_err());
+    assert_eq!(s.editor.as_deref(), Some("cursor"));
     assert!(set_settings(
         &mut c,
         &Settings {
             editor: Some("vim; rm".into()),
-            ..s.clone()
         }
     )
     .is_err());
@@ -600,7 +561,6 @@ fn settings_validation() {
         &mut c,
         &Settings {
             editor: Some(" ".into()),
-            ..s
         },
     )
     .unwrap();

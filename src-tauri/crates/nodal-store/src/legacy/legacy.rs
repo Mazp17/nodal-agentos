@@ -16,13 +16,11 @@ pub const PLAN_FILE: &str = "plan.md";
 
 // ---------- config.json ----------
 
-/// `{repos: [...], concurrency}`.
+/// `{repos: [...]}` (the old `concurrency` key is ignored).
 #[derive(Debug, Deserialize)]
 pub struct Config {
     #[serde(default)]
     pub repos: Vec<serde_json::Value>,
-    #[serde(default)]
-    pub concurrency: Option<u32>,
 }
 
 /// A `repos` entry. Accepts the legacy format (a `teamId`/`projectId` → path mapping)
@@ -47,9 +45,6 @@ pub struct RepoEntry {
     pub effort: Option<String>,
     #[serde(default)]
     pub permission_mode: Option<String>,
-    /// `"pr"` | `"branch"`.
-    #[serde(default)]
-    pub finish: Option<String>,
     #[serde(default)]
     pub links: Vec<LinkEntry>,
 }

@@ -123,6 +123,7 @@ CREATE TABLE task_relations (
 );
 CREATE INDEX task_relations_other ON task_relations(other_id);
 
+-- `runs` is unused since v9 (the runs feature was removed); it will be dropped in a later migration.
 CREATE TABLE runs (
     id                 TEXT PRIMARY KEY,
     task_id            TEXT REFERENCES tasks(id) ON DELETE SET NULL,
@@ -275,7 +276,22 @@ const V8: &str = r#"
 ALTER TABLE chats ADD COLUMN agent TEXT;
 "#;
 
-pub const MIGRATIONS: &[&str] = &[V1, V2, V3, V4, V5, V6, V7, V8];
+/// v9: `chats.task_id`, the task a chat works on (it runs in the task's worktree). The chat
+/// outlives nothing it points to: deleting the task just unlinks it.
+const V9: &str = r#"
+ALTER TABLE chats ADD COLUMN task_id TEXT REFERENCES tasks(id) ON DELETE SET NULL;
+CREATE INDEX chats_task ON chats(task_id);
+"#;
+
+/// v10: `chats.worktree`, a free chat's own worktree folder (a task chat uses its task's).
+const V10: &str = r#"
+ALTER TABLE chats ADD COLUMN worktree TEXT;
+"#;
+
+// Unused since v9 (run-era config; kept, never read or written): projects.default_executor_json,
+// projects.reviewer, repos.default_executor_json / default_isolation / default_finish /
+// default_review / reviewer, tasks.assignee_json / isolation / finish / review.
+pub const MIGRATIONS: &[&str] = &[V1, V2, V3, V4, V5, V6, V7, V8, V9, V10];
 
 pub fn user_version(conn: &Conn) -> Result<i64, DbError> {
     Ok(conn.query_row("PRAGMA user_version", [], |r| r.get(0))?)

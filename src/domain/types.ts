@@ -13,12 +13,8 @@ export interface Project {
   nextTaskNumber: number;
   color: string;
   description: string | null;
-  /** Canonical folder holding the project's repos. Repo-less chats run there; never a run target. */
+  /** Canonical folder holding the project's repos. Repo-less chats run there. */
   rootPath: string | null;
-  /** `null` → `Settings.defaultExecutor` → Claude. */
-  defaultExecutor: Executor | null;
-  /** `null` → `code-reviewer`. */
-  reviewer: string | null;
   createdAt: number;
   archivedAt: number | null;
 }
@@ -37,11 +33,6 @@ export interface Repo extends LaunchOptions {
   /** Canonical git root. */
   path: string;
   name: string;
-  defaultExecutor: Executor | null;
-  defaultIsolation: Isolation;
-  defaultFinish: Finish;
-  defaultReview: boolean;
-  reviewer: string | null;
   position: number;
   createdAt: number;
 }
@@ -62,6 +53,10 @@ export interface Chat extends LaunchOptions {
   sessionId: string | null;
   /** Agent the chat talks to (`--agent`); `null` is plain Claude. */
   agent: string | null;
+  /** Task this chat works (in the task's worktree); `null` for a free chat. */
+  taskId: string | null;
+  /** A worktree a free chat was opened in (its path); `null` → the repo's checkout. */
+  worktree: string | null;
   createdAt: number;
   /** Last message sent: the sessions list is ordered by it. */
   updatedAt: number;
@@ -84,11 +79,6 @@ export interface HiddenExecutor {
   /** Only for `source: "repo"`: the same repo agent in two repos is two entries. */
   repoId: string | null;
 }
-
-export type Isolation = "worktree" | "in_place";
-
-/** `changes`: uncommitted · `commit`: commit without push · `pr`: commit, push and PR. */
-export type Finish = "changes" | "commit" | "pr";
 
 // ---------- Tasks ----------
 
@@ -171,11 +161,6 @@ export interface Task {
   plan: PlanRef;
   planOverridden: boolean;
   acceptance: string[];
-  /** `null` → repo default → project default → Claude. */
-  assignee: Executor | null;
-  isolation: Isolation | null;
-  finish: Finish | null;
-  review: boolean | null;
   worktree: WorktreeRef | null;
   source: TaskSource | null;
   createdAt: number;
@@ -193,58 +178,6 @@ export interface TaskRelation {
   otherId: string;
   kind: RelationKind;
 }
-
-// ---------- Runs ----------
-
-export type RunKind = "work" | "review";
-
-export type RunStatus = "queued" | "launching" | "launched" | "finished" | "failed" | "canceled";
-
-export type RunOutcome = "green" | "yellow" | "red" | "stopped" | "unknown";
-
-export interface Verdict {
-  pass: boolean;
-  unmet: string[];
-  nits: string[];
-  summary: string | null;
-}
-
-export interface Run {
-  id: string;
-  taskId: string | null;
-  repoId: string | null;
-  cwd: string;
-  executor: Executor;
-  kind: RunKind;
-  parentRunId: string | null;
-  prompt: string;
-  extraInstructions: string | null;
-  options: LaunchOptions;
-  finish: Finish;
-  /** Resolved when queued; `null` for workflows. */
-  isolation: Isolation | null;
-  /** Resolved when queued: when it finishes, the reviewer is queued. */
-  review: boolean;
-  verdict: Verdict | null;
-  status: RunStatus;
-  queuePosition: number;
-  claudeRunId: string | null;
-  sessionId: string | null;
-  queuedAt: number;
-  launchedAt: number | null;
-  finishedAt: number | null;
-  outcome: RunOutcome | null;
-  summary: string | null;
-  prUrl: string | null;
-  branch: string | null;
-  error: string | null;
-  legacyLabel: string | null;
-  /** Transcript tokens (agent/Claude/reviewer), summed on close. */
-  tokens: number | null;
-}
-
-/** `Run` without `prompt` or `extraInstructions`, for lists. */
-export type RunLight = Omit<Run, "prompt" | "extraInstructions">;
 
 // ---------- External sources ----------
 
@@ -322,10 +255,6 @@ export interface OutboxItem {
 // ---------- Settings ----------
 
 export interface Settings {
-  concurrency: number;
   /** `code`, `cursor`... `null` → the system's. */
   editor: string | null;
-  reviewer: string;
-  /** Last executor fallback: repo → project → this → Claude. */
-  defaultExecutor: Executor | null;
 }

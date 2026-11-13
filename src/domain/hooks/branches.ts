@@ -10,7 +10,10 @@ import {
   readRepoFile,
   repoBranch,
   repoChanges,
+  repoCommitDiff,
+  repoCommits,
   type ChatWorkspace,
+  type CommitInfo,
   type DirEntry,
   type FileDiff,
   type RepoFile,
@@ -26,8 +29,8 @@ export const useRepoBranch = (repoId: string | null): Loadable<string | null> =>
   usePolled<string | null>(repoId ? `repo-branch:${repoId}` : null, () => repoBranch(repoId!), ["repos"], POLL.slow);
 
 /** The repo's checkout and its git worktrees (main first). */
-export const useRepoWorktrees = (repoId: string): Loadable<RepoWorktree[]> =>
-  usePolled<RepoWorktree[]>(`repo-worktrees:${repoId}`, () => listRepoWorktrees(repoId), ["repos", "chats"], POLL.slow);
+export const useRepoWorktrees = (repoId: string | null): Loadable<RepoWorktree[]> =>
+  usePolled<RepoWorktree[]>(repoId ? `repo-worktrees:${repoId}` : null, () => listRepoWorktrees(repoId as string), ["repos", "chats"], POLL.slow);
 
 /** Children of `dir` in a checkout; re-read on `repos` notices only. */
 export const useRepoDir = (repoId: string, dir: string, enabled: boolean, worktree: string | null = null): Loadable<DirEntry[]> =>
@@ -58,3 +61,11 @@ export const useRepoChanges = (repoId: string, enabled: boolean, worktree: strin
     ["repos", "chats"],
     POLL.live,
   );
+
+/** The checkout's commits (see `repoCommits`); re-read with the changes, since commits land with them. */
+export const useRepoCommits = (repoId: string, enabled: boolean, worktree: string | null = null): Loadable<CommitInfo[]> =>
+  usePolled<CommitInfo[]>(enabled ? `repo-commits:${rootKey(repoId, worktree)}` : null, () => repoCommits(repoId, worktree), ["repos", "chats"], POLL.slow);
+
+/** A commit never changes: read once. */
+export const useCommitDiff = (repoId: string, sha: string, worktree: string | null = null): Loadable<FileDiff[]> =>
+  usePolled<FileDiff[]>(`commit-diff:${rootKey(repoId, worktree)}:${sha}`, () => repoCommitDiff(repoId, sha, worktree), [], 0);

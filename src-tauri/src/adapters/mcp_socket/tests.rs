@@ -10,15 +10,10 @@ use nodal_app::sources::registry::ProviderRegistry;
 use nodal_app::sources::SourcesHub;
 use nodal_app::{App, Deps, Env, HubDeps};
 use nodal_domain::error::HostError;
-use nodal_domain::model::activity::{AgentSession, AppRuns, ExternalSessions};
 use nodal_domain::model::chat::{ChatLive, ChatSpec};
-use nodal_domain::model::claude::{
-    ExtraFlags, LaunchBlocker, LaunchError, RunDetail, RunRef, RunSummary, SessionReadout,
-    Transcript,
-};
-use nodal_domain::model::LaunchOptions;
+use nodal_domain::model::claude::Transcript;
 use nodal_domain::ports::{
-    BoxFut, ChangeNotifier, ChatRuntime, ClaudeCli, Clock, SecretStore, SessionFiles,
+    ChangeNotifier, ChatRuntime, Clock, SecretStore, SessionFiles,
 };
 use nodal_host::adapters::{HostClaudeConfig, HostGit, HostLocalFs, HostPlanFiles, SystemClock};
 use nodal_host::testutil::TempDir;
@@ -31,60 +26,10 @@ use nodal_mcp_proto::stdio::{forward, OPEN_NODAL};
 
 use super::*;
 
-/// Not exercised: `agent_api::tools` never reaches `Core::claude`.
-struct NoopClaude;
-
-impl ClaudeCli for NoopClaude {
-    fn list_sessions(&self) -> BoxFut<'_, Result<Vec<RunSummary>, HostError>> {
-        Box::pin(async move { unimplemented!("not exercised by the socket tests") })
-    }
-    fn list_agent_sessions(&self) -> BoxFut<'_, Result<Vec<AgentSession>, HostError>> {
-        Box::pin(async move { unimplemented!("not exercised by the socket tests") })
-    }
-    fn launch_bg<'a>(
-        &'a self,
-        _cwd: String,
-        _prompt: String,
-        _opts: &'a LaunchOptions,
-        _extra: &'a ExtraFlags,
-    ) -> BoxFut<'a, Result<RunRef, LaunchError>> {
-        Box::pin(async move { unimplemented!("not exercised by the socket tests") })
-    }
-    fn stop<'a>(&'a self, _short_id: &'a str) -> BoxFut<'a, Result<(), HostError>> {
-        Box::pin(async move { unimplemented!("not exercised by the socket tests") })
-    }
-}
-
 /// Not exercised: `agent_api::tools` never reaches `Core::sessions`.
 struct NoopSessionFiles;
 
 impl SessionFiles for NoopSessionFiles {
-    fn read_session(&self, _session_id: &str, _cwd: &str) -> SessionReadout {
-        unimplemented!("not exercised by the socket tests")
-    }
-    fn session_tokens(&self, _session_id: &str, _cwd: &str) -> Option<i64> {
-        unimplemented!("not exercised by the socket tests")
-    }
-    fn run_detail(&self, _session_id: &str, _cwd: &str) -> Result<Option<RunDetail>, HostError> {
-        unimplemented!("not exercised by the socket tests")
-    }
-    fn launch_blocker(
-        &self,
-        _session_id: &str,
-        _cwd: &str,
-    ) -> Result<Option<LaunchBlocker>, HostError> {
-        unimplemented!("not exercised by the socket tests")
-    }
-    fn agent_transcript(
-        &self,
-        _session_id: &str,
-        _cwd: &str,
-        _run_id: &str,
-        _agent_id: &str,
-        _limit: usize,
-    ) -> Result<Option<Transcript>, HostError> {
-        unimplemented!("not exercised by the socket tests")
-    }
     fn find_session_jsonl(
         &self,
         _projects: &Path,
@@ -104,15 +49,6 @@ impl SessionFiles for NoopSessionFiles {
         unimplemented!("not exercised by the socket tests")
     }
     fn session_title(&self, _path: &Path) -> Option<String> {
-        unimplemented!("not exercised by the socket tests")
-    }
-    fn external_sessions(
-        &self,
-        _repos: &[(String, PathBuf)],
-        _agents: &[AgentSession],
-        _app: &AppRuns,
-        _now: i64,
-    ) -> Result<ExternalSessions, HostError> {
         unimplemented!("not exercised by the socket tests")
     }
 }
@@ -199,7 +135,6 @@ fn test_app(root: &Path) -> (Arc<App>, Db, Env) {
         env: env.clone(),
         rt,
         clock,
-        claude: Arc::new(NoopClaude),
         sessions: Arc::new(NoopSessionFiles),
         notifier,
         chats: Arc::new(NoopChatRuntime),

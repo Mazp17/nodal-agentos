@@ -25,8 +25,6 @@ fn project(id: &str, key: &str) -> Project {
         key: key.into(),
         next_task_number: 1,
         color: "oklch(0.74 0.15 55)".into(),
-        default_executor: Some(Executor::Agent { name: "frontend-developer".into(), source: AgentSource::User }),
-        reviewer: Some("code-reviewer".into()),
         created_at: 1_700_000_000_000,
         archived_at: None,
         root_path: None,
@@ -41,11 +39,6 @@ fn repo(id: &str, project_id: &str) -> Repo {
         path: format!("/Users/me/Code/acme-{id}"),
         name: format!("acme-{id}"),
         launch: LaunchOptions { model: Some("opus".into()), effort: None, permission_mode: Some("acceptEdits".into()) },
-        default_executor: Some(Executor::Workflow { name: "plan-task".into() }),
-        default_isolation: Isolation::InPlace,
-        default_finish: Finish::Commit,
-        default_review: false,
-        reviewer: None,
         position: 2,
         created_at: 1_700_000_000_001,
     }
@@ -65,10 +58,6 @@ fn local_task(id: &str, project_id: &str, repo_id: &str, number: i64) -> Task {
         plan: PlanRef::Text,
         plan_overridden: false,
         acceptance: vec!["The new logo shows up in the header".into()],
-        assignee: Some(Executor::Claude),
-        isolation: None,
-        finish: Some(Finish::Pr),
-        review: Some(true),
         worktree: None,
         source: None,
         created_at: 10,
@@ -81,9 +70,6 @@ fn imported_task(id: &str, project_id: &str, repo_id: &str, number: i64, ext: &s
     Task {
         plan: PlanRef::File { path: "/Users/me/Code/acme-r1/docs/plan.md".into() },
         plan_overridden: true,
-        assignee: None,
-        isolation: Some(Isolation::Worktree),
-        review: None,
         worktree: Some(WorktreeRef {
             path: "/Users/me/.nodal/worktrees/acme-r1/eng-142".into(),
             branch: "nodal/eng-142".into(),
@@ -135,7 +121,7 @@ fn schema_applies_in_memory_with_pragmas() {
     let fk: i64 = c.query_row("PRAGMA foreign_keys", [], |r| r.get(0)).unwrap();
     assert_eq!(fk, 1);
     for t in [
-        "projects", "repos", "tasks", "task_relations", "runs", "source_links", "sync_outbox", "settings",
+        "projects", "repos", "tasks", "task_relations", "source_links", "sync_outbox", "settings",
         "legacy_imports",
     ] {
         assert_eq!(count(&c, t), 0, "{t}");
@@ -191,8 +177,6 @@ fn migrates_v1_data_to_v2() {
          INSERT INTO tasks (id, project_id, repo_id, number, title, status, plan_kind, created_at, updated_at,
                             src_provider, src_link_id, src_external_id, src_identifier, src_url)
            VALUES ('t1', 'p1', 'r1', 1, 'x', 'todo', 'text', 1, 1, 'linear', 'l1', 'e1', 'ENG-1', 'https://example.com/1');
-         INSERT INTO runs (id, cwd, executor_json, kind, prompt, finish, status, queue_position, queued_at)
-           VALUES ('u1', '/r1', '{"kind":"claude"}', 'work', 'p', 'pr', 'finished', 1, 1);
          INSERT INTO settings (key, value_json) VALUES ('concurrency', '2');"#,
     )
     .unwrap();
@@ -203,9 +187,7 @@ fn migrates_v1_data_to_v2() {
     let l = get_source_link(c, "l1").unwrap().unwrap();
     assert_eq!((l.last_synced_at, l.last_sync_error, l.pending_state_changes), (None, None, None));
     assert!(!get_task(c, "t1").unwrap().unwrap().source.unwrap().unmapped);
-    assert_eq!(get_run(c, "u1").unwrap().unwrap().tokens, None);
-    let mut s = load_settings(c).unwrap();
-    assert_eq!((s.concurrency, s.default_executor.clone()), (2, None));
+    assert_eq!(load_settings(c).unwrap(), Settings::default());
 
     // The new fields are saved and read back.
     let changes = StateChanges {
@@ -218,9 +200,6 @@ fn migrates_v1_data_to_v2() {
     )
     .unwrap();
     assert_eq!(get_source_link(c, "l1").unwrap().unwrap().pending_state_changes, Some(changes));
-    s.default_executor = Some(Executor::Workflow { name: "plan-task".into() });
-    save_settings(c, &s).unwrap();
-    assert_eq!(load_settings(c).unwrap().default_executor, s.default_executor);
 }
 
 #[test]
@@ -298,6 +277,8 @@ fn migrates_v3_data_to_v4() {
         title: Some("Plan the login page".into()),
         session_title: None,
         agent: None,
+        task_id: None,
+        worktree: None,
         session_id: Some("00000000-0000-4000-8000-000000000001".into()),
         launch: LaunchOptions { model: Some("opus".into()), effort: Some("high".into()), permission_mode: Some("plan".into()) },
         created_at: 5,
@@ -353,6 +334,44 @@ fn migrates_v6_data_to_v7() {
     )
     .unwrap();
     assert_eq!(count(c, "project_hidden_executors"), 1);
+}
+
+#[test]
+fn migrates_v8_chats_to_v9_without_a_task() {
+    let mut raw = rusqlite::Connection::open_in_memory().unwrap();
+    raw.pragma_update(None, "foreign_keys", "ON").unwrap();
+    for sql in &MIGRATIONS[..8] {
+        raw.execute_batch(sql).unwrap();
+    }
+    raw.pragma_update(None, "user_version", 8).unwrap();
+    raw.execute_batch(
+        r#"INSERT INTO projects (id, name, key, color, created_at) VALUES ('p1', 'Pay', 'PAY', '#fff', 1);
+         INSERT INTO chats (id, project_id, created_at, updated_at) VALUES ('c1', 'p1', 1, 1);"#,
+    )
+    .unwrap();
+    let c = Conn::wrap_mut(&mut raw);
+    migrate(c).unwrap();
+    assert_eq!(user_version(c).unwrap(), MIGRATIONS.len() as i64);
+    assert_eq!(get_chat(c, "c1").unwrap().unwrap().task_id, None);
+}
+
+#[test]
+fn migrates_v9_chats_to_v10_without_a_worktree() {
+    let mut raw = rusqlite::Connection::open_in_memory().unwrap();
+    raw.pragma_update(None, "foreign_keys", "ON").unwrap();
+    for sql in &MIGRATIONS[..9] {
+        raw.execute_batch(sql).unwrap();
+    }
+    raw.pragma_update(None, "user_version", 9).unwrap();
+    raw.execute_batch(
+        r#"INSERT INTO projects (id, name, key, color, created_at) VALUES ('p1', 'Pay', 'PAY', '#fff', 1);
+         INSERT INTO chats (id, project_id, created_at, updated_at) VALUES ('c1', 'p1', 1, 1);"#,
+    )
+    .unwrap();
+    let c = Conn::wrap_mut(&mut raw);
+    migrate(c).unwrap();
+    assert_eq!(user_version(c).unwrap(), 10);
+    assert_eq!(get_chat(c, "c1").unwrap().unwrap().worktree, None);
 }
 
 #[test]
@@ -420,6 +439,8 @@ fn chats_follow_their_project_and_widen_when_their_repo_goes() {
         title: None,
         session_title: None,
         agent: None,
+        task_id: None,
+        worktree: None,
         session_id: None,
         launch: LaunchOptions::default(),
         created_at: 1,
@@ -451,15 +472,11 @@ fn deleting_project_cascades_repos_tasks_and_links() {
     let mut linked = imported_task("t3", "p1", "r2", 3, "ext-1");
     linked.source.as_mut().unwrap().link_id = Some("l1".into());
     insert_task(&c, &linked).unwrap();
-    insert_run(&c, &run("run1", Some("t1"), Some("r1"))).unwrap();
 
     c.execute("DELETE FROM projects WHERE id = 'p1'", []).unwrap();
     for t in ["projects", "repos", "tasks", "task_relations", "source_links"] {
         assert_eq!(count(&c, t), 0, "{t}");
     }
-    // Run history is kept, unlinked.
-    let r = get_run(&c, "run1").unwrap().unwrap();
-    assert_eq!((r.task_id, r.repo_id), (None, None));
 }
 
 #[test]
@@ -508,44 +525,6 @@ fn external_ids_are_unique_per_provider() {
     assert!(insert_task(&c, &local_task("t6", "p1", "r1", 5)).is_err());
 }
 
-fn run(id: &str, task: Option<&str>, repo: Option<&str>) -> Run {
-    Run {
-        id: id.into(),
-        task_id: task.map(String::from),
-        repo_id: repo.map(String::from),
-        cwd: "/Users/me/.nodal/worktrees/acme-r1/pay-1".into(),
-        executor: Executor::Agent { name: "code-reviewer".into(), source: AgentSource::Plugin },
-        kind: RunKind::Review,
-        parent_run_id: None,
-        prompt: "Review against the criteria".into(),
-        extra_instructions: Some("Check the tests too".into()),
-        options: LaunchOptions { model: Some("sonnet".into()), ..Default::default() },
-        finish: Finish::Changes,
-        isolation: Some(Isolation::Worktree),
-        review: true,
-        verdict: Some(Verdict {
-            pass: false,
-            unmet: vec!["Logo is missing".into()],
-            nits: vec!["Variable name".into()],
-            summary: Some("Almost".into()),
-        }),
-        status: RunStatus::Finished,
-        queue_position: 3.25,
-        claude_run_id: Some("abc123".into()),
-        session_id: Some("11111111-2222-3333-4444-555555555555".into()),
-        queued_at: 1,
-        launched_at: Some(2),
-        finished_at: Some(3),
-        outcome: Some(RunOutcome::Red),
-        summary: Some("Report".into()),
-        pr_url: Some("https://github.com/acme/web/pull/1".into()),
-        branch: Some("nodal/pay-1".into()),
-        error: None,
-        legacy_label: Some("ENG-7".into()),
-        tokens: None,
-    }
-}
-
 fn link(id: &str, project_id: &str, default_repo: Option<&str>) -> SourceLink {
     let mut pull = BTreeMap::new();
     pull.insert("s1".to_string(), TaskStatus::Backlog);
@@ -582,7 +561,7 @@ fn round_trips() {
     let p = project("p1", "PAY");
     insert_project(&c, &p).unwrap();
     assert_eq!(get_project(&c, "p1").unwrap().unwrap(), p);
-    let bare = Project { id: "p2".into(), key: "WEB".into(), default_executor: None, reviewer: None, archived_at: Some(9), ..p };
+    let bare = Project { id: "p2".into(), key: "WEB".into(), archived_at: Some(9), ..p };
     insert_project(&c, &bare).unwrap();
     assert_eq!(get_project(&c, "p2").unwrap().unwrap(), bare);
     assert_eq!(get_project(&c, "nope").unwrap(), None);
@@ -608,29 +587,6 @@ fn round_trips() {
     insert_relation(&c, &rel).unwrap();
     assert_eq!(relations_of(&c, "t2").unwrap(), vec![rel]);
 
-    let work = Run {
-        kind: RunKind::Work,
-        executor: Executor::Workflow { name: "plan-task".into() },
-        verdict: None,
-        outcome: None,
-        status: RunStatus::Queued,
-        launched_at: None,
-        finished_at: None,
-        claude_run_id: None,
-        session_id: None,
-        extra_instructions: None,
-        options: LaunchOptions::default(),
-        legacy_label: None,
-        isolation: None,
-        review: false,
-        ..run("run1", Some("t1"), Some("r1"))
-    };
-    insert_run(&c, &work).unwrap();
-    assert_eq!(get_run(&c, "run1").unwrap().unwrap(), work);
-    let review = Run { parent_run_id: Some("run1".into()), ..run("run2", Some("t1"), Some("r1")) };
-    insert_run(&c, &review).unwrap();
-    assert_eq!(get_run(&c, "run2").unwrap().unwrap(), review);
-
     let o = OutboxItem {
         id: 0,
         task_id: "t2".into(),
@@ -652,14 +608,14 @@ fn settings_round_trip_and_defaults() {
     let db = conn();
     let mut c = db.lock().unwrap();
     assert_eq!(load_settings(&c).unwrap(), Settings::default());
-    let s = Settings { concurrency: 5, editor: Some("cursor".into()), reviewer: "strict-reviewer".into(), default_executor: None };
+    let s = Settings { editor: Some("cursor".into()) };
     save_settings(&mut c, &s).unwrap();
     assert_eq!(load_settings(&c).unwrap(), s);
     // Overwriting updates instead of duplicating.
-    let s2 = Settings { editor: None, ..s };
+    let s2 = Settings { editor: None };
     save_settings(&mut c, &s2).unwrap();
     assert_eq!(load_settings(&c).unwrap(), s2);
-    assert_eq!(count(&c, "settings"), 4);
+    assert_eq!(count(&c, "settings"), 1);
 }
 
 #[test]
@@ -674,9 +630,7 @@ fn corrupt_settings_fall_back_per_field() {
     )
     .unwrap();
     let s = load_settings(&c).unwrap();
-    assert_eq!(s.concurrency, MAX_CONCURRENCY);
     assert_eq!(s.editor, None);
-    assert_eq!(s.reviewer, DEFAULT_REVIEWER);
 }
 
 #[test]

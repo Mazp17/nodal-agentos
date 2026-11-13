@@ -1,3 +1,4 @@
+#![allow(clippy::disallowed_methods)] // builds git fixtures directly on disk
 //! Facade tests: `Board`'s methods over an in-memory database, with fake claude/sessions/chat
 //! ports (board never calls them) and a clock/notifier local to this module (board owns its
 //! tests; it doesn't reach into `nodal_app::testutil`).
@@ -7,15 +8,10 @@ use std::sync::{Arc, Mutex, OnceLock};
 
 use nodal_domain::board::dto::{NewProject, NewRepo, NewTask, ProjectPatch};
 use nodal_domain::error::HostError;
-use nodal_domain::model::activity::{AgentSession, AppRuns, ExternalSessions};
 use nodal_domain::model::chat::{ChatLive, ChatSpec};
-use nodal_domain::model::claude::{
-    ExtraFlags, LaunchBlocker, LaunchError, RunDetail, RunRef, RunSummary, SessionReadout,
-    Transcript,
-};
+use nodal_domain::model::claude::Transcript;
 use nodal_domain::model::events::ChangeKind;
-use nodal_domain::model::LaunchOptions;
-use nodal_domain::ports::{BoxFut, ChangeNotifier, ChatRuntime, ClaudeCli, Clock, SessionFiles};
+use nodal_domain::ports::{ChangeNotifier, ChatRuntime, Clock, SessionFiles};
 use nodal_host::adapters::{HostClaudeConfig, HostGit, HostLocalFs, HostPlanFiles};
 use nodal_host::testutil::TempDir;
 use nodal_store::Db;
@@ -73,60 +69,9 @@ impl ChangeNotifier for RecordingNotifier {
     }
 }
 
-/// Board never calls `claude`/`sessions`/`chats` (only execution, sessions and chats do): these
-/// fakes exist only so `Core` can be built.
-struct FakeClaude;
-
-impl ClaudeCli for FakeClaude {
-    fn list_sessions(&self) -> BoxFut<'_, Result<Vec<RunSummary>, HostError>> {
-        unimplemented!()
-    }
-    fn list_agent_sessions(&self) -> BoxFut<'_, Result<Vec<AgentSession>, HostError>> {
-        unimplemented!()
-    }
-    fn launch_bg<'a>(
-        &'a self,
-        _cwd: String,
-        _prompt: String,
-        _opts: &'a LaunchOptions,
-        _extra: &'a ExtraFlags,
-    ) -> BoxFut<'a, Result<RunRef, LaunchError>> {
-        unimplemented!()
-    }
-    fn stop<'a>(&'a self, _short_id: &'a str) -> BoxFut<'a, Result<(), HostError>> {
-        unimplemented!()
-    }
-}
-
 struct FakeSessionFiles;
 
 impl SessionFiles for FakeSessionFiles {
-    fn read_session(&self, _session_id: &str, _cwd: &str) -> SessionReadout {
-        unimplemented!()
-    }
-    fn session_tokens(&self, _session_id: &str, _cwd: &str) -> Option<i64> {
-        unimplemented!()
-    }
-    fn run_detail(&self, _session_id: &str, _cwd: &str) -> Result<Option<RunDetail>, HostError> {
-        unimplemented!()
-    }
-    fn launch_blocker(
-        &self,
-        _session_id: &str,
-        _cwd: &str,
-    ) -> Result<Option<LaunchBlocker>, HostError> {
-        unimplemented!()
-    }
-    fn agent_transcript(
-        &self,
-        _session_id: &str,
-        _cwd: &str,
-        _run_id: &str,
-        _agent_id: &str,
-        _limit: usize,
-    ) -> Result<Option<Transcript>, HostError> {
-        unimplemented!()
-    }
     fn find_session_jsonl(
         &self,
         _projects: &Path,
@@ -146,15 +91,6 @@ impl SessionFiles for FakeSessionFiles {
         unimplemented!()
     }
     fn session_title(&self, _path: &Path) -> Option<String> {
-        unimplemented!()
-    }
-    fn external_sessions(
-        &self,
-        _repos: &[(String, PathBuf)],
-        _agents: &[AgentSession],
-        _app: &AppRuns,
-        _now: i64,
-    ) -> Result<ExternalSessions, HostError> {
         unimplemented!()
     }
 }
@@ -222,7 +158,6 @@ fn fx(name: &str) -> Fx {
         env,
         rt: rt().handle().clone(),
         clock: Arc::new(FixedClock(1_000)),
-        claude: Arc::new(FakeClaude),
         sessions: Arc::new(FakeSessionFiles),
         notifier: notifier.clone(),
         chats: Arc::new(FakeChatRuntime),
@@ -356,10 +291,69 @@ fn settings_round_trip_through_the_facade() {
     let f = fx("board-settings");
     let defaults = block_on(f.board.get_settings()).unwrap();
     let mut wanted = defaults.clone();
-    wanted.concurrency = 3;
+    wanted.editor = Some("cursor".into());
     let saved = block_on(f.board.set_settings(wanted)).unwrap();
-    assert_eq!(saved.concurrency, 3);
+    assert_eq!(saved.editor.as_deref(), Some("cursor"));
     assert_eq!(f.notifier.kinds(), vec![ChangeKind::Projects]);
-    // `set_settings` doesn't kick the queue itself: that's the command's job, after this
-    // returns (today's order, kept in `commands::board::set_settings`).
+}
+
+fn git_in(dir: &Path, args: &[&str]) {
+    let out = std::process::Command::new("git").arg("-C").arg(dir).args(args).output().unwrap();
+    assert!(out.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&out.stderr));
+}
+
+#[test]
+fn remove_repo_worktree_guards_removes_and_unlinks_tasks() {
+    use nodal_domain::model::WorktreeRef;
+    if !nodal_host::testutil::git_available() {
+        return;
+    }
+    let f = fx("board-rm-wt");
+    let p = block_on(f.board.create_project(new_project("acme"))).unwrap();
+    let repo_dir = f._t.0.join("repo");
+    nodal_host::testutil::init_repo(&repo_dir);
+    let r = block_on(f.board.add_repo(
+        p.id.clone(),
+        NewRepo { path: repo_dir.to_string_lossy().into_owned(), ..Default::default() },
+    ))
+    .unwrap();
+    let wt = f._t.0.join("wt-feat");
+    git_in(&repo_dir, &["worktree", "add", "-q", "-b", "feat", &wt.to_string_lossy()]);
+    let task_input: NewTask =
+        serde_json::from_value(serde_json::json!({"projectId": p.id, "repoId": r.id, "title": "T", "plan": {"kind": "text", "text": "p"}})).unwrap();
+    let t = block_on(f.board.create_task(task_input)).unwrap();
+    {
+        let c = f.board.core.db.lock().unwrap();
+        let mut task = nodal_store::board::tasks::get(&c, &t.id).unwrap();
+        task.worktree =
+            Some(WorktreeRef { path: wt.to_string_lossy().into_owned(), branch: "feat".into(), base: "main".into() });
+        nodal_store::board::tasks::update(&c, &task).unwrap();
+    }
+    let rm = |path: &Path, force: bool| {
+        block_on(f.board.remove_repo_worktree(r.id.clone(), path.to_string_lossy().into_owned(), force))
+    };
+
+    // The main checkout and unknown folders are refused.
+    assert!(rm(&repo_dir, true).unwrap_err().to_string().contains("Not a linked worktree"));
+    assert!(rm(&f._t.0, true).is_err());
+
+    // Dirty: refused without force, nothing removed.
+    std::fs::write(wt.join("scratch.txt"), "x").unwrap();
+    assert!(rm(&wt, false).unwrap_err().to_string().contains("uncommitted changes"));
+    assert!(wt.exists());
+
+    rm(&wt, true).unwrap();
+    assert!(!wt.exists());
+    let branches = std::process::Command::new("git").arg("-C").arg(&repo_dir).args(["branch", "--list", "feat"]).output().unwrap();
+    assert!(branches.stdout.is_empty(), "branch deleted with the worktree");
+    let c = f.board.core.db.lock().unwrap();
+    assert!(nodal_store::board::tasks::get(&c, &t.id).unwrap().worktree.is_none());
+    assert!(f.notifier.kinds().contains(&ChangeKind::Tasks));
+    drop(c);
+
+    // Detached HEAD: no branch to delete, only the folder goes.
+    let det = f._t.0.join("wt-det");
+    git_in(&repo_dir, &["worktree", "add", "-q", "--detach", &det.to_string_lossy()]);
+    rm(&det, false).unwrap();
+    assert!(!det.exists());
 }

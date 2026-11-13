@@ -9,7 +9,7 @@ use tokio::runtime::Handle;
 use nodal_domain::error::HostError;
 use nodal_domain::model::providers::ProviderError;
 use nodal_domain::ports::{
-    ChangeNotifier, ChatRuntime, ClaudeCli, ClaudeConfig, Clock, Git, LocalFs, PlanFiles,
+    ChangeNotifier, ChatRuntime, ClaudeConfig, Clock, Git, LocalFs, PlanFiles,
     SessionFiles,
 };
 use nodal_store::{Db, StoreError};
@@ -49,12 +49,6 @@ impl Env {
     pub fn text_plan_path(&self, task_id: &str) -> PathBuf {
         self.plan_dir(task_id).join("plan.md")
     }
-    pub fn stopped_patch_path(&self, run_id: &str) -> PathBuf {
-        self.data_dir
-            .join("runs")
-            .join(run_id)
-            .join("stopped.patch")
-    }
 }
 
 /// What `App::new` needs: one database, the ports and the already-built sources hub.
@@ -63,7 +57,6 @@ pub struct Deps {
     pub env: Env,
     pub rt: Handle,
     pub clock: Arc<dyn Clock>,
-    pub claude: Arc<dyn ClaudeCli>,
     pub sessions: Arc<dyn SessionFiles>,
     pub notifier: Arc<dyn ChangeNotifier>,
     pub chats: Arc<dyn ChatRuntime>,
@@ -93,10 +86,24 @@ pub(crate) struct Core {
     pub env: Env,
     pub rt: Handle,
     pub clock: Arc<dyn Clock>,
-    pub claude: Arc<dyn ClaudeCli>,
     pub sessions: Arc<dyn SessionFiles>,
     pub notifier: Arc<dyn ChangeNotifier>,
     pub chats: Arc<dyn ChatRuntime>,
+}
+
+impl Env {
+    /// The repo's linked (non-main) worktree at `path`, as git lists it (compared
+    /// canonicalized). Blocking. Trust boundary: never an arbitrary path or the main checkout.
+    pub(crate) fn linked_worktree(&self, repo_path: &str, path: &str) -> Result<nodal_domain::model::RepoWorktree, String> {
+        let not_ours = || "Not a linked worktree of this repo.".to_string();
+        let want = self.fs.canonicalize(std::path::Path::new(path)).map_err(|_| not_ours())?;
+        self.git
+            .list_worktrees(std::path::Path::new(repo_path))
+            .map_err(|e| e.0)?
+            .into_iter()
+            .find(|w| !w.is_main && self.fs.canonicalize(std::path::Path::new(&w.path)).is_ok_and(|p| p == want))
+            .ok_or_else(not_ours)
+    }
 }
 
 /// Runs `f` on a blocking thread without stalling the runtime (was `util::blocking`, minus

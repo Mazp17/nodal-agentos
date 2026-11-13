@@ -2,19 +2,17 @@
 //!
 //! Most bodies take `State<'_, Arc<App>>` and reject with `CommandError` (from an `AppError`
 //! or a bare `String`); a few contexts with no shared `App` state of their own (`host`,
-//! `linear`, `mcp`, `pty`) still take their own state, or none, and reject with a plain
+//! `linear`, `mcp`) still take their own state, or none, and reject with a plain
 //! `String`.
 
 pub mod board;
 pub mod chats;
-pub mod execution;
 pub mod host;
 pub mod linear;
 pub mod mcp;
-pub mod pty;
-pub mod sessions;
 pub mod sources;
 pub mod system;
+pub mod worktrees;
 
 use serde::{Serialize, Serializer};
 

@@ -9,8 +9,6 @@ export interface MergeDialogProps {
   worktree: WorktreeRef;
   /** `PLA-2: tarea 2`: the commit message. */
   message: string;
-  /** The worktree has uncommitted changes by design (finish mode "changes"). */
-  commitFirst: boolean;
   /** Linked task manager, to say it gets the Done status too. */
   provider: string | null;
   onClose: () => void;
@@ -22,7 +20,7 @@ export interface MergeDialogProps {
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
 
 /** Confirmation for "Merge into <base> & done": nothing runs until it's confirmed. */
-export function MergeDialog({ taskId, worktree, message, commitFirst, provider, onClose, onMerged, onHandOff }: MergeDialogProps) {
+export function MergeDialog({ taskId, worktree, message, provider, onClose, onMerged, onHandOff }: MergeDialogProps) {
   const [busy, setBusy] = useState(false);
   const close = () => {
     if (!busy) onClose();
@@ -48,7 +46,7 @@ export function MergeDialog({ taskId, worktree, message, commitFirst, provider, 
     };
   }, [taskId]);
 
-  const dirty = status?.dirty ?? commitFirst;
+  const dirty = status?.dirty ?? false;
   const commits = status?.ahead ?? 0;
   const nothing = !!status && commits === 0 && !status.dirty;
   const summary = [commits > 0 ? plural(commits, "commit") : null, dirty ? "uncommitted changes" : null]
