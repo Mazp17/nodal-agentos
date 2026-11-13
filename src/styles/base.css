@@ -241,6 +241,7 @@ button.badge:hover { filter: brightness(1.2); }
 .tone-danger { --tone: var(--run-failed); }
 .tone-muted { --tone: var(--run-queued); }
 .tone-info { --tone: var(--info); }
+.tone-merged { --tone: oklch(0.7 0.14 300); }
 
 /* ---- Dropdown menu ---- */
 .menu {

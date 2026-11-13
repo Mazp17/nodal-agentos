@@ -4,8 +4,8 @@ import { ContextMenu, DropdownMenu } from "radix-ui";
 import { rootKey, useRepoChanges, useRepoCommits, useRepoDir, useRepoWorktrees } from "../../domain/hooks/branches";
 import { agentRows, isAgentCall, shortAgo } from "./model";
 import { openSubagent } from "./SubagentSheet";
-import { useChatStream } from "./stream";
-import { useChatSubagents } from "../../domain/hooks/chats";
+import { OPEN_PR_PROMPT, sendToChat, useChatStream } from "./stream";
+import { useAllChats, useChatSubagents } from "../../domain/hooks/chats";
 import { formatDuration } from "../../lib/format";
 import type { FileDiff } from "../../domain/api";
 import { readJsonPref, writePref } from "../../shell/storage";
@@ -14,8 +14,10 @@ const isStrings = (v: unknown): v is string[] => Array.isArray(v) && v.every((x)
 import { useConfirm } from "../../ui/ConfirmDialog";
 import { useToast } from "../../ui/Toasts";
 import { revertChanges } from "./FileView";
-import { repoCommit, repoOpenPr } from "../../domain/api";
-import { invalidate } from "../../domain/hooks/store";
+import { refreshTaskPr, repoCommit, repoOpenPr } from "../../domain/api";
+import { invalidate, useTasks } from "../../domain/hooks/store";
+import { ExternalLink } from "../../ui/ExternalLink";
+import { PR_TONE } from "../tasks/bits";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import type { RepoWorktree } from "../../domain/api";
 import type { DiffFileStatus } from "../../domain/api";
@@ -534,6 +536,15 @@ function GitBox({
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState<"commit" | "pr" | null>(null);
   const [pr, setPr] = useState<{ title: string; body: string } | null>(null);
+  // The task working in this worktree: once it has a PR (not closed), show it like the task panel does.
+  const task = useTasks(repo.projectId).data?.find((t) => worktree !== null && t.repoId === repo.id && t.worktree?.path.replace(/\/+$/, "") === worktree.replace(/\/+$/, ""));
+  const linked = task?.pr && task.pr.state !== "closed" ? task.pr : null;
+  // Same as the task panel's "Open PR": ask the task's chat (else the open one); without a chat, the GitHub CLI form.
+  const taskChat = useAllChats(!!task).data?.find((c) => c.taskId === task?.id);
+  const askChat = taskChat
+    ? () => void sendToChat(taskChat.id, OPEN_PR_PROMPT).catch((e: unknown) => toast("Couldn't ask the chat", String(e), "danger"))
+    : onAskChatForPr;
+  const startPr = () => (askChat ? askChat() : setPr({ title: latest?.subject ?? "", body: "" }));
   // In a worktree, "changes" also counts committed work; the box commits what's on disk.
   const files = picked.length || (changes?.length ?? 0);
   const canCommit = !!message.trim() && files > 0 && !busy;
@@ -599,24 +610,53 @@ function GitBox({
                 ? `Commit all ${files} ${files === 1 ? "file" : "files"}`
                 : "Commit"}
         </button>
-        <DropdownMenu.Root>
-          <DropdownMenu.Trigger className="btn btn-sm git-pr" disabled={!!busy || !worktree} title={worktree ? undefined : "Open a PR from a worktree branch"}>
-            Pull request
-            <svg width="9" height="9" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden focusable="false">
-              <path d="M2.5 4l2.5 2.5L7.5 4" />
-            </svg>
-          </DropdownMenu.Trigger>
-          <DropdownMenu.Portal>
-            <DropdownMenu.Content className="menu tab-menu" align="end" sideOffset={4} collisionPadding={8}>
-              <DropdownMenu.Item className="menu-item" onSelect={() => setPr({ title: latest?.subject ?? "", body: "" })}>
-                Open with GitHub CLI…
-              </DropdownMenu.Item>
-              <DropdownMenu.Item className="menu-item" disabled={!onAskChatForPr} onSelect={() => onAskChatForPr?.()}>
-                Ask the chat to open it
-              </DropdownMenu.Item>
-            </DropdownMenu.Content>
-          </DropdownMenu.Portal>
-        </DropdownMenu.Root>
+        {linked && task ? (
+          <>
+            <ExternalLink url={linked.url} className={`btn btn-sm git-pr git-pr-linked ${PR_TONE[linked.state]}`} label={`Open PR #${linked.number} (${linked.state}) on GitHub`}>
+              <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" aria-hidden focusable="false">
+                <circle cx="4" cy="3.5" r="1.75" />
+                <circle cx="4" cy="12.5" r="1.75" />
+                <circle cx="12" cy="12.5" r="1.75" />
+                <path d="M4 5.25v5.5M12 10.75V7a2 2 0 0 0-2-2H7.5M9 3.5 7.5 5 9 6.5" />
+              </svg>
+              <span className="mono">#{linked.number}</span>
+              <span className="git-pr-state">{linked.state}</span>
+            </ExternalLink>
+            <button
+              type="button"
+              className="icon-btn git-pr-refresh"
+              title="Refresh the PR"
+              aria-label="Refresh the PR"
+              disabled={!!busy}
+              onClick={() => void refreshTaskPr(task.id, true).catch((e: unknown) => toast("Couldn't refresh the PR", String(e), "danger"))}
+            >
+              <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden focusable="false">
+                <path d="M13.5 8a5.5 5.5 0 1 1-1.6-3.9M13.5 2.5v3h-3" />
+              </svg>
+            </button>
+          </>
+        ) : (
+          <DropdownMenu.Root>
+            <button type="button" className="btn btn-sm git-pr" disabled={!!busy || !worktree} title={worktree ? undefined : "Open a PR from a worktree branch"} onClick={startPr}>
+              Open PR
+            </button>
+            <DropdownMenu.Trigger className="btn btn-sm git-pr" disabled={!!busy || !worktree} aria-label="More ways to open the PR">
+              <svg width="9" height="9" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden focusable="false">
+                <path d="M2.5 4l2.5 2.5L7.5 4" />
+              </svg>
+            </DropdownMenu.Trigger>
+            <DropdownMenu.Portal>
+              <DropdownMenu.Content className="menu tab-menu" align="end" sideOffset={4} collisionPadding={8}>
+                <DropdownMenu.Item className="menu-item" onSelect={() => setPr({ title: latest?.subject ?? "", body: "" })}>
+                  Open with GitHub CLI…
+                </DropdownMenu.Item>
+                <DropdownMenu.Item className="menu-item" disabled={!askChat} onSelect={() => askChat?.()}>
+                  Ask the chat to open it
+                </DropdownMenu.Item>
+              </DropdownMenu.Content>
+            </DropdownMenu.Portal>
+          </DropdownMenu.Root>
+        )}
       </div>
       {pr && (
         <form

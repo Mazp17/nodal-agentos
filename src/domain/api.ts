@@ -302,6 +302,8 @@ export const removeTaskRelation = (taskId: string, otherId: string, kind: Relati
  */
 export const cleanupWorktree = (taskId: string, force = false) =>
   invoke<Task>("cleanup_worktree", { taskId, force });
+/** Re-detects the task's PR from its branch. Throttled server-side unless `force`; errors are swallowed there. */
+export const refreshTaskPr = (taskId: string, force = false) => invoke<Task>("refresh_task_pr", { taskId, force });
 /** Absolute path. Doesn't launch anything or write Claude Code's config. */
 export const repoTrust = (path: string) => invoke<RepoTrust>("repo_trust", { path });
 /** Opens Terminal.app at `path`; with `runClaude`, starts `claude` there. */

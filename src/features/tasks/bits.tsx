@@ -1,4 +1,5 @@
-import type { Priority, TaskStatus } from "../../domain/types";
+import type { Priority, TaskPr, TaskStatus } from "../../domain/types";
+import { ExternalLink } from "../../ui/ExternalLink";
 import { PRIORITY_LABEL, STATUS_META } from "./status";
 import "./tasks.css";
 
@@ -23,5 +24,23 @@ export function PriorityBars({ priority }: { priority: Priority }) {
         <i key={h} style={{ height: h }} className={priority === "urgent" ? "urgent" : k < on ? "on" : ""} />
       ))}
     </span>
+  );
+}
+
+export const PR_TONE = { open: "tone-ok", draft: "tone-muted", merged: "tone-merged", closed: "tone-danger" } as const;
+
+/** `#123` chip coloured by PR state; `link` makes it open the PR in the browser. */
+export function PrBadge({ pr, link = false }: { pr: TaskPr; link?: boolean }) {
+  const chip = (
+    <span className={`badge badge-sm mono ${PR_TONE[pr.state]}`} title={`PR #${pr.number} · ${pr.state}`}>
+      #{pr.number}
+    </span>
+  );
+  return link ? (
+    <ExternalLink url={pr.url} label={`Open PR #${pr.number} (${pr.state})`}>
+      {chip}
+    </ExternalLink>
+  ) : (
+    chip
   );
 }

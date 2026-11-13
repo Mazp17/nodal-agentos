@@ -4,6 +4,8 @@ import {
   addTaskRelation,
   cleanupWorktree,
   deleteTask,
+  refreshTaskPr,
+  repoOpenPr,
   removeTaskRelation,
   resolveMovedTask,
   sendChatMessage,
@@ -28,15 +30,16 @@ import {
 } from "../../domain/hooks/store";
 import { taskKey, TASK_STATUSES, type RelationKind, type Task, type TaskStatus } from "../../domain/types";
 import { formatDateTime } from "../../lib/format";
+import { ExternalLink } from "../../ui/ExternalLink";
 import { SafeMarkdown } from "../../ui/Markdown";
 import { useConfirm } from "../../ui/ConfirmDialog";
 import { useFocusTrap } from "../../ui/useFocusTrap";
 import { useToast } from "../../ui/Toasts";
-import { ensureChatAttached } from "../chats/stream";
+import { ensureChatAttached, OPEN_PR_PROMPT, sendToChat } from "../chats/stream";
 import { SourceTab } from "../providers";
 import { MergeDialog } from "./MergeDialog";
 import { NewTaskDialog } from "./NewTaskDialog";
-import { PriorityBars, StatusRing } from "./bits";
+import { PrBadge, PriorityBars, StatusRing } from "./bits";
 import { isClosed, PRIORITIES, PRIORITY_LABEL, providerLabel, STATUS_META } from "./status";
 import { useOpenTaskChat } from "./useTaskChat";
 import "./tasks.css";
@@ -93,6 +96,12 @@ export function TaskPanel({ taskId, onClose, onOpenTask, onOpenSources }: TaskPa
     setCleanupBlocked(null);
     setMerging(false);
   }, [taskId]);
+
+  const hasWorktree = !!taskQ.data?.worktree;
+  useEffect(() => {
+    // Fire-and-forget: the backend throttles it and pushes the change through the Tasks event.
+    if (hasWorktree) void refreshTaskPr(taskId).catch(() => {});
+  }, [taskId, hasWorktree]);
 
   const closeMenu = useCallback(() => setMenu(null), []);
   const statusRef = useOutside(menu === "status", closeMenu);
@@ -239,18 +248,40 @@ export function TaskPanel({ taskId, onClose, onOpenTask, onOpenSources }: TaskPa
   };
 
   const provider = src ? providerLabel(src.provider) : null;
-  const mergeButton =
-    canMerge && task.worktree ? (
-      <button
-        type="button"
-        className="btn btn-sm btn-primary"
-        disabled={busy !== null}
-        title={`Land ${task.worktree.branch} on ${task.worktree.base}`}
-        onClick={() => setMerging(true)}
-      >
-        {`Merge into ${task.worktree.base} & done`}
-      </button>
-    ) : null;
+  const openPr = () =>
+    act("open the PR", async () => {
+      if (chat) return sendToChat(chat.id, OPEN_PR_PROMPT);
+      if (!task.worktree) return;
+      const url = await repoOpenPr(task.repoId, task.worktree.path, task.title, "");
+      await openUrl(url).catch(() => {});
+      await refreshTaskPr(task.id, true);
+    });
+  const pr = task.pr;
+  const merged = pr?.state === "merged";
+  const prActions = task.worktree ? (
+    <>
+      {pr && (
+        <>
+          <ExternalLink url={pr.url} label={`Open PR #${pr.number}`}>
+            PR #{pr.number} <PrBadge pr={pr} />
+          </ExternalLink>
+          <button
+            type="button"
+            className="btn btn-sm"
+            disabled={busy !== null}
+            onClick={() => void act("refresh the PR", () => refreshTaskPr(task.id, true))}
+          >
+            Refresh
+          </button>
+        </>
+      )}
+      {(!pr || pr.state === "closed") && (
+        <button type="button" className="btn btn-sm btn-primary" disabled={busy !== null} onClick={() => void openPr()}>
+          Open PR
+        </button>
+      )}
+    </>
+  ) : null;
   /** Menu action: closes the menu first. */
   const picked = (fn: () => void) => () => {
     closeMenu();
@@ -560,14 +591,14 @@ export function TaskPanel({ taskId, onClose, onOpenTask, onOpenSources }: TaskPa
                     </span>
                   </div>
                   <div className="tp-wt-actions">
-                    {mergeButton}
+                    {prActions}
                     <button
                       type="button"
-                      className="btn btn-sm btn-danger"
+                      className={`btn btn-sm ${merged ? "btn-primary" : "btn-danger"}`}
                       disabled={busy !== null}
                       onClick={() => void cleanUp()}
                     >
-                      Clean up
+                      {merged ? "Clean up worktree" : "Clean up"}
                     </button>
                   </div>
                   {cleanupBlocked && (

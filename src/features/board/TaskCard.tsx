@@ -1,7 +1,7 @@
 import type { DragEvent, MouseEvent } from "react";
 import { taskKey, type Chat, type Project, type Repo, type Task } from "../../domain/types";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../../ui/Tooltip";
-import { PriorityBars } from "../tasks/bits";
+import { PrBadge, PriorityBars } from "../tasks/bits";
 import { isClosed, providerLabel } from "../tasks/status";
 import { projectColor } from "../projects/create";
 
@@ -132,6 +132,7 @@ export function TaskCard({ model, showProject, busy, dragging, onOpen, onAction,
         )}
         <span className="bd-sep" aria-hidden>·</span>
         <span className={`bd-repo mono ${repo ? "" : "bd-danger"}`}>{repo ? repo.name : "Repo removed"}</span>
+        {task.pr && <PrBadge pr={task.pr} />}
         {src?.syncError && (
           <span className="bd-sync-err" title={`Sync failed: ${src.syncError}`} role="img" aria-label="Sync failed">
             ⚠
