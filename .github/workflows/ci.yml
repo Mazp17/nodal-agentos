@@ -188,4 +188,4 @@ jobs:
 
       - name: Rust tests (Windows)
         working-directory: src-tauri
-        run: cargo test --workspace --lib --locked
+        run: cargo test --workspace --lib --locked --no-fail-fast
