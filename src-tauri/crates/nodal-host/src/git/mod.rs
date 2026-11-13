@@ -205,7 +205,17 @@ pub fn ok(dir: &Path, args: &[&str]) -> Result<String, String> {
 pub fn toplevel(dir: &Path) -> Result<Option<PathBuf>, String> {
     let out = run(dir, &["rev-parse", "--show-toplevel"])?;
     let root = out.stdout.trim();
-    Ok((out.ok && !root.is_empty()).then(|| PathBuf::from(root)))
+    Ok((out.ok && !root.is_empty()).then(|| native_path(root)))
+}
+
+/// An absolute path printed by git. Git for Windows prints `C:/a/b`; this turns it into
+/// `C:\a\b` so it compares equal to the paths the app stores.
+pub(crate) fn native_path(git_path: &str) -> PathBuf {
+    if cfg!(windows) {
+        PathBuf::from(git_path.replace('/', "\\"))
+    } else {
+        PathBuf::from(git_path)
+    }
 }
 
 /// `git` version (`git version 2.x`), using the same resolver as the rest of the app.

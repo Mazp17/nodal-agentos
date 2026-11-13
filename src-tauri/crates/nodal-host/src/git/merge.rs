@@ -20,7 +20,7 @@ fn checkout_of(repo: &Path, branch: &str) -> Result<Option<PathBuf>, String> {
         if let Some(p) = line.strip_prefix("worktree ") {
             path = Some(p);
         } else if line == target {
-            return Ok(path.map(PathBuf::from));
+            return Ok(path.map(super::native_path));
         }
     }
     Ok(None)

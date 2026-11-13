@@ -48,6 +48,10 @@ fn resolve(repo: &Path, rel: &str) -> Result<PathBuf, String> {
 pub fn read_file(repo: &Path, rel: &str) -> Result<RepoFile, String> {
     use std::io::Read;
     let path = resolve(repo, rel)?;
+    // Windows can't open a folder as a file, so `File::open` would fail with a vaguer error.
+    if path.is_dir() {
+        return Err(format!("`{rel}` is not a regular file."));
+    }
     let file = std::fs::File::open(&path).map_err(|e| format!("Can't read `{rel}`: {e}"))?;
     let meta = file.metadata().map_err(|e| format!("Can't read `{rel}`: {e}"))?;
     if !meta.is_file() {
@@ -152,7 +156,7 @@ pub fn list_worktrees(repo: &Path) -> Result<Vec<RepoWorktree>, String> {
         let mut skip = false;
         for line in block.lines() {
             if let Some(p) = line.strip_prefix("worktree ") {
-                path = Some(p.to_string());
+                path = Some(super::native_path(p).to_string_lossy().into_owned());
             } else if let Some(b) = line.strip_prefix("branch ") {
                 branch = Some(b.strip_prefix("refs/heads/").unwrap_or(b).to_string());
             } else if line.starts_with("prunable") || line == "bare" {
