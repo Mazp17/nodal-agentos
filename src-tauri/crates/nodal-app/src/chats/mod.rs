@@ -11,6 +11,8 @@
 
 pub mod context;
 pub mod hooks;
+mod task;
+pub use task::TaskChatStart;
 mod transcript;
 
 use std::path::{Path, PathBuf};
@@ -27,7 +29,7 @@ use nodal_domain::model::{Chat, ChatWorkspace, LaunchOptions, Project, Repo};
 use nodal_domain::serde_util::double_option;
 use nodal_domain::sessions::transcript::{is_valid_session_id, TRANSCRIPT_DEFAULT_LIMIT, TRANSCRIPT_MAX_LIMIT};
 use nodal_domain::util::{check_id, clip_chars, new_id};
-use nodal_store::{board::projects, board::repos, chats, Conn as Connection, StoreError};
+use nodal_store::{board::projects, board::repos, board::tasks, chats, Conn as Connection, StoreError};
 
 use crate::core::{blocking, AppError, Core};
 
@@ -44,6 +46,9 @@ pub struct NewChat {
     pub title: Option<String>,
     #[serde(default)]
     pub agent: Option<String>,
+    /// Run in this worktree of `repo_id` (validated against git in `Chats::create_chat`).
+    #[serde(default)]
+    pub worktree: Option<String>,
     #[serde(flatten)]
     pub launch: LaunchOptions,
 }
@@ -95,9 +100,24 @@ pub mod ops {
     use super::*;
 
     pub fn create(conn: &Connection, project_id: &str, input: &NewChat, now: i64) -> Result<Chat, String> {
+        create_for(conn, project_id, input, None, now)
+    }
+
+    /// `create`, linking the chat to the task it works on.
+    pub fn create_for(
+        conn: &Connection,
+        project_id: &str,
+        input: &NewChat,
+        task_id: Option<&str>,
+        now: i64,
+    ) -> Result<Chat, String> {
         projects::get(conn, project_id)?;
         let repo_id = input.repo_id.clone().filter(|r| !r.is_empty());
         check_repo(conn, project_id, repo_id.as_deref())?;
+        let worktree = input.worktree.clone().filter(|w| !w.is_empty());
+        if worktree.is_some() && repo_id.is_none() {
+            return Err("A worktree chat needs a repo.".into());
+        }
         let chat = Chat {
             id: new_id('c', now),
             project_id: project_id.to_string(),
@@ -106,6 +126,8 @@ pub mod ops {
             session_title: None,
             session_id: None,
             agent: agent(input.agent.as_deref())?,
+            task_id: task_id.map(str::to_string),
+            worktree,
             launch: options::normalize(&input.launch).map_err(|e| e.join("\n"))?,
             created_at: now,
             updated_at: now,
@@ -169,9 +191,21 @@ pub mod ops {
     }
 }
 
+/// The worktree the chat runs in: its task's, else its own. `None` if it has none or the
+/// folder is gone (the chat then runs in the repo as usual).
+fn task_worktree(conn: &Connection, chat: &Chat, is_dir: impl Fn(&str) -> bool) -> Result<Option<String>, String> {
+    let from_task = match &chat.task_id {
+        Some(id) => tasks::get(conn, id)?.worktree.map(|w| w.path),
+        None => None,
+    };
+    Ok(from_task.or_else(|| chat.worktree.clone()).filter(|p| is_dir(p)))
+}
+
 /// Where a chat runs.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum ChatCwd<'a> {
+    /// A task chat: the task's worktree of `repo`.
+    Worktree { repo: &'a Repo, path: &'a str },
     /// The chat's repo or, in a project without a root folder, its first repo.
     Repo(&'a Repo),
     /// The project's root folder, for a repo-less chat: it sees the repos and everything
@@ -183,6 +217,7 @@ impl<'a> ChatCwd<'a> {
     pub fn path(&self) -> &'a str {
         match self {
             ChatCwd::Repo(r) => &r.path,
+            ChatCwd::Worktree { path, .. } => path,
             ChatCwd::Root(p) => p,
         }
     }
@@ -191,14 +226,23 @@ impl<'a> ChatCwd<'a> {
     /// canonical, and `Path::starts_with` compares whole components (`acme` ≠ `acme-web`).
     pub fn covers(&self, repo: &Repo) -> bool {
         match self {
-            ChatCwd::Repo(r) => r.id == repo.id,
+            ChatCwd::Repo(r) | ChatCwd::Worktree { repo: r, .. } => r.id == repo.id,
             ChatCwd::Root(p) => Path::new(&repo.path).starts_with(p),
         }
     }
 }
 
-/// Where the chat runs: its repo, else the project's root folder, else its first repo.
-pub fn chat_cwd<'a>(chat: &Chat, project: &'a Project, repos: &'a [Repo]) -> Result<ChatCwd<'a>, String> {
+/// Where the chat runs: the task's `worktree` if it works on one, else its repo, else the
+/// project's root folder, else its first repo.
+pub fn chat_cwd<'a>(
+    chat: &Chat,
+    project: &'a Project,
+    repos: &'a [Repo],
+    worktree: Option<&'a str>,
+) -> Result<ChatCwd<'a>, String> {
+    if let (Some(path), Some(repo)) = (worktree, repos.iter().find(|r| Some(&r.id) == chat.repo_id.as_ref())) {
+        return Ok(ChatCwd::Worktree { repo, path });
+    }
     scope_cwd(chat.repo_id.as_deref(), project, repos)
 }
 
@@ -215,8 +259,14 @@ pub fn scope_cwd<'a>(repo_id: Option<&str>, project: &'a Project, repos: &'a [Re
 /// How the chat's process is launched: in its repo or the project's root folder, with its
 /// own model, effort and permission mode, and the Nodal context (`mcp` is `nodal-mcp`, when
 /// found).
-pub fn spec(chat: &Chat, project: &Project, repos: &[Repo], mcp: Option<&Path>) -> Result<ChatSpec, String> {
-    let cwd = chat_cwd(chat, project, repos)?;
+pub fn spec(
+    chat: &Chat,
+    project: &Project,
+    repos: &[Repo],
+    worktree: Option<&str>,
+    mcp: Option<&Path>,
+) -> Result<ChatSpec, String> {
+    let cwd = chat_cwd(chat, project, repos, worktree)?;
     let mut args = options::to_args(&chat.launch)?;
     if let Some(a) = &chat.agent {
         args.extend(["--agent".to_string(), a.clone()]);
@@ -259,6 +309,14 @@ impl Chats {
     pub async fn create_chat(&self, project_id: String, input: NewChat) -> Result<Chat, AppError> {
         check_id(&project_id, "project")?;
         let now = self.core.clock.now_ms();
+        let mut input = input;
+        if let Some(wt) = input.worktree.take().filter(|w| !w.is_empty()) {
+            let repo_id = input.repo_id.clone().filter(|r| !r.is_empty()).ok_or("A worktree chat needs a repo.")?;
+            check_id(&repo_id, "repo")?;
+            let repo = self.db(move |c| Ok(repos::get(c, &repo_id)?)).await?;
+            let env = self.core.env.clone();
+            input.worktree = Some(blocking(move || env.linked_worktree(&repo.path, &wt)).await?.path);
+        }
         let chat = self.db(move |c| ops::create(c, &project_id, &input, now)).await?;
         self.core.notifier.notify(ChangeKind::Chats, Some(&chat.project_id));
         Ok(chat)
@@ -293,9 +351,16 @@ impl Chats {
         check_id(&id, "chat")?;
         let now = self.core.clock.now_ms();
         let body = text.clone();
-        let (chat, project, repos) = self.db(move |c| ops::prepare_send(c, &id, &body, now)).await?;
+        let fs = self.core.env.fs.clone();
+        let (chat, project, repos, wt) = self
+            .db(move |c| {
+                let (chat, project, repos) = ops::prepare_send(c, &id, &body, now)?;
+                let wt = task_worktree(c, &chat, |p| fs.is_dir(Path::new(p)))?;
+                Ok((chat, project, repos, wt))
+            })
+            .await?;
         let mcp = self.core.env.fs.nodal_mcp_bin();
-        let spec = spec(&chat, &project, &repos, mcp.as_deref())?;
+        let spec = spec(&chat, &project, &repos, wt.as_deref(), mcp.as_deref())?;
         self.core.chats.send(&chat.id, &chat.project_id, chat.session_id.as_deref(), spec, &text)?;
         self.core.notifier.notify(ChangeKind::Chats, Some(&chat.project_id));
         Ok(chat)
@@ -374,19 +439,21 @@ impl Chats {
     /// The chat's history, read from its Claude Code session. `None` before the first message.
     pub async fn get_chat_transcript(&self, id: String, limit: Option<u32>) -> Result<Option<Transcript>, AppError> {
         check_id(&id, "chat")?;
-        let (chat, project, repos) = self
+        let fs = self.core.env.fs.clone();
+        let (chat, project, repos, wt) = self
             .db(move |c| {
                 let chat = chats::get(c, &id)?;
                 let project = projects::get(c, &chat.project_id)?;
                 let repos = repos::list(c, Some(&chat.project_id))?;
-                Ok((chat, project, repos))
+                let wt = task_worktree(c, &chat, |p| fs.is_dir(Path::new(p)))?;
+                Ok((chat, project, repos, wt))
             })
             .await?;
         let Some(sid) = chat.session_id.clone().filter(|s| is_valid_session_id(s)) else { return Ok(None) };
         let Some(claude_dir) = self.core.env.claude_dir.clone() else {
             return Err("Couldn't locate the Claude Code folder ($HOME is not set).".into());
         };
-        let cwd = chat_cwd(&chat, &project, &repos).map(|c| c.path().to_string()).unwrap_or_default();
+        let cwd = chat_cwd(&chat, &project, &repos, wt.as_deref()).map(|c| c.path().to_string()).unwrap_or_default();
         let limit = limit.unwrap_or(TRANSCRIPT_DEFAULT_LIMIT).clamp(1, TRANSCRIPT_MAX_LIMIT) as usize;
         let (chat_id, project_id, known_title) = (chat.id.clone(), chat.project_id.clone(), chat.session_title.clone());
         let sessions = self.core.sessions.clone();
@@ -415,15 +482,17 @@ impl Chats {
     /// over the launch folder. Read-only and cheap: polled per visible chat.
     pub async fn chat_workspace(&self, id: String) -> Result<ChatWorkspace, AppError> {
         check_id(&id, "chat")?;
-        let (chat, project, repos) = self
+        let fs = self.core.env.fs.clone();
+        let (chat, project, repos, wt) = self
             .db(move |c| {
                 let chat = chats::get(c, &id)?;
                 let project = projects::get(c, &chat.project_id)?;
                 let repos = repos::list(c, Some(&chat.project_id))?;
-                Ok((chat, project, repos))
+                let wt = task_worktree(c, &chat, |p| fs.is_dir(Path::new(p)))?;
+                Ok((chat, project, repos, wt))
             })
             .await?;
-        let launch = chat_cwd(&chat, &project, &repos).ok().map(|c| c.path().to_string());
+        let launch = chat_cwd(&chat, &project, &repos, wt.as_deref()).ok().map(|c| c.path().to_string());
         let sid = chat.session_id.clone().filter(|s| is_valid_session_id(s));
         let projects_dir = self.core.env.claude_dir.as_ref().map(|d| d.join("projects"));
         let (sessions, env) = (self.core.sessions.clone(), self.core.env.clone());

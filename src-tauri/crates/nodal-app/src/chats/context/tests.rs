@@ -15,6 +15,8 @@ fn chat(repo_id: Option<&str>) -> Chat {
         title: None,
         session_title: None,
         agent: None,
+        task_id: None,
+        worktree: None,
         session_id: None,
         launch: LaunchOptions::default(),
         created_at: 1,
@@ -64,7 +66,7 @@ fn a_project_chat_gets_nodal_mcp_every_other_repo_and_the_project() {
     );
     assert_eq!(
         value_of(&args, "--allowedTools"),
-        ["mcp__nodal__list_projects,mcp__nodal__list_tasks,mcp__nodal__get_task,mcp__nodal__get_run,mcp__nodal__propose_task"]
+        ["mcp__nodal__list_projects,mcp__nodal__list_tasks,mcp__nodal__get_task,mcp__nodal__propose_task"]
     );
     assert_eq!(
         value_of(&args, "--add-dir"),
@@ -162,7 +164,7 @@ fn a_root_chat_runs_at_the_root_and_adds_only_repos_outside_it() {
         "- acme-api: /Users/me/Code/acme/api (id r1)\n",
         "- acme-web: /Users/me/Code/acme-web (id r2)\n",
         "This chat runs at the project root.",
-        "tasks and runs always target one of the repos above",
+        "tasks always target one of the repos above",
     ] {
         assert!(prompt.contains(part), "missing {part:?} in:\n{prompt}");
     }
@@ -243,4 +245,22 @@ fn real_chat_sees_propose_task() {
             .any(|t| t == &json!(tool_name(PROPOSE_TASK))),
         "{tools}"
     );
+}
+
+#[test]
+fn worktree_scope_names_a_task_or_a_free_worktree_and_never_says_commit() {
+    let (project, repos) = fixture();
+    let scope = |task: bool| {
+        let mut c = chat(Some("r1"));
+        c.task_id = task.then(|| "t1".to_string());
+        let cwd = ChatCwd::Worktree { repo: &repos[0], path: "/wt/x" };
+        let p = system_prompt(&c, &project, &repos, cwd, false);
+        p.lines().find(|l| l.starts_with("Scope:")).unwrap().to_string()
+    };
+    let task = scope(true);
+    assert!(task.contains("one task, worked in its own git worktree /wt/x of the repo acme-api"), "{task}");
+    let free = scope(false);
+    assert!(free.contains("the git worktree /wt/x of the repo acme-api (its own branch)"), "{free}");
+    assert!(!free.contains("one task"), "{free}");
+    assert!(!task.contains("commit") && !free.contains("commit"));
 }

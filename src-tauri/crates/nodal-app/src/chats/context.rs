@@ -24,7 +24,7 @@ use super::ChatCwd;
 /// `PROPOSE_TASK_TOOL` in `api.ts`).
 pub const MCP_SERVER: &str = "nodal";
 /// Nodal tools the chat uses without asking: they only read the board or show a card.
-const PRE_ALLOWED: [&str; 5] = ["list_projects", "list_tasks", "get_task", "get_run", PROPOSE_TASK];
+const PRE_ALLOWED: [&str; 4] = ["list_projects", "list_tasks", "get_task", PROPOSE_TASK];
 const DESCRIPTION_MAX: usize = 2000;
 
 pub fn tool_name(tool: &str) -> String {
@@ -71,7 +71,11 @@ pub fn system_prompt(chat: &Chat, project: &Project, repos: &[Repo], cwd: ChatCw
     }
     s.push_str("Repos:\n");
     for r in repos {
-        let here = if matches!(cwd, ChatCwd::Repo(c) if c.id == r.id) { " (this chat runs here)" } else { "" };
+        let here = if matches!(cwd, ChatCwd::Repo(c) | ChatCwd::Worktree { repo: c, .. } if c.id == r.id) {
+            " (this chat runs here)"
+        } else {
+            ""
+        };
         s.push_str(&format!("- {}: {} (id {}){here}\n", one_line(&r.name), r.path, r.id));
     }
     if repos.is_empty() {
@@ -84,17 +88,29 @@ pub fn system_prompt(chat: &Chat, project: &Project, repos: &[Repo], cwd: ChatCw
             one_line(&r.name),
             r.path
         )),
-        ChatCwd::Repo(_) => s.push_str("Scope: the whole project: its tasks, its runs and all the repos above.\n\n"),
+        ChatCwd::Worktree { repo, path } => {
+            let what = if chat.task_id.is_some() {
+                "one task, worked in its own git worktree"
+            } else {
+                "the git worktree"
+            };
+            let own = if chat.task_id.is_some() { "" } else { " (its own branch)" };
+            s.push_str(&format!(
+                "Scope: {what} {path} of the repo {}{own}. Leave the project's other repos alone unless the user asks.\n\n",
+                one_line(&repo.name),
+            ));
+        }
+        ChatCwd::Repo(_) => s.push_str("Scope: the whole project: its tasks and all the repos above.\n\n"),
         ChatCwd::Root(root) => s.push_str(&format!(
-            "Scope: the whole project: its tasks, its runs, all the repos above and everything else in its root folder \
+            "Scope: the whole project: its tasks, all the repos above and everything else in its root folder \
              {root}, such as docs and notes. This chat runs at the project root. The root folder itself is not a repo: \
-             tasks and runs always target one of the repos above.\n\n"
+             tasks always target one of the repos above.\n\n"
         )),
     }
     if has_mcp {
         s.push_str(&format!(
             "The `{MCP_SERVER}` MCP tools read and change this project's board; pass project \"{}\" where a tool takes one.\n\
-             - list_tasks, get_task, get_run: read tasks and the results of their runs.\n\
+             - list_tasks, get_task: read tasks.\n\
              - {PROPOSE_TASK}: when the conversation lands on work to do, propose it as a task. The user sees a task \
              card in this chat and creates it with one click; the tool itself creates nothing. One task per step \
              that can be run and reviewed on its own, and one repo per task. Check list_tasks first so you don't \

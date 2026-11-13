@@ -41,7 +41,8 @@ pub fn runtime(
         sessions,
         claude_dir,
         rt.clone(),
-    ));
+    )
+    .with_tasks(Arc::new(nodal_host::adapters::HostGit), Arc::new(nodal_host::adapters::SystemClock)));
     let sink = Arc::new(TauriChatSink::new(h.clone()));
     // Managed separately from the `Arc<dyn ChatSink>` below so `attach_chat_channel` /
     // `detach_chat_channel` can reach the concrete type (registering a channel isn't part of
@@ -185,4 +186,15 @@ pub async fn chat_workspace(
     chat_id: String,
 ) -> Result<nodal_domain::model::ChatWorkspace, CommandError> {
     Ok(state.chats.chat_workspace(chat_id).await?)
+}
+
+/// Opens the task's chat (the existing one, or a new one in the task's worktree) and moves the
+/// task to In Progress. Doesn't send: the UI sends `prompt` over its attached channel.
+#[tauri::command]
+#[tracing::instrument(skip_all, level = "info")]
+pub async fn start_task_chat(
+    state: State<'_, Arc<App>>,
+    task_id: String,
+) -> Result<nodal_app::chats::TaskChatStart, CommandError> {
+    Ok(state.chats.prepare_task_chat(task_id).await?)
 }

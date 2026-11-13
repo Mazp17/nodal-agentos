@@ -555,7 +555,7 @@ impl SourcesHub {
     }
 
     /// Resolves the "moved to another project in the provider" notice: `move` moves it to the
-    /// suggested repo (rejects with an active run or a worktree), `keep` leaves it where it is.
+    /// suggested repo (rejects with a worktree), `keep` leaves it where it is.
     pub async fn resolve_moved_task(&self, task_id: String, action: MovedAction) -> Result<Task, AppError> {
         let plans = self.plans.clone();
         let now = self.clock.now_ms();

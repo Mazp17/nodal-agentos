@@ -9,7 +9,7 @@ use tauri::{AppHandle, Manager, State};
 use crate::adapters::mcp_socket::{self, Listening};
 
 /// Starts the MCP socket once the app opened its database (today's `McpState.start(app)`,
-/// called from `commands::execution::setup` on success).
+/// called from `lib.rs`'s setup on success).
 pub fn setup(h: &AppHandle, app: &Arc<App>) {
     h.state::<McpState>().start(app.clone());
 }

@@ -50,13 +50,6 @@ pub async fn repo_trust(path: String) -> Result<nodal_host::claude::trust::RepoT
     blocking(move || repo_trust_blocking(&path, nodal_host::claude::trust::global_config_file().as_deref())).await
 }
 
-/// Opens Terminal.app running `claude attach <run_id>` on a background session.
-#[tauri::command]
-#[tracing::instrument(skip_all, level = "info")]
-pub async fn attach_run(run_id: String) -> Result<(), String> {
-    nodal_host::terminal::attach(&run_id).await
-}
-
 /// Opens Terminal.app in `path` (an existing directory). With `run_claude`, starts
 /// `claude` there: useful for accepting the trust dialog of a new repo (or of
 /// `~/.nodal/worktrees`, where the tasks' worktrees live).

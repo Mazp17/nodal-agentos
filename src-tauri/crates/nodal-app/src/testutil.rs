@@ -25,7 +25,7 @@ fn runtime() -> &'static Runtime {
     })
 }
 
-/// A `Handle` into the shared test runtime, for ports that need one (e.g. `HostClaudeCli::new`).
+/// A `Handle` into the shared test runtime, for ports that need one.
 pub fn rt() -> Handle {
     runtime().handle().clone()
 }

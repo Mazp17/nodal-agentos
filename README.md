@@ -33,8 +33,6 @@ You need [Claude Code](https://docs.claude.com/en/docs/claude-code) installed an
 - **Delegate** each task to one of your agents (`~/.claude/agents`, the repo's or a plugin), a workflow, or plain Claude.
 - **Isolated by default**: every task gets its own git worktree and branch, so several run on the same repo at once.
 - **Finish** with uncommitted changes, a commit, or a pull request. Local work merges back into its base branch from the task panel, without touching your checkout.
-- **Automatic review** against the acceptance criteria: pass goes to In Review, fail to Blocked with the findings.
-- **One queue** with a global concurrency limit, and a live view of each run: phases, subagents, transcript, tokens and diff.
 - **Linear, optional**: import issues, route them to repos and keep statuses in sync. More task managers are planned.
 
 ## How it works
@@ -45,7 +43,7 @@ Everything stays on your Mac: an SQLite database, worktrees under `~/.nodal`, AP
 
 ### Agents (MCP)
 
-While Nodal is open, agents can list projects and tasks, create and update tasks and read run results through MCP. The app listens on a Unix socket in its data folder (readable only by you, no network port) and `nodal-mcp`, which ships inside the app, bridges it to stdio. Register it:
+While Nodal is open, agents can list projects and tasks, create and update tasks and open a task's chat through MCP. The app listens on a Unix socket in its data folder (readable only by you, no network port) and `nodal-mcp`, which ships inside the app, bridges it to stdio. Register it:
 
 ```bash
 claude mcp add nodal -- /Applications/Nodal.app/Contents/MacOS/nodal-mcp
@@ -53,9 +51,9 @@ claude mcp add nodal -- /Applications/Nodal.app/Contents/MacOS/nodal-mcp
 
 From source, build it with `cargo build --release --bin nodal-mcp` in `src-tauri` (after `pnpm build`) and register `src-tauri/target/release/nodal-mcp` instead.
 
-Tools: `list_projects`, `list_tasks`, `get_task`, `create_task`, `update_task`, `list_executors`, `launch_run`, `review_task`, `cancel_run`, `get_run`, `list_runs` and `get_queue`. Nodal's own chats launch it with `--chat`, which adds `propose_task`: the chat shows a task card and nothing is created until you accept it. A debug build of `nodal-mcp` talks to a debug build of the app.
+Tools: `list_projects`, `list_tasks`, `get_task`, `create_task`, `update_task` and `start_task_chat`. Nodal's own chats launch it with `--chat`, which adds `propose_task`: the chat shows a task card and nothing is created until you accept it. A debug build of `nodal-mcp` talks to a debug build of the app.
 
-The [`nodal-tasks` skill](skills/nodal-tasks/SKILL.md) teaches agents when to create a task instead of doing the work, how to write its plan and acceptance criteria, how to pick the repo and the executor, and how to read a run's result. Install it with [skills](https://skills.sh):
+The [`nodal-tasks` skill](skills/nodal-tasks/SKILL.md) teaches agents when to create a task instead of doing the work, how to write its plan and acceptance criteria, how to pick the repo, and how to start a task's chat. Install it with [skills](https://skills.sh):
 
 ```bash
 npx skills add Mazp17/nodal-agentos --skill nodal-tasks

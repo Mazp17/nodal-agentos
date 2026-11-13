@@ -32,7 +32,6 @@ const WHITELIST: &[(&str, &[&str], &[&str])] = &[
         &[
             "tokio",
             "keyring",
-            "portable-pty",
             "libc",
             "serde",
             "serde_json",
@@ -81,7 +80,6 @@ const EXCLUSIVE_EXTERNAL: &[(&str, &[&str])] = &[
     ("rusqlite", &["nodal-store"]),
     ("reqwest", &["nodal-linear"]),
     ("keyring", &["nodal-host"]),
-    ("portable-pty", &["nodal-host"]),
     // ADR-007: only the shell installs a `tracing` subscriber; other crates just emit spans/events.
     ("tracing-subscriber", &["nodal"]),
 ];

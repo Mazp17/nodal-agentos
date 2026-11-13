@@ -35,6 +35,16 @@ pub async fn list_repo_worktrees(
 
 #[tauri::command]
 #[tracing::instrument(skip_all, level = "info")]
+pub async fn list_repo_files(
+    app: State<'_, Arc<App>>,
+    repo_id: String,
+    worktree: Option<String>,
+) -> Result<Vec<String>, CommandError> {
+    app.system.list_repo_files(repo_id, worktree).await.map_err(CommandError::from)
+}
+
+#[tauri::command]
+#[tracing::instrument(skip_all, level = "info")]
 pub async fn list_repo_dir(
     app: State<'_, Arc<App>>,
     repo_id: String,
@@ -63,6 +73,51 @@ pub async fn repo_changes(
     worktree: Option<String>,
 ) -> Result<Vec<nodal_domain::diff::FileDiff>, CommandError> {
     app.system.repo_changes(repo_id, worktree).await.map_err(CommandError::from)
+}
+
+#[tauri::command]
+#[tracing::instrument(skip_all, level = "info")]
+pub async fn repo_commits(
+    app: State<'_, Arc<App>>,
+    repo_id: String,
+    worktree: Option<String>,
+) -> Result<Vec<nodal_domain::diff::CommitInfo>, CommandError> {
+    app.system.repo_commits(repo_id, worktree).await.map_err(CommandError::from)
+}
+
+#[tauri::command]
+#[tracing::instrument(skip_all, level = "info")]
+pub async fn repo_commit(
+    app: State<'_, Arc<App>>,
+    repo_id: String,
+    worktree: Option<String>,
+    message: String,
+    paths: Option<Vec<String>>,
+) -> Result<nodal_domain::diff::CommitInfo, CommandError> {
+    app.system.repo_commit(repo_id, worktree, message, paths.unwrap_or_default()).await.map_err(CommandError::from)
+}
+
+#[tauri::command]
+#[tracing::instrument(skip_all, level = "info")]
+pub async fn repo_open_pr(
+    app: State<'_, Arc<App>>,
+    repo_id: String,
+    worktree: Option<String>,
+    title: String,
+    body: String,
+) -> Result<String, CommandError> {
+    app.system.repo_open_pr(repo_id, worktree, title, body).await.map_err(CommandError::from)
+}
+
+#[tauri::command]
+#[tracing::instrument(skip_all, level = "info")]
+pub async fn repo_commit_diff(
+    app: State<'_, Arc<App>>,
+    repo_id: String,
+    worktree: Option<String>,
+    sha: String,
+) -> Result<Vec<nodal_domain::diff::FileDiff>, CommandError> {
+    app.system.repo_commit_diff(repo_id, worktree, sha).await.map_err(CommandError::from)
 }
 
 #[tauri::command]

@@ -1,5 +1,6 @@
 mod adapters;
 pub mod commands;
+mod menu;
 mod paths;
 mod secrets;
 pub(crate) mod telemetry;
@@ -14,24 +15,11 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
-        .menu(updates::menu)
-        .on_menu_event(updates::on_menu_event)
-        .on_page_load(|webview, payload| {
-            // A full reload doesn't tell the frontend's terminals to close: without this, any
-            // `claude attach` started before the reload would keep running with nobody reading
-            // its output. This only fires on a full page load, not on Vite's HMR in dev (which
-            // patches modules in place), so it doesn't help with that case.
-            if let tauri::webview::PageLoadEvent::Started = payload.event() {
-                use tauri::Manager;
-                if let Some(sessions) = webview.try_state::<nodal_host::pty::PtySessions>() {
-                    sessions.close_owned_by(webview.label());
-                }
-            }
-        })
+        .menu(menu::menu)
+        .on_menu_event(menu::on_menu_event)
         .manage(commands::linear::LinearState::new(secrets.clone()))
         .manage(secrets)
         .manage(commands::mcp::McpState::default())
-        .manage(nodal_host::pty::PtySessions::default())
         .setup(|app| {
             use std::sync::Arc;
 
@@ -66,14 +54,6 @@ pub fn run() {
             let clock: Arc<dyn nodal_domain::ports::Clock> = Arc::new(nodal_host::adapters::SystemClock);
             let rt = tauri::async_runtime::handle().inner().clone();
 
-            // P01: one `HostClaudeCli` (its own single-flight `claude agents` cache), wrapped
-            // by `LiveSessions` (a second, typed-result cache). Both `Deps.claude` (the queue
-            // pump, `work_summary`, `cancel_run`) and `SessionReader` (`list_runs`) below share
-            // this same instance, so `external_sessions` (also `Deps.claude`, via `App::sessions`)
-            // reads it too — no more of the two independent `HostClaudeCli`s today's code had.
-            let claude: Arc<dyn nodal_domain::ports::ClaudeCli> =
-                nodal_app::execution::LiveSessions::new(Arc::new(nodal_host::adapters::HostClaudeCli::new(rt.clone())));
-
             // The hub works without a database: provider, key and live-session commands do
             // too. Registered before the database opens, and always.
             let data_dir = paths::data_dir(&handle)?;
@@ -91,11 +71,10 @@ pub fn run() {
                 plans: Arc::new(nodal_host::adapters::HostPlanFiles),
             });
 
-            // The only place that starts the background workers: the queue pump
-            // (`commands::execution::setup`) with the MCP socket (`commands::mcp::setup`) and
-            // the chat runtime (`commands::chats::runtime`). Without a database the app still
-            // opens (to show the error): there is no pump, chats don't run and those commands
-            // fail.
+            // The only place that starts the background workers: the MCP socket
+            // (`commands::mcp::setup`) and the chat runtime (`commands::chats::runtime`).
+            // Without a database the app still opens (to show the error): chats don't run and
+            // those commands fail.
             match opened {
                 Ok(db) => {
                     app.manage(db.clone());
@@ -124,14 +103,13 @@ pub fn run() {
                                 env,
                                 rt: rt.clone(),
                                 clock: clock.clone(),
-                                claude: claude.clone(),
                                 sessions,
                                 notifier: Arc::new(events),
                                 chats: chat_runtime,
                                 sources: hub.clone(),
                             });
                             app.manage(app_arc.clone());
-                            let _ = commands::execution::setup(&handle, &app_arc, &db);
+                            commands::mcp::setup(&handle, &app_arc);
                             commands::chats::setup(&handle, &app_arc);
                         }
                         Err(e) => eprintln!("work: {e}"),
@@ -140,13 +118,8 @@ pub fn run() {
                 Err(e) => eprintln!("nodal.db: {e}"),
             }
 
-            // Registered even without a database, so provider, key and live-session commands
-            // (`SourcesHub`, `SessionReader`) still work.
+            // Registered even without a database, so provider and key commands still work.
             app.manage(hub.clone());
-            app.manage(nodal_app::sessions::SessionReader::new(
-                claude,
-                Arc::new(nodal_host::adapters::HostSessionFiles),
-            ));
 
             if let Err(e) = commands::sources::setup(&handle, &hub) {
                 eprintln!("providers: {e}");
@@ -155,20 +128,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             commands::host::claude_version,
-            commands::sessions::list_runs,
-            commands::sessions::get_run_detail,
-            commands::sessions::get_agent_transcript,
-            commands::sessions::get_launch_blocker,
-            commands::sessions::get_run_transcript,
-            commands::sessions::run_progress,
-            commands::sessions::external_sessions,
-            commands::host::attach_run,
             commands::host::open_terminal_at,
-            commands::pty::pty_attach,
-            commands::pty::pty_open_claude,
-            commands::pty::pty_write,
-            commands::pty::pty_resize,
-            commands::pty::pty_close,
             commands::host::resolve_git_root,
             commands::host::scan_git_repos,
             commands::host::git_version,
@@ -193,27 +153,12 @@ pub fn run() {
             commands::board::list_task_relations,
             commands::board::add_task_relation,
             commands::board::remove_task_relation,
-            commands::execution::cleanup_worktree,
-            commands::execution::merge_worktree,
-            commands::execution::worktree_status,
-            commands::board::list_executors,
+            commands::worktrees::cleanup_worktree,
+            commands::worktrees::remove_repo_worktree,
+            commands::worktrees::merge_worktree,
+            commands::worktrees::worktree_status,
             commands::board::list_hidden_executors,
             commands::board::set_executor_hidden,
-            commands::execution::list_task_runs,
-            commands::execution::list_runs_light,
-            commands::execution::get_run,
-            commands::execution::latest_runs_by_task,
-            commands::execution::list_queue,
-            commands::execution::work_summary,
-            commands::execution::launch_task,
-            commands::execution::hand_off,
-            commands::execution::review_now,
-            commands::execution::confirm_run,
-            commands::execution::cancel_run,
-            commands::execution::reorder_queue,
-            commands::execution::run_diff,
-            commands::execution::open_in_editor,
-            commands::execution::open_worktree,
             commands::board::get_settings,
             commands::board::set_settings,
             commands::sources::provider_status,
@@ -241,6 +186,11 @@ pub fn run() {
             commands::system::read_repo_file,
             commands::system::write_repo_file,
             commands::system::repo_changes,
+            commands::system::list_repo_files,
+            commands::system::repo_commits,
+            commands::system::repo_commit_diff,
+            commands::system::repo_commit,
+            commands::system::repo_open_pr,
             commands::system::import_legacy_data,
             updates::updates_enabled,
             updates::restart_app,
@@ -260,20 +210,15 @@ pub fn run() {
             commands::chats::get_chat_live,
             commands::chats::get_chat_transcript,
             commands::chats::chat_workspace,
+            commands::chats::start_task_chat,
             commands::chats::attach_chat_channel,
             commands::chats::detach_chat_channel,
         ])
         .build(tauri::generate_context!())
         .expect("error while running tauri application")
-        .run(|app_handle, event| {
-            // Nothing else reaps embedded terminals on exit: without this, `claude attach`
-            // child processes would outlive the app.
+        .run(|_, event| {
             if let tauri::RunEvent::Exit = event {
                 telemetry::log_metrics_snapshot();
-                use tauri::Manager;
-                if let Some(sessions) = app_handle.try_state::<nodal_host::pty::PtySessions>() {
-                    sessions.close_all();
-                }
             }
         });
 }
