@@ -79,8 +79,8 @@ fn read_file_validates_paths_and_detects_binary_and_truncation() {
     assert!(read_file(&repo, "d").unwrap_err().contains("not a regular file"));
     assert!(read_file(&repo, "nope").is_err());
 
-    std::fs::write(repo.join("nul.bin"), [b'a', 0, b'b']).unwrap();
-    let f = read_file(&repo, "nul.bin").unwrap();
+    std::fs::write(repo.join("zero.bin"), [b'a', 0, b'b']).unwrap();
+    let f = read_file(&repo, "zero.bin").unwrap();
     assert!(f.binary && f.content.is_empty() && f.size == 3);
     std::fs::write(repo.join("bad.txt"), [0xffu8, 0xfe, b'x']).unwrap();
     assert!(read_file(&repo, "bad.txt").unwrap().binary);
