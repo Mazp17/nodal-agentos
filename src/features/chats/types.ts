@@ -9,6 +9,29 @@ export interface ToolResultInfo {
   truncated: boolean;
   /** The file change of an `Edit`/`Write`/`MultiEdit`, when Claude Code reported it. */
   patch: ToolPatch | null;
+  /** Set on an `Agent`/`Task` call's result: what the subagent did. */
+  agent?: AgentResultInfo | null;
+}
+
+export interface AgentResultInfo {
+  agentId: string;
+  agentType: string | null;
+  status: string | null;
+  durationMs: number | null;
+  totalTokens: number | null;
+  toolUses: number | null;
+}
+
+/** A subagent of a chat's session, from `list_chat_subagents`. */
+export interface SubagentRef {
+  agentId: string;
+  /** The `Agent` call in the main conversation that launched it. */
+  toolUseId: string | null;
+  agentType: string | null;
+  description: string | null;
+  model: string | null;
+  stoppedByUser: boolean;
+  startedAt: number | null;
 }
 
 export interface ToolPatch {

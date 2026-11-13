@@ -1,7 +1,8 @@
 // "chats" resource of the data layer (see `store.ts`): a project's chats, re-read on
 // `nodal://changed` `chats`. What a chat streams lives in `features/chats/stream.ts`.
 
-import { getClaudeDefaults, listChatAgents, listChats, type ClaudeDefaults, type ExecutorInfo } from "../api";
+import { getClaudeDefaults, listChatAgents, listChatSubagents, listChats, type ClaudeDefaults, type ExecutorInfo } from "../api";
+import type { SubagentRef } from "../../features/chats/types";
 import type { Chat } from "../types";
 import { POLL, usePolled, type Loadable } from "./store";
 
@@ -20,3 +21,7 @@ export const useChatAgents = (projectId: string, repoId: string | null): Loadabl
 /** Claude Code's configured model and effort for a repo (or only the user's settings). */
 export const useClaudeDefaults = (repoId: string | null): Loadable<ClaudeDefaults> =>
   usePolled<ClaudeDefaults>(`claude-defaults:${repoId ?? "*"}`, () => getClaudeDefaults(repoId), [], POLL.slow);
+
+/** The chat's subagents; the Agents tab re-reads it when it opens and when an `Agent` call finishes. */
+export const useChatSubagents = (chatId: string | null): Loadable<SubagentRef[]> =>
+  usePolled<SubagentRef[]>(chatId ? `chat-subagents:${chatId}` : null, () => listChatSubagents(chatId!), ["chats"], POLL.slow);

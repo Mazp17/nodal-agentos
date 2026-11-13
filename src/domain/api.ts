@@ -35,7 +35,7 @@ import type {
   TaskRelation,
   TaskStatus,
 } from "./types";
-import type { ToolResultInfo, Transcript, TranscriptItem } from "../features/chats/types";
+import type { SubagentRef, ToolResultInfo, Transcript, TranscriptItem } from "../features/chats/types";
 
 // ---------- DTOs ----------
 
@@ -423,6 +423,11 @@ export interface ChatLive {
   pending: PermissionRequest[];
 }
 
+/** The events a subagent streams. */
+export type SubagentEvent =
+  | { type: "item"; item: TranscriptItem }
+  | { type: "toolResult"; toolUseId: string; result: ToolResultInfo };
+
 /**
  * What a chat streams. `textDelta`/`thinkingDelta` preview text that a later `item` carries
  * in full; `item` also brings back each user message, in order.
@@ -433,6 +438,8 @@ export type ChatEvent =
   | { type: "thinkingDelta"; text: string }
   | { type: "item"; item: TranscriptItem }
   | { type: "toolResult"; toolUseId: string; result: ToolResultInfo }
+  /** What a subagent does inside: its own items and tool results, under the `Agent` call that launched it. */
+  | { type: "subagent"; parentToolUseId: string; event: SubagentEvent }
   | ({ type: "permissionRequest" } & PermissionRequest)
   /** Denied without asking (the permission mode or a rule decided). */
   | { type: "permissionDenied"; toolName: string; toolUseId: string | null; message: string | null }
@@ -502,6 +509,11 @@ export const getChatLive = (id: string) => invoke<ChatLive>("get_chat_live", { i
 /** History from the Claude Code session; `null` before the first message. */
 export const getChatTranscript = (id: string, limit?: number) =>
   invoke<Transcript | null>("get_chat_transcript", { id, limit: limit ?? null });
+/** The subagents of the chat's session, oldest first. */
+export const listChatSubagents = (chatId: string) => invoke<SubagentRef[]>("list_chat_subagents", { chatId });
+/** A subagent's conversation; `null` when its file isn't there. */
+export const getChatSubagentTranscript = (chatId: string, agentId: string, limit?: number) =>
+  invoke<Transcript | null>("get_chat_subagent_transcript", { chatId, agentId, limit: limit ?? null });
 /**
  * Registers `onEvent` as `id`'s dedicated channel (P05): from then on its events arrive there,
  * batched on the Rust side, instead of the shared `nodal://chat` broadcast. Call before the

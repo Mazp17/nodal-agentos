@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { createTask, respondChatPermission, type PermissionRequest } from "../../domain/api";
 import { invalidate } from "../../domain/hooks/store";
 import { taskKey, type Repo } from "../../domain/types";
@@ -11,7 +11,14 @@ import { DiffLines } from "./DiffLines";
 import { useOpenTaskChat } from "../tasks";
 import { PriorityBars } from "../tasks/bits";
 import { PRIORITY_LABEL, STATUS_META } from "../tasks/status";
+import { formatDuration } from "../../lib/format";
+import { openSubagent } from "./SubagentSheet";
 import {
+  agentMeta,
+  agentState,
+  agentStats,
+  isAgentCall,
+  latestToolUse,
   readProposal,
   resultMeta,
   shortArg,
@@ -164,13 +171,54 @@ function ToolRow({
   );
 }
 
+/** A subagent call: who it is, what it does right now, and how it went. Click opens its transcript. */
+function SubagentCard({ chatId, item, stream, repos, live }: { chatId: string; item: ToolUse; stream: ChatStream; repos: Repo[]; live: boolean }) {
+  const { type, description } = agentMeta(item);
+  const state = agentState(item, live);
+  const running = state === "running";
+  // The card shows up when the call arrives, so its mount is when the agent started.
+  const [start] = useState(() => Date.now());
+  const [now, setNow] = useState(start);
+  useEffect(() => {
+    if (!running) return;
+    const t = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, [running]);
+  const ms = item.result?.agent?.durationMs ?? (running ? now - start : null);
+  const current = running ? latestToolUse(item.id ? stream.subagents[item.id] : undefined) : null;
+  const detail = running
+    ? current
+      ? `${toolVerb(current.name, !current.result)} ${shortArg(current.summary, repos)}`.trim()
+      : "Starting…"
+    : (agentStats(item.result?.agent) ?? (state === "stopped" ? "No result" : state === "error" ? "Failed" : ""));
+  return (
+    <button
+      type="button"
+      className={`chat-agent chat-agent-${state}`}
+      title="View the subagent's transcript"
+      onClick={() => openSubagent({ chatId, toolUseId: item.id, agentId: item.result?.agent?.agentId ?? null, title: description ?? type })}
+    >
+      <span className="chat-agent-head">
+        <ToolIcon state={state} />
+        <span className="chat-agent-type">{type}</span>
+        <span className="chat-agent-desc ellipsis">{description}</span>
+        {ms != null && <span className="chat-agent-time num">{formatDuration(ms)}</span>}
+        <span className="chat-agent-view">View</span>
+      </span>
+      {detail && <span className={`chat-agent-detail ellipsis ${running ? "shimmer" : ""}`}>{detail}</span>}
+    </button>
+  );
+}
+
 export function ToolBlock({
+  chatId,
   items,
   stream,
   repos,
   live,
   onOpenDiff,
 }: {
+  chatId: string;
   items: ToolUse[];
   stream: ChatStream;
   repos: Repo[];
@@ -182,17 +230,21 @@ export function ToolBlock({
   const asking = new Set(stream.pending.map((p) => p.toolUseId).filter(Boolean));
   return (
     <div className="chat-tools" role="group" aria-label="Tool calls">
-      {items.map((it, i) => (
-        <ToolRow
-          key={it.id ?? i}
-          item={it}
-          repos={repos}
-          denied={it.id ? stream.denied[it.id] : undefined}
-          asking={!!it.id && asking.has(it.id)}
-          live={live}
-          onOpenDiff={onOpenDiff}
-        />
-      ))}
+      {items.map((it, i) =>
+        isAgentCall(it) ? (
+          <SubagentCard key={it.id ?? i} chatId={chatId} item={it} stream={stream} repos={repos} live={live} />
+        ) : (
+          <ToolRow
+            key={it.id ?? i}
+            item={it}
+            repos={repos}
+            denied={it.id ? stream.denied[it.id] : undefined}
+            asking={!!it.id && asking.has(it.id)}
+            live={live}
+            onOpenDiff={onOpenDiff}
+          />
+        ),
+      )}
     </div>
   );
 }
@@ -492,7 +544,7 @@ export function Conversation({ chatId, turns, stream, projectId, projectKey, rep
                     </details>
                   );
                 case "tools":
-                  return <ToolBlock key={j} items={p.items} stream={stream} repos={repos} live={current && stream.state === "busy"} onOpenDiff={onOpenDiff} />;
+                  return <ToolBlock key={j} chatId={chatId} items={p.items} stream={stream} repos={repos} live={current && stream.state === "busy"} onOpenDiff={onOpenDiff} />;
                 case "proposal":
                   return (
                     <ProposalCard
