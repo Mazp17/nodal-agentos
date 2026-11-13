@@ -36,6 +36,8 @@ export function FileView({ repo, worktree, path, tab }: EditProps) {
   const draft = dirtyTabs.has(tab) ? getDraft(tab) : undefined;
   const [saving, setSaving] = useState(false);
   const [conflict, setConflict] = useState(false);
+  /** The caret's line while the editor has focus, highlighted like VS Code's current line. */
+  const [caretLine, setCaretLine] = useState<number | null>(null);
   const ext = extOf(path);
   const slash = path.lastIndexOf("/");
   const data = file.data;
@@ -138,13 +140,15 @@ export function FileView({ repo, worktree, path, tab }: EditProps) {
           <div className="file-edit">
             <div className="file-edit-gutter" aria-hidden>
               {lines.map((_, i) => (
-                <div key={i}>{i + 1}</div>
+                <div key={i} className={i === caretLine ? "on" : undefined}>
+                  {i + 1}
+                </div>
               ))}
             </div>
             <div className="file-edit-stack">
               <pre className="file-edit-hl" aria-hidden>
                 {lines.map((tokens, i) => (
-                  <div key={i} className="file-edit-line">
+                  <div key={i} className={i === caretLine ? "file-edit-line on" : "file-edit-line"}>
                     {tokens.length === 0
                       ? "​"
                       : tokens.map((tk, j) => (
@@ -166,6 +170,11 @@ export function FileView({ repo, worktree, path, tab }: EditProps) {
                   wrap="off"
                   onChange={(e) => edit(e.target.value)}
                   onKeyDown={onKeyDown}
+                  onSelect={(e) => {
+                    const t = e.currentTarget;
+                    setCaretLine(t.value.slice(0, t.selectionEnd).split("\n").length - 1);
+                  }}
+                  onBlur={() => setCaretLine(null)}
                 />
               )}
             </div>
