@@ -28,7 +28,7 @@ export function useLegacyImport() {
     try {
       const r = await importLegacyData(folder);
       setReport(r);
-      await invalidate("projects", "repos", "tasks", "runs", "settings");
+      await invalidate("projects", "repos", "tasks", "settings");
       toast("Data imported", summarize(r), "ok");
       return r;
     } catch (e) {

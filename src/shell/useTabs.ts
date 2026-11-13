@@ -14,19 +14,26 @@ export interface FileRef {
   worktree: string | null;
   path: string;
   diff: boolean;
+  /** A `commit:` tab: `path` is the commit's sha. */
+  commit: boolean;
 }
 
 /** A file tab in the chat tab bar: `file:<repoId>:<worktree, URI-encoded>:<path>`, or `diff:…`
  * for the file's uncommitted changes. */
 export const fileTab = (repoId: string, path: string, diff = false, worktree: string | null = null) =>
   `${diff ? "diff" : "file"}:${repoId}:${encodeURIComponent(worktree ?? "")}:${path}`;
+/** A commit tab: one commit's changes, `commit:<repoId>:<worktree, URI-encoded>:<sha>`. */
+export const commitTab = (repoId: string, sha: string, worktree: string | null = null) =>
+  `commit:${repoId}:${encodeURIComponent(worktree ?? "")}:${sha}`;
 export const parseFileTab = (tab: string): FileRef | null => {
-  if (!tab.startsWith("file:") && !tab.startsWith("diff:")) return null;
-  const i = tab.indexOf(":", 5);
+  const kind = tab.slice(0, tab.indexOf(":"));
+  if (kind !== "file" && kind !== "diff" && kind !== "commit") return null;
+  const start = kind.length + 1;
+  const i = tab.indexOf(":", start);
   const j = i < 0 ? -1 : tab.indexOf(":", i + 1);
   if (j < 0) return null;
   const wt = decodeURIComponent(tab.slice(i + 1, j));
-  return { repoId: tab.slice(5, i), worktree: wt || null, path: tab.slice(j + 1), diff: tab.startsWith("diff:") };
+  return { repoId: tab.slice(start, i), worktree: wt || null, path: tab.slice(j + 1), diff: kind === "diff", commit: kind === "commit" };
 };
 
 interface State {

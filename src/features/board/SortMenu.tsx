@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 
-export type BoardSort = "last-run" | "manual";
+export type BoardSort = "updated" | "manual";
 
 const OPTIONS: { value: BoardSort; label: string; hint: string }[] = [
-  { value: "last-run", label: "Last run", hint: "Most recently run first; the rest keep their manual order" },
+  { value: "updated", label: "Last updated", hint: "Most recently changed first" },
   { value: "manual", label: "Manual", hint: "The order you set by dragging cards" },
 ];
 

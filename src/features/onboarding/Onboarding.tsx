@@ -104,7 +104,7 @@ export function Onboarding({ onDone, onCancel, onImportLegacy, importingLegacy }
             <BrandMark size={40} />
             <div className="onboarding-hero-text">
               <h1 className="onboarding-title">Welcome to Nodal</h1>
-              <p className="onboarding-sub">Agent OS for Claude. Plan work, launch Claude Code on your repos, watch every agent.</p>
+              <p className="onboarding-sub">Agent OS for Claude. Bring in your tasks and work each one in a Claude chat on your repos.</p>
             </div>
           </div>
 

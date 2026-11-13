@@ -1,4 +1,4 @@
-import type { Finish, Isolation, Priority, TaskStatus } from "../../domain/types";
+import { taskKey, type Priority, type Task, type TaskStatus } from "../../domain/types";
 
 export interface StatusMeta {
   label: string;
@@ -33,17 +33,9 @@ export const PRIORITY_LABEL: Record<Priority, string> = {
 };
 export const PRIORITIES: Priority[] = ["urgent", "high", "medium", "low", "none"];
 
-export const FINISH_LABEL: Record<Finish, string> = { changes: "Changes only", commit: "Commit", pr: "Open PR" };
-export const FINISH_HINT: Record<Finish, string> = {
-  changes: "Leaves the changes uncommitted",
-  commit: "Commits on the task branch, no push",
-  pr: "Commits, pushes and opens a PR",
-};
-export const ISOLATION_LABEL: Record<Isolation, string> = { worktree: "Worktree", in_place: "In place" };
-export const ISOLATION_HINT: Record<Isolation, string> = {
-  worktree: "Own branch and worktree folder",
-  in_place: "Works in the repo folder; one in-place run per repo at a time",
-};
-
 export const PROVIDER_LABEL: Record<string, string> = { linear: "Linear" };
 export const providerLabel = (p: string) => PROVIDER_LABEL[p] ?? p.charAt(0).toUpperCase() + p.slice(1);
+
+/** The short id of a task: its provider identifier (`NOD-12`), else the local key. */
+export const taskTag = (t: Task, projectKey: string | undefined) =>
+  t.source?.identifier ?? (projectKey ? taskKey(projectKey, t.number) : `#${t.number}`);

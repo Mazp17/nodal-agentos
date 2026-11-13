@@ -1,31 +1,27 @@
 import { useCallback, useEffect, useMemo, useState, type DragEvent, type ReactNode } from "react";
 import { deleteTask, moveTask, reorderTasks, updateTask } from "../../domain/api";
-import { useAllRuns, useLatestRunByTask } from "../../domain/hooks/runs";
-import { invalidate, useProjectList, useRepos, useSettings, useTasks } from "../../domain/hooks/store";
+import { useAllChats } from "../../domain/hooks/chats";
+import { invalidate, useProjectList, useRepos, useTasks } from "../../domain/hooks/store";
 import { taskKey, type Priority, type Task, type TaskStatus } from "../../domain/types";
 import { useConfirm } from "../../ui/ConfirmDialog";
 import { EmptyState } from "../../ui/EmptyState";
 import { readPref, writePref } from "../../shell/storage";
 import { useToast } from "../../ui/Toasts";
-import { resolveExecutor } from "../executors";
 import { NewTaskDialog } from "../tasks/NewTaskDialog";
 import { StatusRing } from "../tasks/bits";
 import { BOARD_COLUMNS, HIDDEN_COLUMNS, PRIORITY_LABEL, providerLabel, STATUS_META } from "../tasks/status";
-import { useAskLaunch } from "../tasks/LaunchPopover";
-import { useLaunch } from "../tasks/useLaunch";
+import { useOpenTaskChat } from "../tasks/useTaskChat";
 import { CardMenu } from "./CardMenu";
 import { FilterMenu } from "./FilterMenu";
 import { SortMenu, type BoardSort } from "./SortMenu";
 import { TaskList } from "./TaskList";
 import { cardAction, TaskCard, type CardAction, type CardModel } from "./TaskCard";
-import { useRunPhases } from "./usePhases";
 import "./board.css";
 
 export interface BoardViewProps {
   /** `null`: every project (the card shows the project). */
   projectId: string | null;
   onOpenTask: (taskId: string) => void;
-  onOpenRun: (runId: string) => void;
   /** "No projects" state: when set, shows "New project". */
   onNewProject?: () => void;
   /** "No repos" state: when set, shows "Project settings". */
@@ -59,20 +55,18 @@ const SORT_PREF = "boardSort";
 const byPosition = (a: Task, b: Task) =>
   a.position - b.position || a.createdAt - b.createdAt || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
 
-export function BoardView({ projectId, onOpenTask, onOpenRun, onNewProject, onOpenProjectSettings }: BoardViewProps) {
+export function BoardView({ projectId, onOpenTask, onNewProject, onOpenProjectSettings }: BoardViewProps) {
   const push = useToast();
   const ask = useConfirm();
-  const launch = useLaunch();
-  const askLaunch = useAskLaunch();
+  const openTaskChat = useOpenTaskChat();
   const projects = useProjectList();
   const repos = useRepos(projectId);
   const tasks = useTasks(projectId);
-  const runs = useAllRuns();
-  const globalExecutor = useSettings().data?.defaultExecutor ?? null;
+  const chats = useAllChats(true);
 
   const [filters, setFilters] = useState<Filters>(NO_FILTERS);
   const [view, setView] = useState<View>(() => (readPref(VIEW_PREF) === "list" ? "list" : "board"));
-  const [sort, setSort] = useState<BoardSort>(() => (readPref(SORT_PREF) === "manual" ? "manual" : "last-run"));
+  const [sort, setSort] = useState<BoardSort>(() => (readPref(SORT_PREF) === "manual" ? "manual" : "updated"));
   const [collapsed, setCollapsed] = useState(DEFAULT_COLLAPSED);
   const [menu, setMenu] = useState<{ taskId: string; at: { x: number; y: number } } | null>(null);
   const [newTask, setNewTask] = useState(false);
@@ -116,10 +110,10 @@ export function BoardView({ projectId, onOpenTask, onOpenRun, onNewProject, onOp
     }
   }, [tasks.data, patched]);
 
-  const latest = useLatestRunByTask();
-  const taskIds = useMemo(() => new Set(allTasks.map((t) => t.id)), [allTasks]);
-  const viewRuns = useMemo(() => [...latest.values()].filter((r) => r.taskId && taskIds.has(r.taskId)), [latest, taskIds]);
-  const phases = useRunPhases(viewRuns);
+  const chatByTask = useMemo(
+    () => new Map((chats.data ?? []).flatMap((c) => (c.taskId ? [[c.taskId, c] as const] : []))),
+    [chats.data],
+  );
 
   const labels = useMemo(() => [...new Set(allTasks.flatMap((t) => t.labels))].sort(), [allTasks]);
   const providers = useMemo(
@@ -145,38 +139,21 @@ export function BoardView({ projectId, onOpenTask, onOpenRun, onNewProject, onOp
   const isRail = (s: TaskStatus) => !filters.status && !!collapsed[s];
   /** Expanded columns (keyboard moves go between these). */
   const columns = layout.filter((s) => !isRail(s));
-  /** "Last run": most recently run first; tasks that never ran go after, in board order. */
-  const lastRunAt = (t: Task) => latest.get(t.id)?.queuedAt ?? -Infinity;
-  const order =
-    sort === "manual" ? byPosition : (a: Task, b: Task) => lastRunAt(b) - lastRunAt(a) || byPosition(a, b);
+  const order = sort === "manual" ? byPosition : (a: Task, b: Task) => b.updatedAt - a.updatedAt || byPosition(a, b);
   const byColumn = (s: TaskStatus) => visible.filter((t) => t.status === s).sort(order);
 
-  const model = (t: Task): CardModel => {
-    const repo = repoById.get(t.repoId);
-    const project = projectById.get(t.projectId);
-    const run = latest.get(t.id);
-    return {
-      task: t,
-      project,
-      repo,
-      assignee: resolveExecutor(t, repo, project, globalExecutor),
-      run,
-      phase: run ? phases.get(run.id) : undefined,
-    };
-  };
+  const model = (t: Task): CardModel => ({
+    task: t,
+    project: projectById.get(t.projectId),
+    repo: repoById.get(t.repoId),
+    chat: chatByTask.get(t.id),
+  });
 
   const onAction = async (m: CardModel, a: CardAction) => {
     if (a === "choose-repo") return onOpenTask(m.task.id);
-    if (a === "open-run") {
-      if (m.run) onOpenRun(m.run.id);
-      return;
-    }
     const id = m.task.id;
-    const name = m.project ? taskKey(m.project.key, m.task.number) : m.task.title;
-    const config = await askLaunch({ name, repo: m.repo, executor: m.assignee });
-    if (!config) return;
     setBusy((s) => new Set(s).add(id));
-    await launch(id, name, { kind: "run", config });
+    await openTaskChat(id);
     setBusy((s) => {
       const n = new Set(s);
       n.delete(id);
@@ -356,14 +333,14 @@ export function BoardView({ projectId, onOpenTask, onOpenRun, onNewProject, onOp
   } else if (loadError && (tasks.data === undefined || repos.data === undefined || projects.data === undefined)) {
     body = (
       <ErrorState title="Couldn't load the board" text={loadError}>
-        <button type="button" className="btn" onClick={() => invalidate("projects", "repos", "tasks", "runs")}>
+        <button type="button" className="btn" onClick={() => invalidate("projects", "repos", "tasks")}>
           Retry
         </button>
       </ErrorState>
     );
   } else if (noRepos) {
     body = (
-      <EmptyState title="Add a repo to start" description="Every task runs in one repo of this project. Add the root of a git checkout.">
+      <EmptyState title="Add a repo to start" description="Every task belongs to one repo of this project. Add the root of a git checkout.">
         {onOpenProjectSettings && projectId && (
           <button type="button" className="btn btn-primary" onClick={() => onOpenProjectSettings(projectId)}>
             Project settings
@@ -425,7 +402,6 @@ export function BoardView({ projectId, onOpenTask, onOpenRun, onNewProject, onOp
         showProject={projectId === null}
         projectById={projectById}
         repoById={repoById}
-        latest={latest}
         keyOf={keyOf}
         onOpen={onOpenTask}
         onMenu={(taskId, at) => setMenu({ taskId, at })}
@@ -587,11 +563,6 @@ export function BoardView({ projectId, onOpenTask, onOpenRun, onNewProject, onOp
             </button>
           )}
           <span className="bd-spacer" />
-          {runs.error && (
-            <span className="bd-tool-warn" title={runs.error}>
-              Run status unavailable
-            </span>
-          )}
           <SortMenu
             value={sort}
             onChange={(v) => {

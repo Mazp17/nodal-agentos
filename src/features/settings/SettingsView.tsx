@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useId, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
 import {
   claudeVersion,
   gitVersion,
   mcpRestart,
   mcpStatus,
   mcpStop,
+  openTerminalAt,
   providerStatus,
   repoTrust,
   setSettings,
@@ -14,13 +15,10 @@ import {
 } from "../../domain/api";
 import { useProjects } from "../../domain/hooks/projects";
 import type { Repo, Settings } from "../../domain/types";
-import { openTerminalAt } from "../runs/api";
 import { IntegrationsSettings } from "../providers";
 import { resolveGitRoot } from "../projects/repoPicker";
 import { Segmented } from "../projects/fields";
 import { invalidate, KEYS, setData, useSettings } from "../../domain/hooks/store";
-import { CLAUDE } from "../executors/executors";
-import { ExecutorPicker } from "../executors";
 import type { SettingsSection } from "../../shell/useNav";
 import type { Updates } from "../updates/useUpdates";
 import { Play, RotateCw, Square } from "lucide-react";
@@ -32,7 +30,7 @@ import "./settings.css";
 
 const SECTIONS: { id: SettingsSection; label: string }[] = [
   { id: "integrations", label: "Integrations" },
-  { id: "execution", label: "Execution" },
+  { id: "editor", label: "Editor" },
   { id: "updates", label: "Updates" },
   { id: "diagnostics", label: "Diagnostics" },
   ...(import.meta.env.DEV ? [{ id: "debug" as const, label: "Debug" }] : []),
@@ -44,7 +42,7 @@ interface Props {
   updates: Updates;
 }
 
-/** The pill and the dialogs read concurrency from the shared store. */
+/** Other views read the settings from the shared store. */
 function onSettingsSaved(s: Settings) {
   setData<Settings>(KEYS.settings, () => s);
   void invalidate("settings");
@@ -69,7 +67,7 @@ export function SettingsView({ section, onSection, updates }: Props) {
       <div className="settings-scroll">
         <div className="settings-col">
           {section === "integrations" && <IntegrationsSettings />}
-          {section === "execution" && <ExecutionSettings onSaved={onSettingsSaved} />}
+          {section === "editor" && <EditorSettings onSaved={onSettingsSaved} />}
           {section === "updates" && <UpdatesSettings updates={updates} />}
           {section === "diagnostics" && <DiagnosticsSettings />}
           {import.meta.env.DEV && section === "debug" && <DebugSettings />}
@@ -144,21 +142,12 @@ const EDITOR_LABEL: Record<string, string> = {
   webstorm: "WebStorm",
   fleet: "Fleet",
 };
-const MAX_CONCURRENCY = 16;
 
-function ExecutionSettings({ onSaved }: { onSaved: (s: Settings) => void }) {
+function EditorSettings({ onSaved }: { onSaved: (s: Settings) => void }) {
   const toast = useToast();
   const settings = useSettings();
   const s = settings.data;
-  const [reviewer, setReviewer] = useState("");
   const [saving, setSaving] = useState(false);
-  const parId = useId();
-  const reviewerId = useId();
-  const execId = useId();
-
-  useEffect(() => {
-    if (s) setReviewer(s.reviewer);
-  }, [s?.reviewer]);
 
   // One save at a time (controls are disabled): no out-of-order responses.
   // Optimistic on the shared store; if it fails, the reload corrects it.
@@ -178,99 +167,25 @@ function ExecutionSettings({ onSaved }: { onSaved: (s: Settings) => void }) {
   if (!s) {
     return settings.error ? (
       <>
-        <SectionHead title="Execution" />
+        <SectionHead title="Editor" />
         <div className="field-error" role="alert">
           Couldn't read the settings: {settings.error}
         </div>
       </>
     ) : (
-      <SectionHead title="Execution" text="Loading…" />
+      <SectionHead title="Editor" text="Loading…" />
     );
   }
 
-  const commitReviewer = () => {
-    const r = reviewer.trim();
-    if (r && r !== s.reviewer) void save({ ...s, reviewer: r });
-    else setReviewer(s.reviewer);
-  };
-
   return (
     <>
-      <SectionHead title="Execution" text="One global queue for runs across every project." />
+      <SectionHead title="Editor" />
       <div className="panel settings-card">
-        <div className="settings-row">
-          <div className="settings-row-text">
-            <span className="settings-row-title" id={parId}>
-              Parallel runs
-            </span>
-            <span className="settings-row-hint">Extra launches wait in the queue.</span>
-          </div>
-          <div className="stepper" role="group" aria-labelledby={parId}>
-            <button
-              type="button"
-              aria-label="Fewer parallel runs"
-              disabled={saving || s.concurrency <= 1}
-              onClick={() => void save({ ...s, concurrency: s.concurrency - 1 })}
-            >
-              −
-            </button>
-            <span className="stepper-value" aria-live="polite">
-              {s.concurrency}
-            </span>
-            <button
-              type="button"
-              aria-label="More parallel runs"
-              disabled={saving || s.concurrency >= MAX_CONCURRENCY}
-              onClick={() => void save({ ...s, concurrency: s.concurrency + 1 })}
-            >
-              +
-            </button>
-          </div>
-        </div>
-        <div className="settings-row">
-          <div className="settings-row-text">
-            <span className="settings-row-title" id={execId}>
-              Default executor
-            </span>
-            <span className="settings-row-hint">
-              Runs tasks when neither the task, its repo nor its project picks one. Projects and repos can override it.
-            </span>
-          </div>
-          <div aria-labelledby={execId} role="group">
-            <ExecutorPicker
-              repoId={null}
-              value={s.defaultExecutor}
-              inherited={CLAUDE}
-              label="Default executor"
-              disabled={saving}
-              onChange={(defaultExecutor) => void save({ ...s, defaultExecutor })}
-            />
-          </div>
-        </div>
-        <div className="settings-row">
-          <div className="settings-row-text">
-            <label className="settings-row-title" htmlFor={reviewerId}>
-              Default reviewer
-            </label>
-            <span className="settings-row-hint">
-              Agent that checks agent and Claude runs against the acceptance criteria. Projects and repos can override it.
-            </span>
-          </div>
-          <input
-            id={reviewerId}
-            className="input input-mono settings-input"
-            value={reviewer}
-            spellCheck={false}
-            onChange={(e) => setReviewer(e.target.value)}
-            onBlur={commitReviewer}
-            onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()}
-          />
-        </div>
         <div className="settings-row settings-row-top">
           <div className="settings-row-text">
             <span className="settings-row-title">Editor</span>
             <span className="settings-row-hint">
-              Used by "Open in editor" in run diffs. Auto picks the first one installed, or the system text editor.
+              Used by "Open in editor". Auto picks the first one installed, or the system text editor.
             </span>
           </div>
           <Segmented
@@ -487,7 +402,7 @@ function DiagnosticsSettings() {
 
       <SectionHead
         title="Repo trust"
-        text="Claude Code asks once per folder whether to trust it. Background runs can't answer that prompt, so an untrusted repo stalls its runs."
+        text="Claude Code asks once per folder whether to trust it. Chats can't answer that prompt, so an untrusted repo stalls them."
       />
       <div className="panel diag-list" aria-busy={busy}>
         {repos.length === 0 && (

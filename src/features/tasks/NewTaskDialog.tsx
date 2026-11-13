@@ -11,17 +11,15 @@ import {
 } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { createTask, getTask, readTaskPlan, updateTask, type NewTask, type PlanInput, type TaskPatch } from "../../domain/api";
-import { invalidate, useProjectList, useRepos, useSettings } from "../../domain/hooks/store";
-import { taskKey, type Executor, type Priority, type Task } from "../../domain/types";
+import { invalidate, useProjectList, useRepos } from "../../domain/hooks/store";
+import { taskKey, type Priority, type Task } from "../../domain/types";
 import { Kbd, KbdGroup } from "../../ui/Kbd";
 import { SafeMarkdown } from "../../ui/Markdown";
 import { useFocusTrap } from "../../ui/useFocusTrap";
 import { useToast } from "../../ui/Toasts";
-import { ExecutorPicker, inheritedExecutor, sameExecutor } from "../executors";
 import { PriorityBars } from "./bits";
-import { useAskLaunch, type RunConfig } from "./LaunchPopover";
 import { PRIORITIES, PRIORITY_LABEL, providerLabel } from "./status";
-import { useLaunch } from "./useLaunch";
+import { useOpenTaskChat } from "./useTaskChat";
 import "./tasks.css";
 
 export interface NewTaskDialogProps {
@@ -86,11 +84,9 @@ export function NewTaskDialog({ projectId, taskId, defaultRepoId, onClose, onSav
   const ref = useFocusTrap<HTMLFormElement>(onClose);
   const titleId = useId();
   const push = useToast();
-  const launch = useLaunch();
-  const askLaunch = useAskLaunch();
+  const openTaskChat = useOpenTaskChat();
   const projects = useProjectList();
   const allRepos = useRepos(null);
-  const settings = useSettings();
   const titleRef = useRef<HTMLInputElement>(null);
 
   const [original, setOriginal] = useState<Task | null>(null);
@@ -108,7 +104,6 @@ export function NewTaskDialog({ projectId, taskId, defaultRepoId, onClose, onSav
   const [labelDraft, setLabelDraft] = useState("");
   const [acceptance, setAcceptance] = useState<string[]>([]);
   const [critDraft, setCritDraft] = useState("");
-  const [assignee, setAssignee] = useState<Executor | null>(null);
   const [menu, setMenu] = useState<Menu>(null);
   const [tried, setTried] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -138,7 +133,6 @@ export function NewTaskDialog({ projectId, taskId, defaultRepoId, onClose, onSav
         setPriority(t.priority);
         setLabels(t.labels);
         setAcceptance(t.acceptance);
-        setAssignee(t.assignee);
         setLoaded(true);
       } catch (e) {
         if (alive) setError(String(e));
@@ -186,9 +180,6 @@ export function NewTaskDialog({ projectId, taskId, defaultRepoId, onClose, onSav
   }, [loaded, taskId, pid, repoId, repos, allRepos.data]);
 
   const imported = !!original?.source;
-  const inherited = inheritedExecutor(repo, project, settings.data?.defaultExecutor);
-  const effExecutor = assignee ?? inherited;
-  const execCustom = assignee !== null;
 
   const titleErr = tried && !title.trim();
   const planErr = tried && (kind === "text" ? !text.trim() : !path.trim());
@@ -287,15 +278,10 @@ export function NewTaskDialog({ projectId, taskId, defaultRepoId, onClose, onSav
 
   const planInput = (): PlanInput => (kind === "text" ? { kind: "text", text } : { kind: "file", path: path.trim() });
 
-  const submit = async (run: boolean) => {
+  const submit = async (chat: boolean) => {
     setTried(true);
     if (!pid || missing.length) return;
     if (saving || !repo) return;
-    let config: RunConfig | null = null;
-    if (run && !original) {
-      config = await askLaunch({ name: title.trim(), repo, executor: effExecutor });
-      if (!config) return;
-    }
     setSaving(true);
     setError(null);
     const ac = cleanList([...acceptance, stripBullet(critDraft)]);
@@ -316,7 +302,6 @@ export function NewTaskDialog({ projectId, taskId, defaultRepoId, onClose, onSav
           if (!same(allLabels, original.labels)) patch.labels = allLabels;
         }
         if (!same(ac, original.acceptance)) patch.acceptance = ac;
-        if (!same(assignee, original.assignee)) patch.assignee = assignee;
         saved = Object.keys(patch).length ? await updateTask(original.id, patch) : original;
         push("Task updated", saved.title, "ok");
       } else {
@@ -328,16 +313,16 @@ export function NewTaskDialog({ projectId, taskId, defaultRepoId, onClose, onSav
           priority,
           labels: allLabels,
           acceptance: ac,
-          assignee,
         };
         saved = await createTask(input);
         const key = project ? taskKey(project.key, saved.number) : saved.title;
-        if (config) await launch(saved.id, key, { kind: "run", config });
-        else push("Task created", `${key} · ${saved.title}`, "ok");
+        push("Task created", `${key} · ${saved.title}`, "ok");
       }
       // Wait for the refetch: the panel that opens looks the task up in the shared list.
       await invalidate("tasks");
-      onSaved(saved);
+      // "Create and open in chat": the chat tab opens instead of the task panel.
+      if (chat && !original && (await openTaskChat(saved.id))) onClose();
+      else onSaved(saved);
     } catch (e) {
       setError(String(e));
       setSaving(false);
@@ -375,10 +360,8 @@ export function NewTaskDialog({ projectId, taskId, defaultRepoId, onClose, onSav
     tried && missing.length
       ? `Missing: ${missing.join(", ")}`
       : original
-        ? "Changes apply to the next run"
-        : repo
-          ? "Isolation, finish and review are chosen on each run"
-          : "";
+        ? "Changes apply to the next message in its chat"
+        : "";
 
   return (
     <>
@@ -562,7 +545,7 @@ export function NewTaskDialog({ projectId, taskId, defaultRepoId, onClose, onSav
               </div>
               {(repoErr || noRepos) && (
                 <div className="nt-err">
-                  {noRepos ? "This project has no repos yet. Add one from the repo menu." : "Choose which repo this task runs in."}
+                  {noRepos ? "This project has no repos yet. Add one from the repo menu." : "Choose which repo this task belongs to."}
                 </div>
               )}
             </section>
@@ -630,7 +613,7 @@ export function NewTaskDialog({ projectId, taskId, defaultRepoId, onClose, onSav
                     <span className={`mono ellipsis nt-grow ${path ? "" : "tk-muted"}`}>{path || "Choose a .md file…"}</span>
                     <span className="nt-file-browse">Browse…</span>
                   </button>
-                  <span className="tk-hint">Read from the repo each time the task runs.</span>
+                  <span className="tk-hint">Read from the repo each time the task is opened.</span>
                 </div>
               )}
               {planErr && (
@@ -710,7 +693,7 @@ export function NewTaskDialog({ projectId, taskId, defaultRepoId, onClose, onSav
               </div>
               {critCount === 0 && (
                 <span className="nt-crit-empty">
-                  Without criteria the reviewer only checks the plan steps. Paste a list and each line becomes one criterion.
+                  Paste a list and each line becomes one criterion.
                 </span>
               )}
             </section>
@@ -724,21 +707,6 @@ export function NewTaskDialog({ projectId, taskId, defaultRepoId, onClose, onSav
         )}
 
         <footer className="dlg-foot">
-          <div className="nt-runs">
-            <span className="nt-runs-label">Runs with</span>
-            <ExecutorPicker
-              variant="pill"
-              caption="Executor"
-              repoId={repo?.id ?? null}
-              projectId={pid}
-              value={assignee}
-              inherited={inherited}
-              disabled={!loaded}
-              onChange={(v) => setAssignee(v && sameExecutor(v, inherited) ? null : v)}
-              dropUp
-            />
-            {execCustom && <span className="nt-runs-note">differs from the repo default</span>}
-          </div>
           <div className="nt-actions">
             <span className={`dlg-foot-note ${tried && missing.length ? "nt-err" : "tk-hint"}`}>{footNote}</span>
             <button type="button" className="btn btn-ghost" onClick={onClose}>
@@ -746,7 +714,7 @@ export function NewTaskDialog({ projectId, taskId, defaultRepoId, onClose, onSav
             </button>
             {!original && (
               <button type="button" className="btn" disabled={saving || !loaded} onClick={() => void submit(true)}>
-                Create and run
+                Create and open in chat
               </button>
             )}
             <button type="submit" className="btn btn-primary nt-save" disabled={saving || !loaded}>

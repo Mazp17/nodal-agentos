@@ -3,7 +3,7 @@ import type { Priority, TaskStatus } from "../../domain/types";
 import { Kbd } from "../../ui/Kbd";
 import { PriorityBars, StatusRing } from "../tasks/bits";
 import { BOARD_COLUMNS, HIDDEN_COLUMNS, PRIORITIES, PRIORITY_LABEL, STATUS_META } from "../tasks/status";
-import { ACTION_LABEL, type CardAction, type CardModel } from "./TaskCard";
+import { actionLabel, type CardAction, type CardModel } from "./TaskCard";
 
 const ALL_STATUSES: TaskStatus[] = [HIDDEN_COLUMNS[0], ...BOARD_COLUMNS, HIDDEN_COLUMNS[1]];
 
@@ -13,7 +13,7 @@ interface Props {
   taskId: string;
   at: { x: number; y: number };
   action: CardAction | null;
-  /** An action is already in flight for this task: Run/Retry is disabled. */
+  /** An action is already in flight for this task: the chat action is disabled. */
   busy: boolean;
   onClose: () => void;
   onOpen: () => void;
@@ -214,7 +214,7 @@ export function CardMenu({ model, taskId, at, action, busy, onClose, onOpen, onA
         <span className="ellipsis">{task.title}</span>
       </div>
       {item("Open", onOpen, { kbd: "↵" })}
-      {action && item(ACTION_LABEL[action], () => onAction(action), { disabled: busy })}
+      {action && item(actionLabel(action, model), () => onAction(action), { disabled: busy })}
       <div role="separator" className="bd-ctx-sep" />
       {subItem("status", "Status")}
       {canPriority && subItem("priority", "Priority")}

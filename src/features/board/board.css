@@ -13,7 +13,6 @@
   border-bottom: 1px solid var(--border);
 }
 .bd-q { width: 200px; height: var(--h-lg); margin-right: var(--sp-1); }
-.bd-tool-warn { font-size: var(--fs-sm); color: var(--amber-text); white-space: nowrap; }
 .bd-view { width: max-content; margin-left: var(--sp-2); }
 
 .bd-filter { position: relative; }
@@ -118,7 +117,8 @@
 .bd-card:hover { background: var(--surface-card-hover); border-color: var(--border-3); }
 .bd-card.dragging { opacity: 0.4; }
 /* Project color (All projects view). */
-.bd-card-stripe { position: absolute; left: 0; top: 0; bottom: 0; width: 3px; }
+/* Which project a card belongs to (only on "All projects"): dot and name, like the sidebar. */
+.bd-card-proj { display: flex; align-items: center; gap: 6px; min-width: 0; font-size: var(--fs-2xs); color: var(--text-muted); }
 .bd-card-title {
   display: -webkit-box;
   -webkit-line-clamp: 2;
@@ -135,7 +135,7 @@
   cursor: pointer;
 }
 
-/* Run state: a quiet line (icon + label in the tone color), not a pill. */
+/* Card notices (e.g. moved in the provider): a quiet line, not a pill. */
 .bd-card-run { display: flex; align-items: center; gap: var(--sp-3); min-width: 0; }
 .bd-card-run > .badge {
   flex: 0 1 auto;
@@ -147,8 +147,6 @@
   font-size: var(--fs-xs);
   font-weight: var(--fw-regular);
 }
-.bd-progress { height: 2px; border-radius: 2px; background: var(--fill-6); overflow: hidden; }
-.bd-progress > span { display: block; height: 100%; background: var(--run-running); }
 
 .bd-card-foot {
   display: flex;
@@ -225,7 +223,7 @@
   width: 100%;
   min-height: 42px;
   display: grid;
-  grid-template-columns: 26px 64px minmax(0, 1fr) minmax(0, 190px) 190px 24px;
+  grid-template-columns: 26px 64px minmax(0, 1fr) minmax(0, 190px) 24px;
   gap: var(--sp-5);
   align-items: center;
   padding: 0 var(--sp-7) 0 var(--sp-5);
@@ -252,8 +250,6 @@
 .tv-proj-dot { width: 8px; height: 8px; border-radius: 2px; flex: none; }
 .tv-sep { color: var(--text-dim); }
 .tv-danger { color: var(--red-text); }
-.tv-run { display: flex; min-width: 0; }
-.tv-run > .badge { min-width: 0; height: auto; padding: 0; background: transparent; font-size: var(--fs-sm); font-weight: var(--fw-regular); }
 .tv-prio { display: flex; justify-content: flex-end; }
 .tv-skel-row { height: 42px; display: flex; align-items: center; gap: var(--sp-5); padding: 0 var(--sp-7); border-bottom: 1px solid var(--border-faint); }
 .tv-skel { height: 10px; border-radius: var(--r-sm); background: var(--fill-4); animation: var(--pulse-skeleton); }

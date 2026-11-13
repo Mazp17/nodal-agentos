@@ -1,9 +1,8 @@
-// Shared data layer. One store per resource (projects, repos, tasks, settings; runs
-// live in `runs.ts` with the same contract) with ONE timer per resource: the global list is read
+// Shared data layer. One store per resource (projects, repos, tasks, settings) with ONE timer per resource: the global list is read
 // and each view filters its own, so board, panel, sidebar and palette share a single query.
 // Polling runs while someone is subscribed and pauses while the window is hidden; after a
 // mutation, `invalidate(...)` re-reads immediately (and returns that re-read's promise).
-// Keyed queries without polling (relations, plan, executors) use the same engine with
+// Keyed queries without polling (relations, plan, agents) use the same engine with
 // interval 0 and are re-read when their resource is invalidated.
 // The backend notifies with `nodal://changed` (see `onChanged`): each notice invalidates the
 // matching resource, so polling is only a (slower) fallback.
@@ -12,7 +11,6 @@ import { useCallback, useLayoutEffect, useMemo, useRef, useSyncExternalStore } f
 import {
   getSettings,
   onChanged,
-  listExecutors,
   listHiddenExecutors,
   listProjects,
   listRepos,
@@ -27,11 +25,11 @@ import {
 } from "../api";
 import type { HiddenExecutor, Project, Repo, Settings, Task, TaskRelation } from "../types";
 
-export type Resource = "projects" | "repos" | "tasks" | "runs" | "settings" | "sources" | "chats";
+export type Resource = "projects" | "repos" | "tasks" | "settings" | "sources" | "chats";
 
 /**
- * Fallback polling intervals (ms): changes arrive through `nodal://changed`. `live`
- * is for whatever depends on Claude Code sessions (`claude agents`), which don't notify.
+ * Fallback polling intervals (ms): changes arrive through `nodal://changed`. `live` is for
+ * whatever changes on disk outside Nodal (agents and editors), which doesn't notify.
  */
 export const POLL = { tasks: 20_000, live: 5000, slow: 60_000 } as const;
 
@@ -94,7 +92,7 @@ function load(key: string): Promise<void> {
   return p;
 }
 
-/** Resources with their own store (runs): re-read with their function on invalidation. */
+/** Resources with their own store (sources): re-read with their function on invalidation. */
 const externals = new Map<Resource, () => Promise<void>>();
 
 export function registerResource(resource: Resource, reload: () => Promise<void>) {
@@ -144,15 +142,13 @@ if (typeof document !== "undefined") {
 /** Which resources each `nodal://changed` `kind` re-reads. */
 const CHANGED_RESOURCES: Record<ChangedKind, Resource[]> = {
   tasks: ["tasks"],
-  runs: ["runs"],
-  queue: ["runs"],
   sources: ["sources"],
   chats: ["chats"],
   // Repos and settings also notify as `projects`.
   projects: ["projects", "repos", "settings"],
 };
 
-/** Notices arrive per `kind` (runs, queue and tasks together): they're batched into a single re-read. */
+/** Notices arrive per `kind` (several kinds at once): they're batched into a single re-read. */
 const CHANGE_BATCH_MS = 50;
 let pendingChanges = new Set<Resource>();
 let changeTimer: number | undefined;
@@ -286,7 +282,7 @@ export const useRepoList = () =>
     POLL.slow,
   );
 
-export const useTaskList = () => usePolled<Task[]>(KEYS.tasks, () => listTasks(null), ["tasks"], POLL.tasks);
+export const useTaskList = () => usePolled<Task[]>(KEYS.tasks, () => listTasks(null), ["tasks", "chats"], POLL.tasks);
 
 export const useSettings = () => usePolled<Settings>(KEYS.settings, getSettings, ["settings"], POLL.slow);
 
@@ -329,17 +325,13 @@ export const useTaskPlan = (taskId: string | null) =>
 
 /** Git status of the task's worktree (ahead/unpushed/dirty); changes while the agent works. */
 export const useWorktreeStatus = (taskId: string | null) =>
-  usePolled<WorktreeStatus>(taskId ? `worktree:${taskId}` : null, () => worktreeStatus(taskId as string), ["tasks", "runs"], POLL.tasks);
+  usePolled<WorktreeStatus>(taskId ? `worktree:${taskId}` : null, () => worktreeStatus(taskId as string), ["tasks"], POLL.tasks);
 
-/** Executor catalog; it reads disk, so it isn't repeated (only on invalidation). */
-export const useExecutors = (repoId: string | null) =>
-  usePolled<ExecutorInfo[]>(`executors:${repoId ?? "*"}`, () => listExecutors(repoId), ["repos"], 0);
-
-// ---------- Hidden executors (per project) ----------
+// ---------- Hidden agents (per project) ----------
 
 const hiddenKey = (projectId: string) => `hiddenExecutors:${projectId}`;
 
-/** What the project hides from its pickers; re-read on any `projects` notice. */
+/** What the project hides from its chat agent picker; re-read on any `projects` notice. */
 export const useHiddenExecutors = (projectId: string | null) =>
   usePolled<HiddenExecutor[]>(
     projectId ? hiddenKey(projectId) : null,

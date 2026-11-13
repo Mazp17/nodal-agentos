@@ -1,43 +1,28 @@
 import type { DragEvent, MouseEvent } from "react";
-import { isRunActive } from "../../domain/hooks/runs";
-import { taskKey, type Executor, type Project, type Repo, type RunLight, type Task } from "../../domain/types";
-import { executorLabel } from "../executors";
-import { RunBadge } from "../runs";
+import { taskKey, type Chat, type Project, type Repo, type Task } from "../../domain/types";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../../ui/Tooltip";
 import { PriorityBars } from "../tasks/bits";
 import { isClosed, providerLabel } from "../tasks/status";
-import type { PhaseProgress } from "./usePhases";
 
-export type CardAction = "run" | "retry" | "open-run" | "choose-repo";
+export type CardAction = "open-chat" | "choose-repo";
 
 export interface CardModel {
   task: Task;
   project: Project | undefined;
   repo: Repo | undefined;
-  assignee: Executor;
-  run: RunLight | undefined;
-  phase: PhaseProgress | undefined;
+  /** The chat working this task, if one was started. */
+  chat: Chat | undefined;
 }
 
-/** The card's main action based on repo, current run and status. */
+/** The card's main action: work the task in a chat (closed tasks only offer an existing chat). */
 export function cardAction(m: CardModel): CardAction | null {
-  const { task, repo, run } = m;
-  if (!repo) return "choose-repo";
-  if (run && isRunActive(run)) return "open-run";
-  if (isClosed(task.status) || task.status === "in_review") return run ? "open-run" : null;
-  const failed =
-    task.status === "blocked" ||
-    run?.status === "failed" ||
-    (run?.status === "finished" && (run.outcome === "red" || run.outcome === "stopped" || run.verdict?.pass === false));
-  return failed ? "retry" : "run";
+  if (!m.repo) return "choose-repo";
+  if (isClosed(m.task.status) && !m.chat) return null;
+  return "open-chat";
 }
 
-export const ACTION_LABEL: Record<CardAction, string> = {
-  run: "Run",
-  retry: "Retry",
-  "open-run": "Open run",
-  "choose-repo": "Choose repo",
-};
+export const actionLabel = (a: CardAction, m: CardModel) =>
+  a === "choose-repo" ? "Choose repo" : m.chat ? "Open chat" : "Open in chat";
 
 interface Props {
   model: CardModel;
@@ -55,10 +40,9 @@ interface Props {
 }
 
 export function TaskCard({ model, showProject, busy, dragging, onOpen, onAction, onDragStart, onDragEnd, onKeyMove, onMenu }: Props) {
-  const { task, project, repo, assignee, run, phase } = model;
+  const { task, project, repo } = model;
   const action = cardAction(model);
-  const primary = action === "run" || action === "retry";
-  const reviewing = task.status === "in_progress" && run?.kind === "review" && isRunActive(run);
+  const primary = action === "open-chat" && !model.chat;
   const id = project ? taskKey(project.key, task.number) : `#${task.number}`;
   const src = task.source;
 
@@ -82,7 +66,10 @@ export function TaskCard({ model, showProject, busy, dragging, onOpen, onAction,
       title={id}
     >
       {showProject && project && (
-        <span className="bd-card-stripe" style={{ background: project.color }} title={project.name} aria-hidden />
+        <span className="bd-card-proj">
+          <span className="project-dot" style={{ ["--project-color" as string]: project.color }} aria-hidden />
+          <span className="ellipsis">{project.name}</span>
+        </span>
       )}
 
       {/* Real button to open with the keyboard; the whole card also opens on click.
@@ -115,7 +102,7 @@ export function TaskCard({ model, showProject, busy, dragging, onOpen, onAction,
         {task.title}
       </button>
 
-      {(src?.moved || reviewing || run) && (
+      {src?.moved && (
         <div className="bd-card-run">
           {src?.moved && (
             <Tooltip>
@@ -131,30 +118,6 @@ export function TaskCard({ model, showProject, busy, dragging, onOpen, onAction,
               </TooltipContent>
             </Tooltip>
           )}
-          {reviewing ? (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <span className="badge tone-warn">
-                  <span className="dot dot-sm pulse" aria-hidden />
-                  <span className="badge-label">Reviewing</span>
-                </span>
-              </TooltipTrigger>
-              <TooltipContent>Reviewing · The reviewer is checking the acceptance criteria</TooltipContent>
-            </Tooltip>
-          ) : (
-            run && <RunBadge run={run} tooltip />
-          )}
-        </div>
-      )}
-
-      {phase && run && isRunActive(run) && (
-        <div
-          className="bd-progress"
-          role="img"
-          aria-label={`Phase ${phase.index} of ${phase.total}${phase.name ? `: ${phase.name}` : ""}`}
-          title={`Phase ${phase.index}/${phase.total}${phase.name ? ` · ${phase.name}` : ""}`}
-        >
-          <span style={{ width: `${Math.min(100, (phase.index / phase.total) * 100)}%` }} />
         </div>
       )}
 
@@ -182,10 +145,9 @@ export function TaskCard({ model, showProject, busy, dragging, onOpen, onAction,
             type="button"
             className={`btn btn-xs bd-act ${primary ? "btn-primary" : ""}`}
             disabled={busy}
-            title={primary ? `Assignee: ${executorLabel(assignee)}` : undefined}
             onClick={act}
           >
-            {ACTION_LABEL[action]}
+            {actionLabel(action, model)}
           </button>
         )}
       </div>

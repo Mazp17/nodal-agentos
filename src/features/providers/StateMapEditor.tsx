@@ -128,7 +128,7 @@ export function StateMapEditor({
       <div className="pv-map-table" role="table" aria-label={`Push: Nodal to ${prov}`}>
         <div className="pv-map-caption" role="caption">
           <span className="pv-map-dir">Push</span>
-          <span className="pv-hint">When a run moves the task, Nodal sets the issue to… ("Don't sync" only comments)</span>
+          <span className="pv-hint">When the task changes status, Nodal sets the issue to… ("Don't sync" only comments)</span>
         </div>
         <div className="pv-map-head" role="row">
           <span role="columnheader">Nodal status</span>
