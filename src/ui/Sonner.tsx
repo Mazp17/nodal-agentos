@@ -1,8 +1,9 @@
-// shadcn/ui's Sonner Toaster with our own CSS instead of Tailwind. Nodal is dark-only, so the
-// theme is fixed instead of read from next-themes.
+// shadcn/ui's Sonner Toaster with our own CSS instead of Tailwind. The theme comes from
+// `shell/theme` instead of next-themes.
 
 import type { CSSProperties } from "react";
 import { Toaster as Sonner, type ToasterProps } from "sonner";
+import { useTheme } from "../shell/theme";
 import "./sonner.css";
 
 /** The tone's dot (colored by `--tone` in sonner.css), used instead of icons. */
@@ -11,7 +12,7 @@ export const TONE_DOT = <span className="dot" aria-hidden />;
 export function Toaster(props: ToasterProps) {
   return (
     <Sonner
-      theme="dark"
+      theme={useTheme()}
       className="toaster"
       position="bottom-right"
       offset="var(--sp-6)"

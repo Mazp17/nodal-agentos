@@ -8,10 +8,12 @@ import "./styles/base.css";
 import "./styles/tailwind.css";
 import App from "./App";
 import { migrateLegacyStorage } from "./shell/storage";
+import { installTheme } from "./shell/theme";
 import { installZoomShortcuts } from "./shell/zoom";
 
 // Before the first render: old preferences (`agent-desk.*`) move to `nodal.*`.
 migrateLegacyStorage();
+installTheme();
 installZoomShortcuts();
 // Tauri's file-drop handler is off (`dragDropEnabled: false`, so HTML5 drag works in the
 // board): without this, a file dropped from Finder would navigate the webview to it.
