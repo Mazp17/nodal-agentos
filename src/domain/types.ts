@@ -147,6 +147,14 @@ export interface MovedInfo {
   suggestedRepoId: string | null;
 }
 
+export interface TaskPr {
+  url: string;
+  number: number;
+  state: "open" | "draft" | "merged" | "closed";
+  /** Branch commit GitHub last reported; once merged, the task's changes count from here. */
+  head: string | null;
+}
+
 export interface Task {
   id: string;
   projectId: string;
@@ -162,6 +170,7 @@ export interface Task {
   planOverridden: boolean;
   acceptance: string[];
   worktree: WorktreeRef | null;
+  pr: TaskPr | null;
   source: TaskSource | null;
   createdAt: number;
   updatedAt: number;

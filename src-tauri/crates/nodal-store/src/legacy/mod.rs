@@ -753,6 +753,7 @@ impl Ctx<'_> {
                 plan_overridden: false,
                 acceptance: Vec::new(),
                 worktree: None,
+                pr: None,
                 source: None,
                 created_at: t.created_at,
                 updated_at: closed_at.unwrap_or(t.created_at),

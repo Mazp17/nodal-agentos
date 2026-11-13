@@ -46,7 +46,7 @@ macro_rules! sql_enum {
         }
     )+};
 }
-sql_enum!(TaskStatus, Priority, RelationKind);
+sql_enum!(TaskStatus, Priority, RelationKind, PrState);
 
 // ---------- Project ----------
 
@@ -215,6 +215,10 @@ pub fn task_from_row(row: &Row) -> rusqlite::Result<Task> {
         source,
         created_at: row.get("created_at")?,
         updated_at: row.get("updated_at")?,
+        pr: match row.get::<_, Option<String>>("pr_url")? {
+            Some(url) => Some(TaskPr { url, number: row.get("pr_number")?, state: row.get::<_, SqlEnum<PrState>>("pr_state")?.0, head: row.get("pr_head")? }),
+            None => None,
+        },
         closed_at: row.get("closed_at")?,
     })
 }
@@ -230,14 +234,14 @@ pub fn insert_task(conn: &Connection, t: &Task) -> Result<(), DbError> {
     conn.execute(
         "INSERT INTO tasks (id, project_id, repo_id, number, title, status, priority, labels_json,
                             position, plan_kind, plan_path, plan_overridden, acceptance_json,
-                            wt_path, wt_branch, wt_base,
+                            wt_path, wt_branch, wt_base, pr_url, pr_number, pr_state, pr_head,
                             src_provider, src_link_id, src_external_id, src_identifier, src_url,
                             src_state_json, src_last_synced_at, src_sync_error, src_unmapped,
                             src_project_id, src_project_name, src_rule_id, src_moved,
                             created_at, updated_at, closed_at)
          VALUES (:id, :project, :repo, :number, :title, :status, :priority, :labels,
                  :position, :plan_kind, :plan_path, :plan_overridden, :acceptance,
-                 :wt_path, :wt_branch, :wt_base,
+                 :wt_path, :wt_branch, :wt_base, :pr_url, :pr_number, :pr_state, :pr_head,
                  :src_provider, :src_link, :src_ext, :src_ident, :src_url,
                  :src_state, :src_synced, :src_error, :src_unmapped,
                  :src_project, :src_project_name, :src_rule, :src_moved,
@@ -250,6 +254,8 @@ pub fn insert_task(conn: &Connection, t: &Task) -> Result<(), DbError> {
             ":acceptance": to_json(&t.acceptance)?,
             ":wt_path": wt.map(|w| &w.path), ":wt_branch": wt.map(|w| &w.branch),
             ":wt_base": wt.map(|w| &w.base),
+            ":pr_url": t.pr.as_ref().map(|p| &p.url), ":pr_number": t.pr.as_ref().map(|p| p.number),
+            ":pr_state": t.pr.as_ref().map(|p| SqlEnum(p.state)), ":pr_head": t.pr.as_ref().and_then(|p| p.head.as_ref()),
             ":src_provider": src.map(|s| &s.provider), ":src_link": src.and_then(|s| s.link_id.as_ref()),
             ":src_ext": src.map(|s| &s.external_id), ":src_ident": src.map(|s| &s.identifier),
             ":src_url": src.map(|s| &s.url),

@@ -240,6 +240,7 @@ pub fn create_task(conn: &mut Connection, env: &Env, input: &NewTask, now: i64) 
             source: None,
             created_at: now,
             updated_at: now,
+            pr: None,
             closed_at: matches!(status, TaskStatus::Done | TaskStatus::Canceled).then_some(now),
         };
         tasks::insert(&tx, &t)?;

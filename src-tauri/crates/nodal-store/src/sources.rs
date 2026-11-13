@@ -226,6 +226,7 @@ pub fn insert_imported(conn: &Connection, n: NewImported) -> Result<Task, DbErro
         }),
         created_at: n.now,
         updated_at: n.now,
+        pr: None,
         closed_at: closed,
     };
     rows::insert_task(conn, &task)?;

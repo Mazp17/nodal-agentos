@@ -489,6 +489,11 @@ export function useRunStates(): ReadonlyMap<string, ChatRunState> {
  * Sends `text` to a chat from outside its composer (a task's first message, "ask the chat for a
  * PR"), the way the composer does: attached channel first, shown at once, streamed live.
  */
+/** What "ask the chat for a PR" sends. */
+export const OPEN_PR_PROMPT =
+  "Open a pull request for this branch with what's already committed (don't commit anything new): push it and run " +
+  "`gh pr create` against the branch it split from. Follow .github/PULL_REQUEST_TEMPLATE.md if the repo has one. Don't merge it. Reply with the PR URL.";
+
 export async function sendToChat(chatId: string, text: string): Promise<void> {
   seedChat(chatId);
   pushOutbox(chatId, text);

@@ -11,7 +11,7 @@ import { BoardView } from "../features/board";
 import { ChatView } from "../features/chats";
 import { chatTitle } from "../features/chats/model";
 import { setInAppNotice } from "../features/chats/alerts";
-import { forgetChat, pruneUnread, sendToChat, useRunStates, useUnreadChats } from "../features/chats/stream";
+import { forgetChat, OPEN_PR_PROMPT, pruneUnread, sendToChat, useRunStates, useUnreadChats } from "../features/chats/stream";
 import { FilesPanel, type FilesMode } from "../features/chats/FilesPanel";
 import { setDraft, useDirtyTabs } from "../features/chats/drafts";
 import { CommitView, FileDiffView, FileView } from "../features/chats/FileView";
@@ -636,11 +636,7 @@ export function AppShell() {
                   onAskChatForPr={
                     activeChatId
                       ? () =>
-                          void sendToChat(
-                            activeChatId,
-                            "Open a pull request for this branch with what's already committed (don't commit anything new): push it and run " +
-                              "`gh pr create` against the branch it split from. Follow .github/PULL_REQUEST_TEMPLATE.md if the repo has one. Don't merge it. Reply with the PR URL.",
-                          ).catch((e: unknown) => toast("Couldn't ask the chat", String(e), "danger"))
+                          void sendToChat(activeChatId, OPEN_PR_PROMPT).catch((e: unknown) => toast("Couldn't ask the chat", String(e), "danger"))
                       : null
                   }
                   onOpenFile={(path) => tabs.openChat(fileTab(filesRepo.id, path, false, filesWorktree))}

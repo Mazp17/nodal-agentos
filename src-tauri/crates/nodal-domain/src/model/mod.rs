@@ -233,6 +233,30 @@ pub struct WorktreeRef {
     pub base: String,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PrState {
+    Open,
+    Draft,
+    Merged,
+    Closed,
+}
+str_enum!(PrState { Open => "open", Draft => "draft", Merged => "merged", Closed => "closed" });
+
+/// A task's pull request on GitHub.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskPr {
+    pub url: String,
+    pub number: i64,
+    pub state: PrState,
+    /// The branch's commit when GitHub last reported it (`headRefOid`); once merged, the
+    /// task's changes are shown from here, since a squash or rebase merge leaves the branch's
+    /// commits out of the base's history.
+    #[serde(default)]
+    pub head: Option<String>,
+}
+
 /// Normalized type of an external state, for the mapping heuristic.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -308,11 +332,23 @@ pub struct Task {
     /// Acceptance criteria the gate reviews against.
     pub acceptance: Vec<String>,
     pub worktree: Option<WorktreeRef>,
+    /// The PR opened from the task's branch, found with `gh` (see `Git::pr_for_branch`).
+    #[serde(default)]
+    pub pr: Option<TaskPr>,
     pub source: Option<TaskSource>,
     pub created_at: i64,
     pub updated_at: i64,
     /// When it moved to Done or Canceled.
     pub closed_at: Option<i64>,
+}
+
+impl Task {
+    /// Where the task's changes and commits are counted from: the merged PR's head (only
+    /// later work is pending), else the worktree's base.
+    pub fn diff_base(&self) -> Option<&str> {
+        let merged = self.pr.as_ref().filter(|p| p.state == PrState::Merged).and_then(|p| p.head.as_deref());
+        merged.or(self.worktree.as_ref().map(|w| w.base.as_str()))
+    }
 }
 
 /// `{KEY}-{number}`, e.g. `PAY-1`.

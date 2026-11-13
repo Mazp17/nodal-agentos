@@ -10,7 +10,7 @@ import { useConfirm } from "../../ui/ConfirmDialog";
 import { EmptyState } from "../../ui/EmptyState";
 import { useToast } from "../../ui/Toasts";
 import { isClosed, providerLabel, STATUS_META, taskTag } from "../tasks/status";
-import { StatusRing } from "../tasks/bits";
+import { PrBadge, StatusRing } from "../tasks/bits";
 import { Composer, type ComposerSettings } from "./Composer";
 import { getComposerDraft, setComposerDraft, useComposerDraft } from "./composerDrafts";
 import { Conversation } from "./Conversation";
@@ -286,6 +286,7 @@ export function ChatView({ project, repos, chatId: tabChatId, onCreated, onShowC
             <button type="button" className="chat-task-title ellipsis" title="Open the task" onClick={() => onOpenTask(task.id)}>
               {task.title}
             </button>
+            {task.pr && <PrBadge pr={task.pr} link />}
             <span className="chat-task-status">
               <StatusRing status={task.status} size={12} />
               {STATUS_META[task.status].label}

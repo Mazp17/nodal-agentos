@@ -588,6 +588,11 @@
 .git-actions { display: flex; gap: var(--sp-2); }
 .git-commit { flex: 1; justify-content: center; }
 .git-pr { flex: none; gap: 6px; }
+/* A linked PR: tinted by its state (tone), with an icon-only refresh beside it. */
+.git-pr-linked { color: var(--tone); background: color-mix(in oklch, var(--tone) 12%, transparent); border-color: color-mix(in oklch, var(--tone) 35%, transparent); text-decoration: none; }
+.git-pr-linked:hover { background: color-mix(in oklch, var(--tone) 20%, transparent); }
+.git-pr-state { font-size: var(--fs-2xs); text-transform: capitalize; opacity: 0.85; }
+.git-pr-refresh { flex: none; }
 .git-pr-form { display: flex; flex-direction: column; gap: 6px; padding-top: var(--sp-2); }
 .git-label { font-size: var(--fs-2xs); font-weight: var(--fw-semibold); color: var(--text-muted); }
 .git-input { width: 100%; box-sizing: border-box; }

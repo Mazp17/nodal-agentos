@@ -9,7 +9,7 @@ use std::path::Path;
 
 use nodal_domain::diff::{CommitInfo, FileDiff};
 use nodal_domain::model::events::ChangeKind;
-use nodal_domain::model::{DirEntry, Repo, RepoFile, RepoWorktree};
+use nodal_domain::model::{DirEntry, PrState, Repo, RepoFile, RepoWorktree, TaskPr};
 use nodal_domain::ports::Git;
 use nodal_domain::util::check_id;
 use nodal_store::board::tasks;
@@ -86,12 +86,11 @@ impl System {
         self.with_root(repo_id, worktree, move |git, root| git.list_dir(root, &dir).map_err(|e| e.0)).await
     }
 
-    /// Changes of the checkout, per file with its hunks, for the files panel's "Changes" view.
-    /// The repo's own checkout: uncommitted vs HEAD. A worktree is a branch of work, so it's
-    /// diffed from where it branched off (committed work included). Untracked files included.
+    /// Uncommitted changes of the checkout (vs HEAD, untracked files included), per file with its
+    /// hunks, for the files panel's "Changes" view and commit box; committed work is in `repo_commits`.
     pub async fn repo_changes(&self, repo_id: String, worktree: Option<String>) -> Result<Vec<FileDiff>, AppError> {
-        self.with_base(repo_id, worktree, |git, root, base| {
-            let (patch, _) = git.diff(root, base.as_deref()).map_err(|e| e.0)?;
+        self.with_root(repo_id, worktree, |git, root| {
+            let (patch, _) = git.diff(root, None).map_err(|e| e.0)?;
             Ok(nodal_domain::diff::parse(&patch))
         })
         .await
@@ -100,7 +99,7 @@ impl System {
     /// The checkout's commits, newest first: a worktree's since it branched off, the repo's
     /// own checkout its latest ones.
     pub async fn repo_commits(&self, repo_id: String, worktree: Option<String>) -> Result<Vec<CommitInfo>, AppError> {
-        self.with_base(repo_id, worktree, |git, root, base| git.log(root, base.as_deref()).map_err(|e| e.0)).await
+        self.with_base(repo_id, worktree, true, |git, root, base| git.log(root, base.as_deref()).map_err(|e| e.0)).await
     }
 
     /// Commits the checkout's changes with `message`: all of them, or only `paths` when given.
@@ -123,7 +122,8 @@ impl System {
             return Err("Write a title for the pull request.".into());
         }
         let own_checkout = worktree.is_none();
-        self.with_base(repo_id, worktree, move |git, root, base| {
+        let (rid, wt) = (repo_id.clone(), worktree.clone());
+        let url = self.with_base(repo_id, worktree, false, move |git, root, base| {
             let base = if own_checkout { git.default_branch(root) } else { base };
             let base = base.ok_or(if own_checkout {
                 "Open a PR from a worktree branch."
@@ -136,7 +136,38 @@ impl System {
             }
             git.open_pr(root, &base, &branch, &title, &body).map_err(|e| e.0)
         })
-        .await
+        .await?;
+        if let Some(wt) = wt {
+            if let Err(e) = self.link_task_pr(rid, wt, url.clone()).await {
+                eprintln!("tasks: couldn't link the PR {url}: {e}");
+            }
+        }
+        Ok(url)
+    }
+
+    /// Links a PR just opened from `worktree` to the task working there, if any.
+    async fn link_task_pr(&self, repo_id: String, worktree: String, url: String) -> Result<(), AppError> {
+        let Some(number) = crate::board::pr::pr_number(&url) else { return Ok(()) };
+        let (env, now) = (self.core.env.clone(), self.core.clock.now_ms());
+        let project = with_db(&self.core.db, move |c| {
+            let repo = rows::get_repo(c, &repo_id)?.ok_or_else(|| nodal_store::StoreError::Invalid("Repo not found.".into()))?;
+            let canon = |p: &str| env.fs.canonicalize(Path::new(p)).ok();
+            let here = canon(&worktree);
+            let task = tasks::list(c, Some(&repo.project_id))?
+                .into_iter()
+                .find(|t| t.repo_id == repo.id && t.worktree.as_ref().is_some_and(|w| here.is_some() && canon(&w.path) == here));
+            let Some(task) = task else { return Ok(None) };
+            let tx = c.transaction()?;
+            let pr = TaskPr { url, number, state: PrState::Open, head: None };
+            crate::board::pr::link_pr(&tx, &task, Some(pr), now).map_err(nodal_store::StoreError::Invalid)?;
+            tx.commit()?;
+            Ok(Some(task.project_id))
+        })
+        .await?;
+        if let Some(p) = project {
+            self.core.notifier.notify(ChangeKind::Tasks, Some(&p));
+        }
+        Ok(())
     }
 
     /// One commit's files with their hunks.
@@ -149,11 +180,13 @@ impl System {
     }
 
     /// `with_root` plus where the checkout branched off: `None` for the repo's own checkout; for
-    /// a worktree, its task's base, else the branch checked out in the repo's folder.
+    /// a worktree, its task's base, else the branch checked out in the repo's folder. With
+    /// `for_diff`, a task whose PR merged counts from the PR's head (`Task::diff_base`).
     async fn with_base<T: Send + 'static>(
         &self,
         repo_id: String,
         worktree: Option<String>,
+        for_diff: bool,
         f: impl FnOnce(&dyn Git, &Path, Option<String>) -> Result<T, String> + Send + 'static,
     ) -> Result<T, AppError> {
         let repo = self.repo(repo_id.clone()).await?;
@@ -165,7 +198,10 @@ impl System {
                     Ok(tasks::list(c, Some(&pid))?
                         .into_iter()
                         .filter(|t| t.repo_id == rid)
-                        .filter_map(|t| t.worktree.map(|w| (w.path, w.base)))
+                        .filter_map(|t| {
+                            let base = if for_diff { t.diff_base() } else { t.worktree.as_ref().map(|w| w.base.as_str()) };
+                            Some((t.worktree.as_ref()?.path.clone(), base?.to_string()))
+                        })
                         .collect::<Vec<_>>())
                 })
                 .await?

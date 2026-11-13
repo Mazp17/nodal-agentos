@@ -15,7 +15,7 @@ use crate::model::claude::{SubagentRef, Transcript};
 use crate::model::events::ChangeKind;
 use crate::model::executors::AgentDef;
 use crate::model::providers::{ExternalItem, ImportQuery, Page, ProviderResult};
-use crate::model::{DiffStat, DirEntry, RepoFile, RepoWorktree, ExternalState, ScopeRef, WorktreeRef};
+use crate::model::{DiffStat, DirEntry, RepoFile, RepoWorktree, ExternalState, ScopeRef, TaskPr, WorktreeRef};
 
 pub type BoxFut<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 
@@ -136,6 +136,9 @@ pub trait Git: Send + Sync {
     /// Pushes `branch` to `origin` and opens a PR against `base` with the GitHub CLI (or finds
     /// the existing one). Returns the PR URL.
     fn open_pr(&self, dir: &Path, base: &str, branch: &str, title: &str, body: &str) -> Result<String, HostError>;
+    /// The newest PR whose head is `branch` (GitHub CLI). `Err` when `gh` can't tell (missing,
+    /// not logged in, not a GitHub repo).
+    fn pr_for_branch(&self, dir: &Path, branch: &str) -> Result<Option<TaskPr>, HostError>;
 }
 
 /// Files Nodal owns (plans, stopped patches) + plan files inside repos. Blocking.

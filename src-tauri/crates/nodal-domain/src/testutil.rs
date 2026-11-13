@@ -21,6 +21,7 @@ pub fn task_of(id: &str) -> Task {
         source: None,
         created_at: 1,
         updated_at: 1,
+        pr: None,
         closed_at: None,
     }
 }

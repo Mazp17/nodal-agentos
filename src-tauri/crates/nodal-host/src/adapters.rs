@@ -11,7 +11,7 @@ use nodal_domain::execution::worktree::{MergeOutcome, WorktreeStatus};
 use nodal_domain::model::chat::ClaudeDefaults;
 use nodal_domain::model::claude::{SubagentRef, Transcript};
 use nodal_domain::model::executors::AgentDef;
-use nodal_domain::model::{DiffStat, DirEntry, RepoFile, RepoWorktree, WorktreeRef};
+use nodal_domain::model::{DiffStat, DirEntry, RepoFile, RepoWorktree, TaskPr, WorktreeRef};
 use nodal_domain::ports::{ClaudeConfig, Clock, Git, LocalFs, PlanFiles, SessionFiles};
 
 use crate::claude::{catalog, fs, settings};
@@ -189,6 +189,10 @@ impl Git for HostGit {
 
     fn open_pr(&self, dir: &Path, base: &str, branch: &str, title: &str, body: &str) -> Result<String, HostError> {
         Ok(git::pr::open_pr(dir, base, branch, title, body)?)
+    }
+
+    fn pr_for_branch(&self, dir: &Path, branch: &str) -> Result<Option<TaskPr>, HostError> {
+        Ok(git::pr::pr_for_branch(dir, branch)?)
     }
 }
 
