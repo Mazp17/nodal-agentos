@@ -243,18 +243,6 @@ struct Fx {
 fn fx(name: &str) -> Fx {
     let t = TempDir::new(name);
     let db = Db::open_in_memory().unwrap();
-    {
-        // Concurrency 0: `launch_task`/`hand_off`/`review_now`/`confirm_run` all `kick()` a
-        // real (if short-lived) background pump pass after returning. With any capacity, that
-        // pass could race a test's own queue/task assertions (it would even "launch" the run
-        // through `FakeClaude`, which always succeeds) between one `.await` and the next.
-        // Nothing here exercises the pump itself — that's `execution::pump::tests`' job — so
-        // this keeps every enqueued run `queued` for the rest of the test, deterministically.
-        let mut c = db.lock().unwrap();
-        let mut s = nodal_store::rows::load_settings(&c).unwrap();
-        s.concurrency = 0;
-        nodal_store::rows::save_settings(&mut c, &s).unwrap();
-    }
     let git = Arc::new(FakeGit::default());
     let claude = Arc::new(FakeClaude::default());
     let env = Env {
@@ -277,6 +265,10 @@ fn fx(name: &str) -> Fx {
         chats: Arc::new(FakeChats),
     });
     let exec = Execution::new(core);
+    // `launch_task`/`hand_off`/`review_now`/`confirm_run` `kick()` a background pump pass that
+    // could launch a run (through `FakeClaude`) mid-test. Concurrency can't block it: settings
+    // clamp it to >= 1. The pump itself is `execution::pump::tests`' job, so runs stay queued.
+    exec.no_kick.store(true, std::sync::atomic::Ordering::SeqCst);
     Fx { _t: t, exec, db, env, git, claude }
 }
 

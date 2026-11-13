@@ -253,6 +253,10 @@ impl Execution {
     /// Fires a queue pass in the background (after enqueueing, cancelling or reordering),
     /// today's `work::kick`.
     pub(crate) fn kick(&self) {
+        #[cfg(test)]
+        if self.no_kick.load(std::sync::atomic::Ordering::SeqCst) {
+            return;
+        }
         let Some(exec) = self.self_ref.upgrade() else { return };
         self.core.rt.spawn(async move {
             if let Err(e) = exec.pump().await {

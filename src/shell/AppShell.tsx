@@ -222,6 +222,11 @@ export function AppShell() {
     if (route.page === "board") lastBoard.current = route.projectId;
   }, [route.page, route.projectId]);
 
+  // Sidebar mode follows the page, but global pages (settings) keep whichever mode was showing.
+  const sideMode = useRef<SideMode>("chat");
+  if (visible.page === "chat") sideMode.current = "chat";
+  else if (visible.page !== "settings" && visible.page !== "project-settings") sideMode.current = "tasks";
+
   const goMode = (m: SideMode) => {
     if (m === "tasks") {
       go("board", lastBoard.current);
@@ -662,12 +667,12 @@ export function AppShell() {
       ? { tone: "ok", label: "Linear connected" }
       : provider.status?.hasKey
         ? { tone: "danger", label: "Linear unreachable" }
-        : { tone: "muted", label: "No task manager" };
+        : { tone: "muted", label: "No task manager connected" };
 
   return (
     <div className="desk">
       <Sidebar
-        mode={visible.page === "chat" ? "chat" : "tasks"}
+        mode={sideMode.current}
         projects={ctx.projects}
         chats={allChats.data ?? []}
         defaultRepo={(pid) => ctx.reposOf(pid)[0]?.id ?? null}

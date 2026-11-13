@@ -268,7 +268,7 @@
 /* Footer: Settings with the task manager status at its right. */
 .side-foot { flex-direction: column; align-items: stretch; gap: var(--sp-1); padding: var(--sp-3) 0 0; }
 .side-foot .side-item { height: 30px; }
-.side-foot .side-foot-status { flex: none; gap: 5px; font-size: var(--fs-2xs); color: var(--text-muted); font-weight: var(--fw-regular, 400); }
+.side-foot .side-foot-status { flex: none; padding: 4px; margin-right: -4px; font-size: var(--fs-2xs); color: var(--text-muted); font-weight: var(--fw-regular, 400); }
 .side-foot .side-version { margin: 0; padding: 0 var(--sp-3); color: var(--text-dim); }
 
 /* ---- Tabs over the main panel ---- */
