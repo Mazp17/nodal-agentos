@@ -47,7 +47,7 @@ pub fn run(dir: &Path, args: &[&str]) -> Result<GitOutput, String> {
     claude_bin::no_window_std(&mut cmd);
     let what = format!("git {}", args.first().copied().unwrap_or(""));
     crate::metrics::record_git_spawn();
-    let child = cmd.spawn().map_err(|e| format!("Couldn't run {what}: {e}"))?;
+    let child = claude_bin::spawn_retrying(|| cmd.spawn()).map_err(|e| format!("Couldn't run {what}: {e}"))?;
     let deadline = Instant::now() + GIT_TIMEOUT;
     wait_for_output(child, deadline, &what)
 }

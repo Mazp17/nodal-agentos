@@ -24,3 +24,31 @@ fn resolve_git_finds_the_test_runner_s_git() {
     let git = resolve_git().expect("git should resolve when it's on PATH");
     assert!(git.exists());
 }
+
+#[cfg(unix)]
+#[test]
+fn spawn_retrying_retries_text_file_busy_then_gives_up() {
+    let busy = || std::io::Error::from_raw_os_error(libc::ETXTBSY);
+    let mut calls = 0;
+    let ok = spawn_retrying(|| {
+        calls += 1;
+        if calls < 3 { Err(busy()) } else { Ok(calls) }
+    });
+    assert_eq!(ok.unwrap(), 3);
+
+    let mut calls = 0;
+    let err = spawn_retrying::<()>(|| {
+        calls += 1;
+        Err(busy())
+    });
+    assert_eq!(err.unwrap_err().raw_os_error(), Some(libc::ETXTBSY));
+    assert_eq!(calls, 6);
+
+    let mut calls = 0;
+    let other = spawn_retrying::<()>(|| {
+        calls += 1;
+        Err(std::io::Error::from(std::io::ErrorKind::NotFound))
+    });
+    assert!(other.is_err());
+    assert_eq!(calls, 1, "other errors aren't retried");
+}
