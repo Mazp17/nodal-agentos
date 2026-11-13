@@ -619,6 +619,7 @@ async fn supervise(
     if let Ok(r) = tokio::time::timeout(EXIT_GRACE, child.wait()).await {
         return (r.ok(), true);
     }
+    // shortcut: kills only the direct child (grandchildren survive), upgrade to a Job object if orphaned processes show up
     let _ = child.start_kill();
     (child.wait().await.ok(), true)
 }

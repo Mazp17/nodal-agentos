@@ -44,6 +44,7 @@ pub fn run(dir: &Path, args: &[&str]) -> Result<GitOutput, String> {
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
+    claude_bin::no_window_std(&mut cmd);
     let what = format!("git {}", args.first().copied().unwrap_or(""));
     crate::metrics::record_git_spawn();
     let child = cmd.spawn().map_err(|e| format!("Couldn't run {what}: {e}"))?;

@@ -13,10 +13,11 @@ use std::time::Duration;
 use tokio::process::Command;
 
 fn home() -> Option<PathBuf> {
-    std::env::var_os("HOME").map(PathBuf::from)
+    std::env::home_dir()
 }
 
-/// Directories where `claude` (and the tools it uses) usually live outside Finder's PATH.
+/// Directories where `claude` (and the tools it uses) usually live outside the GUI's PATH.
+#[cfg(unix)]
 fn extra_dirs() -> Vec<PathBuf> {
     let mut dirs = Vec::new();
     if let Some(h) = home() {
@@ -27,6 +28,43 @@ fn extra_dirs() -> Vec<PathBuf> {
         dirs.push(PathBuf::from(d));
     }
     dirs
+}
+
+/// Windows: the native installer (`~\.local\bin`), npm globals (`%APPDATA%\npm`) and Git for Windows.
+#[cfg(windows)]
+fn extra_dirs() -> Vec<PathBuf> {
+    let mut dirs = Vec::new();
+    if let Some(h) = home() {
+        dirs.push(h.join(".local").join("bin"));
+        dirs.push(h.join(".claude").join("local"));
+    }
+    let env = |k: &str| std::env::var_os(k).map(PathBuf::from);
+    dirs.extend(env("APPDATA").map(|d| d.join("npm")));
+    dirs.extend(env("ProgramFiles").map(|d| d.join("Git").join("cmd")));
+    dirs.extend(env("ProgramFiles").map(|d| d.join("Git").join("bin")));
+    dirs.extend(env("LOCALAPPDATA").map(|d| d.join("Programs").join("Git").join("cmd")));
+    dirs
+}
+
+/// Windows spawns console programs with a visible console window unless told otherwise.
+#[cfg(windows)]
+const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+
+/// Keeps a child from flashing a console window on Windows (no-op elsewhere).
+pub fn no_window(cmd: &mut Command) -> &mut Command {
+    #[cfg(windows)]
+    cmd.creation_flags(CREATE_NO_WINDOW);
+    cmd
+}
+
+/// [`no_window`] for `std::process::Command`.
+pub fn no_window_std(cmd: &mut std::process::Command) -> &mut std::process::Command {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+    cmd
 }
 
 fn is_executable(p: &Path) -> bool {
@@ -46,10 +84,12 @@ pub fn resolve_bin(name: &str) -> Option<PathBuf> {
     let from_path = std::env::var_os("PATH")
         .map(|p| std::env::split_paths(&p).collect::<Vec<_>>())
         .unwrap_or_default();
+    // Windows: `claude.exe` (native installer) or `claude.cmd` (npm); `.exe` wins.
+    let exts: &[&str] = if cfg!(windows) { &[".exe", ".cmd", ".bat"] } else { &[""] };
     from_path
         .into_iter()
         .chain(extra_dirs())
-        .map(|d| d.join(name))
+        .flat_map(|d| exts.iter().map(move |e| d.join(format!("{name}{e}"))))
         .find(|c| is_executable(c))
 }
 
@@ -61,7 +101,7 @@ pub fn resolve_claude() -> Result<PathBuf, String> {
     CLAUDE_BIN
         .get_or_init(|| {
             resolve_bin("claude").ok_or_else(|| {
-                "Couldn't find the `claude` executable in PATH or ~/.local/bin. Is Claude Code installed?"
+                "Couldn't find the `claude` executable in PATH or the usual install folders. Is Claude Code installed?"
                     .to_string()
             })
         })
@@ -101,6 +141,7 @@ pub fn augmented_path() -> OsString {
 pub fn claude_command() -> Result<Command, String> {
     let mut cmd = Command::new(resolve_claude()?);
     cmd.env("PATH", augmented_path()).stdin(Stdio::null());
+    no_window(&mut cmd);
     crate::metrics::record_claude_spawn();
     Ok(cmd)
 }

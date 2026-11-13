@@ -53,16 +53,16 @@ pub fn default_branch(dir: &Path) -> Option<String> {
 
 fn gh(dir: &Path, args: &[&str]) -> Result<GitOutput, String> {
     let bin = claude_bin::resolve_bin("gh").ok_or(NO_GH)?;
-    let child = Command::new(bin)
-        .current_dir(dir)
+    let mut cmd = Command::new(bin);
+    cmd.current_dir(dir)
         .args(args)
         .env("PATH", claude_bin::augmented_path())
         .env("GH_PROMPT_DISABLED", "1")
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|e| format!("Couldn't run gh: {e}"))?;
+        .stderr(Stdio::piped());
+    claude_bin::no_window_std(&mut cmd);
+    let child = cmd.spawn().map_err(|e| format!("Couldn't run gh: {e}"))?;
     wait_for_output(child, Instant::now() + GIT_TIMEOUT, "gh")
 }
 

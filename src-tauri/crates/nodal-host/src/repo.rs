@@ -47,7 +47,7 @@ pub fn test_commands(cwd: &Path) -> Vec<String> {
 /// `target/<profile>` from source (only if it was built: `cargo build --bin nodal-mcp`).
 pub fn nodal_mcp_bin() -> Option<PathBuf> {
     let exe = std::env::current_exe().ok()?;
-    Some(exe.parent()?.join("nodal-mcp")).filter(|p| p.is_file())
+    Some(exe.parent()?.join(format!("nodal-mcp{}", std::env::consts::EXE_SUFFIX))).filter(|p| p.is_file())
 }
 
 #[cfg(test)]
