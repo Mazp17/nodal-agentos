@@ -31,9 +31,11 @@ All releases come from `main`. We don't keep release branches.
 
 To release, review the release PR and squash-merge it once CI passes. release-please rewrites the PR whenever another PR lands, so edit its changelog (reword an entry, mention a database schema change, add something a `chore` PR changed for users) right before merging.
 
-The workflow needs **Settings → Actions → General → Allow GitHub Actions to create and approve pull requests** turned on, or it can't open the release PR. The same workflow then creates a draft release with its tag `vx.y.z` and calls the [release workflow](.github/workflows/release.yml). It checks that the tag matches the version in `package.json` and that the changelog has a section for it, builds a universal `.dmg` for Apple Silicon and Intel, computes its SHA-256 and uploads everything to the draft. The draft's notes are that version's changelog section plus the install instructions.
+The workflow needs **Settings → Actions → General → Allow GitHub Actions to create and approve pull requests** turned on, or it can't open the release PR. The same workflow then creates a draft release with its tag `vx.y.z` and calls the [release workflow](.github/workflows/release.yml). It checks that the tag matches the version in `package.json` and that the changelog has a section for it, builds a universal `.dmg` for Apple Silicon and Intel (macOS job) and a Windows x64 NSIS installer, `Nodal_x.y.z_x64-setup.exe` (Windows job), computes their SHA-256 and uploads everything to the draft in a final job that waits for both. The draft's notes are that version's changelog section plus the install instructions.
 
-The draft also carries what the in-app updater needs: the update bundle (`Nodal_x.y.z_universal.app.tar.gz`), its signature (`.sig`) and `latest.json`, with the version, the changelog section as release notes, the date and the bundle's URL and signature. Installed apps only see it once the draft is published.
+The draft also carries what the in-app updater needs: the update bundle (`Nodal_x.y.z_universal.app.tar.gz`), its signature (`.sig`) and `latest.json`, with the version, the changelog section as release notes, the date and, for `darwin-aarch64`, `darwin-x86_64` and `windows-x86_64`, the bundle's URL and signature. On Windows the updater installs the signed `-setup.exe` itself.
+
+On Windows, `src-tauri/tauri.windows.conf.json` (merged by Tauri on Windows only) selects the NSIS target and bundles `nodal-mcp` as a sidecar, so the installer puts `nodal-mcp.exe` next to `Nodal.exe`. The workflow builds it and stages it as `src-tauri/binaries/nodal-mcp-x86_64-pc-windows-msvc.exe` before `tauri build`. Installed apps only see it once the draft is published.
 
 If the build fails for a reason outside the code (a runner or network hiccup), rebuild the tag from Actions → Release → Run workflow, with the tag as input. A failure that needs a code change is handled like a broken release, below.
 
@@ -45,7 +47,7 @@ gh release delete vx.y.z --yes
 
 ## Smoke test
 
-Before publishing, check the downloaded build on a Mac:
+Before publishing, check the downloaded build on a Mac, and the Windows installer on a Windows 10/11 x64 machine (SmartScreen: More info → Run anyway; the app starts without a console window, `nodal-mcp.exe` sits next to `Nodal.exe`, and updating from the previous version works):
 
 - [ ] It installs, and opens after running `xattr -dr com.apple.quarantine /Applications/Nodal.app`.
 - [ ] Nodal → About Nodal, the sidebar footer and Settings → Updates show the new version.
@@ -66,3 +68,5 @@ The key pair was made with `pnpm tauri signer generate`. Keep a backup of the pr
 The app isn't signed with an Apple Developer ID or notarized, because that requires a paid Apple developer account. It is ad-hoc signed, which is enough for it to run on Apple Silicon, but macOS still blocks the first launch until the quarantine flag is removed. The release notes and the README explain how to do that.
 
 If the project gets a Developer ID later, signing and notarization only need the certificates added as repository secrets. The rest of this process stays the same.
+
+The Windows installer isn't code-signed either, so SmartScreen shows "Windows protected your PC" until the build gains reputation; users click More info → Run anyway. To sign it later, buy a certificate (or use Azure Trusted Signing), add it as secrets and set `bundle.windows.signCommand` (or `certificateThumbprint`) in `src-tauri/tauri.windows.conf.json`. The updater signature above is independent of it.

@@ -27,6 +27,9 @@ dist-ssr
 .env
 .env.*
 
+# nodal-mcp sidecar staged by the Windows build (see release.yml)
+src-tauri/binaries/
+
 # worktrees de agentes de Claude Code
 .claude/
 !src-tauri/src/runs/fixtures/workflows/repo/.claude/
