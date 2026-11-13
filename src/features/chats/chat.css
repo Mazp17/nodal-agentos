@@ -322,8 +322,8 @@
 .chat-tabs { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .chat-body { flex: 1; min-height: 0; display: flex; }
 .files-panel { width: 260px; flex: none; display: flex; flex-direction: column; min-height: 0; background: var(--bg-rail); border-left: 1px solid var(--border); }
-.files-head { flex: none; height: 40px; display: flex; align-items: center; gap: var(--sp-3); padding: 0 var(--sp-2) 0 var(--sp-3); border-bottom: 1px solid var(--border); }
-.files-title { flex: 1; min-width: 0; text-align: right; font-size: var(--fs-2xs); color: var(--text-muted); }
+.files-head { flex: none; height: 40px; display: flex; align-items: center; gap: var(--sp-3); padding: 0 var(--sp-2) 0 var(--sp-1); border-bottom: 1px solid var(--border); }
+.files-close { margin-left: auto; }
 .files-tree { flex: 1; min-height: 0; overflow: auto; margin: 0; padding: var(--sp-2); list-style: none; }
 .files-tree ul { margin: 0; padding: 0; list-style: none; }
 .files-row {
@@ -371,12 +371,13 @@
 .files-file.on { background: var(--surface-selected); color: var(--text-strong); }
 .files-file.on .files-icon, .files-row:hover .files-icon { color: var(--accent); }
 .files-changes .files-row { padding-left: 8px; }
-.files-modes { flex: none; display: inline-flex; padding: 2px; border-radius: 999px; border: 1px solid var(--border-2); background: var(--fill-1); }
-.files-mode { height: 24px; display: inline-flex; align-items: center; gap: 5px; padding: 0 9px 0 7px; border: 0; border-radius: 999px; background: transparent; color: var(--text-muted); font: inherit; font-size: var(--fs-2xs); font-weight: var(--fw-medium); cursor: pointer; transition: background var(--dur-fast, 120ms), color var(--dur-fast, 120ms); }
+.files-modes { flex: none; align-self: stretch; display: flex; margin-bottom: -1px; }
+/* Tabs flush with the header, like an editor's panel tabs: the active one is underlined. */
+.files-mode { display: inline-flex; align-items: center; padding: 0 10px; border: 0; border-bottom: 2px solid transparent; border-radius: 0; background: transparent; color: var(--text-muted); cursor: pointer; transition: color var(--dur-fast, 120ms), border-color var(--dur-fast, 120ms); }
+.files-mode svg { width: 16px; height: 16px; }
 .files-mode:hover { color: var(--text); }
-.files-mode.on { background: var(--surface-selected); color: var(--text-strong); box-shadow: var(--shadow-raised); }
-.files-mode.on svg { color: var(--accent); }
-.files-mode:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.files-mode.on { color: var(--text-strong); border-bottom-color: var(--accent); }
+.files-mode:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .files-changes-note { margin: 0; padding: var(--sp-3) var(--sp-5); }
 .files-change-dir { min-width: 0; font-size: var(--fs-xs); color: var(--text-dim); }
 .files-change-stat { margin-left: auto; flex: none; display: flex; gap: 4px; font-size: var(--fs-xs); }
@@ -482,35 +483,35 @@
 .file-view-conflict { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-3); }
 .file-view-conflict span { flex: 1; min-width: 200px; }
 
-/* Checkout picker (repo or one of its worktrees) under the files panel header. */
-.files-root { flex: none; padding: var(--sp-3) var(--sp-3) var(--sp-2); }
+/* Checkout picker (repo or one of its worktrees): a flat row under the files panel header,
+   name then branch on one line; the path is in the tooltip. */
+.files-root { flex: none; padding: var(--sp-1) var(--sp-2); border-bottom: 1px solid var(--border); }
 .files-root-btn {
   width: 100%;
-  min-height: 40px;
+  height: 28px;
   display: flex;
   align-items: center;
   gap: var(--sp-3);
-  padding: var(--sp-2) var(--sp-3);
-  border: 1px solid var(--border-2);
-  border-radius: 12px;
-  background: var(--fill-1);
+  padding: 0 var(--sp-3);
+  border: 0;
+  border-radius: var(--r-lg);
+  background: transparent;
   color: var(--text-3);
   font: inherit;
   text-align: left;
   cursor: pointer;
 }
 .files-root-btn:hover,
-.files-root-btn[data-state="open"] { background: var(--fill-4); border-color: var(--border-3); }
-.files-root-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
-.files-root-icon { flex: none; color: var(--accent); }
-.files-root-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
-.files-root-name { font-size: var(--fs-sm); font-weight: var(--fw-medium); color: var(--text-2); }
-.files-root-branch { font-family: var(--font-mono); font-size: var(--fs-2xs); color: var(--text-muted); }
-.files-root-tag { flex: none; padding: 1px 6px; border-radius: 4px; background: var(--fill-5); font-size: var(--fs-2xs); color: var(--text-4); }
+.files-root-btn[data-state="open"] { background: var(--fill-4); }
+.files-root-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.files-root-icon { flex: none; color: var(--text-dim); }
+.files-root.wt .files-root-icon { color: var(--accent); }
+.files-root-name { flex: 1; min-width: 0; font-family: var(--font-mono); font-size: var(--fs-xs); color: var(--text-2); }
+.files-root-tag { flex: none; padding: 1px 6px; border-radius: 4px; background: var(--fill-5); font-size: var(--fs-2xs); color: var(--text-muted); }
 .files-root-caret { flex: none; color: var(--text-dim); }
-/* The menu matches the trigger's width (radix exposes it) and wraps nothing: names ellipsize. */
+/* The menu matches the trigger's width (radix exposes it); names ellipsize. */
 .files-root-menu { width: var(--radix-dropdown-menu-trigger-width); max-width: 340px; max-height: 360px; }
-.files-root-menu .files-root-item { height: auto; min-height: 38px; align-items: center; padding-top: 4px; padding-bottom: 4px; }
+.files-root-menu .files-root-item { gap: var(--sp-3); }
 
 /* Changed file row: a revert button shows on hover/focus (and stays for keyboard users). */
 .files-change { position: relative; display: flex; align-items: center; }
