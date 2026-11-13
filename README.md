@@ -5,11 +5,11 @@
 [![Platform: macOS](https://img.shields.io/badge/platform-macOS-lightgrey?logo=apple)](#install)
 [![License: MIT](https://img.shields.io/github/license/Mazp17/nodal-agentos)](LICENSE.md)
 
-**Agent OS for Claude.** Plan tasks on a board, hand them to Claude Code agents and follow every run across all your repos.
+**A desktop workspace for Claude Code.** Chat with Claude across all your projects, answer what it needs from one inbox, and turn conversations into tasks that run in their own worktree.
 
 [Español](README.es.md)
 
-![Nodal board](docs/screenshots/board.png)
+![Nodal overview](docs/screenshots/overview.png)
 
 > Early alpha, macOS only. Independent project, not affiliated with Anthropic.
 
@@ -28,16 +28,15 @@ You need [Claude Code](https://docs.claude.com/en/docs/claude-code) installed an
 
 ## What it does
 
-- **Board of tasks** grouped in projects, each project with one or more local repos. Plans in markdown, acceptance criteria, priority and labels.
-- **Chats per project**: talk to Claude about the whole project or one repo, approve its edits and commands from the app, and turn the conversation into tasks with one click. Sessions show up in `claude --resume`.
-- **Delegate** each task to one of your agents (`~/.claude/agents`, the repo's or a plugin), a workflow, or plain Claude.
-- **Isolated by default**: every task gets its own git worktree and branch, so several run on the same repo at once.
-- **Finish** with uncommitted changes, a commit, or a pull request. Local work merges back into its base branch from the task panel, without touching your checkout.
-- **Linear, optional**: import issues, route them to repos and keep statuses in sync. More task managers are planned.
+- **Chats per project**: talk to Claude about a whole project or one repo, with your own agent (`~/.claude/agents`, the repo's or a plugin's), model and effort. Tool calls, diffs and subagents show live. Sessions show up in `claude --resume`.
+- **Overview inbox**: approvals and failed chats waiting on you, what just finished, your projects, and a summary of the tokens Claude Code used on this machine.
+- **Tasks as chats**: plan tasks on a board (markdown plans, acceptance criteria, priority, labels). Opening a task starts a chat in its own git worktree and branch, so several run on the same repo at once; its status follows the chat.
+- **Git in the app**: files panel and editor, commit all or picked files, diff against the branch base, open a pull request with `gh` or ask the chat.
+- **Linear, optional**: import issues, route them to repos and keep statuses in sync.
 
 ## How it works
 
-Nodal drives the `claude` CLI you already have (`claude --bg`, `--agent`, `/<workflow>`) and reads progress from `claude agents --json` and the session files under `~/.claude/projects`. Those files are an undocumented internal format, so a Claude Code update can break the parsing.
+Nodal drives the `claude` CLI you already have, in `claude -p` stream-json mode, and reads history and token usage from the session files under `~/.claude/projects`. Parts of that protocol and those files are undocumented, so a Claude Code update can break them.
 
 Everything stays on your Mac: an SQLite database, worktrees under `~/.nodal`, API keys in the Keychain. No network server, no telemetry.
 

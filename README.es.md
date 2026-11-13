@@ -5,11 +5,11 @@
 [![Platform: macOS](https://img.shields.io/badge/platform-macOS-lightgrey?logo=apple)](#instalación)
 [![License: MIT](https://img.shields.io/github/license/Mazp17/nodal-agentos)](LICENSE.md)
 
-**Agent OS for Claude.** Planifica tareas en un board, delégalas a agentes de Claude Code y sigue cada run en todos tus repos.
+**Un espacio de trabajo de escritorio para Claude Code.** Chatea con Claude en todos tus proyectos, responde lo que necesita desde una sola bandeja y convierte conversaciones en tareas que corren en su propio worktree.
 
 [English](README.md)
 
-![Board de Nodal](docs/screenshots/board.png)
+![Overview de Nodal](docs/screenshots/overview.png)
 
 > Alpha temprana, solo macOS. Proyecto independiente, sin relación con Anthropic.
 
@@ -28,17 +28,15 @@ Necesitas [Claude Code](https://docs.claude.com/en/docs/claude-code) instalado y
 
 ## Qué hace
 
-- **Board de tareas** agrupadas en proyectos, cada uno con uno o más repos locales. Planes en markdown, criterios de aceptación, prioridad y etiquetas.
-- **Delega** cada tarea a uno de tus agentes (`~/.claude/agents`, los del repo o de un plugin), a un workflow o a Claude a secas.
-- **Aislado por defecto**: cada tarea tiene su propio worktree y rama de git, así varias corren a la vez en el mismo repo.
-- **Termina** con los cambios sin commitear, con un commit o con un pull request. El trabajo local se mergea a su rama base desde el panel de la tarea, sin tocar tu checkout.
-- **Revisión automática** contra los criterios de aceptación: si pasa va a In Review, si no a Blocked con los hallazgos.
-- **Una cola** con límite de concurrencia global, y cada run en vivo: fases, subagentes, transcript, tokens y diff.
-- **Linear, opcional**: importa issues, las rutea a repos y mantiene los estados sincronizados. Hay más task managers planeados.
+- **Chats por proyecto**: habla con Claude sobre un proyecto entero o un repo, con tu propio agente (`~/.claude/agents`, los del repo o de un plugin), modelo y esfuerzo. Las llamadas a herramientas, los diffs y los subagentes se ven en vivo. Las sesiones aparecen en `claude --resume`.
+- **Bandeja en el Overview**: aprobaciones y chats fallidos que esperan por ti, lo que acaba de terminar, tus proyectos y un resumen de los tokens que Claude Code usó en esta máquina.
+- **Tareas como chats**: planifica tareas en un board (planes en markdown, criterios de aceptación, prioridad, etiquetas). Abrir una tarea inicia un chat en su propio worktree y rama de git, así varias corren a la vez en el mismo repo; su estado sigue al chat.
+- **Git en la app**: panel de archivos y editor, commit de todo o de archivos elegidos, diff contra la base de la rama, y pull requests con `gh` o pidiéndoselo al chat.
+- **Linear, opcional**: importa issues, las rutea a repos y mantiene los estados sincronizados.
 
 ## Cómo funciona
 
-Nodal maneja el CLI `claude` que ya tienes (`claude --bg`, `--agent`, `/<workflow>`) y lee el progreso de `claude agents --json` y de los archivos de sesión en `~/.claude/projects`. Esos archivos son un formato interno sin documentar, así que una actualización de Claude Code puede romper la lectura.
+Nodal maneja el CLI `claude` que ya tienes, en modo stream-json de `claude -p`, y lee el historial y el uso de tokens de los archivos de sesión en `~/.claude/projects`. Partes de ese protocolo y de esos archivos no están documentadas, así que una actualización de Claude Code puede romperlas.
 
 Todo queda en tu Mac: una base SQLite, los worktrees en `~/.nodal` y las API keys en el Llavero. Sin servidor ni telemetría.
 
