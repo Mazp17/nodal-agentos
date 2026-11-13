@@ -5,6 +5,7 @@ edition = "2021"
 publish = false
 
 [dependencies]
+dunce = { workspace = true }
 nodal-domain = { workspace = true }
 rusqlite = { workspace = true }
 serde = { workspace = true }
