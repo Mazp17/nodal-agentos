@@ -107,10 +107,10 @@ jobs:
         run: cargo test -p nodal-domain --test architecture --locked
 
       # Resolver 2 can merge dev-dependency features (e.g. test-support) into the
-      # normal build graph; building lib+bins without dev-deps catches that leak.
-      - name: Build without dev-dependencies
+      # normal build graph; checking lib+bins without dev-deps catches that leak.
+      - name: Check without dev-dependencies
         working-directory: src-tauri
-        run: cargo build --workspace --lib --bins --locked
+        run: cargo check --workspace --lib --bins --locked
 
       - name: cargo-deny (bans)
         run: cargo deny --manifest-path src-tauri/Cargo.toml check bans
