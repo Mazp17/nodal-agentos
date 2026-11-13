@@ -1,15 +1,5 @@
-use std::path::PathBuf;
-
 use super::*;
-use crate::claude::fs::paths::{claude_config_dir, project_slug};
 use crate::testutil::TempDir;
-
-const SANDBOX: &str = "/Users/me/Code/nodal-sandbox";
-const DONE_SESSION: &str = "ddb91222-57b2-4ae4-a0bb-d1c5993dc1c8";
-
-fn fixtures_projects() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src/claude/fixtures/projects")
-}
 
 #[test]
 fn session_title_prefers_the_last_rename_then_the_last_ai_title() {
@@ -62,70 +52,6 @@ fn session_file_edit_results_carry_their_diff() {
         (last.text.as_str(), last.new_no),
         ("Modificado desde Nodal", Some(19))
     );
-}
-
-#[test]
-fn transcript_from_real_fixture() {
-    let dir = fixtures_projects()
-        .join(project_slug(SANDBOX))
-        .join(DONE_SESSION);
-    let t = read_agent_transcript(&dir, "wf_2450b7a8-254", "a1007a0f03db17270", 200)
-        .unwrap()
-        .unwrap();
-    assert_eq!(t.label.as_deref(), Some("revisar:volcanes-famosos"));
-    assert_eq!(t.model.as_deref(), Some("claude-sonnet-5"));
-    assert_eq!(t.phase.as_deref(), Some("Revisar"));
-    // Without the harness wrapper and without the indentation.
-    let prompt = t.prompt.unwrap();
-    assert!(
-        prompt.starts_with("Leé /Users/me/Code/nodal-sandbox/demo-out/04-volcanes-famosos.md"),
-        "{prompt}"
-    );
-    assert!(!prompt.contains("Workflow harness"));
-    // Empty (signed) thinking is skipped: Bash, text, StructuredOutput.
-    assert_eq!(t.total_items, 3);
-    assert_eq!(t.tool_calls, 2);
-    assert_eq!(t.omitted, 0);
-    match &t.items[0] {
-        TranscriptItem::ToolUse {
-            name,
-            summary,
-            result,
-            ..
-        } => {
-            assert_eq!(name, "Bash");
-            assert!(summary
-                .as_deref()
-                .unwrap()
-                .starts_with("cat /Users/me/Code/nodal-sandbox/demo-out/04"));
-            let r = result.as_ref().unwrap();
-            assert!(r.text.starts_with("# Volcanes famosos del mundo"));
-            assert!(!r.is_error);
-        }
-        other => panic!("{other:?}"),
-    }
-    assert!(
-        matches!(&t.items[1], TranscriptItem::Text { text, .. } if text.starts_with("160 palabras"))
-    );
-    assert!(t.final_output.unwrap().contains("\"ok\": true"));
-    assert!(!t.partial);
-
-    // Limit: only the last N.
-    let t = read_agent_transcript(&dir, "wf_2450b7a8-254", "a1007a0f03db17270", 1)
-        .unwrap()
-        .unwrap();
-    assert_eq!((t.items.len(), t.omitted, t.total_items), (1, 2, 3));
-    assert!(
-        matches!(&t.items[0], TranscriptItem::ToolUse { name, .. } if name == "StructuredOutput")
-    );
-
-    // No file → None; ids with paths → error.
-    assert_eq!(
-        read_agent_transcript(&dir, "wf_2450b7a8-254", "nope", 10).unwrap(),
-        None
-    );
-    assert!(read_agent_transcript(&dir, "wf_2450b7a8-254", "../x", 10).is_err());
-    assert!(read_agent_transcript(&dir, "..", "a1", 10).is_err());
 }
 
 #[test]
@@ -207,86 +133,4 @@ fn session_transcript_skips_sidechains() {
             .is_none()
     );
     fs::remove_dir_all(&dir).ok();
-}
-
-/// Every workflow transcript on this machine: none fails, and timings are measured.
-#[test]
-#[ignore]
-fn real_transcripts_on_disk() {
-    let projects = claude_config_dir().unwrap().join("projects");
-    let (mut n, mut slowest) = (0, (std::time::Duration::ZERO, PathBuf::new()));
-    for proj in fs::read_dir(&projects).unwrap().flatten() {
-        for sess in fs::read_dir(proj.path()).into_iter().flatten().flatten() {
-            let wfs = sess.path().join("subagents").join("workflows");
-            for wf in fs::read_dir(&wfs).into_iter().flatten().flatten() {
-                let wf_id = wf.file_name().to_string_lossy().into_owned();
-                for f in fs::read_dir(wf.path()).into_iter().flatten().flatten() {
-                    let name = f.file_name().to_string_lossy().into_owned();
-                    let Some(agent) = name
-                        .strip_prefix("agent-")
-                        .and_then(|s| s.strip_suffix(".jsonl"))
-                    else {
-                        continue;
-                    };
-                    let t0 = std::time::Instant::now();
-                    let t = read_agent_transcript(&sess.path(), &wf_id, agent, 200)
-                        .unwrap()
-                        .unwrap();
-                    let dt = t0.elapsed();
-                    assert!(t.items.len() <= 200);
-                    if dt > slowest.0 {
-                        slowest = (dt, f.path());
-                    }
-                    n += 1;
-                }
-            }
-        }
-    }
-    eprintln!(
-        "{n} transcripts; slowest {:?} {}",
-        slowest.0,
-        slowest.1.display()
-    );
-}
-
-#[test]
-fn count_new_tool_calls_is_incremental() {
-    let t = TempDir::new("count-new-tool-calls");
-    let f = t.0.join("s.jsonl");
-    let assistant = |id: &str| {
-        format!(
-            r#"{{"type":"assistant","message":{{"content":[{{"type":"tool_use","id":"{id}","name":"Bash","input":{{}}}}]}}}}"#
-        )
-    };
-    fs::write(&f, format!("{}\n{}\n", assistant("t1"), assistant("t2"))).unwrap();
-    let (n, offset) = count_new_tool_calls(&f, 0).unwrap();
-    assert_eq!(n, 2);
-    // Steady state: nothing new appended, the cursor doesn't recount what it already read.
-    assert_eq!(count_new_tool_calls(&f, offset).unwrap(), (0, offset));
-    // New data appended: only the new line is counted.
-    let mut file = fs::OpenOptions::new().append(true).open(&f).unwrap();
-    use std::io::Write;
-    writeln!(file, "{}", assistant("t3")).unwrap();
-    let (n2, offset2) = count_new_tool_calls(&f, offset).unwrap();
-    assert_eq!(n2, 1);
-    assert!(offset2 > offset);
-}
-
-#[test]
-fn count_new_tool_calls_ignores_sidechains_and_partial_tail_lines() {
-    let t = TempDir::new("count-new-tool-calls-edge");
-    let f = t.0.join("s.jsonl");
-    let sidechain = r#"{"type":"assistant","isSidechain":true,"message":{"content":[{"type":"tool_use","id":"s1","name":"Bash","input":{}}]}}"#;
-    let main = r#"{"type":"assistant","message":{"content":[{"type":"tool_use","id":"m1","name":"Bash","input":{}}]}}"#;
-    // A cut-off last line (still being written) isn't counted, and the cursor stays before it.
-    fs::write(&f, format!("{sidechain}\n{main}\n{{\"type\":\"assist")).unwrap();
-    let (n, offset) = count_new_tool_calls(&f, 0).unwrap();
-    assert_eq!(n, 1);
-    assert_eq!(offset, (sidechain.len() + main.len() + 2) as u64);
-}
-
-#[test]
-fn count_new_tool_calls_missing_file_reports_no_progress() {
-    let t = TempDir::new("count-new-tool-calls-missing");
-    assert_eq!(count_new_tool_calls(&t.0.join("nope.jsonl"), 7).unwrap(), (0, 7));
 }

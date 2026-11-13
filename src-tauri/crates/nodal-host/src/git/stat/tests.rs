@@ -49,3 +49,17 @@ fn not_a_repo_is_zeros() {
     assert!(!is_worktree(&t.0));
 }
 
+
+#[test]
+fn a_nested_repo_is_not_a_change() {
+    if !git_available() {
+        eprintln!("git not available: skipping");
+        return;
+    }
+    let t = TempDir::new("stat-nested");
+    let repo = t.0.join("repo");
+    init_repo(&repo);
+    // What Claude Code's own worktrees look like: a repo inside the repo, untracked.
+    init_repo(&repo.join(".claude/worktrees/wt"));
+    assert_eq!(changes(&repo), DiffStat::default());
+}

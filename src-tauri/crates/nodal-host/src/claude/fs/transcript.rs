@@ -1,7 +1,7 @@
 //! Full subagent/session transcript parsing, and the session title Claude Code assigns.
 
 use std::fs;
-use std::io::{self, Read, Seek, SeekFrom};
+use std::io::{Read, Seek, SeekFrom};
 use std::path::Path;
 
 use serde::Deserialize;
@@ -9,7 +9,7 @@ use serde_json::Value;
 
 use nodal_domain::diff::{DiffFileStatus, DiffHunk, DiffLine, DiffLineKind, FileDiff};
 use nodal_domain::model::claude::{ToolPatch, ToolResultInfo, Transcript, TranscriptItem};
-use nodal_domain::sessions::transcript::{clip, is_valid_path_id, TEXT_MAX};
+use nodal_domain::sessions::transcript::{clip, TEXT_MAX};
 
 use super::last_tool::tool_summary_n;
 use super::{lenient, truncate};
@@ -37,17 +37,6 @@ struct RawTranscriptLine {
 struct RawToolUseResult {
     #[serde(default, rename = "toolUseResult")]
     tool_use_result: Option<Value>,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct RawAgentMeta {
-    #[serde(default, deserialize_with = "lenient")]
-    model: Option<String>,
-    #[serde(default, deserialize_with = "lenient")]
-    description: Option<String>,
-    #[serde(default, deserialize_with = "lenient")]
-    workflow_phase: Option<String>,
 }
 
 /// The result of parsing the transcript text.
@@ -514,44 +503,6 @@ pub(crate) fn read_transcript_text(path: &Path) -> std::io::Result<(String, bool
     Ok((format!("{head}\n{tail}"), true, len))
 }
 
-/// Transcript of agent `agent_id` of workflow `wf_id`. `Ok(None)` if there's no file.
-/// The ids must already be validated with `is_valid_path_id`.
-pub fn read_agent_transcript(
-    session_dir: &Path,
-    wf_id: &str,
-    agent_id: &str,
-    limit: usize,
-) -> Result<Option<Transcript>, String> {
-    if !is_valid_path_id(wf_id) || !is_valid_path_id(agent_id) {
-        return Err("Invalid workflow or agent id.".into());
-    }
-    let dir = super::workflow_detail::wf_live_dir(session_dir, wf_id);
-    let path = dir.join(format!("agent-{agent_id}.jsonl"));
-    let (text, partial, bytes) = match read_transcript_text(&path) {
-        Ok(r) => r,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-        Err(e) => return Err(format!("Couldn't read the transcript: {e}")),
-    };
-    let meta = fs::read_to_string(dir.join(format!("agent-{agent_id}.meta.json")))
-        .ok()
-        .and_then(|t| serde_json::from_str::<RawAgentMeta>(&t).ok());
-    let parsed = parse_transcript(&text, limit);
-    Ok(Some(Transcript {
-        agent_id: agent_id.to_string(),
-        label: meta.as_ref().and_then(|m| m.description.clone()),
-        model: meta.as_ref().and_then(|m| m.model.clone()),
-        phase: meta.and_then(|m| m.workflow_phase),
-        prompt: parsed.prompt,
-        omitted: (parsed.total - parsed.items.len()) as u32,
-        total_items: parsed.total as u32,
-        tool_calls: parsed.tool_calls as u32,
-        items: parsed.items,
-        final_output: parsed.final_output,
-        partial,
-        bytes,
-    }))
-}
-
 /// Without the sidechain lines (subagents launched with `Task` inside the session). Claude
 /// Code writes compact JSON, so searching for the literal is enough.
 fn main_thread_lines(text: &str) -> String {
@@ -590,57 +541,6 @@ pub fn read_session_transcript(
         partial,
         bytes,
     }))
-}
-
-/// `tool_use` blocks (with a `name`, like `assistant_item` requires) of one main-thread
-/// assistant line. Cheap substring filter before parsing, like the rest of this module.
-fn tool_use_count_in_line(line: &str) -> u32 {
-    if line.contains("\"isSidechain\":true") || !line.contains("\"assistant\"") || !line.contains("\"tool_use\"") {
-        return 0;
-    }
-    let Ok(entry) = serde_json::from_str::<RawTranscriptLine>(line) else {
-        return 0;
-    };
-    if entry.kind.as_deref() != Some("assistant") {
-        return 0;
-    }
-    let Some(Value::Array(blocks)) = entry.message.as_ref().and_then(|m| m.get("content")) else {
-        return 0;
-    };
-    blocks
-        .iter()
-        .filter(|b| {
-            b.get("type").and_then(Value::as_str) == Some("tool_use")
-                && b.get("name").and_then(Value::as_str).is_some()
-        })
-        .count() as u32
-}
-
-/// New tool calls appended to the main transcript since byte offset `from` (`0`: count the
-/// whole file), and the offset to resume from next time: an incremental cursor for polling
-/// an active run's progress instead of re-parsing the transcript on every poll (P03). Only
-/// complete lines are counted; a concurrent partial write at the tail is left for the next
-/// call. `from` past the file's current length restarts from the beginning (the file was
-/// replaced). `Ok((0, from))` if there's no file yet.
-pub fn count_new_tool_calls(path: &Path, from: u64) -> io::Result<(u32, u64)> {
-    let mut file = match fs::File::open(path) {
-        Ok(f) => f,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok((0, from)),
-        Err(e) => return Err(e),
-    };
-    let len = file.metadata()?.len();
-    let start = from.min(len);
-    file.seek(SeekFrom::Start(start))?;
-    let mut buf = Vec::new();
-    file.read_to_end(&mut buf)?;
-    let Some(last_nl) = buf.iter().rposition(|&b| b == b'\n') else {
-        return Ok((0, start));
-    };
-    let count = String::from_utf8_lossy(&buf[..last_nl])
-        .lines()
-        .map(tool_use_count_in_line)
-        .sum();
-    Ok((count, start + last_nl as u64 + 1))
 }
 
 #[cfg(test)]

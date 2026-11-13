@@ -136,6 +136,7 @@ pub fn status(repo: &Path, wt: Option<&WorktreeRef>) -> Result<WorktreeStatus, S
     let exists = is_live_worktree(Path::new(&wt.path));
     let mut st = WorktreeStatus {
         exists,
+        has_remote: !ok(repo, &["remote"])?.trim().is_empty(),
         branch: Some(wt.branch.clone()),
         base: Some(wt.base.clone()),
         ..Default::default()

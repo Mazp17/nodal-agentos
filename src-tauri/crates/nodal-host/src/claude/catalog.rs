@@ -1,5 +1,5 @@
-//! Executor catalog: agents (`~/.claude/agents`, `<repo>/.claude/agents` and those of
-//! enabled plugins), workflows (`claude::workflows`) and Claude.
+//! Agent catalog: agents (`~/.claude/agents`, `<repo>/.claude/agents` and those of
+//! enabled plugins).
 //!
 //! Plugins (verified on this machine with Claude Code 2.1.281):
 //! - enabled: `enabledPlugins` (`"<plugin>@<marketplace>": true`) in
@@ -16,11 +16,10 @@ use std::time::SystemTime;
 
 use serde_json::Value;
 
-use nodal_domain::model::executors::{is_valid_agent_name, AgentDef, ExecutorInfo};
-use nodal_domain::model::{AgentSource, Executor};
+use nodal_domain::model::executors::{is_valid_agent_name, AgentDef};
+use nodal_domain::model::AgentSource;
 use nodal_domain::util::clip_chars;
 
-use super::workflows::{self, WorkflowInfo, WorkflowSource};
 
 const DESCRIPTION_MAX: usize = 400;
 const AGENT_FILE_MAX: u64 = 256 * 1024;
@@ -383,59 +382,6 @@ pub fn list_agents(claude_dir: Option<&Path>, repo: Option<&Path>) -> Vec<AgentD
     }
     out.sort_by(|a, b| a.name.cmp(&b.name));
     out
-}
-
-// ---------- Catalog ----------
-
-pub fn workflow_info(w: &WorkflowInfo) -> ExecutorInfo {
-    ExecutorInfo {
-        executor: Executor::Workflow {
-            name: w.name.clone(),
-        },
-        description: w.description.clone(),
-        tools: None,
-        manages_source: w.manages_source.clone(),
-        reviews: w.reviews,
-        path: Some(w.path.clone()),
-        source: Some(match w.source {
-            WorkflowSource::User => AgentSource::User,
-            WorkflowSource::Repo => AgentSource::Repo,
-        }),
-    }
-}
-
-/// Claude first, then agents and workflows (each group by name).
-pub fn catalog(claude_dir: Option<&Path>, repo: Option<&Path>) -> Vec<ExecutorInfo> {
-    let mut out = vec![ExecutorInfo {
-        executor: Executor::Claude,
-        description: Some("A regular Claude Code session with the task as the prompt.".into()),
-        tools: None,
-        manages_source: None,
-        reviews: false,
-        path: None,
-        source: None,
-    }];
-    out.extend(list_agents(claude_dir, repo).into_iter().map(ExecutorInfo::from));
-    let wf_dir = claude_dir.map(|d| d.join("workflows"));
-    out.extend(
-        workflows::list_from(wf_dir.as_deref(), repo)
-            .iter()
-            .map(workflow_info),
-    );
-    out
-}
-
-/// Workflow meta (`managesSource`, `reviews`) by name, if it's in the catalog.
-pub fn find_workflow(
-    claude_dir: Option<&Path>,
-    repo: Option<&Path>,
-    name: &str,
-) -> Option<ExecutorInfo> {
-    let wf_dir = claude_dir.map(|d| d.join("workflows"));
-    workflows::list_from(wf_dir.as_deref(), repo)
-        .iter()
-        .find(|w| w.name == name)
-        .map(workflow_info)
 }
 
 #[cfg(test)]

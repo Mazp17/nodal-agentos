@@ -259,3 +259,20 @@ fn version_changes_with_same_size_edits() {
     std::fs::File::options().write(true).open(repo.join("a.txt")).unwrap().set_modified(mtime).unwrap();
     assert_ne!(read_file(&repo, "a.txt").unwrap().version, v1);
 }
+
+#[test]
+fn list_files_has_tracked_and_untracked_but_not_ignored() {
+    if !crate::testutil::git_available() {
+        return;
+    }
+    let t = crate::testutil::TempDir::new("ls-files");
+    let repo = t.0.join("repo");
+    crate::testutil::init_repo(&repo);
+    std::fs::write(repo.join(".gitignore"), "*.log\n").unwrap();
+    std::fs::write(repo.join("new.txt"), "x").unwrap();
+    std::fs::write(repo.join("x.log"), "x").unwrap();
+    let files = list_files(&repo).unwrap();
+    assert!(files.contains(&"new.txt".to_string()));
+    assert!(files.contains(&".gitignore".to_string()));
+    assert!(!files.contains(&"x.log".to_string()));
+}

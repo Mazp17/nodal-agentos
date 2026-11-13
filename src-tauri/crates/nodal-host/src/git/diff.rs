@@ -50,6 +50,28 @@ pub fn commits(dir: &Path, base: &str, head: &str) -> Result<Vec<CommitInfo>, St
     Ok(parse_log(&out))
 }
 
+/// Commits of `dir`'s HEAD: those not in `base`, or the latest `LOG_MAX` without one.
+pub fn log(dir: &Path, base: Option<&str>) -> Result<Vec<CommitInfo>, String> {
+    if base.is_some_and(|b| b.starts_with('-')) {
+        return Err("Invalid branch name.".into());
+    }
+    let range = base.map_or_else(|| "HEAD".to_string(), |b| format!("{b}..HEAD"));
+    let max = LOG_MAX.to_string();
+    let out = ok(dir, &["log", "--no-color", "--format=%H%x1f%h%x1f%an%x1f%at%x1f%s", "-n", &max, &range, "--"])?;
+    Ok(parse_log(&out))
+}
+
+/// Latest commits listed for a checkout without a base.
+pub const LOG_MAX: usize = 50;
+
+/// One commit's patch (vs its first parent; the root commit vs nothing).
+pub fn show(dir: &Path, sha: &str) -> Result<String, String> {
+    if !(4..=40).contains(&sha.len()) || !sha.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return Err("Invalid commit.".into());
+    }
+    ok(dir, &["show", "--no-color", "--format=", "--patch", "-M", "--first-parent", sha, "--"])
+}
+
 /// Branch checked out in `dir`; `None` with a detached HEAD.
 pub fn current_branch(dir: &Path) -> Option<String> {
     let b = ok(dir, &["rev-parse", "--abbrev-ref", "HEAD"]).ok()?;
@@ -150,8 +172,11 @@ fn parse_status(cwd: &Path, raw: &str) -> StatusSnapshot {
             hash_metadata(cwd, path, &mut hasher);
         }
         if let Some(path) = e.strip_prefix("? ") {
-            untracked.push(path.to_string());
-            dirty = true;
+            // A trailing `/` is a nested repo (e.g. a worktree inside the repo): not a change here.
+            if !path.ends_with('/') {
+                untracked.push(path.to_string());
+                dirty = true;
+            }
         } else if e.starts_with("2 ") {
             dirty = true;
             entries.next(); // Rename/copy entries append the orig path as its own NUL field.
