@@ -10,6 +10,7 @@ import { Kbd, KbdGroup } from "../ui/Kbd";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../ui/Tooltip";
 import { readJsonPref, writePref } from "./storage";
 import type { ProjectSection } from "./useNav";
+import { projectColor } from "../features/projects/create";
 
 export type SideMode = "chat" | "tasks";
 type IconName = "update" | "overview" | "chat" | "board" | "settings" | "plus" | "chevron" | "branch" | "trash";
@@ -328,7 +329,7 @@ export function Sidebar(p: Props) {
                     aria-expanded={open}
                     onClick={() => setCollapsed((s) => toggle(s, proj.id))}
                   >
-                    <span className="project-dot" style={{ ["--project-color" as string]: proj.color }} aria-hidden />
+                    <span className="project-dot" style={{ ["--project-color" as string]: projectColor(proj.color) }} aria-hidden />
                     <span className="side-group-name ellipsis">{proj.name}</span>
                     {(() => {
                       // Seen even with the project folded: how many of its chats are answering now.
@@ -422,7 +423,7 @@ export function Sidebar(p: Props) {
                     aria-current={on ? "page" : undefined}
                     onClick={() => p.onOpenBoard(proj.id)}
                   >
-                    <span className="project-dot" style={{ ["--project-color" as string]: proj.color }} aria-hidden />
+                    <span className="project-dot" style={{ ["--project-color" as string]: projectColor(proj.color) }} aria-hidden />
                     <span className="side-item-label ellipsis">{proj.name}</span>
                     {p.needYouByProject.has(proj.id) && <span className="side-need">Needs you</span>}
                     {open > 0 && <span className="side-count num">{open}</span>}

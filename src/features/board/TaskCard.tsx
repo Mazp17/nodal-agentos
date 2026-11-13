@@ -3,6 +3,7 @@ import { taskKey, type Chat, type Project, type Repo, type Task } from "../../do
 import { Tooltip, TooltipContent, TooltipTrigger } from "../../ui/Tooltip";
 import { PriorityBars } from "../tasks/bits";
 import { isClosed, providerLabel } from "../tasks/status";
+import { projectColor } from "../projects/create";
 
 export type CardAction = "open-chat" | "choose-repo";
 
@@ -67,7 +68,7 @@ export function TaskCard({ model, showProject, busy, dragging, onOpen, onAction,
     >
       {showProject && project && (
         <span className="bd-card-proj">
-          <span className="project-dot" style={{ ["--project-color" as string]: project.color }} aria-hidden />
+          <span className="project-dot" style={{ ["--project-color" as string]: projectColor(project.color) }} aria-hidden />
           <span className="ellipsis">{project.name}</span>
         </span>
       )}

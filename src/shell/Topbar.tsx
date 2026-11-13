@@ -1,4 +1,5 @@
 import type { Project } from "../domain/types";
+import { projectColor } from "../features/projects/create";
 
 interface Props {
   project: Project | null;
@@ -15,7 +16,7 @@ export function Topbar(p: Props) {
       <nav className="crumb" aria-label="Breadcrumb">
         {p.project && (
           <>
-            <span className="project-dot" style={{ ["--project-color" as string]: p.project.color }} aria-hidden />
+            <span className="project-dot" style={{ ["--project-color" as string]: projectColor(p.project.color) }} aria-hidden />
             <span className="crumb-project ellipsis">{p.project.name}</span>
             <span className="crumb-sep" aria-hidden>
               /

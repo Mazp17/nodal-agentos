@@ -5,7 +5,7 @@ import { useProviderScopes, useProviderStatus } from "../../domain/hooks/provide
 import type { ScopeRef } from "../../domain/types";
 import { ScopePicker } from "../providers/ScopePicker";
 import "../providers/providers.css";
-import { PROJECT_COLORS } from "./create";
+import { PROJECT_COLORS, projectColor } from "./create";
 import "./projects.css";
 
 /** Accessible names for `PROJECT_COLORS`, in the same order. */
@@ -46,7 +46,7 @@ export function ColorSwatches({
           aria-label={COLOR_NAMES[k] ?? `Custom color`}
           tabIndex={c === value || (!colors.includes(value) && k === 0) ? 0 : -1}
           className="swatch"
-          style={{ background: c }}
+          style={{ background: projectColor(c) }}
           onClick={() => onChange(c)}
         />
       ))}
