@@ -1,5 +1,0 @@
-// Backup viejo: el catálogo lo ignora.
-export const meta = {
-  name: 'linear-issue',
-  description: 'Versión anterior',
-}
