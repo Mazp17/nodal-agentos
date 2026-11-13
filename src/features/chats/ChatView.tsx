@@ -12,6 +12,7 @@ import { useToast } from "../../ui/Toasts";
 import { isClosed, providerLabel, STATUS_META, taskTag } from "../tasks/status";
 import { StatusRing } from "../tasks/bits";
 import { Composer, type ComposerSettings } from "./Composer";
+import { getComposerDraft, setComposerDraft, useComposerDraft } from "./composerDrafts";
 import { Conversation } from "./Conversation";
 import { closeSubagent, SubagentSheet, useSubagentTarget } from "./SubagentSheet";
 import { agentOptions, chatTitle, effortOptions, modelOptions, modeOptions, repoOptions, toTurns } from "./model";
@@ -57,7 +58,9 @@ export function ChatView({ project, repos, chatId: tabChatId, onCreated, onShowC
   const toast = useToast();
   const ask = useConfirm();
   const chats = useChats(project.id);
-  const [draft, setDraft] = useState("");
+  const draftKey = tabChatId ?? `new:${project.id}`;
+  const draft = useComposerDraft(draftKey);
+  const setDraft = (text: string) => setComposerDraft(draftKey, text);
   const [menu, setMenu] = useState<string | null>(null);
   const [draftSettings, setDraftSettings] = useState<ComposerSettings>(NEW_CHAT);
 
@@ -160,11 +163,14 @@ export function ChatView({ project, repos, chatId: tabChatId, onCreated, onShowC
       // The sidebar reads every project's chats: show the new one there (and keep its tab) right away.
       setData<Chat[]>("chats:*", (cs) => [target as Chat, ...cs]);
       void invalidate("chats");
+      // The text goes to the new chat: the next new chat starts empty.
+      setComposerDraft(draftKey, "");
       onCreated(target.id);
     }
     const id = target.id;
     pushOutbox(id, text);
-    setDraft("");
+    // By id, not `setDraft`: a new chat's tab is re-keyed to `id` (and remounted) meanwhile.
+    setComposerDraft(id, "");
     atBottom.current = true;
     try {
       // Its channel must be attached before the process can start (and stream): `seedChat`/
@@ -174,7 +180,7 @@ export function ChatView({ project, repos, chatId: tabChatId, onCreated, onShowC
       void invalidate("chats");
     } catch (e) {
       dropOutbox(id, text);
-      setDraft((d) => d || text);
+      setComposerDraft(id, getComposerDraft(id) || text);
       toast("Couldn't send the message", String(e), "danger");
     }
   };
