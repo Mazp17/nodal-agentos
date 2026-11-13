@@ -56,6 +56,7 @@ fn a_project_chat_gets_nodal_mcp_every_other_repo_and_the_project() {
         &repos,
         ChatCwd::Repo(&repos[0]),
         Some(bin),
+        None,
     );
 
     let config: serde_json::Value =
@@ -102,6 +103,7 @@ fn a_repo_chat_is_narrowed_and_works_without_nodal_mcp() {
         &repos,
         ChatCwd::Repo(&repos[1]),
         None,
+        None,
     );
     assert_eq!(args.len(), 2, "{args:?}");
     assert_eq!(args[0], "--append-system-prompt");
@@ -127,6 +129,7 @@ fn a_long_description_is_clipped() {
         &repos,
         ChatCwd::Repo(&repos[0]),
         true,
+        None,
     );
     let line = prompt
         .lines()
@@ -150,6 +153,7 @@ fn a_root_chat_runs_at_the_root_and_adds_only_repos_outside_it() {
         &project,
         &repos,
         ChatCwd::Root("/Users/me/Code/acme"),
+        None,
         None,
     );
     assert_eq!(
@@ -183,12 +187,12 @@ fn a_root_chat_with_every_repo_under_it_adds_none() {
     repos[1].path = "/Users/me/Code/acme/web/app".into();
     let root = ChatCwd::Root("/Users/me/Code/acme");
     assert!(value_of(
-        &args(&chat(None), &project, &repos, root, None),
+        &args(&chat(None), &project, &repos, root, None, None),
         "--add-dir"
     )
     .is_empty());
 
-    let prompt = system_prompt(&chat(None), &project, &[], root, false);
+    let prompt = system_prompt(&chat(None), &project, &[], root, false, None);
     assert!(prompt.contains("Repos:\n- none yet\n"), "{prompt}");
 }
 
@@ -210,6 +214,7 @@ fn real_chat_sees_propose_task() {
         std::slice::from_ref(&repo),
         ChatCwd::Repo(&repo),
         Some(&bin),
+        None,
     );
     let tools = crate::testutil::block_on(async {
         let mut cmd = nodal_host::claude::bin::claude_command().expect("claude");
@@ -254,7 +259,7 @@ fn worktree_scope_names_a_task_or_a_free_worktree_and_never_says_commit() {
         let mut c = chat(Some("r1"));
         c.task_id = task.then(|| "t1".to_string());
         let cwd = ChatCwd::Worktree { repo: &repos[0], path: "/wt/x" };
-        let p = system_prompt(&c, &project, &repos, cwd, false);
+        let p = system_prompt(&c, &project, &repos, cwd, false, None);
         p.lines().find(|l| l.starts_with("Scope:")).unwrap().to_string()
     };
     let task = scope(true);
@@ -263,4 +268,25 @@ fn worktree_scope_names_a_task_or_a_free_worktree_and_never_says_commit() {
     assert!(free.contains("the git worktree /wt/x of the repo acme-api (its own branch)"), "{free}");
     assert!(!free.contains("one task"), "{free}");
     assert!(!task.contains("commit") && !free.contains("commit"));
+}
+
+#[test]
+fn a_custom_intro_replaces_only_the_default_one() {
+    let (project, repos) = fixture();
+    let prompt = |intro: Option<&str>| {
+        let a = args(&chat(None), &project, &repos, ChatCwd::Repo(&repos[0]), None, intro);
+        value_of(&a, "--append-system-prompt")[0].to_string()
+    };
+    let default = prompt(None);
+    assert!(default.starts_with(DEFAULT_CHAT_INTRO), "{default}");
+
+    let custom = prompt(Some("  Answer in Spanish.\n"));
+    assert!(custom.starts_with("Answer in Spanish.\n\nProject: "), "{custom}");
+    assert!(!custom.contains(DEFAULT_CHAT_INTRO));
+    for part in ["Project: Acme payments (key PAY", "Repos:\n- acme-api:", "Scope: the whole project"] {
+        assert!(custom.contains(part), "missing {part:?} in:\n{custom}");
+    }
+    assert_eq!(custom.split_once("Project: ").unwrap().1, default.split_once("Project: ").unwrap().1);
+
+    assert_eq!(prompt(Some(" \n\t")), default, "blank means the default");
 }

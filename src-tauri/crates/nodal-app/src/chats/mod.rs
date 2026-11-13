@@ -29,7 +29,7 @@ use nodal_domain::model::{Chat, ChatWorkspace, LaunchOptions, Project, Repo};
 use nodal_domain::serde_util::double_option;
 use nodal_domain::sessions::transcript::{is_valid_message_uuid, is_valid_session_id, TRANSCRIPT_DEFAULT_LIMIT, TRANSCRIPT_MAX_LIMIT};
 use nodal_domain::util::{check_id, clip_chars, new_id};
-use nodal_store::{board::projects, board::repos, board::tasks, chats, Conn as Connection, StoreError};
+use nodal_store::{board::projects, board::repos, board::tasks, chats, rows, Conn as Connection, StoreError};
 
 use crate::core::{blocking, AppError, Core};
 
@@ -265,13 +265,14 @@ pub fn spec(
     repos: &[Repo],
     worktree: Option<&str>,
     mcp: Option<&Path>,
+    intro: Option<&str>,
 ) -> Result<ChatSpec, String> {
     let cwd = chat_cwd(chat, project, repos, worktree)?;
     let mut args = options::to_args(&chat.launch)?;
     if let Some(a) = &chat.agent {
         args.extend(["--agent".to_string(), a.clone()]);
     }
-    args.extend(context::args(chat, project, repos, cwd, mcp));
+    args.extend(context::args(chat, project, repos, cwd, mcp, intro));
     Ok(ChatSpec { cwd: PathBuf::from(cwd.path()), args })
 }
 
@@ -352,15 +353,16 @@ impl Chats {
         let now = self.core.clock.now_ms();
         let body = text.clone();
         let fs = self.core.env.fs.clone();
-        let (chat, project, repos, wt) = self
+        let (chat, project, repos, wt, intro) = self
             .db(move |c| {
                 let (chat, project, repos) = ops::prepare_send(c, &id, &body, now)?;
                 let wt = task_worktree(c, &chat, |p| fs.is_dir(Path::new(p)))?;
-                Ok((chat, project, repos, wt))
+                let intro = rows::load_settings(c).map_err(|e| e.to_string())?.chat_system_prompt;
+                Ok((chat, project, repos, wt, intro))
             })
             .await?;
         let mcp = self.core.env.fs.nodal_mcp_bin();
-        let spec = spec(&chat, &project, &repos, wt.as_deref(), mcp.as_deref())?;
+        let spec = spec(&chat, &project, &repos, wt.as_deref(), mcp.as_deref(), intro.as_deref())?;
         self.core.chats.send(&chat.id, &chat.project_id, chat.session_id.as_deref(), spec, &text)?;
         self.core.notifier.notify(ChangeKind::Chats, Some(&chat.project_id));
         Ok(chat)
@@ -407,18 +409,19 @@ impl Chats {
             Some(blocking(move || sessions.rewind_point(&path, &uuid).map_err(|e| e.to_string())).await.map_err(AppError::from)?)
         };
         let fs = self.core.env.fs.clone();
-        let (project, repos, wt) = {
+        let (project, repos, wt, intro) = {
             let chat = chat.clone();
             self.db(move |c| {
                 let project = projects::get(c, &chat.project_id)?;
                 let repos = repos::list(c, Some(&chat.project_id))?;
                 let wt = task_worktree(c, &chat, |p| fs.is_dir(Path::new(p)))?;
-                Ok((project, repos, wt))
+                let intro = rows::load_settings(c).map_err(|e| e.to_string())?.chat_system_prompt;
+                Ok((project, repos, wt, intro))
             })
             .await?
         };
         let mcp = self.core.env.fs.nodal_mcp_bin();
-        let spec = spec(&chat, &project, &repos, wt.as_deref(), mcp.as_deref())?;
+        let spec = spec(&chat, &project, &repos, wt.as_deref(), mcp.as_deref(), intro.as_deref())?;
         let result = self
             .core
             .chats

@@ -186,7 +186,7 @@ fn spec_runs_in_the_chat_repo_or_the_first_one() {
         created_at: 1,
         updated_at: 1,
     };
-    let s = spec(&chat, &project, &repos, None, None).unwrap();
+    let s = spec(&chat, &project, &repos, None, None, None).unwrap();
     assert_eq!(s.cwd, PathBuf::from("/Users/me/Code/acme-api"));
     assert_eq!(
         s.args[..6],
@@ -208,6 +208,7 @@ fn spec_runs_in_the_chat_repo_or_the_first_one() {
         &repos,
         None,
         Some(Path::new("/Users/me/nodal-mcp")),
+        None,
     )
     .unwrap();
     assert_eq!(s.cwd, PathBuf::from("/Users/me/Code/acme-web"));
@@ -218,14 +219,14 @@ fn spec_runs_in_the_chat_repo_or_the_first_one() {
     );
 
     chat.agent = Some("code-reviewer".into());
-    let s = spec(&chat, &project, &repos, None, None).unwrap();
+    let s = spec(&chat, &project, &repos, None, None, None).unwrap();
     assert!(s.args.windows(2).any(|w| w == ["--agent", "code-reviewer"]));
     chat.agent = None;
 
     chat.repo_id = Some("gone".into());
-    assert!(spec(&chat, &project, &repos, None, None).is_err());
+    assert!(spec(&chat, &project, &repos, None, None, None).is_err());
     chat.repo_id = None;
-    assert!(spec(&chat, &project, &[], None, None)
+    assert!(spec(&chat, &project, &[], None, None, None)
         .unwrap_err()
         .contains("Add a repo"));
 }
@@ -253,7 +254,7 @@ fn a_repo_less_chat_runs_at_the_project_root_when_it_has_one() {
         created_at: 1,
         updated_at: 1,
     };
-    let s = spec(&chat, &project, &repos, None, None).unwrap();
+    let s = spec(&chat, &project, &repos, None, None, None).unwrap();
     assert_eq!(s.cwd, PathBuf::from("/Users/me/Code/acme"));
     assert_eq!(
         s.args[..2],
@@ -271,7 +272,7 @@ fn a_repo_less_chat_runs_at_the_project_root_when_it_has_one() {
         "the transcript looks it up here"
     );
 
-    let s = spec(&chat, &project, &[], None, None).unwrap();
+    let s = spec(&chat, &project, &[], None, None, None).unwrap();
     assert_eq!(
         s.cwd,
         PathBuf::from("/Users/me/Code/acme"),
@@ -279,7 +280,7 @@ fn a_repo_less_chat_runs_at_the_project_root_when_it_has_one() {
     );
 
     chat.repo_id = Some("r2".into());
-    let s = spec(&chat, &project, &repos, None, None).unwrap();
+    let s = spec(&chat, &project, &repos, None, None, None).unwrap();
     assert_eq!(
         s.cwd,
         PathBuf::from("/Users/me/Code/acme/web"),

@@ -9,7 +9,7 @@ export type ProjectPage = "board" | "chat" | "project-settings";
 export type Page = ProjectPage | "settings" | "overview";
 
 /** `debug` exists only in dev builds. */
-export type SettingsSection = "integrations" | "editor" | "appearance" | "updates" | "diagnostics" | "debug";
+export type SettingsSection = "integrations" | "editor" | "chats" | "appearance" | "updates" | "diagnostics" | "debug";
 export type ProjectSection = "general" | "repos" | "worktrees" | "sources" | "agents";
 
 export interface Route {
@@ -61,7 +61,7 @@ export function useNav(): Nav {
   const [settingsSection, setSettingsSection] = useState<SettingsSection>(() => {
     const s = readJsonPref<string>("settingsSection", "integrations", (v): v is string => typeof v === "string");
     if (s === "debug") return import.meta.env.DEV ? s : "integrations";
-    return s === "editor" || s === "appearance" || s === "updates" || s === "diagnostics" ? s : "integrations";
+    return s === "editor" || s === "chats" || s === "appearance" || s === "updates" || s === "diagnostics" ? s : "integrations";
   });
   const [projectSection, setProjectSection] = useState<ProjectSection>("general");
 

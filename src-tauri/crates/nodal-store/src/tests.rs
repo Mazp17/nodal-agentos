@@ -608,14 +608,14 @@ fn settings_round_trip_and_defaults() {
     let db = conn();
     let mut c = db.lock().unwrap();
     assert_eq!(load_settings(&c).unwrap(), Settings::default());
-    let s = Settings { editor: Some("cursor".into()) };
+    let s = Settings { editor: Some("cursor".into()), chat_system_prompt: Some("Be brief.".into()) };
     save_settings(&mut c, &s).unwrap();
     assert_eq!(load_settings(&c).unwrap(), s);
     // Overwriting updates instead of duplicating.
-    let s2 = Settings { editor: None };
+    let s2 = Settings { editor: None, chat_system_prompt: None };
     save_settings(&mut c, &s2).unwrap();
     assert_eq!(load_settings(&c).unwrap(), s2);
-    assert_eq!(count(&c, "settings"), 1);
+    assert_eq!(count(&c, "settings"), 2);
 }
 
 #[test]

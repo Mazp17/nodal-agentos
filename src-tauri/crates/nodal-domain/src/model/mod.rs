@@ -565,6 +565,8 @@ pub struct OutboxItem {
 pub struct Settings {
     /// Editor command for "Open in editor" (`code`, `cursor`...). `None` → the system one.
     pub editor: Option<String>,
+    /// Intro of the chat agent's system prompt. `None` → `DEFAULT_CHAT_INTRO` (nodal-app).
+    pub chat_system_prompt: Option<String>,
 }
 
 /// One child of a repo directory (`list_repo_dir`).
