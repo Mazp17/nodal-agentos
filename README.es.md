@@ -11,9 +11,11 @@
 
 ![Overview de Nodal](docs/screenshots/overview.png)
 
-> Alpha temprana, solo macOS. Proyecto independiente, sin relación con Anthropic.
+> macOS y Windows. Proyecto independiente, sin relación con Anthropic.
 
 ## Instalación
+
+### macOS
 
 1. Descarga el último `.dmg` desde [Releases](https://github.com/Mazp17/nodal-agentos/releases) (Apple Silicon e Intel) y arrastra Nodal a Aplicaciones.
 2. Nodal no está notarizado por Apple, así que macOS bloquea la primera apertura. Corre una vez:
@@ -22,7 +24,12 @@
    xattr -dr com.apple.quarantine /Applications/Nodal.app
    ```
 
-Después, Nodal se actualiza solo: busca una versión nueva al abrirse y una vez al día (y desde Nodal → Check for Updates… o Settings → Updates), muestra las notas de la versión y la instala solo si eliges Update. Las actualizaciones no necesitan repetir el `xattr`. Nodal 0.1.0 es anterior a las actualizaciones in-app, así que desde 0.1.0 descarga la versión siguiente a mano por última vez.
+### Windows
+
+1. Descarga el último `Nodal_x.y.z_x64-setup.exe` desde [Releases](https://github.com/Mazp17/nodal-agentos/releases) (Windows 10/11 x64) y ejecútalo.
+2. El instalador no está firmado, así que SmartScreen muestra "Windows protegió su PC". Haz clic en Más información → Ejecutar de todas formas.
+
+Después, Nodal se actualiza solo: busca una versión nueva al abrirse y una vez al día (y desde Nodal → Check for Updates… o Settings → Updates), muestra las notas de la versión y la instala solo si eliges Update. Las actualizaciones no necesitan repetir el `xattr` ni el paso de SmartScreen. Nodal 0.1.0 es anterior a las actualizaciones in-app, así que desde 0.1.0 descarga la versión siguiente a mano por última vez.
 
 Necesitas [Claude Code](https://docs.claude.com/en/docs/claude-code) instalado y con sesión iniciada, y `git`. `gh` es opcional, para tareas que abren pull requests. Abre `claude` una vez en cada repo y acepta el diálogo de confianza antes de correr tareas ahí.
 

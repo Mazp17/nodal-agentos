@@ -4,13 +4,11 @@ This is how a new version of Nodal gets out, from deciding it's time to publishi
 
 ## Version numbers
 
-Versions follow [Semantic Versioning](https://semver.org/). Bump the patch number (`0.2.0` → `0.2.1`) when a release only fixes bugs, and the minor number (`0.2.0` → `0.3.0`) when it adds something new. Nodal hasn't reached 1.0 yet, so a minor release can also change or break existing behavior. When it does, the changelog says so.
-
-We'll move to 1.0 once the app is stable enough to promise compatibility between versions.
+Versions follow [Semantic Versioning](https://semver.org/). Bump the patch number (`0.2.0` → `0.2.1`) when a release only fixes bugs, and the minor number (`0.2.0` → `0.3.0`) when it adds something new, and the major number (`1.2.0` → `2.0.0`) when it changes or breaks existing behavior. When it does, the changelog says so.
 
 Only versions with a suffix (`0.3.0-beta.1`) are marked as pre-releases on GitHub. release-please doesn't pick those on its own: to cut one, set `"release-as": "0.3.0-beta.1"` on the package in `release-please-config.json` through a PR, and remove it once that release is out. Installed apps look for updates in the `latest.json` of the latest release, and GitHub skips pre-releases there, so a plain `x.y.z` reaches every user once it's published and a suffixed one reaches nobody until a plain version follows it.
 
-The next version is computed by [release-please](https://github.com/googleapis/release-please) from the Conventional Commit titles merged since the last release: a `fix` bumps the patch, a `feat` bumps the minor, and a breaking change (`feat!:` in the PR title) also bumps the minor until 1.0. PRs are squash-merged with the title only, so footers like `BREAKING CHANGE:` in a PR description don't reach `main`. It sets the version in `package.json`, `src-tauri/Cargo.toml` and `src-tauri/Cargo.lock`; don't edit them by hand.
+The next version is computed by [release-please](https://github.com/googleapis/release-please) from the Conventional Commit titles merged since the last release: a `fix` bumps the patch, a `feat` bumps the minor, and a breaking change (`feat!:` in the PR title) bumps the major. PRs are squash-merged with the title only, so footers like `BREAKING CHANGE:` in a PR description don't reach `main`. It sets the version in `package.json`, `src-tauri/Cargo.toml` and `src-tauri/Cargo.lock`; don't edit them by hand.
 
 ## When to release
 
