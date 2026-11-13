@@ -11,7 +11,7 @@
 
 ![Nodal overview](docs/screenshots/overview.png)
 
-> Early alpha, macOS only. Independent project, not affiliated with Anthropic.
+> macOS and Windows. Independent project, not affiliated with Anthropic.
 
 ## Install
 
