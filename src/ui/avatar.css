@@ -4,7 +4,7 @@
   place-items: center;
   border-radius: 50%;
   /* Hue per name (--hue, inline); fixed lightness and chroma. */
-  background: oklch(0.5 0.08 var(--hue, 250));
+  background: oklch(var(--avatar-l) var(--avatar-c) var(--hue, 250));
   color: var(--text-2);
   font-weight: var(--fw-semibold);
 }

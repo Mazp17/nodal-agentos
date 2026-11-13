@@ -2,6 +2,7 @@ import type { Project, Repo, Task, TaskStatus } from "../../domain/types";
 import { PriorityBars, StatusRing } from "../tasks/bits";
 import { STATUS_META } from "../tasks/status";
 import "./board.css";
+import { projectColor } from "../projects/create";
 
 export interface TaskListProps {
   /** Already filtered by the board's toolbar. */
@@ -68,7 +69,7 @@ export function TaskList({ tasks, statuses, order, showProject, projectById, rep
                     <span className="tv-where">
                       {showProject && p && (
                         <>
-                          <span className="tv-proj-dot" style={{ background: p.color }} aria-hidden />
+                          <span className="tv-proj-dot" style={{ background: projectColor(p.color) }} aria-hidden />
                           <span>{p.name}</span>
                           <span className="tv-sep" aria-hidden>·</span>
                         </>

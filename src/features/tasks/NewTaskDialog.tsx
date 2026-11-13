@@ -21,6 +21,7 @@ import { PriorityBars } from "./bits";
 import { PRIORITIES, PRIORITY_LABEL, providerLabel } from "./status";
 import { useOpenTaskChat } from "./useTaskChat";
 import "./tasks.css";
+import { projectColor } from "../projects/create";
 
 export interface NewTaskDialogProps {
   /** The view's project; `null` (All projects) lets the user pick one. When editing, the task's wins. */
@@ -385,7 +386,7 @@ export function NewTaskDialog({ projectId, taskId, defaultRepoId, onClose, onSav
               <span className="nt-sep-dot" aria-hidden>
                 ·
               </span>
-              <span className="dlg-proj-dot" style={{ background: project.color }} aria-hidden />
+              <span className="dlg-proj-dot" style={{ background: projectColor(project.color) }} aria-hidden />
               <span className="ellipsis">{project.name}</span>
             </>
           )}
@@ -439,7 +440,7 @@ export function NewTaskDialog({ projectId, taskId, defaultRepoId, onClose, onSav
                         <div key={g.project.id} role="group" aria-label={g.project.name}>
                           {pickProject && (
                             <div className="menu-label nt-menu-proj">
-                              <span className="dlg-proj-dot" style={{ background: g.project.color }} aria-hidden />
+                              <span className="dlg-proj-dot" style={{ background: projectColor(g.project.color) }} aria-hidden />
                               {g.project.name}
                             </div>
                           )}

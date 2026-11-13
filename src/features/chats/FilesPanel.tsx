@@ -79,24 +79,19 @@ export function FilesPanel({ repo, activePath, onOpenFile, onOpenDiff, onOpenCom
       <div className="files-head">
         {/* Files or git, as one capsule split in two: the same shape as the composer's settings. */}
         <div className="files-modes" role="group" aria-label={`${repo.name}: show`} title={repo.path}>
-          <button type="button" className={`files-mode ${mode === "tree" ? "on" : ""}`} aria-pressed={mode === "tree"} onClick={() => setMode("tree")}>
+          <button type="button" className={`files-mode ${mode === "tree" ? "on" : ""}`} aria-pressed={mode === "tree"} aria-label="Files" title="Files" onClick={() => setMode("tree")}>
             <FileIcon dir />
-            Files
           </button>
-          <button type="button" className={`files-mode ${mode === "changes" ? "on" : ""}`} aria-pressed={mode === "changes"} title="Changes and commits (git)" onClick={() => setMode("changes")}>
+          <button type="button" className={`files-mode ${mode === "changes" ? "on" : ""}`} aria-pressed={mode === "changes"} aria-label="Git" title="Changes and commits (git)" onClick={() => setMode("changes")}>
             <svg width="13" height="13" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" aria-hidden focusable="false">
               <circle cx="4" cy="3" r="1.5" />
               <circle cx="4" cy="11" r="1.5" />
               <circle cx="10" cy="5" r="1.5" />
               <path d="M4 4.5v5M10 6.5c0 2-2 2.5-6 3" />
             </svg>
-            Git
           </button>
         </div>
-        <span className="files-title ellipsis" title={repo.path}>
-          {repo.name}
-        </span>
-        <button type="button" className="icon-btn" aria-label="Close files" title="Close" onClick={onClose}>
+        <button type="button" className="icon-btn files-close" aria-label="Close files" title="Close" onClick={onClose}>
           <svg width="9" height="9" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" aria-hidden focusable="false">
             <path d="M2 2l6 6M8 2l-6 6" />
           </svg>
@@ -348,20 +343,20 @@ const BRANCH_ICON = (
   </svg>
 );
 
-/** Which checkout the panel shows: the repo's own or one of its worktrees (name over branch). */
+/** Which checkout the panel shows: the repo's own or one of its worktrees, each by its branch. */
 function RootPicker({ repo, worktrees, value, onChange }: { repo: Repo; worktrees: RepoWorktree[]; value: string | null; onChange: (w: string | null) => void }) {
   const current = worktrees.find((w) => (w.isMain ? value === null : w.path === value)) ?? worktrees[0]!;
   const name = (w: RepoWorktree) => (w.isMain ? repo.name : (w.path.split("/").pop() ?? w.path));
+  // A worktree's branch already carries its name; a detached checkout falls back to the folder.
+  const label = (w: RepoWorktree) => w.branch ?? name(w);
+  const tag = <span className="files-root-tag">main repo</span>;
   return (
-    <div className="files-root">
+    <div className={`files-root ${current.isMain ? "" : "wt"}`}>
       <DropdownMenu.Root>
-        <DropdownMenu.Trigger className="files-root-btn" aria-label={`Checkout: ${name(current)}`}>
+        <DropdownMenu.Trigger className="files-root-btn" aria-label={`Checkout: ${label(current)}`} title={`${name(current)}\n${current.path}`}>
           {BRANCH_ICON}
-          <span className="files-root-text">
-            <span className="files-root-name ellipsis">{name(current)}</span>
-            {current.branch && <span className="files-root-branch ellipsis">{current.branch}</span>}
-          </span>
-          {!current.isMain && <span className="files-root-tag">worktree</span>}
+          <span className="files-root-name ellipsis">{label(current)}</span>
+          {current.isMain && tag}
           <svg className="files-root-caret" width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden focusable="false">
             <path d="M2.5 4l2.5 2.5L7.5 4" />
           </svg>
@@ -372,14 +367,12 @@ function RootPicker({ repo, worktrees, value, onChange }: { repo: Repo; worktree
               {worktrees.map((w, i) => (
                 <div key={w.path}>
                   {i === 1 && <DropdownMenu.Label className="menu-label">Worktrees</DropdownMenu.Label>}
-                  <DropdownMenu.RadioItem value={w.path} className="menu-item files-root-item" title={w.path}>
+                  <DropdownMenu.RadioItem value={w.path} className="menu-item files-root-item" title={`${name(w)}\n${w.path}`}>
                     <span className="menu-mark" aria-hidden>
                       <DropdownMenu.ItemIndicator>✓</DropdownMenu.ItemIndicator>
                     </span>
-                    <span className="files-root-text">
-                      <span className="files-root-name ellipsis">{name(w)}</span>
-                      {w.branch && <span className="files-root-branch ellipsis">{w.branch}</span>}
-                    </span>
+                    <span className="files-root-name ellipsis">{label(w)}</span>
+                    {w.isMain && tag}
                   </DropdownMenu.RadioItem>
                 </div>
               ))}

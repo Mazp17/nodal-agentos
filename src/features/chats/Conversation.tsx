@@ -23,6 +23,7 @@ import {
   type Turn,
 } from "./model";
 import type { ChatStream } from "./stream";
+import { FileDiff } from "lucide-react";
 
 // ---------- Tool block ----------
 
@@ -411,9 +412,7 @@ function ChangesMarker({ changes }: { changes: NonNullable<ReturnType<typeof tur
   return (
     <Marker variant="border" className="chat-mk chat-mk-changes">
       <MarkerIcon className="chat-mk-icon chat-mk-changed">
-        <svg width="8" height="8" viewBox="0 0 8 8" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" aria-hidden focusable="false">
-          <path d="M4 1.5v5M1.5 4h5" />
-        </svg>
+        <FileDiff size={14} strokeWidth={1.75} aria-hidden focusable="false" />
       </MarkerIcon>
       <MarkerContent className="chat-mk-text">
         {changes.files} {changes.files === 1 ? "file" : "files"} changed

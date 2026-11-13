@@ -1,5 +1,6 @@
 /*
- * Nodal design tokens. Source: the "Nodal" design in Claude Design (dark, warm palette).
+ * Nodal design tokens: "Grafito" (dark, default) on `:root`, "Papel" (light) on
+ * `[data-theme="light"]` (set by `shell/theme.ts`).
  * Every color, radius, shadow or duration in the UI comes from here; components
  * shouldn't have color literals. Names stay stable across redesigns:
  * the values change.
@@ -10,75 +11,88 @@
 
   /* ---- Base palette ---- */
   --accent: oklch(0.74 0.15 55);
-  --accent-hover: oklch(0.82 0.12 60);
+  --accent-hover: oklch(0.8 0.13 58);
   /* Status yellow (In Review, "need you", warnings). */
-  --amber: oklch(0.82 0.13 88);
-  --amber-text: oklch(0.88 0.1 88);
-  --red: oklch(0.68 0.16 25);
-  --red-text: oklch(0.8 0.1 25);
-  --green: oklch(0.74 0.12 150);
-  --info: oklch(0.74 0.1 240);
-  --gray: #8a837a;
-  --gray-dim: #5f5850;
+  --amber: oklch(0.85 0.13 92);
+  --amber-text: oklch(0.9 0.1 92);
+  --red: oklch(0.7 0.16 25);
+  --red-text: oklch(0.82 0.1 25);
+  --green: oklch(0.76 0.12 155);
+  --info: oklch(0.75 0.1 240);
+  --gray: oklch(0.62 0.01 265);
+  --gray-dim: oklch(0.45 0.01 265);
   /* Text on accent / amber fills. */
-  --on-accent: #1a120a;
-  --on-amber: #1a1608;
+  --on-accent: oklch(0.2 0.03 55);
+  --on-amber: oklch(0.2 0.03 92);
 
   /* ---- Surfaces (from deepest to most elevated) ---- */
-  --bg-deep: #0c0a09;
-  --bg-sidebar: #141210;
-  --bg-rail: #171513;
-  --bg: #1b1917;
-  --surface-sheet: #1e1b19;
-  --surface-drawer: #1e1b19;
-  --surface-1: #231f1c;
-  --surface-card: #231f1c;
-  --surface-2: #26221f;
-  --surface-dialog: #201d1a;
-  --surface-palette: #221f1c;
-  --surface-selected: #2b2622;
-  --surface-card-hover: #28231f;
-  --surface-menu: #2a2622;
-  --surface-float: #2a2622;
+  --bg-deep: oklch(0.14 0.005 265);
+  --bg-sidebar: oklch(0.165 0.005 265);
+  --bg-rail: oklch(0.175 0.005 265);
+  --bg: oklch(0.195 0.005 265);
+  --surface-sheet: oklch(0.21 0.005 265);
+  --surface-drawer: oklch(0.21 0.005 265);
+  --surface-1: oklch(0.228 0.006 265);
+  --surface-card: oklch(0.228 0.006 265);
+  --surface-2: oklch(0.24 0.006 265);
+  --surface-dialog: oklch(0.215 0.006 265);
+  --surface-palette: oklch(0.225 0.006 265);
+  --surface-selected: oklch(0.27 0.008 265);
+  --surface-card-hover: oklch(0.25 0.007 265);
+  --surface-menu: oklch(0.255 0.007 265);
+  --surface-float: oklch(0.255 0.007 265);
 
-  /* Translucent fills (warm tint) for controls on any surface. */
-  --fill-1: rgb(255 236 214 / 0.03);
-  --fill-2: rgb(255 236 214 / 0.04);
-  --fill-3: rgb(255 236 214 / 0.05);
-  --fill-4: rgb(255 236 214 / 0.06);
-  --fill-5: rgb(255 236 214 / 0.07);
-  --fill-6: rgb(255 236 214 / 0.09);
-  --fill-7: rgb(255 236 214 / 0.12);
-  --fill-soft: rgb(255 236 214 / 0.07);
+  /* Translucent fills (cool white) for controls on any surface. */
+  --fill-1: oklch(0.95 0.01 265 / 0.03);
+  --fill-2: oklch(0.95 0.01 265 / 0.04);
+  --fill-3: oklch(0.95 0.01 265 / 0.05);
+  --fill-4: oklch(0.95 0.01 265 / 0.06);
+  --fill-5: oklch(0.95 0.01 265 / 0.07);
+  --fill-6: oklch(0.95 0.01 265 / 0.09);
+  --fill-7: oklch(0.95 0.01 265 / 0.12);
+  --fill-soft: oklch(0.95 0.01 265 / 0.07);
   --fill-inset: rgb(0 0 0 / 0.22);
-  --scrim: rgb(8 6 5 / 0.3);
-  --scrim-strong: rgb(8 6 5 / 0.45);
+  --scrim: oklch(0.1 0.005 265 / 0.3);
+  --scrim-strong: oklch(0.1 0.005 265 / 0.45);
 
   /* ---- Borders ---- */
-  --border-faint: rgb(255 236 214 / 0.035);
-  --border: rgb(255 236 214 / 0.07);
-  --border-2: rgb(255 236 214 / 0.09);
-  --border-3: rgb(255 236 214 / 0.11);
-  --border-4: rgb(255 236 214 / 0.14);
-  --border-soft: rgb(255 236 214 / 0.07);
-  --border-strong: rgb(255 236 214 / 0.2);
+  --border-faint: oklch(0.95 0.01 265 / 0.035);
+  --border: oklch(0.95 0.01 265 / 0.07);
+  --border-2: oklch(0.95 0.01 265 / 0.09);
+  --border-3: oklch(0.95 0.01 265 / 0.11);
+  --border-4: oklch(0.95 0.01 265 / 0.14);
+  --border-soft: oklch(0.95 0.01 265 / 0.07);
+  --border-strong: oklch(0.95 0.01 265 / 0.2);
 
-  /* Brand (logo). */
-  --brand-ring: #ece7e1;
-  --brand-dot: var(--accent);
+  /* Brand (logo): the dot is fixed, the ring follows the text. */
+  --brand-ring: var(--text);
+  --brand-dot: #e8954a;
 
   /* ---- Text (from most to least emphasis) ---- */
-  --text-strong: #f5f1ec;
-  --text: #ece7e1;
-  --text-2: #e0d9d1;
-  --text-3: #d6cfc6;
-  --text-4: #cfc8bf;
-  --text-5: #b3aba2;
-  --text-muted: #9a938a;
-  --text-subtle: #9a938a;
-  --text-faint: #9a938a;
-  --text-dim: #9a938a;
-  --text-disabled: #5f5850;
+  --text-strong: oklch(0.97 0.003 265);
+  --text: oklch(0.93 0.004 265);
+  --text-2: oklch(0.89 0.005 265);
+  --text-3: oklch(0.86 0.005 265);
+  --text-4: oklch(0.83 0.006 265);
+  --text-5: oklch(0.79 0.006 265);
+  --text-muted: oklch(0.7 0.008 265);
+  --text-subtle: oklch(0.7 0.008 265);
+  --text-faint: oklch(0.7 0.008 265);
+  --text-dim: oklch(0.7 0.008 265);
+  --text-disabled: oklch(0.47 0.008 265);
+
+  /* ---- Syntax (file viewer) ---- */
+  --syn-kw: oklch(0.74 0.14 55);
+  --syn-str: oklch(0.8 0.1 140);
+  --syn-num: oklch(0.76 0.1 330);
+  --syn-key: oklch(0.76 0.09 245);
+  --syn-fn: oklch(0.86 0.07 85);
+  --syn-tag: oklch(0.74 0.12 35);
+  --syn-attr: oklch(0.79 0.09 300);
+
+  /* Avatar background: lightness and chroma per theme, hue per name. */
+  --avatar-l: 0.5;
+  --avatar-c: 0.08;
 
   /* ---- Task states (Nodal) ---- */
   --st-backlog: var(--gray-dim);
@@ -178,6 +192,8 @@
   --shadow-drawer: -24px 0 50px rgb(0 0 0 / 0.4);
   --shadow-palette: 0 30px 80px rgb(0 0 0 / 0.6);
   --shadow-dialog: 0 30px 80px rgb(0 0 0 / 0.6);
+  --shadow-composer: 0 12px 32px rgb(0 0 0 / 0.32);
+  --shadow-raised: 0 1px 2px rgb(0 0 0 / 0.35);
 
   /* ---- Motion ---- */
   --ease-out: cubic-bezier(0.2, 0.7, 0.3, 1);
@@ -191,12 +207,108 @@
   --focus-ring: 0 0 0 2px var(--accent);
 }
 
+/* "Papel": the light theme. Only colors and shadows change. */
+:root[data-theme="light"] {
+  color-scheme: light;
+
+  --accent: oklch(0.53 0.16 45);
+  --accent-hover: oklch(0.47 0.16 45);
+  --amber: oklch(0.5 0.11 75);
+  --amber-text: oklch(0.45 0.1 75);
+  --red: oklch(0.52 0.18 25);
+  --red-text: oklch(0.47 0.17 25);
+  --green: oklch(0.5 0.12 150);
+  --info: oklch(0.5 0.14 250);
+  --gray: oklch(0.6 0.012 60);
+  --gray-dim: oklch(0.72 0.01 60);
+  --on-accent: oklch(1 0 0);
+  --on-amber: oklch(1 0 0);
+
+  --bg-deep: oklch(0.94 0.007 75);
+  --bg-sidebar: oklch(0.955 0.006 75);
+  --bg-rail: oklch(0.965 0.005 75);
+  --bg: oklch(0.985 0.003 75);
+  --surface-sheet: oklch(0.99 0.002 75);
+  --surface-drawer: oklch(0.99 0.002 75);
+  --surface-1: oklch(1 0 0);
+  --surface-card: oklch(1 0 0);
+  --surface-2: oklch(0.975 0.004 75);
+  --surface-dialog: oklch(1 0 0);
+  --surface-palette: oklch(1 0 0);
+  --surface-selected: oklch(0.915 0.014 65);
+  --surface-card-hover: oklch(0.975 0.005 75);
+  --surface-menu: oklch(1 0 0);
+  --surface-float: oklch(1 0 0);
+
+  /* Translucent fills (warm ink) for controls on any surface. */
+  --fill-1: oklch(0.3 0.02 60 / 0.03);
+  --fill-2: oklch(0.3 0.02 60 / 0.04);
+  --fill-3: oklch(0.3 0.02 60 / 0.05);
+  --fill-4: oklch(0.3 0.02 60 / 0.06);
+  --fill-5: oklch(0.3 0.02 60 / 0.07);
+  --fill-6: oklch(0.3 0.02 60 / 0.09);
+  --fill-7: oklch(0.3 0.02 60 / 0.12);
+  --fill-soft: oklch(0.3 0.02 60 / 0.07);
+  --fill-inset: oklch(0.3 0.02 60 / 0.05);
+  --scrim: oklch(0.2 0.01 60 / 0.18);
+  --scrim-strong: oklch(0.2 0.01 60 / 0.32);
+
+  --border-faint: oklch(0.3 0.02 60 / 0.05);
+  --border: oklch(0.3 0.02 60 / 0.1);
+  --border-2: oklch(0.3 0.02 60 / 0.13);
+  --border-3: oklch(0.3 0.02 60 / 0.16);
+  --border-4: oklch(0.3 0.02 60 / 0.2);
+  --border-soft: oklch(0.3 0.02 60 / 0.1);
+  --border-strong: oklch(0.3 0.02 60 / 0.28);
+
+  --text-strong: oklch(0.16 0.012 60);
+  --text: oklch(0.22 0.012 60);
+  --text-2: oklch(0.27 0.012 60);
+  --text-3: oklch(0.31 0.012 60);
+  --text-4: oklch(0.34 0.012 60);
+  --text-5: oklch(0.38 0.012 60);
+  --text-muted: oklch(0.48 0.012 60);
+  --text-subtle: oklch(0.48 0.012 60);
+  --text-faint: oklch(0.48 0.012 60);
+  --text-dim: oklch(0.48 0.012 60);
+  --text-disabled: oklch(0.66 0.01 60);
+
+  --syn-kw: oklch(0.5 0.15 45);
+  --syn-str: oklch(0.48 0.12 145);
+  --syn-num: oklch(0.5 0.15 330);
+  --syn-key: oklch(0.48 0.13 250);
+  --syn-fn: oklch(0.48 0.1 75);
+  --syn-tag: oklch(0.5 0.16 30);
+  --syn-attr: oklch(0.5 0.14 300);
+
+  --avatar-l: 0.86;
+  --avatar-c: 0.06;
+
+  --project-1: oklch(0.6 0.15 55);
+  --project-2: oklch(0.55 0.14 250);
+  --project-3: oklch(0.55 0.12 150);
+  --project-4: oklch(0.55 0.16 320);
+  --project-5: oklch(0.66 0.13 85);
+  --project-6: oklch(0.55 0.18 25);
+  --project-7: oklch(0.55 0.1 200);
+  --project-8: oklch(0.52 0.14 290);
+
+  --shadow-menu: 0 14px 34px oklch(0.3 0.02 60 / 0.14);
+  --shadow-float: 0 12px 30px oklch(0.3 0.02 60 / 0.12);
+  --shadow-drawer: -24px 0 50px oklch(0.3 0.02 60 / 0.1);
+  --shadow-palette: 0 30px 80px oklch(0.3 0.02 60 / 0.18);
+  --shadow-dialog: 0 30px 80px oklch(0.3 0.02 60 / 0.18);
+  --shadow-composer: 0 12px 32px oklch(0.3 0.02 60 / 0.08);
+  --shadow-raised: 0 1px 2px oklch(0.3 0.02 60 / 0.12);
+}
+
 /* Tints: `tint(color, %)` without relative color syntax. */
 :root {
   --accent-tint-7: color-mix(in oklch, var(--accent) 7%, transparent);
   --accent-tint-12: color-mix(in oklch, var(--accent) 12%, transparent);
   --accent-tint-16: color-mix(in oklch, var(--accent) 16%, transparent);
   --accent-tint-22: color-mix(in oklch, var(--accent) 22%, transparent);
+  --accent-tint-30: color-mix(in oklch, var(--accent) 30%, transparent);
   --accent-tint-50: color-mix(in oklch, var(--accent) 50%, transparent);
   --accent-tint-70: color-mix(in oklch, var(--accent) 70%, transparent);
   --amber-tint-10: color-mix(in oklch, var(--amber) 10%, transparent);

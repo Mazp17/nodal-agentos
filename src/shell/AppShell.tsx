@@ -36,6 +36,7 @@ import { PAGE_TITLE, useNav, type Page } from "./useNav";
 import { readJsonPref, writePref } from "./storage";
 import { useWorkStatus } from "./useWorkStatus";
 import "./shell.css";
+import { projectColor } from "../features/projects/create";
 
 /** ⌘1 Chats, ⌘2 Tasks, ⌘3 Overview. */
 const SHORTCUT_PAGES: Record<string, Page> = { "1": "chat", "2": "board", "3": "overview" };
@@ -550,7 +551,7 @@ export function AppShell() {
           return {
             id: t,
             label: c ? chatTitle(c) : "New chat",
-            color: (pid && ctx.projectById.get(pid)?.color) || undefined,
+            color: projectColor((pid && ctx.projectById.get(pid)?.color) || undefined),
             closable: true,
             live: liveChats.has(t),
             unread: unreadChats.has(t),
@@ -736,7 +737,7 @@ export function AppShell() {
                 { id: ALL_BOARD, label: "All projects", closable: false },
                 ...tabs.boards.flatMap((id) => {
                   const bp = ctx.projectById.get(id);
-                  return bp ? [{ id, label: bp.name, color: bp.color, closable: true }] : [];
+                  return bp ? [{ id, label: bp.name, color: projectColor(bp.color), closable: true }] : [];
                 }),
               ]}
               active={route.projectId ?? ALL_BOARD}

@@ -40,6 +40,7 @@ import { PriorityBars, StatusRing } from "./bits";
 import { isClosed, PRIORITIES, PRIORITY_LABEL, providerLabel, STATUS_META } from "./status";
 import { useOpenTaskChat } from "./useTaskChat";
 import "./tasks.css";
+import { projectColor } from "../projects/create";
 
 export interface TaskPanelProps {
   taskId: string;
@@ -267,7 +268,7 @@ export function TaskPanel({ taskId, onClose, onOpenTask, onOpenSources }: TaskPa
         {key} · {task.title}
       </h2>
       <div className="tp-bar">
-        {project && <span className="tp-proj-dot" style={{ background: project.color }} aria-hidden />}
+        {project && <span className="tp-proj-dot" style={{ background: projectColor(project.color) }} aria-hidden />}
         {project && <span className="tp-nowrap">{project.name}</span>}
         <span className="tp-sep" aria-hidden>
           /

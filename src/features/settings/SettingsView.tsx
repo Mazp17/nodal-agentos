@@ -17,7 +17,8 @@ import { useProjects } from "../../domain/hooks/projects";
 import type { Repo, Settings } from "../../domain/types";
 import { IntegrationsSettings } from "../providers";
 import { resolveGitRoot } from "../projects/repoPicker";
-import { Segmented } from "../projects/fields";
+import { Segmented, type SegOption } from "../projects/fields";
+import { setThemePref, useThemePref, type ThemePref } from "../../shell/theme";
 import { invalidate, KEYS, setData, useSettings } from "../../domain/hooks/store";
 import type { SettingsSection } from "../../shell/useNav";
 import type { Updates } from "../updates/useUpdates";
@@ -31,6 +32,7 @@ import "./settings.css";
 const SECTIONS: { id: SettingsSection; label: string }[] = [
   { id: "integrations", label: "Integrations" },
   { id: "editor", label: "Editor" },
+  { id: "appearance", label: "Appearance" },
   { id: "updates", label: "Updates" },
   { id: "diagnostics", label: "Diagnostics" },
   ...(import.meta.env.DEV ? [{ id: "debug" as const, label: "Debug" }] : []),
@@ -68,6 +70,7 @@ export function SettingsView({ section, onSection, updates }: Props) {
         <div className="settings-col">
           {section === "integrations" && <IntegrationsSettings />}
           {section === "editor" && <EditorSettings onSaved={onSettingsSaved} />}
+          {section === "appearance" && <AppearanceSettings />}
           {section === "updates" && <UpdatesSettings updates={updates} />}
           {section === "diagnostics" && <DiagnosticsSettings />}
           {import.meta.env.DEV && section === "debug" && <DebugSettings />}
@@ -86,6 +89,32 @@ export function SectionHead({ title, text, children }: { title: string; text?: s
       </div>
       {children}
     </div>
+  );
+}
+
+// ---------- Appearance ----------
+
+const THEME_OPTIONS: SegOption<ThemePref>[] = [
+  { value: "system", label: "System" },
+  { value: "dark", label: "Dark" },
+  { value: "light", label: "Light" },
+];
+
+function AppearanceSettings() {
+  const theme = useThemePref();
+  return (
+    <>
+      <SectionHead title="Appearance" />
+      <div className="panel settings-card">
+        <div className="settings-row">
+          <div className="settings-row-text">
+            <span className="settings-row-title">Theme</span>
+            <span className="settings-row-hint">System follows macOS.</span>
+          </div>
+          <Segmented label="Theme" value={theme} options={THEME_OPTIONS} onChange={setThemePref} />
+        </div>
+      </div>
+    </>
   );
 }
 

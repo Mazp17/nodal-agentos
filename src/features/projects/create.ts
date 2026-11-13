@@ -19,6 +19,15 @@ export const PROJECT_COLORS = [
   "oklch(0.70 0.12 290)",
 ] as const;
 
+/**
+ * A stored project color for rendering: palette entries become `var(--project-N)` so they
+ * follow the theme. Custom colors (not in the palette) render as stored in every theme.
+ */
+export function projectColor<T extends string | null | undefined>(c: T): string | T {
+  const i = (PROJECT_COLORS as readonly string[]).indexOf(c ?? "");
+  return i < 0 ? c : `var(--project-${i + 1})`;
+}
+
 export interface ProjectDraft {
   name: string;
   key: string;
