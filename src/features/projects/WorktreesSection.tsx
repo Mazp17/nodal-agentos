@@ -2,7 +2,7 @@ import { useContext, useState } from "react";
 import { createChat, removeRepoWorktree, type RepoWorktree } from "../../domain/api";
 import { useRepoWorktrees } from "../../domain/hooks/branches";
 import { useAllChats } from "../../domain/hooks/chats";
-import { useProjects } from "../../domain/hooks/projects";
+import { basename, useProjects } from "../../domain/hooks/projects";
 import { invalidate, setData, useTasks } from "../../domain/hooks/store";
 import type { Chat, Project, Repo, Task } from "../../domain/types";
 import { useConfirm } from "../../ui/ConfirmDialog";
@@ -76,7 +76,7 @@ function WorktreeRow({ project, repo, wt, task, chats }: { project: Project; rep
   const ask = useConfirm();
   const toast = useToast();
   const [busy, setBusy] = useState(false);
-  const name = wt.path.split("/").pop() ?? wt.path;
+  const name = basename(wt.path);
 
   const chatHere = async () => {
     setBusy(true);

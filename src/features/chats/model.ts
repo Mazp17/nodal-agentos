@@ -1,6 +1,7 @@
 // Pure helpers of the Chat page: pill options, how the conversation is grouped into
 // turns, the `propose_task` card and the context ring.
 
+import { relUnder } from "../../domain/hooks/projects";
 import { PROPOSE_TASK_TOOL, type ExecutorInfo, type NewTask } from "../../domain/api";
 import type { Chat, Priority, Repo, TaskStatus } from "../../domain/types";
 import type { TranscriptItem } from "./types";
@@ -150,8 +151,11 @@ export const toolVerb = (name: string, running: boolean): string =>
 /** A tool's argument with the repo's own path left out: `/…/core-api/src/a.ts` → `src/a.ts`. */
 export function shortArg(summary: string | null, repos: Repo[]): string {
   if (!summary) return "";
-  const repo = [...repos].sort((a, b) => b.path.length - a.path.length).find((r) => summary.startsWith(`${r.path}/`));
-  return repo ? summary.slice(repo.path.length + 1) : summary;
+  for (const r of [...repos].sort((a, b) => b.path.length - a.path.length)) {
+    const rel = relUnder(summary, r.path);
+    if (rel !== null) return rel;
+  }
+  return summary;
 }
 
 /**

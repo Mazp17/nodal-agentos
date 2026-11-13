@@ -28,7 +28,7 @@ export async function pickFolder(title: string): Promise<string | null> {
  * final name it counts as the root (e.g. `/tmp/x` vs `/private/tmp/x`).
  */
 const isSubfolder = (path: string, root: string) =>
-  path.replace(/\/+$/, "") !== root.replace(/\/+$/, "") && basename(path) !== basename(root);
+  path.replace(/[\\/]+$/, "") !== root.replace(/[\\/]+$/, "") && basename(path) !== basename(root);
 
 export type RepoNotice =
   | { kind: "bad"; text: string }

@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { relUnder } from "../../domain/hooks/projects";
 import { cleanupWorktree, createChat, interruptChat, sendChatMessage, updateChat, updateTask, type ChatPatch } from "../../domain/api";
 import { useChatWorkspace } from "../../domain/hooks/branches";
 import { useChatAgents, useChats, useClaudeDefaults } from "../../domain/hooks/chats";
@@ -201,16 +202,16 @@ export function ChatView({ project, repos, chatId: tabChatId, onCreated, onShowC
   /** A path a tool edited (absolute, or relative to the chat's folder) → repo, checkout, relative path. */
   const openDiff = (p: string) => {
     const cwd = workspace?.cwd ?? null;
-    const abs = p.startsWith("/") ? p : cwd ? `${cwd}/${p}` : null;
+    const abs = /^([A-Za-z]:)?[\\/]/.test(p) ? p : cwd ? `${cwd}/${p}` : null;
     if (!abs) return;
-    const under = (root: string) => abs.startsWith(`${root}/`);
+    const under = (root: string) => relUnder(abs, root) !== null;
     // shortcut: takes the chat's folder as the worktree root, wrong if Claude cd'd into a subfolder of it.
     if (workspace?.isWorktree && cwd && under(cwd)) {
-      const repo = repos.find((r) => cwd.startsWith(`${r.path}/`)) ?? repos.find((r) => r.id === chat?.repoId);
-      if (repo) return onOpenDiff(repo.id, abs.slice(cwd.length + 1), cwd);
+      const repo = repos.find((r) => relUnder(cwd, r.path) !== null) ?? repos.find((r) => r.id === chat?.repoId);
+      if (repo) return onOpenDiff(repo.id, relUnder(abs, cwd)!, cwd);
     }
     const repo = repos.filter((r) => under(r.path)).sort((a, b) => b.path.length - a.path.length)[0];
-    if (repo) onOpenDiff(repo.id, abs.slice(repo.path.length + 1), null);
+    if (repo) onOpenDiff(repo.id, relUnder(abs, repo.path)!, null);
   };
 
   const stop = () => {
