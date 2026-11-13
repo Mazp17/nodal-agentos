@@ -1,6 +1,7 @@
 //! Enforces the workspace's per-crate dependency whitelist (plan §2) and the absence of
 //! internal dependency cycles, straight from `cargo metadata`, so a stray `use` or
 //! manifest edit that widens a crate's dependency surface fails CI instead of drifting.
+#![allow(clippy::disallowed_methods)] // a workspace check, not domain code: it runs `cargo metadata`
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::process::Command;
@@ -91,7 +92,7 @@ struct Dep {
 }
 
 fn cargo_metadata() -> Value {
-    let manifest_path = concat!(env!("CARGO_MANIFEST_DIR"), "/Cargo.toml");
+    let manifest_path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../Cargo.toml");
     let output = Command::new(env!("CARGO"))
         .args([
             "metadata",

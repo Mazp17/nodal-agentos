@@ -1,6 +1,5 @@
 # App (use-case) code reaches the outside world only through nodal_domain::ports
-# (Arc<dyn ...>), never directly. Not enforced yet (no `-D clippy::disallowed-methods`
-# CI step): W4 makes it blocking once nodal-app holds real code (see plan §5.1 W4).
+# (Arc<dyn ...>), never directly. Enforced by CI's clippy `-D warnings`.
 disallowed-methods = [
     "std::process::Command::new",
     "tokio::process::Command::new",

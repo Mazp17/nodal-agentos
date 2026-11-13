@@ -1,7 +1,6 @@
 # Domain code is pure: no direct I/O. All file, process, clock and env access goes
 # through nodal_domain::ports, implemented by nodal-host/nodal-store/the shell.
-# Not enforced yet (no `-D clippy::disallowed-methods` CI step): W4 makes it blocking
-# once the domain crate holds real code (see plan §5.1 W4).
+# Enforced by CI's clippy `-D warnings`.
 disallowed-methods = [
     "std::process::Command::new",
     "tokio::process::Command::new",
