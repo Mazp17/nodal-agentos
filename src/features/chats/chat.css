@@ -351,7 +351,23 @@
 /* ---- Chat tabs and the files panel ---- */
 .chat-tabs { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .chat-body { flex: 1; min-height: 0; display: flex; }
-.files-panel { width: 260px; flex: none; display: flex; flex-direction: column; min-height: 0; background: var(--bg-rail); border-left: 1px solid var(--border); }
+/* Editor groups: a grid of splits, each group its own tab bar over its view. */
+.chat-grid, .chat-split { flex: 1; min-width: 0; min-height: 0; display: flex; }
+.chat-split-col { flex-direction: column; }
+.chat-split-row > * + * { border-left: 1px solid var(--border); }
+.chat-split-col > * + * { border-top: 1px solid var(--border); }
+.chat-group { flex: 1 1 0; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+.chat-group-body { position: relative; flex: 1; min-height: 0; display: flex; flex-direction: column; }
+/* Where a dragged tab would land: the half it would split into, or the whole group. */
+.chat-drop { position: absolute; z-index: 5; pointer-events: none; background: color-mix(in oklch, var(--text) 8%, transparent); border-radius: var(--r-md, 6px); transition: inset var(--dur-fast, 120ms); }
+.chat-drop-center { inset: 4px; }
+.chat-drop-left { inset: 4px 50% 4px 4px; }
+.chat-drop-right { inset: 4px 4px 4px 50%; }
+.chat-drop-up { inset: 4px 4px 50% 4px; }
+.chat-drop-down { inset: 50% 4px 4px 4px; }
+/* With several groups, the unfocused ones' active tab steps back. */
+.chat-grid:has(.chat-group.focused) .chat-group:not(.focused) .tab.on { opacity: 0.6; }
+.files-panel { position: relative; width: 260px; flex: none; display: flex; flex-direction: column; min-height: 0; background: var(--bg-rail); border-left: 1px solid var(--border); }
 .files-head { flex: none; height: 40px; display: flex; align-items: center; gap: var(--sp-3); padding: 0 var(--sp-2) 0 var(--sp-1); border-bottom: 1px solid var(--border); }
 .files-close { margin-left: auto; }
 .files-tree { flex: 1; min-height: 0; overflow: auto; margin: 0; padding: var(--sp-2); list-style: none; }

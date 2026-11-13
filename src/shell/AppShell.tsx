@@ -26,14 +26,16 @@ import { NewTaskDialog, OpenChatContext, TaskPanel } from "../features/tasks";
 import { useUpdates } from "../features/updates/useUpdates";
 import { CommandPalette, type PaletteItem } from "./palette/CommandPalette";
 import { Sidebar, type ProviderFoot, type SideMode } from "./Sidebar";
-import { TabBar, type TabItem } from "./TabBar";
-import { commitTab, draftProject, draftTab, fileTab, parseFileTab, useTabs } from "./useTabs";
+import { TAB_DRAG, TabBar, isTabDrag, type TabItem } from "./TabBar";
+import { commitTab, draftProject, draftTab, fileTab, parseFileTab, useTabs, type Group } from "./useTabs";
+import { dropZoneAt, type DropZone, type Layout } from "./layout";
 import { useConfirm } from "../ui/ConfirmDialog";
 import { EmptyState } from "../ui/EmptyState";
 import { useToast } from "../ui/Toasts";
 import { Topbar } from "./Topbar";
 import { PAGE_TITLE, useNav, type Page } from "./useNav";
 import { readJsonPref, writePref } from "./storage";
+import { Resizer, clampWidth } from "./Resizer";
 import { useWorkStatus } from "./useWorkStatus";
 import "./shell.css";
 import { projectColor } from "../features/projects/create";
@@ -42,6 +44,9 @@ import { projectColor } from "../features/projects/create";
 const SHORTCUT_PAGES: Record<string, Page> = { "1": "chat", "2": "board", "3": "overview" };
 /** Board tab id of the pinned "All projects". */
 const ALL_BOARD = "__all";
+const FILES_MIN = 200;
+const FILES_MAX = 720;
+const FILES_DEFAULT = 260;
 
 export function AppShell() {
   const ctx = useProjects();
@@ -69,6 +74,22 @@ export function AppShell() {
   );
   /** Checkouts picked by hand in the files panel, per tab (`null`: the repo's own). */
   const [wtPicked, setWtPicked] = useState<Readonly<Record<string, string | null>>>({});
+  /** The group a dragged tab hovers, and where in it it would land. */
+  const [dropZone, setDropZone] = useState<{ group: string; zone: DropZone } | null>(null);
+  // A drag that ends anywhere (dropped elsewhere, Esc) clears the highlight.
+  useEffect(() => {
+    const clear = () => setDropZone(null);
+    window.addEventListener("dragend", clear);
+    window.addEventListener("drop", clear);
+    return () => {
+      window.removeEventListener("dragend", clear);
+      window.removeEventListener("drop", clear);
+    };
+  }, []);
+  const [filesWidth, setFilesWidth] = useState(() =>
+    clampWidth(readJsonPref("filesWidth", FILES_DEFAULT, (v): v is number => typeof v === "number"), FILES_MIN, FILES_MAX),
+  );
+  useEffect(() => writePref("filesWidth", JSON.stringify(filesWidth)), [filesWidth]);
   useEffect(() => writePref("filesPanel", JSON.stringify(filesOpen)), [filesOpen]);
   useEffect(() => writePref("filesMode", JSON.stringify(filesMode)), [filesMode]);
   // The chat's working folder: the files panel follows it into a worktree.
@@ -335,6 +356,12 @@ export function AppShell() {
         else go(page, visible.projectId ?? null);
         return;
       }
+      // ⌘\: the active chat/file tab into a new group on the right, like an editor's split.
+      if (mod && e.key === "\\" && visible.page === "chat" && tabs.chat && !overlayOpen) {
+        e.preventDefault();
+        tabs.split(tabs.focus, tabs.chat, "right");
+        return;
+      }
       // Cascading Esc: the palette and dialogs catch it first (useFocusTrap); what's left
       // here is the task drawer.
       if (e.key === "Escape" && taskId) {
@@ -535,10 +562,10 @@ export function AppShell() {
         const tabProject = tabPid ? ctx.projectById.get(tabPid) : undefined;
         const repos = tabProject ? ctx.reposOf(tabProject.id) : [];
         const openFile = tab ? parseFileTab(tab) : null;
-        // The files panel follows the active tab: the open file's repo, or the chat's.
+        // The files panel follows the focused group's tab: the open file's repo, or the chat's.
         const filesRepo =
           repos.find((r) => r.id === (openFile ? openFile.repoId : tab ? chatById.get(tab)?.repoId : null)) ?? repos[0];
-        const items: TabItem[] = tabs.chats.map((t) => {
+        const itemOf = (t: string): TabItem => {
           const file = parseFileTab(t);
           if (file) {
             const name = file.path.split("/").pop() ?? file.path;
@@ -556,24 +583,70 @@ export function AppShell() {
             live: liveChats.has(t),
             unread: unreadChats.has(t),
           };
-        });
-        content = (
-          <div className="chat-tabs">
+        };
+        const multi = tabs.groups.length > 1;
+        // The files toggle sits in the top-right group's bar, over the panel it opens.
+        const corner = (l: Layout): string => ("group" in l ? l.group : corner(l.dir === "row" ? l.children[l.children.length - 1]! : l.children[0]!));
+        const cornerGroup = corner(tabs.layout);
+        const viewOf = (t: string | null): ReactNode => {
+          const pid = chatProjectOf(t);
+          const p = pid ? ctx.projectById.get(pid) : undefined;
+          const file = t ? parseFileTab(t) : null;
+          const repo = file ? ctx.repoById.get(file.repoId) : undefined;
+          if (file && p) {
+            if (!repo) return null;
+            if (file.commit) return <CommitView key={t} repo={repo} worktree={file.worktree} sha={file.path} />;
+            if (file.diff) return <FileDiffView key={t} repo={repo} worktree={file.worktree} path={file.path} />;
+            return <FileView key={t} tab={t!} repo={repo} worktree={file.worktree} path={file.path} />;
+          }
+          if (t && p) {
+            return (
+              <ChatView
+                key={t}
+                project={p}
+                repos={ctx.reposOf(p.id)}
+                chatId={draftProject(t) ? null : t}
+                onCreated={(id) => tabs.replaceChat(t, id)}
+                onShowChanges={() => {
+                  setFilesMode("changes");
+                  setFilesOpen(true);
+                }}
+                onOpenTask={openTask}
+                onOpenDiff={(repoId, path, worktree) => tabs.openChat(fileTab(repoId, path, true, worktree))}
+              />
+            );
+          }
+          return <EmptyState title="No chat open" description="Pick a chat in the sidebar, or start one with the + next to a project." />;
+        };
+        const groupView = (g: Group): ReactNode => {
+          const gPid = chatProjectOf(g.chat);
+          const gProject = gPid ? ctx.projectById.get(gPid) : undefined;
+          return (
+            <section
+              key={g.id}
+              className={`chat-group ${multi && g.id === tabs.focus ? "focused" : ""}`}
+              aria-label={multi ? "Editor group" : undefined}
+              // Any click or focus inside a group makes it the one new tabs open in.
+              onPointerDownCapture={() => tabs.focusGroup(g.id)}
+              onFocusCapture={() => tabs.focusGroup(g.id)}
+            >
             <TabBar
               label="Open chats"
-              items={items}
-              active={tab}
+              items={g.chats.map(itemOf)}
+              active={g.chat}
               onPick={pickChatTab}
               onClose={closeChatTab}
               onCloseMany={(ids) => void closeChatTabs(ids)}
+              onSplit={(id, side) => tabs.split(g.id, id, side)}
+              onDropTab={(id, index) => tabs.move(id, g.id, index)}
               after={
-                tabProject && (
+                gProject && (
                   <button
                     type="button"
                     className="icon-btn tabbar-btn"
-                    aria-label={`New chat in ${tabProject.name}`}
-                    title={`New chat in ${tabProject.name}`}
-                    onClick={() => newChat(tabProject.id)}
+                    aria-label={`New chat in ${gProject.name}`}
+                    title={`New chat in ${gProject.name}`}
+                    onClick={() => newChat(gProject.id)}
                   >
                     <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" aria-hidden focusable="false">
                       <path d="M6 2.5v7M2.5 6h7" />
@@ -582,7 +655,7 @@ export function AppShell() {
                 )
               }
               end={
-                filesRepo && (
+                g.id === cornerGroup && filesRepo && (
                   <button
                     type="button"
                     className={`icon-btn tabbar-btn ${filesOpen ? "on" : ""}`}
@@ -598,34 +671,49 @@ export function AppShell() {
                 )
               }
             />
+            <div
+              className="chat-group-body"
+              // A tab dragged over a group: its edges split that side, its middle moves the tab in.
+              onDragOver={(e) => {
+                if (!isTabDrag(e)) return;
+                e.preventDefault();
+                e.dataTransfer.dropEffect = "move";
+                const zone = dropZoneAt(e.currentTarget.getBoundingClientRect(), e.clientX, e.clientY);
+                if (dropZone?.group !== g.id || dropZone.zone !== zone) setDropZone({ group: g.id, zone });
+              }}
+              onDragLeave={(e) => {
+                if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDropZone(null);
+              }}
+              onDrop={(e) => {
+                const id = e.dataTransfer.getData(TAB_DRAG);
+                setDropZone(null);
+                if (!id) return;
+                e.preventDefault();
+                const zone = dropZoneAt(e.currentTarget.getBoundingClientRect(), e.clientX, e.clientY);
+                if (zone === "center") tabs.move(id, g.id, g.chats.length);
+                else tabs.split(g.id, id, zone);
+              }}
+            >
+              {viewOf(g.chat)}
+              {dropZone?.group === g.id && <div className={`chat-drop chat-drop-${dropZone.zone}`} aria-hidden />}
+            </div>
+            </section>
+          );
+        };
+        const groupById = new Map(tabs.groups.map((g) => [g.id, g]));
+        // shortcut: splits share space equally; add drag handles between groups if people ask to size them.
+        const layoutView = (l: Layout, key: string): ReactNode =>
+          "group" in l ? (
+            groupView(groupById.get(l.group)!)
+          ) : (
+            <div key={key} className={`chat-split chat-split-${l.dir}`}>
+              {l.children.map((c, i) => layoutView(c, `${key}.${i}`))}
+            </div>
+          );
+        content = (
+          <div className="chat-tabs">
             <div className="chat-body">
-              {openFile && tabProject ? (
-                ctx.repoById.get(openFile.repoId) && (
-                  openFile.commit ? (
-                    <CommitView key={tab} repo={ctx.repoById.get(openFile.repoId)!} worktree={openFile.worktree} sha={openFile.path} />
-                  ) : openFile.diff ? (
-                    <FileDiffView key={tab} repo={ctx.repoById.get(openFile.repoId)!} worktree={openFile.worktree} path={openFile.path} />
-                  ) : (
-                    <FileView key={tab} tab={tab!} repo={ctx.repoById.get(openFile.repoId)!} worktree={openFile.worktree} path={openFile.path} />
-                  )
-                )
-              ) : tab && tabProject ? (
-                <ChatView
-                  key={tab}
-                  project={tabProject}
-                  repos={repos}
-                  chatId={draftProject(tab) ? null : tab}
-                  onCreated={(id) => tabs.replaceChat(tab, id)}
-                  onShowChanges={() => {
-                    setFilesMode("changes");
-                    setFilesOpen(true);
-                  }}
-                  onOpenTask={openTask}
-                  onOpenDiff={(repoId, path, worktree) => tabs.openChat(fileTab(repoId, path, true, worktree))}
-                />
-              ) : (
-                <EmptyState title="No chat open" description="Pick a chat in the sidebar, or start one with the + next to a project." />
-              )}
+              <div className="chat-grid">{layoutView(tabs.layout, "root")}</div>
               {filesOpen && filesRepo && (
                 <FilesPanel
                   key={filesRepo.id}
@@ -647,6 +735,19 @@ export function AppShell() {
                   mode={filesMode}
                   onMode={setFilesMode}
                   onClose={() => setFilesOpen(false)}
+                  width={filesWidth}
+                  resizer={
+                    <Resizer
+                      edge="left"
+                      label="Resize files panel"
+                      width={filesWidth}
+                      min={FILES_MIN}
+                      max={FILES_MAX}
+                      initial={FILES_DEFAULT}
+                      onWidth={setFilesWidth}
+                      onCollapse={(c) => setFilesOpen(!c)}
+                    />
+                  }
                 />
               )}
             </div>

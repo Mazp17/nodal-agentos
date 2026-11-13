@@ -9,6 +9,7 @@ import { BrandMark } from "../ui/BrandMark";
 import { Kbd, KbdGroup } from "../ui/Kbd";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../ui/Tooltip";
 import { readJsonPref, writePref } from "./storage";
+import { Resizer, clampWidth } from "./Resizer";
 import type { ProjectSection } from "./useNav";
 import { projectColor } from "../features/projects/create";
 
@@ -140,7 +141,7 @@ interface Props {
 }
 
 const SIDE_MIN = 232;
-const SIDE_MAX = 360;
+const SIDE_MAX = 560;
 const SIDE_DEFAULT = 248;
 
 export function Sidebar(p: Props) {
@@ -181,25 +182,22 @@ export function Sidebar(p: Props) {
     else chatsOf.set(c.projectId, [c]);
   }
 
-  // Resizable: dragged or arrow-keyed between SIDE_MIN and SIDE_MAX, remembered.
-  const [width, setWidthRaw] = useState(() => readJsonPref("sideWidth", SIDE_DEFAULT, (v): v is number => typeof v === "number"));
-  const setWidth = (w: number) => setWidthRaw(Math.max(SIDE_MIN, Math.min(SIDE_MAX, Math.round(w))));
+  // Resizable and collapsible (dragged to the edge, ⌘B, or the active rail icon), remembered.
+  const [width, setWidth] = useState(() =>
+    clampWidth(readJsonPref("sideWidth", SIDE_DEFAULT, (v): v is number => typeof v === "number"), SIDE_MIN, SIDE_MAX),
+  );
+  const [hidden, setHidden] = useState(() => readJsonPref("sideCollapsed", false, (v): v is boolean => typeof v === "boolean"));
   useEffect(() => writePref("sideWidth", JSON.stringify(width)), [width]);
-  const startResize = (e: React.PointerEvent<HTMLDivElement>) => {
-    e.preventDefault();
-    const el = e.currentTarget;
-    el.setPointerCapture(e.pointerId);
-    const left = el.parentElement!.getBoundingClientRect().left;
-    const move = (ev: PointerEvent) => setWidth(ev.clientX - left);
-    const up = () => {
-      el.removeEventListener("pointermove", move);
-      el.removeEventListener("pointerup", up);
-      document.body.classList.remove("resizing-col");
+  useEffect(() => writePref("sideCollapsed", JSON.stringify(hidden)), [hidden]);
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.defaultPrevented || !(e.metaKey || e.ctrlKey) || e.shiftKey || e.altKey || e.key.toLowerCase() !== "b") return;
+      e.preventDefault();
+      setHidden((h) => !h);
     };
-    document.body.classList.add("resizing-col");
-    el.addEventListener("pointermove", move);
-    el.addEventListener("pointerup", up);
-  };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
 
   const showChats = p.mode === "chat";
   const railOn = (m: "overview" | SideMode) =>
@@ -229,7 +227,13 @@ export function Sidebar(p: Props) {
               aria-label={r.badge ? `${r.label}, ${r.badge} ${r.tone === "need" ? "need you" : r.id === "chat" ? "unread" : "working"}` : r.label}
               aria-keyshortcuts={`Meta+${r.key}`}
               title={`${r.label} (⌘${r.key})`}
-              onClick={() => (r.id === "overview" ? p.onOverview() : p.onMode(r.id))}
+              onClick={() => {
+                if (r.id === "overview") return p.onOverview();
+                // Like an editor's activity bar: the place already showing hides or shows its list.
+                if (on) return setHidden((h) => !h);
+                setHidden(false);
+                p.onMode(r.id);
+              }}
             >
               <SideIcon name={r.icon} size={18} />
               {r.badge > 0 && <span className={`rail-badge rail-badge-${r.tone}`}>{r.badge > 9 ? "9+" : r.badge}</span>}
@@ -271,27 +275,17 @@ export function Sidebar(p: Props) {
       </nav>
 
       {/* Overview and Settings are pages of their own: no list beside them. */}
-      {!p.overviewOpen && !p.settingsOpen && (
+      {!p.overviewOpen && !p.settingsOpen && !hidden && (
     <aside className="sidebar" aria-label={showChats ? "Chats" : "Tasks"} style={{ width }}>
-      <div
-        role="separator"
-        className="side-resizer"
-        aria-orientation="vertical"
-        aria-label="Resize sidebar"
-        aria-valuemin={SIDE_MIN}
-        aria-valuemax={SIDE_MAX}
-        aria-valuenow={width}
-        tabIndex={0}
-        title="Drag to resize, double-click to reset"
-        onPointerDown={startResize}
-        onDoubleClick={() => setWidth(SIDE_DEFAULT)}
-        onKeyDown={(e) => {
-          const step = e.shiftKey ? 32 : 8;
-          if (e.key === "ArrowLeft") setWidth(width - step);
-          else if (e.key === "ArrowRight") setWidth(width + step);
-          else return;
-          e.preventDefault();
-        }}
+      <Resizer
+        edge="right"
+        label="Resize sidebar"
+        width={width}
+        min={SIDE_MIN}
+        max={SIDE_MAX}
+        initial={SIDE_DEFAULT}
+        onWidth={setWidth}
+        onCollapse={setHidden}
       />
       <div className="side-head">
         <h2 className="side-title">{showChats ? "Chats" : "Tasks"}</h2>

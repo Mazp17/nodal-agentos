@@ -45,6 +45,9 @@ interface Props {
   /** The chat open, whose subagents the "Agents" tab lists (`null`: none, e.g. a file tab is active). */
   chatId: string | null;
   onClose: () => void;
+  width: number;
+  /** The drag handle on its left edge. */
+  resizer: ReactNode;
 }
 
 export type FilesMode = "tree" | "changes" | "agents";
@@ -58,7 +61,7 @@ const STATUS_BADGE: Record<DiffFileStatus, { letter: string; cls: string; label:
 
 /** The repo's files next to the chat: a lazy tree (one listing per expanded folder), or only
  * the uncommitted changes. */
-export function FilesPanel({ repo, activePath, onOpenFile, onOpenDiff, onOpenCommit, activeCommit, onAskChatForPr, mode, onMode: setMode, worktree, onWorktree, chatId, onClose }: Props) {
+export function FilesPanel({ repo, activePath, onOpenFile, onOpenDiff, onOpenCommit, activeCommit, onAskChatForPr, mode, onMode: setMode, worktree, onWorktree, chatId, onClose, width, resizer }: Props) {
   const worktrees = useRepoWorktrees(repo.id).data;
   // Files picked in "Changes" (⇧/⌘-click) for the next commit, tied to the checkout they're in.
   const [picked, setPicked] = useState<Picked>({ root: "", paths: [], anchor: null });
@@ -84,7 +87,8 @@ export function FilesPanel({ repo, activePath, onOpenFile, onOpenDiff, onOpenCom
       return n;
     });
   return (
-    <aside className="files-panel" aria-label={`${repo.name} files`}>
+    <aside className="files-panel" aria-label={`${repo.name} files`} style={{ width }}>
+      {resizer}
       <div className="files-head">
         {/* Files or git, as one capsule split in two: the same shape as the composer's settings. */}
         <div className="files-modes" role="group" aria-label={`${repo.name}: show`} title={repo.path}>

@@ -1,5 +1,13 @@
-import { useEffect, useRef, type ReactNode } from "react";
+import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
 import { ContextMenu } from "radix-ui";
+import type { SplitSide } from "./layout";
+
+const SPLITS: { side: SplitSide; label: string }[] = [
+  { side: "right", label: "Split right" },
+  { side: "left", label: "Split left" },
+  { side: "down", label: "Split down" },
+  { side: "up", label: "Split up" },
+];
 
 export interface TabItem {
   id: string;
@@ -24,21 +32,70 @@ interface Props {
   onClose: (id: string) => void;
   /** Closes several tabs at once (the right-click menu). */
   onCloseMany: (ids: string[]) => void;
+  /** Moves a tab into a new editor group on that side (the right-click menu). */
+  onSplit?: (id: string, side: SplitSide) => void;
+  /** Makes the tabs draggable: a tab (from any bar) dropped here at `index`, counted without it. */
+  onDropTab?: (tab: string, index: number) => void;
   /** Actions after the tabs (a "+" right after them) and pinned to the right edge. */
   after?: ReactNode;
   end?: ReactNode;
 }
 
+/** Drag data type of a tab being dragged (its id). */
+export const TAB_DRAG = "application/x-nodal-tab";
+/** The tab being dragged, shared by every bar so the one it hovers can draw its ghost. */
+let dragInfo: { id: string; label: string; width: number } | null = null;
+export const isTabDrag =(e: React.DragEvent) => e.dataTransfer.types.includes(TAB_DRAG);
+
 /** Browser-like tabs over the main panel: chats in the Chat view, boards in Tasks. */
-export function TabBar({ label, items, active, onPick, onClose, onCloseMany, after, end }: Props) {
+export function TabBar({ label, items, active, onPick, onClose, onCloseMany, onSplit, onDropTab, after, end }: Props) {
   // Like an editor: the active tab (just opened or picked elsewhere) scrolls into view.
   const scroller = useRef<HTMLDivElement>(null);
   const count = items.length;
   useEffect(() => {
     scroller.current?.querySelector(".tab.on")?.scrollIntoView({ block: "nearest", inline: "nearest", behavior: "smooth" });
   }, [active, count]);
+  // Where a dragged tab would land: before the tab at this position (`count`: at the end).
+  const [over, setOver] = useState<number | null>(null);
+  const [dragged, setDragged] = useState<string | null>(null);
+  const indexAt = (x: number) => {
+    const tabs = [...(scroller.current?.querySelectorAll<HTMLElement>(".tab:not(.tab-ghost)") ?? [])];
+    const i = tabs.findIndex((el) => {
+      const r = el.getBoundingClientRect();
+      return x < r.left + r.width / 2;
+    });
+    return i < 0 ? tabs.length : i;
+  };
+  const drop = onDropTab && {
+    onDragOver: (e: React.DragEvent) => {
+      if (!isTabDrag(e)) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = "move";
+      setOver(indexAt(e.clientX));
+    },
+    onDragLeave: (e: React.DragEvent) => {
+      if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setOver(null);
+    },
+    onDrop: (e: React.DragEvent) => {
+      const tab = e.dataTransfer.getData(TAB_DRAG);
+      setOver(null);
+      if (!tab) return;
+      e.preventDefault();
+      const at = indexAt(e.clientX);
+      // The index skips the dragged tab itself when it sits left of the drop point.
+      const from = items.findIndex((t) => t.id === tab);
+      onDropTab(tab, from >= 0 && from < at ? at - 1 : at);
+    },
+  };
+  // A faded copy of the dragged tab where it would land; none where it would stay put.
+  const from = dragInfo ? items.findIndex((t) => t.id === dragInfo!.id) : -1;
+  const ghost = dragInfo && !(from >= 0 && (over === from || over === from + 1)) && (
+    <div className="tab tab-ghost" style={{ width: dragInfo.width }} aria-hidden>
+      <span className="ellipsis">{dragInfo.label}</span>
+    </div>
+  );
   return (
-    <div className="tabbar">
+    <div className="tabbar" {...drop}>
       <div ref={scroller} className="tabbar-scroll" role="tablist" aria-label={label}>
         {items.map((t, i) => {
           const on = t.id === active;
@@ -47,15 +104,33 @@ export function TabBar({ label, items, active, onPick, onClose, onCloseMany, aft
           const others = closable.filter((x) => x.id !== t.id);
           const ids = (xs: TabItem[]) => xs.map((x) => x.id);
           return (
-            <ContextMenu.Root key={t.id}>
+            <Fragment key={t.id}>
+            {over === i && ghost}
+            <ContextMenu.Root>
             <ContextMenu.Trigger asChild>
-            <div className={`tab ${on ? "on" : ""} ${t.dirty ? "dirty" : ""}`}>
+            <div className={`tab ${on ? "on" : ""} ${t.dirty ? "dirty" : ""} ${dragged === t.id ? "dragging" : ""}`}>
               <button
                 type="button"
                 role="tab"
                 aria-selected={on}
                 className="tab-pick"
                 title={t.label}
+                // On the button itself: WebKit never starts a drag from a <button> otherwise.
+                draggable={!!onDropTab}
+                onDragStart={(e) => {
+                  e.dataTransfer.setData(TAB_DRAG, t.id);
+                  e.dataTransfer.effectAllowed = "move";
+                  const tabEl = e.currentTarget.parentElement!;
+                  const r = tabEl.getBoundingClientRect();
+                  e.dataTransfer.setDragImage(tabEl, e.clientX - r.left, e.clientY - r.top);
+                  dragInfo = { id: t.id, label: t.label, width: r.width };
+                  setDragged(t.id);
+                }}
+                onDragEnd={() => {
+                  dragInfo = null;
+                  setDragged(null);
+                  setOver(null);
+                }}
                 onClick={() => onPick(t.id)}
                 onAuxClick={(e) => {
                   if (e.button === 1 && t.closable) onClose(t.id);
@@ -98,11 +173,24 @@ export function TabBar({ label, items, active, onPick, onClose, onCloseMany, aft
                 <ContextMenu.Item className="menu-item" disabled={closable.length === 0} onSelect={() => onCloseMany(ids(closable))}>
                   Close all
                 </ContextMenu.Item>
+                {onSplit && (
+                  <>
+                    <ContextMenu.Separator className="menu-sep" />
+                    {SPLITS.map((s) => (
+                      <ContextMenu.Item key={s.side} className="menu-item" onSelect={() => onSplit(t.id, s.side)}>
+                        {s.label}
+                        {s.side === "right" && <span className="menu-kbd">⌘\</span>}
+                      </ContextMenu.Item>
+                    ))}
+                  </>
+                )}
               </ContextMenu.Content>
             </ContextMenu.Portal>
             </ContextMenu.Root>
+            </Fragment>
           );
         })}
+        {over === count && ghost}
       </div>
       {after}
       {end && <div className="tabbar-end">{end}</div>}

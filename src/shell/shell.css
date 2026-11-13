@@ -267,6 +267,10 @@
 .tab-menu .menu-item { cursor: default; user-select: none; }
 .tab-menu .menu-item[data-highlighted] { background: var(--fill-6); outline: none; }
 .tab-menu .menu-item[data-disabled] { color: var(--text-dim); pointer-events: none; }
+/* Dragging tabs: the dragged one fades, a ghost of it shows where it would land. */
+.tab.dragging { opacity: 0.4; }
+.tab-ghost { flex: none; opacity: 0.35; pointer-events: none; padding: 0 var(--sp-4); color: var(--text-muted); background: var(--fill-5); }
+.menu-kbd { margin-left: auto; padding-left: var(--sp-4); color: var(--text-dim); font-size: var(--fs-xs); }
 .menu-sep { height: 1px; margin: var(--sp-1) var(--sp-2); background: var(--border); }
 
 /* Unsaved file tab: a dot in place of the close button, the button back on hover. */
@@ -275,9 +279,11 @@
 .tab.dirty:hover .tab-close, .tab.dirty .tab-close:focus-visible { color: var(--text-dim); }
 .tab.dirty:hover .tab-close::after, .tab.dirty .tab-close:focus-visible::after { display: none; }
 
-/* Sidebar resize handle: a 6px strip over its right edge. */
+/* Side panel resize handle: a 6px strip over its inner edge. */
 .sidebar { position: relative; }
-.side-resizer { position: absolute; top: 0; right: -3px; width: 6px; height: 100%; z-index: 2; cursor: col-resize; }
+.side-resizer { position: absolute; top: 0; width: 6px; height: 100%; z-index: 2; cursor: col-resize; }
+.side-resizer.at-right { right: -3px; }
+.side-resizer.at-left { left: -3px; }
 .side-resizer:hover, .side-resizer:focus-visible { background: var(--accent-tint-50); outline: none; }
 body.resizing-col { cursor: col-resize; user-select: none; }
 .side-group-live { flex: none; display: inline-flex; align-items: center; gap: 5px; font-size: var(--fs-2xs); font-weight: var(--fw-regular, 400); color: var(--accent); }
