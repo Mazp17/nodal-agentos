@@ -40,8 +40,8 @@ pub(crate) fn is_live_worktree(dir: &Path) -> bool {
         && super::toplevel(dir)
             .ok()
             .flatten()
-            .and_then(|t| t.canonicalize().ok())
-            .zip(dir.canonicalize().ok())
+            .and_then(|t| dunce::canonicalize(t).ok())
+            .zip(dunce::canonicalize(dir).ok())
             .is_some_and(|(a, b)| a == b)
 }
 
@@ -96,8 +96,7 @@ pub fn ensure(
     } else {
         ok(repo, &["worktree", "add", "-b", &branch, &dir_s, &base])?;
     }
-    let path = dir
-        .canonicalize()
+    let path = dunce::canonicalize(&dir)
         .map(|p| p.to_string_lossy().into_owned())
         .unwrap_or(dir_s);
     Ok(WorktreeRef { path, branch, base })

@@ -11,8 +11,9 @@ fn resolve_claude_and_git_are_memoized() {
 fn augmented_path_is_stable_and_includes_extra_dirs() {
     let first = augmented_path();
     assert_eq!(first, augmented_path());
-    let joined = first.to_string_lossy().into_owned();
-    assert!(joined.contains("/usr/local/bin"), "{joined}");
+    for d in super::extra_dirs() {
+        assert!(std::env::split_paths(&first).any(|p| p == d), "{d:?} missing from {first:?}");
+    }
 }
 
 #[test]

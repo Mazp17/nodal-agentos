@@ -1,7 +1,7 @@
 name: Release
 
-# Builds a universal, ad-hoc signed (not notarized) .dmg, the signed update bundle and
-# latest.json for the in-app updater, and uploads them to the DRAFT release of a tag, with
+# Builds a universal, ad-hoc signed (not notarized) .dmg, an unsigned Windows x64 NSIS installer,
+# their signed update bundles and one latest.json for the in-app updater, and uploads them to the DRAFT release of a tag, with
 # GitHub's generated notes (the updater keeps the CHANGELOG.md section). Called by
 # release-please.yml when a release PR is merged; run it by hand to rebuild a tag. Only versions with a suffix (x.y.z-beta.1) are pre-releases: the
 # updater reads releases/latest, which skips them. Publishing is manual.
@@ -90,9 +90,7 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: pnpm tauri build --target universal-apple-darwin --bundles app,dmg
 
-      - name: Checksum, release notes and latest.json
-        env:
-          GH_TOKEN: ${{ github.token }}
+      - name: Stage assets and checksum
         run: |
           bundle="src-tauri/target/universal-apple-darwin/release/bundle"
           update="Nodal_${VERSION}_universal.app.tar.gz"
@@ -101,6 +99,124 @@ jobs:
           cp "$bundle/macos/Nodal.app.tar.gz" "dist-release/$update"
           cp "$bundle/macos/Nodal.app.tar.gz.sig" "dist-release/$update.sig"
           (cd dist-release && shasum -a 256 "Nodal_${VERSION}_universal.dmg" > "Nodal_${VERSION}_universal.dmg.sha256")
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: release-macos
+          path: dist-release/
+          if-no-files-found: error
+
+  # Native Windows x64, NSIS installer only. Not code-signed (the updater signature still is).
+  # tauri.windows.conf.json adds nodal-mcp as an externalBin: the installer puts it, without the
+  # target triple, next to Nodal.exe, where the app looks for it.
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: bash
+    env:
+      TAG: ${{ inputs.tag }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ inputs.tag }}
+          persist-credentials: false
+
+      - name: Check tag and version
+        run: |
+          version=$(jq -r .version package.json)
+          [ "$TAG" = "v$version" ] || { echo "::error::Tag $TAG does not match package.json version $version"; exit 1; }
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+
+      - name: Check updater signing key
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+        run: |
+          [ -n "$TAURI_SIGNING_PRIVATE_KEY" ] || { echo "::error::The TAURI_SIGNING_PRIVATE_KEY secret is not set"; exit 1; }
+
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+        with:
+          toolchain: stable
+
+      # Building nodal-mcp compiles the app crate's build script, which already requires the
+      # sidecar to exist: stage an empty file first, then replace it with the real exe.
+      # Same features as tauri build so the bundle build below reuses this compile.
+      - name: Build nodal-mcp sidecar
+        run: |
+          pnpm build
+          mkdir -p src-tauri/binaries
+          sidecar=src-tauri/binaries/nodal-mcp-x86_64-pc-windows-msvc.exe
+          : > "$sidecar"
+          (cd src-tauri && cargo build --release --locked --bin nodal-mcp --features tauri/custom-protocol)
+          cp src-tauri/target/release/nodal-mcp.exe "$sidecar"
+
+      - name: Build NSIS installer and update bundle
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: pnpm tauri build --bundles nsis
+
+      # With createUpdaterArtifacts the updater installs the setup.exe itself, signed in .sig.
+      - name: Stage assets and checksum
+        run: |
+          installer="Nodal_${VERSION}_x64-setup.exe"
+          mkdir dist-release
+          cp "src-tauri/target/release/bundle/nsis/$installer" "src-tauri/target/release/bundle/nsis/$installer.sig" dist-release/
+          (cd dist-release && sha256sum "$installer" > "$installer.sha256")
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: release-windows
+          path: dist-release/
+          if-no-files-found: error
+
+  # One latest.json for both platforms, one draft release.
+  publish:
+    needs: [build, windows]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write # create the draft release
+    env:
+      TAG: ${{ inputs.tag }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ inputs.tag }}
+          fetch-depth: 0 # previous tag, for the generated release notes
+          persist-credentials: false
+
+      - name: Check tag, version and changelog
+        run: |
+          version=$(jq -r .version package.json)
+          [ "$TAG" = "v$version" ] || { echo "::error::Tag $TAG does not match package.json version $version"; exit 1; }
+          grep -q "^## \[$version\]" CHANGELOG.md || { echo "::error::CHANGELOG.md has no [$version] section"; exit 1; }
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: release-*
+          path: dist-release
+          merge-multiple: true
+
+      - name: Release notes and latest.json
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mac="Nodal_${VERSION}_universal.app.tar.gz"
+          win="Nodal_${VERSION}_x64-setup.exe"
           # Section of CHANGELOG.md for this version, for the in-app updater.
           awk -v v="$VERSION" '
             $0 ~ "^## \\[" v "\\]" { on = 1; next }
@@ -109,17 +225,21 @@ jobs:
           ' CHANGELOG.md > changelog.md
           # The in-app updater shows plain notes: drop the PR and commit links.
           sed -E 's/ \(\[[^]]*\]\([^)]*\)\)//g' changelog.md > notes-app.md
-          # Universal build: both architectures download the same bundle.
-          url="https://github.com/$GITHUB_REPOSITORY/releases/download/$TAG/$update"
+          base="https://github.com/$GITHUB_REPOSITORY/releases/download/$TAG"
+          # Universal macOS build: both architectures download the same bundle.
           jq -n \
             --arg version "$VERSION" \
             --rawfile notes notes-app.md \
             --arg pub_date "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-            --arg url "$url" \
-            --rawfile sig "dist-release/$update.sig" \
-            '{version: $version, notes: ($notes | gsub("^\\s+|\\s+$"; "")), pub_date: $pub_date,
-              platforms: ($sig | gsub("\\s"; "") as $signature | {"darwin-aarch64": {url: $url, signature: $signature},
-                          "darwin-x86_64": {url: $url, signature: $signature}})}' \
+            --arg mac_url "$base/$mac" \
+            --rawfile mac_sig "dist-release/$mac.sig" \
+            --arg win_url "$base/$win" \
+            --rawfile win_sig "dist-release/$win.sig" \
+            '($mac_sig | gsub("\\s"; "")) as $m | ($win_sig | gsub("\\s"; "")) as $w
+             | {version: $version, notes: ($notes | gsub("^\\s+|\\s+$"; "")), pub_date: $pub_date,
+                platforms: {"darwin-aarch64": {url: $mac_url, signature: $m},
+                            "darwin-x86_64": {url: $mac_url, signature: $m},
+                            "windows-x86_64": {url: $win_url, signature: $w}}}' \
             > dist-release/latest.json
           # The release page gets GitHub's generated notes (PRs, authors, full changelog link),
           # plus the install note for an unsigned app.

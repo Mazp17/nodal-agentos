@@ -82,8 +82,16 @@ export function useProjects(): ProjectsState {
   }, [projects, repos, loaded, error]);
 }
 
-/** Last folder of the path (`/a/b/repo` → `repo`). */
-export const basename = (p: string) => p.replace(/\/+$/, "").split("/").pop() || p;
+/** Last folder of the path (`/a/b/repo` → `repo`, `C:\a\repo` → `repo`). */
+export const basename = (p: string) => p.replace(/[\\/]+$/, "").split(/[\\/]/).pop() || p;
+
+/** `abs` relative to `root` when it lives under it (either separator), with `/` separators for a Windows root. */
+export const relUnder = (abs: string, root: string): string | null => {
+  const r = root.replace(/[\\/]+$/, "");
+  if (abs.length <= r.length || !abs.startsWith(r) || !/[\\/]/.test(abs[r.length]!)) return null;
+  const rel = abs.slice(r.length + 1);
+  return r.includes("\\") ? rel.replace(/\\/g, "/") : rel;
+};
 
 /**
  * Project key from the name: 3 uppercase letters ("Payments" → "PAY"),

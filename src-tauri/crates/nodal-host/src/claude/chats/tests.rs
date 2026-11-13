@@ -104,6 +104,7 @@ echo '{"type":"result","subtype":"success","is_error":false}'
 "#;
 
 #[test]
+#[cfg_attr(windows, ignore = "the fake claude is a sh script")]
 fn bursts_of_deltas_are_coalesced_but_lose_no_text() {
     let f = Fixture::new("burst", BURST_DELTAS);
     block_on(async {
@@ -135,6 +136,7 @@ exit 3
 "#;
 
 #[test]
+#[cfg_attr(windows, ignore = "the fake claude is a sh script")]
 fn a_kind_change_and_a_crash_both_flush_the_buffer() {
     let f = Fixture::new("interleave", INTERLEAVED_THEN_CRASH);
     block_on(async {
@@ -158,6 +160,7 @@ done
 "#;
 
 #[test]
+#[cfg_attr(windows, ignore = "the fake claude is a sh script")]
 fn a_flood_of_lines_is_capped_reported_and_stops_the_process() {
     let f = Fixture::new("flood", FLOODS_OUTPUT);
     block_on(async {
@@ -205,6 +208,7 @@ impl ChatSink for PanicOnChatSink {
 /// supervising task already has) — must not affect a second, healthy chat running on the
 /// same `ChatProcesses`.
 #[test]
+#[cfg_attr(windows, ignore = "the fake claude is a sh script")]
 fn a_panic_in_one_chats_reader_does_not_affect_another_chat() {
     let dir = std::env::temp_dir().join(format!("nodal-chats-panic-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);

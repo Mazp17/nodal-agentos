@@ -8,7 +8,7 @@ pub fn claude_config_dir() -> Option<PathBuf> {
     if let Some(dir) = std::env::var_os("CLAUDE_CONFIG_DIR").filter(|d| !d.is_empty()) {
         return Some(PathBuf::from(dir));
     }
-    std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".claude"))
+    std::env::home_dir().map(|h| h.join(".claude"))
 }
 
 /// Project directory slug: every non-alphanumeric character becomes `-`.

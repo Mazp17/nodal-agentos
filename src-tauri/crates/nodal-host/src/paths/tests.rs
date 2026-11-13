@@ -21,7 +21,7 @@ fn git_root_of_subfolder() {
         .unwrap_err()
         .contains("not inside a git repository"));
     assert!(git_root_of("relative").is_err());
-    assert!(git_root_of("/no/such/dir")
+    assert!(git_root_of(&missing_dir())
         .unwrap_err()
         .contains("doesn't exist"));
 }
@@ -78,7 +78,7 @@ fn scans_repos_up_to_three_levels_down() {
         git_repos_under(root.join("notes").to_str().unwrap()).unwrap(),
         Vec::<PathBuf>::new()
     );
-    assert!(git_repos_under("/no/such/dir")
+    assert!(git_repos_under(&missing_dir())
         .unwrap_err()
         .contains("doesn't exist"));
     assert!(git_repos_under("relative")
@@ -114,4 +114,9 @@ fn expands_home() {
     assert_eq!(expand_home("~/x"), h.join("x"));
     assert_eq!(expand_home("~"), h);
     assert_eq!(expand_home("/a/~"), PathBuf::from("/a/~"));
+}
+
+/// An absolute folder that doesn't exist, on any OS.
+fn missing_dir() -> String {
+    std::env::temp_dir().join("nodal-no-such").join("dir").to_string_lossy().into_owned()
 }

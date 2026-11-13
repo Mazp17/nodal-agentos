@@ -1,4 +1,5 @@
 import { useEffect, useState, type ReactNode } from "react";
+import { basename } from "../../domain/hooks/projects";
 import { ContextMenu, DropdownMenu } from "radix-ui";
 import { rootKey, useRepoChanges, useRepoCommits, useRepoDir, useRepoWorktrees } from "../../domain/hooks/branches";
 import { shortAgo } from "./model";
@@ -346,7 +347,7 @@ const BRANCH_ICON = (
 /** Which checkout the panel shows: the repo's own or one of its worktrees, each by its branch. */
 function RootPicker({ repo, worktrees, value, onChange }: { repo: Repo; worktrees: RepoWorktree[]; value: string | null; onChange: (w: string | null) => void }) {
   const current = worktrees.find((w) => (w.isMain ? value === null : w.path === value)) ?? worktrees[0]!;
-  const name = (w: RepoWorktree) => (w.isMain ? repo.name : (w.path.split("/").pop() ?? w.path));
+  const name = (w: RepoWorktree) => (w.isMain ? repo.name : basename(w.path));
   // A worktree's branch already carries its name; a detached checkout falls back to the folder.
   const label = (w: RepoWorktree) => w.branch ?? name(w);
   const tag = <span className="files-root-tag">main repo</span>;

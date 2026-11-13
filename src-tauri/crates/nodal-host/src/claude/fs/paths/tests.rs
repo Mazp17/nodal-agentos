@@ -9,6 +9,11 @@ fn fixtures_projects() -> PathBuf {
 }
 
 #[test]
+fn slug_handles_windows_paths() {
+    assert_eq!(project_slug(r"C:\Users\a\repo"), "C--Users-a-repo");
+}
+
+#[test]
 fn slug_matches_real_project_dirs() {
     assert_eq!(project_slug(SANDBOX), "-Users-me-Code-nodal-sandbox");
     assert_eq!(

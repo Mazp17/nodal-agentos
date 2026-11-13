@@ -1,4 +1,5 @@
 import { useMemo, useState, type KeyboardEvent } from "react";
+import { basename } from "../../domain/hooks/projects";
 import { revertRepoFile, writeRepoFile } from "../../domain/api";
 import { repoFileKey, useCommitDiff, useRepoChanges, useRepoCommits, useRepoFile } from "../../domain/hooks/branches";
 import { invalidate, setData } from "../../domain/hooks/store";
@@ -243,7 +244,7 @@ function RootCrumb({ repo, worktree }: { repo: Repo; worktree: string | null }) 
             <path d="M4 4.4v5.2M10 5.9c0 2.4-6 1.8-6 3.4" />
           </svg>
           <span className="sr-only">worktree </span>
-          {worktree.split("/").pop()}
+          {basename(worktree)}
         </span>
       )}
       <span className="file-view-repo">/</span>

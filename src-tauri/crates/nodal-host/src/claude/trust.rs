@@ -128,15 +128,15 @@ pub fn repo_trust_blocking(path: &Path, config_file: Option<&Path>) -> Result<Re
     };
     // git returns resolved paths (`/private/tmp`, not `/tmp`): compare with the canonicalized
     // path, and if that's not enough, with the path as is (no git bound).
-    let real = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+    let real = dunce::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
     let bound = if real.is_dir() {
-        git::toplevel(&real)?.map(|t| t.canonicalize().unwrap_or(t))
+        git::toplevel(&real)?.map(|t| dunce::canonicalize(&t).unwrap_or(t))
     } else {
         None
     };
     let canonical = match &bound {
         Some(top) => main_root(top)
-            .map(|m| m.canonicalize().unwrap_or(m))
+            .map(|m| dunce::canonicalize(&m).unwrap_or(m))
             .unwrap_or_else(|| top.clone()),
         None => real.clone(),
     };

@@ -25,7 +25,7 @@ const WHITELIST: &[(&str, &[&str], &[&str])] = &[
     (
         "nodal-store",
         &["nodal-domain"],
-        &["rusqlite", "serde", "serde_json", "thiserror", "tokio", "tracing"],
+        &["dunce", "rusqlite", "serde", "serde_json", "thiserror", "tokio", "tracing"],
     ),
     (
         "nodal-host",
@@ -34,6 +34,7 @@ const WHITELIST: &[(&str, &[&str], &[&str])] = &[
             "tokio",
             "keyring",
             "libc",
+            "dunce",
             "serde",
             "serde_json",
             "thiserror",

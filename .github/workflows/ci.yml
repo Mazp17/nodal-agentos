@@ -151,3 +151,41 @@ jobs:
       - name: Clippy (macOS)
         working-directory: src-tauri
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
+
+  # Windows x64 ships too: compile, lint and test the Windows-only code paths there.
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      # tauri::generate_context! needs dist/ and the externalBin of tauri.windows.conf.json
+      # to exist; the real ones are built in `check` and release.yml.
+      - name: Stub frontend dist and sidecar
+        run: |
+          mkdir -p dist src-tauri/binaries
+          echo '<!doctype html>' > dist/index.html
+          : > src-tauri/binaries/nodal-mcp-x86_64-pc-windows-msvc.exe
+
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+        with:
+          toolchain: stable
+          components: clippy
+
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          workspaces: src-tauri
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Clippy (Windows)
+        working-directory: src-tauri
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+
+      - name: Rust tests (Windows)
+        working-directory: src-tauri
+        run: cargo test --workspace --lib --locked --no-fail-fast

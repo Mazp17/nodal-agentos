@@ -96,22 +96,25 @@ fn reads_config_and_resolves_worktrees() {
     );
     assert!(repo_trust_blocking(Path::new("relative"), Some(&file)).is_err());
 
-    // Symlink to the folder: resolved to compare with what git returns.
-    let link = t.0.join("link");
-    std::os::unix::fs::symlink(&repo, &link).unwrap();
-    std::fs::write(
-        &file,
-        cfg(&[(repo.join("src").to_str().unwrap(), true)]).to_string(),
-    )
-    .unwrap();
-    let r = repo_trust_blocking(&link.join("src"), Some(&file)).unwrap();
-    assert_eq!((r.trusted, r.source), (Some(true), TrustSource::Parent));
-    // And an entry saved with the unresolved path counts too.
-    std::fs::write(&file, cfg(&[(link.to_str().unwrap(), true)]).to_string()).unwrap();
-    assert_eq!(
-        repo_trust_blocking(&link.join("src"), Some(&file))
-            .unwrap()
-            .trusted,
-        Some(true)
-    );
+    #[cfg(unix)]
+    {
+        // Symlink to the folder: resolved to compare with what git returns.
+        let link = t.0.join("link");
+        std::os::unix::fs::symlink(&repo, &link).unwrap();
+        std::fs::write(
+            &file,
+            cfg(&[(repo.join("src").to_str().unwrap(), true)]).to_string(),
+        )
+        .unwrap();
+        let r = repo_trust_blocking(&link.join("src"), Some(&file)).unwrap();
+        assert_eq!((r.trusted, r.source), (Some(true), TrustSource::Parent));
+        // And an entry saved with the unresolved path counts too.
+        std::fs::write(&file, cfg(&[(link.to_str().unwrap(), true)]).to_string()).unwrap();
+        assert_eq!(
+            repo_trust_blocking(&link.join("src"), Some(&file))
+                .unwrap()
+                .trusted,
+            Some(true)
+        );
+    }
 }

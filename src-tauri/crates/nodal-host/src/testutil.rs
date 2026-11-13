@@ -22,7 +22,7 @@ impl TempDir {
         let d = std::env::temp_dir().join(format!("nodal-test-{}-{name}", std::process::id()));
         let _ = std::fs::remove_dir_all(&d);
         std::fs::create_dir_all(&d).unwrap();
-        TempDir(d.canonicalize().unwrap())
+        TempDir(dunce::canonicalize(d).unwrap())
     }
 }
 
@@ -77,6 +77,8 @@ pub fn init_repo(dir: &Path) {
     run(&["config", "user.email", "test@example.com"]);
     run(&["config", "user.name", "Test"]);
     run(&["config", "commit.gpgsign", "false"]);
+    // Windows runners default to autocrlf=true, which rewrites files on checkout.
+    run(&["config", "core.autocrlf", "false"]);
     std::fs::write(dir.join("README.md"), "# demo\n").unwrap();
     run(&["add", "."]);
     run(&["commit", "-q", "-m", "init"]);

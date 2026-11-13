@@ -34,10 +34,10 @@ pub fn plan_file(repo: &Path, path: &str) -> Result<PathBuf, String> {
     if raw.is_empty() {
         return Err("Pick a plan file.".into());
     }
-    let repo = repo.canonicalize().map_err(|_| format!("The repository folder doesn't exist: {}", repo.display()))?;
+    let repo = dunce::canonicalize(repo).map_err(|_| format!("The repository folder doesn't exist: {}", repo.display()))?;
     let p = Path::new(raw);
     let joined = if p.is_absolute() { p.to_path_buf() } else { repo.join(p) };
-    let canon = joined.canonicalize().map_err(|_| format!("The plan file doesn't exist: {raw}"))?;
+    let canon = dunce::canonicalize(joined).map_err(|_| format!("The plan file doesn't exist: {raw}"))?;
     if !canon.starts_with(&repo) {
         return Err(format!("The plan file must be inside the repository ({}).", repo.display()));
     }

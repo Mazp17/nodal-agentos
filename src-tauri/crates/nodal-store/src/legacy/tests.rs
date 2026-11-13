@@ -366,7 +366,8 @@ fn only_known_files_are_copied() {
     let db = Db::open_in_memory().unwrap();
     let r = import_folder(&mut db.lock().unwrap(), &src.0, &data.0, T0).unwrap();
     let copied = snapshot(Path::new(&r.backup_dir));
-    assert_eq!(copied.keys().collect::<Vec<_>>(), ["tasks.json", "tasks/t1/plan.md"]);
+    let keys: Vec<String> = copied.keys().map(|k| k.replace('\\', "/")).collect();
+    assert_eq!(keys, ["tasks.json", "tasks/t1/plan.md"]);
 }
 
 #[test]

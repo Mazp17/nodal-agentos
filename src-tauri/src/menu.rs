@@ -27,6 +27,11 @@ pub fn menu<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
         let close_window = MenuItem::with_id(app, CLOSE_WINDOW_ID, "Close Window", true, Some("CmdOrCtrl+Shift+W"))?;
         sub.insert(&close_tab, pos)?;
         sub.insert(&close_window, pos + 1)?;
+        // Windows' default menu also has Close Window under Window: one pair of ids and
+        // accelerators is enough.
+        if cfg!(not(target_os = "macos")) {
+            break;
+        }
     }
     Ok(menu)
 }

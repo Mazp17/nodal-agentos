@@ -33,10 +33,8 @@ fn check_rel(rel: &str) -> Result<&Path, String> {
 /// (symlinks followed) still inside the canonical repo root.
 fn resolve(repo: &Path, rel: &str) -> Result<PathBuf, String> {
     let rel_path = check_rel(rel)?;
-    let root = repo.canonicalize().map_err(|e| format!("Repo folder unavailable: {e}"))?;
-    let path = root
-        .join(rel_path)
-        .canonicalize()
+    let root = dunce::canonicalize(repo).map_err(|e| format!("Repo folder unavailable: {e}"))?;
+    let path = dunce::canonicalize(root.join(rel_path))
         .map_err(|e| format!("Can't read `{rel}`: {e}"))?;
     // Symlinks are resolved above, so this also rejects links pointing outside the repo.
     if !path.starts_with(&root) {
@@ -50,6 +48,10 @@ fn resolve(repo: &Path, rel: &str) -> Result<PathBuf, String> {
 pub fn read_file(repo: &Path, rel: &str) -> Result<RepoFile, String> {
     use std::io::Read;
     let path = resolve(repo, rel)?;
+    // Windows can't open a folder as a file, so `File::open` would fail with a vaguer error.
+    if path.is_dir() {
+        return Err(format!("`{rel}` is not a regular file."));
+    }
     let file = std::fs::File::open(&path).map_err(|e| format!("Can't read `{rel}`: {e}"))?;
     let meta = file.metadata().map_err(|e| format!("Can't read `{rel}`: {e}"))?;
     if !meta.is_file() {
@@ -154,7 +156,7 @@ pub fn list_worktrees(repo: &Path) -> Result<Vec<RepoWorktree>, String> {
         let mut skip = false;
         for line in block.lines() {
             if let Some(p) = line.strip_prefix("worktree ") {
-                path = Some(p.to_string());
+                path = Some(super::native_path(p).to_string_lossy().into_owned());
             } else if let Some(b) = line.strip_prefix("branch ") {
                 branch = Some(b.strip_prefix("refs/heads/").unwrap_or(b).to_string());
             } else if line.starts_with("prunable") || line == "bare" {
@@ -181,11 +183,11 @@ pub fn revert_file(root: &Path, rel: &str) -> Result<(), String> {
     if norm.as_os_str().is_empty() {
         return Err("Pick a file to revert.".into());
     }
-    let root = root.canonicalize().map_err(|e| format!("Repo folder unavailable: {e}"))?;
+    let root = dunce::canonicalize(root).map_err(|e| format!("Repo folder unavailable: {e}"))?;
     let full = root.join(&norm);
     // The file itself may be gone: validate its nearest existing ancestor instead.
     let near = full.ancestors().skip(1).find(|a| a.exists()).unwrap_or(&root);
-    let near = near.canonicalize().map_err(|e| format!("Can't revert `{rel}`: {e}"))?;
+    let near = dunce::canonicalize(near).map_err(|e| format!("Can't revert `{rel}`: {e}"))?;
     if !near.starts_with(&root) {
         return Err("Path resolves outside the repo.".into());
     }

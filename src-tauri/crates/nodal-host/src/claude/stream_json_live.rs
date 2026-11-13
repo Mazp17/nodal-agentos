@@ -162,7 +162,7 @@ fn answer(req: &Value, allow: bool) -> Value {
 fn scratch() -> PathBuf {
     let dir = std::env::temp_dir().join(format!("nodal-stream-json-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
-    dir.canonicalize().unwrap()
+    dunce::canonicalize(&dir).unwrap()
 }
 
 fn is_permission_request(ev: &Value) -> bool {
