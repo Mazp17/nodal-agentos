@@ -7,6 +7,10 @@
 //! it with `--resume`). Removing a `Proc` from the map is what stops it: its stdin closes
 //! (Claude Code exits on EOF) and, after `EXIT_GRACE`, the process is killed.
 //!
+//! A rewind (`rewind_files`, `rewind_conversation`) never runs mid-turn: files are restored by
+//! a `rewind_files` control request answered on stdout, and the conversation by stopping the
+//! process so the next one resumes with `--resume-session-at`.
+//!
 //! DB side effects of a turn (saving the session id, refreshing the session title) go
 //! through the `ChatHooks` port instead of touching a database directly: this crate has no
 //! store dependency.
@@ -27,12 +31,14 @@ use tokio::runtime::Handle;
 use tokio::sync::{mpsc, oneshot};
 
 use nodal_domain::error::HostError;
+use serde_json::Value;
+
 use nodal_domain::model::chat::{
-    ChatEnvelope, ChatEvent, ChatLive, ChatSpec as Spec, HostEvent, PermissionRequest, RunState,
-    StreamEvent,
+    ChatEnvelope, ChatEvent, ChatLive, ChatSpec as Spec, HostEvent, PermissionRequest, RewindResult,
+    RunState, StreamEvent,
 };
-use nodal_domain::ports::{ChatHooks, ChatRuntime, ChatSink};
-use nodal_domain::sessions::transcript::is_valid_session_id;
+use nodal_domain::ports::{BoxFut, ChatHooks, ChatRuntime, ChatSink};
+use nodal_domain::sessions::transcript::{is_valid_message_uuid, is_valid_session_id};
 
 use super::bin as claude_bin;
 use super::stream_json;
@@ -46,6 +52,8 @@ const EXIT_GRACE: Duration = Duration::from_secs(3);
 pub const DENY_MESSAGE: &str = "The user denied this in Nodal.";
 const DENY_MESSAGE_MAX: usize = 2000;
 const STDERR_TAIL: usize = 2000;
+/// How long a `rewind_files` request waits for its answer.
+const REWIND_TIMEOUT: Duration = Duration::from_secs(20);
 /// P05: caps `TextDelta`/`ThinkingDelta` emits at under 60/s per chat. Consecutive deltas of
 /// the same kind arriving inside one window are merged into a single emit; anything else
 /// (an item, a permission request, the turn ending…) flushes whatever is buffered first, so
@@ -92,6 +100,8 @@ struct Proc {
     interrupts: u64,
     delta: Option<PendingDelta>,
     delta_last_flush: Instant,
+    /// Control requests waiting for their `control_response`, by `request_id`.
+    controls: HashMap<String, oneshot::Sender<Result<Value, String>>>,
 }
 
 impl Proc {
@@ -112,6 +122,10 @@ impl Proc {
 
 struct Shared {
     procs: Mutex<HashMap<String, Proc>>,
+    /// Per chat, the assistant message its next process resumes at (`--resume-session-at`)
+    /// until a message is sent. shortcut: in memory, lost on app restart (the chat then
+    /// resumes at the end of the abandoned branch); upgrade by persisting it with the chat.
+    resume_at: Mutex<HashMap<String, String>>,
     gens: AtomicU64,
     sink: Arc<dyn ChatSink>,
     hooks: Arc<dyn ChatHooks>,
@@ -147,6 +161,7 @@ impl ChatProcesses {
     ) -> Arc<Self> {
         Arc::new(ChatProcesses(Arc::new(Shared {
             procs: Mutex::default(),
+            resume_at: Mutex::default(),
             gens: AtomicU64::new(1),
             sink,
             hooks,
@@ -157,6 +172,10 @@ impl ChatProcesses {
 
     fn procs(&self) -> MutexGuard<'_, HashMap<String, Proc>> {
         self.0.procs.lock().unwrap_or_else(|p| p.into_inner())
+    }
+
+    fn resume_at(&self) -> MutexGuard<'_, HashMap<String, String>> {
+        self.0.resume_at.lock().unwrap_or_else(|p| p.into_inner())
     }
 
     fn emit(&self, chat_id: &str, event: ChatEvent) {
@@ -212,14 +231,19 @@ impl ChatProcesses {
         }
         let mut cmd = self.command()?;
         let (key, value) = stream_json::CHAT_ENTRYPOINT;
+        let (ckey, cvalue) = stream_json::CHAT_CHECKPOINTING;
         cmd.args(stream_json::CHAT_ARGS)
             .args(&spec.args)
-            .env(key, value);
+            .env(key, value)
+            .env(ckey, cvalue);
         if let Some(sid) = session_id {
             if !is_valid_session_id(sid) {
                 return Err(format!("Invalid session id: \"{sid}\".").into());
             }
             cmd.args(stream_json::resume_args(sid));
+            if let Some(at) = self.resume_at().get(chat_id) {
+                cmd.args(stream_json::resume_at_args(at));
+            }
         }
         cmd.current_dir(&spec.cwd)
             .stdin(Stdio::piped())
@@ -300,6 +324,7 @@ impl ChatProcesses {
             interrupts: 0,
             delta: None,
             delta_last_flush: Instant::now(),
+            controls: HashMap::new(),
         })
     }
 
@@ -351,6 +376,15 @@ impl ChatProcesses {
     }
 
     fn on_line(&self, chat_id: &str, gen: u64, line: &str) {
+        if line.contains("\"control_response\"") {
+            if let Some((id, response)) = stream_json::parse_control_response(line) {
+                let waiting = self.procs().get_mut(chat_id).filter(|p| p.gen == gen).and_then(|p| p.controls.remove(&id));
+                if let Some(tx) = waiting {
+                    let _ = tx.send(response);
+                }
+            }
+            return;
+        }
         for ev in stream_json::parse_line(line) {
             match ev {
                 StreamEvent::TextDelta { text } => self.on_delta(chat_id, gen, DeltaKind::Text, &text),
@@ -484,10 +518,12 @@ impl ChatRuntime for ChatProcesses {
         let Some(p) = procs.get_mut(chat_id) else {
             return Err("The chat's Claude process didn't start.".into());
         };
-        p.write(stream_json::user_message(text))?;
+        p.write(stream_json::user_message(text, &stream_json::new_uuid()))?;
         p.turns += 1;
         p.last_active = Instant::now();
         drop(procs);
+        // The new message continues from the rewound point, so the process no longer needs it.
+        self.resume_at().remove(chat_id);
         self.emit_state(chat_id, RunState::Busy);
         Ok(())
     }
@@ -559,6 +595,66 @@ impl ChatRuntime for ChatProcesses {
         Ok(())
     }
 
+    fn rewind_files<'a>(
+        &'a self,
+        chat_id: &'a str,
+        project_id: &'a str,
+        session_id: Option<&'a str>,
+        spec: Spec,
+        message_uuid: &'a str,
+        dry_run: bool,
+    ) -> BoxFut<'a, Result<RewindResult, HostError>> {
+        Box::pin(async move {
+            if !is_valid_message_uuid(message_uuid) {
+                return Err("Invalid message id.".into());
+            }
+            let request_id = format!("rewind-{}", stream_json::new_uuid());
+            let (tx, rx) = oneshot::channel();
+            {
+                let mut procs = self.procs();
+                if procs.get(chat_id).is_some_and(|p| p.turns > 0) {
+                    return Err(REWIND_BUSY.into());
+                }
+                if !procs.contains_key(chat_id) {
+                    let p = self.spawn(chat_id, project_id, session_id, spec)?;
+                    procs.insert(chat_id.to_string(), p);
+                }
+                let Some(p) = procs.get_mut(chat_id) else {
+                    return Err("The chat's Claude process didn't start.".into());
+                };
+                p.controls.insert(request_id.clone(), tx);
+                p.write(stream_json::rewind_files_request(&request_id, message_uuid, dry_run))?;
+                p.last_active = Instant::now();
+            }
+            let answer = tokio::time::timeout(REWIND_TIMEOUT, rx).await;
+            if let Some(p) = self.procs().get_mut(chat_id) {
+                p.controls.remove(&request_id);
+            }
+            match answer {
+                Ok(Ok(response)) => Ok(rewind_result(response)),
+                Ok(Err(_)) => Err("Claude stopped before answering the rewind.".into()),
+                Err(_) => Err("Claude didn't answer the rewind in time.".into()),
+            }
+        })
+    }
+
+    fn rewind_conversation(&self, chat_id: &str, resume_at: Option<&str>) -> Result<(), HostError> {
+        let mut procs = self.procs();
+        if procs.get(chat_id).is_some_and(|p| p.turns > 0) {
+            return Err(REWIND_BUSY.into());
+        }
+        if resume_at.is_some_and(|u| !is_valid_message_uuid(u)) {
+            return Err("Invalid message id.".into());
+        }
+        procs.remove(chat_id);
+        drop(procs);
+        match resume_at {
+            Some(u) => self.resume_at().insert(chat_id.to_string(), u.to_string()),
+            None => self.resume_at().remove(chat_id),
+        };
+        Ok(())
+    }
+
     /// Stops the chat's process, if any. Its session stays resumable.
     fn stop(&self, chat_id: &str) {
         self.procs().remove(chat_id);
@@ -591,6 +687,33 @@ impl ChatRuntime for ChatProcesses {
                 me.reap(IDLE_TIMEOUT, Instant::now());
             }
         });
+    }
+}
+
+const REWIND_BUSY: &str = "Wait for the current turn to finish (or stop it) before rewinding.";
+
+/// `rewind_files`' answer: `{canRewind, filesChanged, insertions, deletions, error}`.
+/// A request that can't be honored is reported in `files_error`, not as a failure: the
+/// conversation can still be rewound.
+fn rewind_result(response: Result<Value, String>) -> RewindResult {
+    let v = match response {
+        Ok(v) => v,
+        Err(e) => return RewindResult { files_error: Some(e), ..Default::default() },
+    };
+    if v.get("canRewind").and_then(Value::as_bool) != Some(true) {
+        let e = v.get("error").and_then(Value::as_str).unwrap_or("The files can't be restored.");
+        return RewindResult { files_error: Some(e.to_string()), ..Default::default() };
+    }
+    let n = |k: &str| v.get(k).and_then(Value::as_u64).unwrap_or(0);
+    RewindResult {
+        files_changed: v
+            .get("filesChanged")
+            .and_then(Value::as_array)
+            .map(|a| a.iter().filter_map(Value::as_str).map(str::to_string).collect())
+            .unwrap_or_default(),
+        insertions: n("insertions"),
+        deletions: n("deletions"),
+        files_error: None,
     }
 }
 

@@ -108,8 +108,28 @@ fn usage_context_window_and_replayed_user() {
     let replay =
         r#"{"type":"user","message":{"role":"user","content":"Hello"},"parent_tool_use_id":null}"#;
     assert!(
-        matches!(&parse_line(replay)[0], StreamEvent::Item { item: TranscriptItem::User { text, .. } } if text == "Hello")
+        matches!(&parse_line(replay)[0], StreamEvent::Item { item: TranscriptItem::User { text, uuid: None, .. } } if text == "Hello")
     );
+    let echoed = r#"{"type":"user","uuid":"4c1e","message":{"role":"user","content":"Hello"},"parent_tool_use_id":null}"#;
+    assert!(
+        matches!(&parse_line(echoed)[0], StreamEvent::Item { item: TranscriptItem::User { uuid: Some(u), .. } } if u == "4c1e")
+    );
+}
+
+#[test]
+fn control_responses_and_uuids() {
+    let ok = r#"{"type":"control_response","response":{"subtype":"success","request_id":"r1","response":{"canRewind":true}}}"#;
+    let (id, r) = parse_control_response(ok).unwrap();
+    assert_eq!((id.as_str(), r.unwrap()["canRewind"].as_bool()), ("r1", Some(true)));
+    let err = r#"{"type":"control_response","response":{"subtype":"error","request_id":"r2","error":"nope"}}"#;
+    assert_eq!(parse_control_response(err).unwrap().1, Err("nope".to_string()));
+    assert!(parse_control_response(r#"{"type":"result"}"#).is_none());
+    let (a, b) = (new_uuid(), new_uuid());
+    assert_ne!(a, b);
+    let parts: Vec<usize> = a.split('-').map(str::len).collect();
+    assert_eq!(parts, [8, 4, 4, 4, 12]);
+    assert!(nodal_domain::sessions::transcript::is_valid_message_uuid(&a));
+    assert_eq!(a.as_bytes()[14], b'4', "version nibble");
 }
 
 #[test]
@@ -273,10 +293,15 @@ fn multi_hunk_numbers_crlf_and_big_creates() {
 
 #[test]
 fn stdin_messages() {
-    let v: Value = serde_json::from_str(&user_message("-rf \"quoted\"\nline")).unwrap();
+    let v: Value = serde_json::from_str(&user_message("-rf \"quoted\"\nline", "u-1")).unwrap();
     assert_eq!(
         v,
-        json!({"type": "user", "message": {"role": "user", "content": "-rf \"quoted\"\nline"}})
+        json!({"type": "user", "uuid": "u-1", "message": {"role": "user", "content": "-rf \"quoted\"\nline"}})
+    );
+    let v: Value = serde_json::from_str(&rewind_files_request("r9", "u-1", true)).unwrap();
+    assert_eq!(
+        v,
+        json!({"type": "control_request", "request_id": "r9", "request": {"subtype": "rewind_files", "user_message_id": "u-1", "dry_run": true}})
     );
     let input = json!({"file_path": "/Users/me/a.txt"});
     let v: Value = serde_json::from_str(&permission_response("r1", Some(&input), "")).unwrap();

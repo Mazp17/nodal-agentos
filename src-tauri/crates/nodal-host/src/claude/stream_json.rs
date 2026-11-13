@@ -59,10 +59,21 @@ pub const CHAT_ARGS: [&str; 10] = [
 /// Verified with 2.1.283.
 pub const CHAT_ENTRYPOINT: (&str, &str) = ("CLAUDE_CODE_ENTRYPOINT", "nodal");
 
+/// Env var that makes Claude Code snapshot the files it edits, so `rewind_files` can restore
+/// them. A session only rewinds if it was recorded with it. Verified with 2.1.323.
+pub const CHAT_CHECKPOINTING: (&str, &str) = ("CLAUDE_CODE_ENABLE_SDK_FILE_CHECKPOINTING", "true");
+
 /// `--resume <session-id>`: keeps the id and the history, also from another cwd (verified
 /// with 2.1.283). The id must already be checked with `is_valid_session_id`.
 pub fn resume_args(session_id: &str) -> [String; 2] {
     ["--resume".into(), session_id.into()]
+}
+
+/// `--resume-session-at <assistant-uuid>`, with `--resume`: the conversation is cut right after
+/// that message and what follows is forgotten. The uuid must already be checked with
+/// `is_valid_message_uuid`. Verified with 2.1.323.
+pub fn resume_at_args(assistant_uuid: &str) -> [String; 2] {
+    ["--resume-session-at".into(), assistant_uuid.into()]
 }
 
 // ---------- Wire shapes ----------
@@ -150,6 +161,8 @@ struct RawContentMessage<'a> {
 /// tells the two shapes apart.
 #[derive(Deserialize)]
 struct RawUser<'a> {
+    #[serde(default, borrow)]
+    uuid: Option<Cow<'a, str>>,
     #[serde(default, borrow, rename = "parent_tool_use_id")]
     parent_tool_use_id: Option<Cow<'a, str>>,
     #[serde(default)]
@@ -316,9 +329,10 @@ fn parse_user(line: &str) -> Vec<StreamEvent> {
         return vec![];
     };
     let parent = v.parent_tool_use_id.as_deref();
+    let uuid = v.uuid.map(Cow::into_owned);
     let out = match content {
         Value::String(s) if !s.trim().is_empty() => {
-            vec![StreamEvent::Item { item: user_item(&s) }]
+            vec![StreamEvent::Item { item: user_item(&s, uuid) }]
         }
         Value::Array(blocks) => {
             let tool_use_result = v.tool_use_result.and_then(to_value);
@@ -338,7 +352,7 @@ fn parse_user(line: &str) -> Vec<StreamEvent> {
                             .get("text")
                             .and_then(Value::as_str)
                             .filter(|s| !s.trim().is_empty())?;
-                        Some(StreamEvent::Item { item: user_item(s) })
+                        Some(StreamEvent::Item { item: user_item(s, uuid.clone()) })
                     }
                     _ => None,
                 })
@@ -410,9 +424,46 @@ pub fn parse_line(line: &str) -> Vec<StreamEvent> {
     }
 }
 
-/// A user message for stdin (one line, without the newline).
-pub fn user_message(text: &str) -> String {
-    json!({"type": "user", "message": {"role": "user", "content": text}}).to_string()
+/// A user message for stdin (one line, without the newline). Claude Code keeps its `uuid` in
+/// the session file and echoes it back, which is how a message is found to rewind to.
+pub fn user_message(text: &str, uuid: &str) -> String {
+    json!({"type": "user", "uuid": uuid, "message": {"role": "user", "content": text}}).to_string()
+}
+
+/// A random (v4) uuid, from std's per-process random hasher seeds (no `uuid` dependency).
+pub fn new_uuid() -> String {
+    use std::hash::{BuildHasher, Hasher};
+    let mut b = [0u8; 16];
+    for half in b.chunks_mut(8) {
+        let r = std::collections::hash_map::RandomState::new().build_hasher().finish();
+        half.copy_from_slice(&r.to_le_bytes());
+    }
+    b[6] = b[6] & 0x0f | 0x40;
+    b[8] = b[8] & 0x3f | 0x80;
+    let h: String = b.iter().map(|x| format!("{x:02x}")).collect();
+    format!("{}-{}-{}-{}-{}", &h[..8], &h[8..12], &h[12..16], &h[16..20], &h[20..])
+}
+
+/// Restores the files to their state before the user message `user_message_id`; `dry_run`
+/// only reports what would change. Answered by a `control_response` with the same `request_id`.
+pub fn rewind_files_request(request_id: &str, user_message_id: &str, dry_run: bool) -> String {
+    json!({"type": "control_request", "request_id": request_id, "request": {"subtype": "rewind_files", "user_message_id": user_message_id, "dry_run": dry_run}}).to_string()
+}
+
+/// A `control_response`'s `(request_id, response)`; the response is `Err(message)` on an
+/// `error` subtype. `None` for any other line.
+pub fn parse_control_response(line: &str) -> Option<(String, Result<Value, String>)> {
+    let v: Value = serde_json::from_str(line.trim()).ok()?;
+    if v.get("type")?.as_str()? != "control_response" {
+        return None;
+    }
+    let r = v.get("response")?;
+    let id = r.get("request_id")?.as_str()?.to_string();
+    let out = match r.get("subtype").and_then(Value::as_str) {
+        Some("success") => Ok(r.get("response").cloned().unwrap_or(Value::Null)),
+        _ => Err(r.get("error").and_then(Value::as_str).unwrap_or("The request failed.").to_string()),
+    };
+    Some((id, out))
 }
 
 /// The answer to a `can_use_tool` request. Allowing sends the original input back

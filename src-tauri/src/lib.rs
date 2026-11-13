@@ -207,6 +207,7 @@ pub fn run() {
             commands::chats::send_chat_message,
             commands::chats::respond_chat_permission,
             commands::chats::interrupt_chat,
+            commands::chats::rewind_chat,
             commands::chats::stop_chat,
             commands::chats::get_chat_live,
             commands::chats::get_chat_transcript,

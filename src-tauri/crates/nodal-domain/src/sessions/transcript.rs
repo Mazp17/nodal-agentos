@@ -35,9 +35,14 @@ pub fn clip(s: &str, max: usize) -> (String, bool) {
 }
 
 /// A user text as a transcript item, clipped like the rest.
-pub fn user_item(s: &str) -> TranscriptItem {
+pub fn user_item(s: &str, uuid: Option<String>) -> TranscriptItem {
     let (text, truncated) = clip(s, TEXT_MAX);
-    TranscriptItem::User { text, truncated }
+    TranscriptItem::User { text, truncated, uuid }
+}
+
+/// A message uuid reaches a CLI argument (`--resume-session-at`, `rewind_files`): only hex and dashes.
+pub fn is_valid_message_uuid(id: &str) -> bool {
+    !id.is_empty() && id.len() <= 64 && id.chars().all(|c| c.is_ascii_hexdigit() || c == '-')
 }
 
 #[cfg(test)]

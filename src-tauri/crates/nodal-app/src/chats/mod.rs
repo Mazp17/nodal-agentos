@@ -21,13 +21,13 @@ use std::sync::Arc;
 use serde::Deserialize;
 
 use nodal_domain::execution::options;
-use nodal_domain::model::chat::{ChatLive, ChatSpec, ClaudeDefaults};
+use nodal_domain::model::chat::{ChatLive, ChatSpec, ClaudeDefaults, RewindResult, RunState};
 use nodal_domain::model::claude::{SubagentRef, Transcript};
 use nodal_domain::model::events::ChangeKind;
 use nodal_domain::model::executors::{is_valid_agent_name, ExecutorInfo};
 use nodal_domain::model::{Chat, ChatWorkspace, LaunchOptions, Project, Repo};
 use nodal_domain::serde_util::double_option;
-use nodal_domain::sessions::transcript::{is_valid_session_id, TRANSCRIPT_DEFAULT_LIMIT, TRANSCRIPT_MAX_LIMIT};
+use nodal_domain::sessions::transcript::{is_valid_message_uuid, is_valid_session_id, TRANSCRIPT_DEFAULT_LIMIT, TRANSCRIPT_MAX_LIMIT};
 use nodal_domain::util::{check_id, clip_chars, new_id};
 use nodal_store::{board::projects, board::repos, board::tasks, chats, Conn as Connection, StoreError};
 
@@ -382,6 +382,58 @@ impl Chats {
     pub async fn interrupt_chat(&self, id: String) -> Result<(), AppError> {
         check_id(&id, "chat")?;
         Ok(self.core.chats.interrupt(&id)?)
+    }
+
+    /// Rewinds the chat to just before its user message `message_uuid`: restores the files
+    /// Claude edited since (a `dry_run` only reports them) and, unless it is a `dry_run`,
+    /// forgets the conversation from that message on. Files that can't be restored come back
+    /// as `files_error`; the conversation is rewound anyway.
+    pub async fn rewind_chat(&self, id: String, message_uuid: String, dry_run: bool) -> Result<RewindResult, AppError> {
+        check_id(&id, "chat")?;
+        if !is_valid_message_uuid(&message_uuid) {
+            return Err("Invalid message id.".to_string().into());
+        }
+        if self.core.chats.live(&id).state == RunState::Busy {
+            return Err("Wait for the current turn to finish (or stop it) before rewinding.".to_string().into());
+        }
+        let Some((chat, path)) = self.chat_session_file(id.clone()).await? else {
+            return Err("This chat has no history to rewind.".to_string().into());
+        };
+        // Resolved first: a message that isn't on the active branch must not touch any file.
+        let resume_at = if dry_run {
+            None
+        } else {
+            let (sessions, uuid) = (self.core.sessions.clone(), message_uuid.clone());
+            Some(blocking(move || sessions.rewind_point(&path, &uuid).map_err(|e| e.to_string())).await.map_err(AppError::from)?)
+        };
+        let fs = self.core.env.fs.clone();
+        let (project, repos, wt) = {
+            let chat = chat.clone();
+            self.db(move |c| {
+                let project = projects::get(c, &chat.project_id)?;
+                let repos = repos::list(c, Some(&chat.project_id))?;
+                let wt = task_worktree(c, &chat, |p| fs.is_dir(Path::new(p)))?;
+                Ok((project, repos, wt))
+            })
+            .await?
+        };
+        let mcp = self.core.env.fs.nodal_mcp_bin();
+        let spec = spec(&chat, &project, &repos, wt.as_deref(), mcp.as_deref())?;
+        let result = self
+            .core
+            .chats
+            .rewind_files(&id, &chat.project_id, chat.session_id.as_deref(), spec, &message_uuid, dry_run)
+            .await?;
+        if let Some(resume_at) = resume_at {
+            self.core.chats.rewind_conversation(&id, resume_at.as_deref())?;
+            if resume_at.is_none() {
+                // Nothing precedes the first message: the next one starts a new session.
+                let chat_id = id.clone();
+                self.db(move |c| Ok(chats::clear_session(c, &chat_id)?)).await?;
+            }
+            self.core.notifier.notify(ChangeKind::Chats, Some(&chat.project_id));
+        }
+        Ok(result)
     }
 
     /// Stops the chat's process now instead of waiting for it to go idle.

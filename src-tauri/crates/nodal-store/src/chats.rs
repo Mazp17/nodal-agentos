@@ -61,6 +61,12 @@ pub fn set_session(conn: &Connection, id: &str, session_id: &str) -> Result<bool
     Ok(n > 0)
 }
 
+/// Forgets the chat's session, so its next message starts a new one.
+pub fn clear_session(conn: &Connection, id: &str) -> Result<bool, DbError> {
+    let n = conn.execute("UPDATE chats SET session_id = NULL WHERE id = ?1 AND session_id IS NOT NULL", [id])?;
+    Ok(n > 0)
+}
+
 /// Stores Claude Code's name for the session; `false` if it was already that one.
 pub fn set_session_title(conn: &Connection, id: &str, title: &str) -> Result<bool, DbError> {
     let n = conn.execute(

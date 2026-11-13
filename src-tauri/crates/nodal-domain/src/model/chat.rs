@@ -147,6 +147,17 @@ pub struct ChatLive {
     pub pending: Vec<PermissionRequest>,
 }
 
+/// What rewinding a chat's files to a user message changes (or would, on a dry run).
+#[derive(Debug, Clone, Default, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RewindResult {
+    pub files_changed: Vec<String>,
+    pub insertions: u64,
+    pub deletions: u64,
+    /// Why the files can't be restored (e.g. the session wasn't recorded with checkpointing).
+    pub files_error: Option<String>,
+}
+
 /// Claude Code's configured defaults (`model`, `effortLevel`), so the UI can say what
 /// "default" means.
 #[derive(Debug, Clone, Default, PartialEq, Serialize)]

@@ -10,7 +10,7 @@ use std::sync::Arc;
 use crate::diff::CommitInfo;
 use crate::error::HostError;
 use crate::execution::worktree::{MergeOutcome, WorktreeStatus};
-use crate::model::chat::{ChatEnvelope, ChatLive, ChatSpec, ClaudeDefaults};
+use crate::model::chat::{ChatEnvelope, ChatLive, ChatSpec, ClaudeDefaults, RewindResult};
 use crate::model::claude::{SubagentRef, Transcript};
 use crate::model::events::ChangeKind;
 use crate::model::executors::AgentDef;
@@ -42,6 +42,13 @@ pub trait SessionFiles: Send + Sync {
         limit: usize,
     ) -> Result<Option<Transcript>, HostError>;
     fn session_title(&self, path: &Path) -> Option<String>;
+    /// The assistant message that precedes the user message `user_uuid` on the session's active
+    /// branch (`None`: it is the first one). Errors if the message isn't on that branch.
+    /// Default: unsupported.
+    fn rewind_point(&self, path: &Path, user_uuid: &str) -> Result<Option<String>, HostError> {
+        let _ = (path, user_uuid);
+        Err("Rewinding isn't supported here.".into())
+    }
     /// Subagents of the session file, oldest first. Default: none.
     fn list_subagents(&self, session_path: &Path) -> Vec<SubagentRef> {
         let _ = session_path;
@@ -192,6 +199,29 @@ pub trait ChatRuntime: Send + Sync {
         message: Option<&str>,
     ) -> Result<(), HostError>;
     fn interrupt(&self, chat_id: &str) -> Result<(), HostError>;
+    /// Restores the files Claude edited to their state before the user message `message_uuid`
+    /// (only reports them on a `dry_run`), starting a process with `--resume` if none runs.
+    /// Fails while a turn runs. Default: unsupported.
+    fn rewind_files<'a>(
+        &'a self,
+        chat_id: &'a str,
+        project_id: &'a str,
+        session_id: Option<&'a str>,
+        spec: ChatSpec,
+        message_uuid: &'a str,
+        dry_run: bool,
+    ) -> BoxFut<'a, Result<RewindResult, HostError>> {
+        let _ = (chat_id, project_id, session_id, spec, message_uuid, dry_run);
+        Box::pin(async { Err("Rewinding isn't supported here.".into()) })
+    }
+    /// Stops the chat's process so its next one resumes the conversation right after the
+    /// assistant message `resume_at` (`None`: the session is being dropped, nothing to resume).
+    /// Fails while a turn runs. Default: just stops.
+    fn rewind_conversation(&self, chat_id: &str, resume_at: Option<&str>) -> Result<(), HostError> {
+        let _ = resume_at;
+        self.stop(chat_id);
+        Ok(())
+    }
     fn stop(&self, chat_id: &str);
     fn stop_project(&self, project_id: &str);
     fn live(&self, chat_id: &str) -> ChatLive;

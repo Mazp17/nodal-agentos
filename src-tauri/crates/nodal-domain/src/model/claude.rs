@@ -151,7 +151,12 @@ pub enum TranscriptItem {
     Thinking { text: String, truncated: bool },
     /// User-side message that isn't a tool result.
     #[serde(rename_all = "camelCase")]
-    User { text: String, truncated: bool },
+    User {
+        text: String,
+        truncated: bool,
+        /// The message's id in the session file: what a rewind targets. `None` for subagents.
+        uuid: Option<String>,
+    },
     #[serde(rename_all = "camelCase")]
     ToolUse {
         id: Option<String>,
@@ -229,6 +234,9 @@ pub struct Transcript {
     pub phase: Option<String>,
     /// Task the agent received (text computed by the workflow).
     pub prompt: Option<String>,
+    /// Uuid of the message `prompt` comes from (not sent to the UI: `with_first_message` uses it).
+    #[serde(skip)]
+    pub prompt_uuid: Option<String>,
     pub items: Vec<TranscriptItem>,
     /// Total items in what was read; the first `omitted` aren't returned.
     pub total_items: u32,

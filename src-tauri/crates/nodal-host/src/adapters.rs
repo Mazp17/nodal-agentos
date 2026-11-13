@@ -54,6 +54,10 @@ impl SessionFiles for HostSessionFiles {
         fs::transcript::session_title(path)
     }
 
+    fn rewind_point(&self, path: &Path, user_uuid: &str) -> Result<Option<String>, HostError> {
+        Ok(fs::transcript::rewind_point(path, user_uuid)?)
+    }
+
     fn list_subagents(&self, session_path: &Path) -> Vec<SubagentRef> {
         fs::transcript::list_subagents(session_path)
     }
