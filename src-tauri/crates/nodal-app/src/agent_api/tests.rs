@@ -181,13 +181,6 @@ fn test_env(root: &Path) -> Env {
 
 fn agent_api(env: Env, notifier: Arc<SpyNotifier>) -> (AgentApi, Db) {
     let db = Db::open_in_memory().unwrap();
-    {
-        // Concurrency 0: the queue pass `launch_run` kicks never launches, so runs stay queued.
-        let mut c = db.lock().unwrap();
-        let mut s = nodal_store::rows::load_settings(&c).unwrap();
-        s.concurrency = 0;
-        nodal_store::rows::save_settings(&mut c, &s).unwrap();
-    }
     let core = Arc::new(Core {
         db: db.clone(),
         env,
@@ -199,6 +192,8 @@ fn agent_api(env: Env, notifier: Arc<SpyNotifier>) -> (AgentApi, Db) {
         chats: Arc::new(NoopChatRuntime),
     });
     let execution = crate::execution::Execution::new(core.clone());
+    // No background pass: `launch_run` would otherwise launch a run (settings clamp concurrency to >= 1).
+    execution.no_kick.store(true, std::sync::atomic::Ordering::SeqCst);
     (AgentApi::new(core, execution), db)
 }
 

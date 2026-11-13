@@ -68,6 +68,9 @@ pub struct Execution {
     /// Lets `&self` facade methods (Tauri commands) spawn a detached queue pass on `core.rt`
     /// (`kick`), which needs an owned `Arc<Execution>` for the spawned future.
     self_ref: Weak<Execution>,
+    /// Test fixtures turn `kick` off so a background pass can't race their assertions.
+    #[cfg(test)]
+    pub(crate) no_kick: std::sync::atomic::AtomicBool,
 }
 
 impl Execution {
@@ -78,6 +81,8 @@ impl Execution {
             pump_error: Mutex::new(None),
             cleaning: cleaning::Cleaning::default(),
             self_ref: weak.clone(),
+            #[cfg(test)]
+            no_kick: Default::default(),
         })
     }
 
