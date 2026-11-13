@@ -257,4 +257,6 @@ export interface OutboxItem {
 export interface Settings {
   /** `code`, `cursor`... `null` → the system's. */
   editor: string | null;
+  /** Intro of the chat agent's system prompt. `null` → the built-in one. */
+  chatSystemPrompt: string | null;
 }

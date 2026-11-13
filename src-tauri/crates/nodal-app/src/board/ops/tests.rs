@@ -546,6 +546,7 @@ fn settings_validation() {
         &mut c,
         &Settings {
             editor: Some("cursor".into()),
+            ..Default::default()
         },
     )
     .unwrap();
@@ -554,6 +555,7 @@ fn settings_validation() {
         &mut c,
         &Settings {
             editor: Some("vim; rm".into()),
+            ..Default::default()
         }
     )
     .is_err());
@@ -561,8 +563,15 @@ fn settings_validation() {
         &mut c,
         &Settings {
             editor: Some(" ".into()),
+            ..Default::default()
         },
     )
     .unwrap();
     assert_eq!(s.editor, None);
+
+    let chat = |p: &str| Settings { chat_system_prompt: Some(p.into()), ..Default::default() };
+    let s = set_settings(&mut c, &chat("  Be brief.\n")).unwrap();
+    assert_eq!(s.chat_system_prompt.as_deref(), Some("Be brief."));
+    assert_eq!(set_settings(&mut c, &chat(" \n")).unwrap().chat_system_prompt, None);
+    assert!(set_settings(&mut c, &chat(&"x".repeat(CHAT_SYSTEM_PROMPT_MAX + 1))).is_err());
 }

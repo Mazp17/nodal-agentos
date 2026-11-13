@@ -435,9 +435,18 @@ pub fn remove_relation(conn: &Connection, task_id: &str, other_id: &str, kind: R
 
 // ---------- Settings ----------
 
+/// It goes into `claude`'s argv on every chat message.
+const CHAT_SYSTEM_PROMPT_MAX: usize = 20_000;
+
 pub fn set_settings(conn: &mut Connection, s: &Settings) -> Result<Settings, String> {
     let clean = Settings {
         editor: s.editor.as_deref().map(str::trim).filter(|e| !e.is_empty()).map(validate::editor).transpose()?,
+        chat_system_prompt: match s.chat_system_prompt.as_deref().map(str::trim).filter(|p| !p.is_empty()) {
+            Some(p) if p.chars().count() > CHAT_SYSTEM_PROMPT_MAX => {
+                return Err(format!("The chat system prompt is too long (over {CHAT_SYSTEM_PROMPT_MAX} characters)."))
+            }
+            p => p.map(Into::into),
+        },
     };
     rows::save_settings(conn, &clean)?;
     Ok(rows::load_settings(conn)?)
