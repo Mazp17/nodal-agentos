@@ -470,7 +470,12 @@ function ChatRow({ chat, repoId, projectKey, on, live, unread, now, onOpen, onDe
   const ws = useChatWorkspace(chat.id).data;
   const repoBranch = useRepoBranch(ws ? null : repoId).data ?? null;
   const branch = ws?.branch ?? repoBranch;
-  const changes = ws && ws.files > 0 ? `+${ws.additions} −${ws.deletions}` : null;
+  const changes =
+    ws && ws.files > 0 ? (
+      <>
+        <span className="side-chat-diff-add">+{ws.additions}</span> <span className="side-chat-diff-del">−{ws.deletions}</span>
+      </>
+    ) : null;
   const title = chatTitle(chat);
   const task = useTask(chat.taskId).data;
   return (

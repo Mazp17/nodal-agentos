@@ -258,6 +258,8 @@
 .tabbar-end { margin-left: auto; display: flex; align-items: flex-end; }
 .side-chat-wt { flex: none; padding: 0 4px; border-radius: 3px; background: var(--fill-5); color: var(--text-4); font-family: var(--font-sans, inherit); }
 .side-chat-diff { flex: none; color: var(--text-dim); }
+.side-chat-diff-add { color: var(--green); }
+.side-chat-diff-del { color: var(--red-text); }
 .tab-file-icon { flex: none; color: var(--text-muted); }
 
 /* Tab right-click menu (radix positions it; `.menu` gives the look). */
