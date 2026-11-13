@@ -70,11 +70,11 @@ pub fn no_window_std(cmd: &mut std::process::Command) -> &mut std::process::Comm
 /// Runs `spawn`, retrying a few times on `ETXTBSY` ("Text file busy"). On Linux exec fails
 /// while any process holds the binary open for writing, which happens for a moment when a
 /// concurrent fork inherits the fd of a just-written executable (fake `claude` in tests).
+#[cfg(unix)]
 pub fn spawn_retrying<T>(mut spawn: impl FnMut() -> std::io::Result<T>) -> std::io::Result<T> {
     let mut tries = 0;
     loop {
         match spawn() {
-            #[cfg(unix)]
             Err(e) if e.raw_os_error() == Some(libc::ETXTBSY) && tries < 5 => {
                 tries += 1;
                 std::thread::sleep(Duration::from_millis(10 * tries));
@@ -82,6 +82,12 @@ pub fn spawn_retrying<T>(mut spawn: impl FnMut() -> std::io::Result<T>) -> std::
             other => return other,
         }
     }
+}
+
+/// [`spawn_retrying`] elsewhere: there's no `ETXTBSY`, so it spawns once.
+#[cfg(not(unix))]
+pub fn spawn_retrying<T>(mut spawn: impl FnMut() -> std::io::Result<T>) -> std::io::Result<T> {
+    spawn()
 }
 
 fn is_executable(p: &Path) -> bool {
