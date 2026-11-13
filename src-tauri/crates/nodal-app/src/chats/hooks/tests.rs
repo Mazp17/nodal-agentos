@@ -158,6 +158,7 @@ fn is_item(e: &ChatEvent, pred: impl Fn(&TranscriptItem) -> bool) -> bool {
 }
 
 #[test]
+#[cfg_attr(windows, ignore = "the fake claude is a sh script")]
 fn streams_a_turn_saves_the_session_and_resumes_after_idle() {
     let f = Fixture::new("resume");
     block_on(async {
@@ -201,6 +202,7 @@ fn streams_a_turn_saves_the_session_and_resumes_after_idle() {
 }
 
 #[test]
+#[cfg_attr(windows, ignore = "the fake claude is a sh script")]
 fn permission_requests_are_answered_from_the_host() {
     let f = Fixture::new("permission");
     block_on(async {
@@ -232,6 +234,7 @@ fn permission_requests_are_answered_from_the_host() {
 }
 
 #[test]
+#[cfg_attr(windows, ignore = "the fake claude is a sh script")]
 fn interrupt_ends_the_turn_and_keeps_the_process() {
     let f = Fixture::new("interrupt");
     block_on(async {
@@ -250,6 +253,7 @@ fn interrupt_ends_the_turn_and_keeps_the_process() {
 }
 
 #[test]
+#[cfg_attr(windows, ignore = "the fake claude is a sh script")]
 fn new_settings_restart_an_idle_process() {
     let f = Fixture::new("restart");
     block_on(async {
@@ -272,6 +276,7 @@ fn new_settings_restart_an_idle_process() {
 }
 
 #[test]
+#[cfg_attr(windows, ignore = "the fake claude is a sh script")]
 fn a_crash_mid_turn_is_reported() {
     let f = Fixture::new("crash");
     block_on(async {

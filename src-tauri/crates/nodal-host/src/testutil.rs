@@ -77,6 +77,8 @@ pub fn init_repo(dir: &Path) {
     run(&["config", "user.email", "test@example.com"]);
     run(&["config", "user.name", "Test"]);
     run(&["config", "commit.gpgsign", "false"]);
+    // Windows runners default to autocrlf=true, which rewrites files on checkout.
+    run(&["config", "core.autocrlf", "false"]);
     std::fs::write(dir.join("README.md"), "# demo\n").unwrap();
     run(&["add", "."]);
     run(&["commit", "-q", "-m", "init"]);

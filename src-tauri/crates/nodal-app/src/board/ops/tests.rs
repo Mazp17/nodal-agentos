@@ -182,7 +182,7 @@ fn project_root_path_is_an_existing_canonical_folder_and_clearable() {
         projects::get(&c, &p.id).unwrap().root_path.as_deref(),
         Some(canonical.as_str())
     );
-    let err = create_project(&c, &env, &input(Some("/no/such/acme".into())), 2).unwrap_err();
+    let err = create_project(&c, &env, &input(Some(std::env::temp_dir().join("nodal-no-such").join("acme").to_string_lossy().into_owned())), 2).unwrap_err();
     assert!(err.contains("doesn't exist"), "{err}");
 
     let patch = |v: serde_json::Value| -> ProjectPatch {
@@ -347,7 +347,7 @@ fn tasks_numbering_plan_move_and_patch() {
     let patch: TaskPatch =
         serde_json::from_value(json!({"plan": {"kind": "file", "path": "docs/plan.md"}})).unwrap();
     let t = update_task(&mut c, &f.env, &t1.id, &patch, 5).unwrap();
-    assert!(matches!(&t.plan, PlanRef::File { path } if path.ends_with("docs/plan.md")));
+    assert!(matches!(&t.plan, PlanRef::File { path } if std::path::Path::new(path).ends_with("docs/plan.md")));
     assert!(!f.env.text_plan_path(&t1.id).exists());
     assert_eq!(read_task_plan(&c, &f.env, &t1.id).unwrap(), "# Repo plan");
     let bad: TaskPatch =
