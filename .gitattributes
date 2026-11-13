@@ -1,0 +1,2 @@
+# LF everywhere, also on Windows checkouts (embedded text and fixtures compare byte-for-byte).
+* text=auto eol=lf
