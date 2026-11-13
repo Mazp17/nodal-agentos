@@ -70,3 +70,15 @@ pub async fn claude_usage() -> Result<nodal_host::claude::usage::UsageSummary, S
     let now = nodal_host::adapters::SystemClock.now_ms();
     blocking(move || nodal_host::claude::usage::usage_summary(now)).await
 }
+
+/// % used of the Claude plan's 5-hour and weekly windows, as of the last `rate_limit_event`
+/// a chat printed. Never rejects: no data comes back as `{ status: "unavailable", reason }`.
+#[tauri::command]
+#[tracing::instrument(skip_all, level = "info")]
+pub async fn get_plan_usage() -> nodal_host::claude::plan_usage::PlanUsage {
+    use nodal_domain::ports::Clock;
+    let now = nodal_host::adapters::SystemClock.now_ms();
+    blocking(move || Ok(nodal_host::claude::plan_usage::read(now))).await.unwrap_or_else(|reason| {
+        nodal_host::claude::plan_usage::PlanUsage::Unavailable { reason }
+    })
+}
