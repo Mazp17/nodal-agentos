@@ -62,7 +62,7 @@ fn gh(dir: &Path, args: &[&str]) -> Result<GitOutput, String> {
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
     claude_bin::no_window_std(&mut cmd);
-    let child = cmd.spawn().map_err(|e| format!("Couldn't run gh: {e}"))?;
+    let child = claude_bin::spawn_retrying(|| cmd.spawn()).map_err(|e| format!("Couldn't run gh: {e}"))?;
     wait_for_output(child, Instant::now() + GIT_TIMEOUT, "gh")
 }
 

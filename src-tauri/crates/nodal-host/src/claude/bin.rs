@@ -67,6 +67,23 @@ pub fn no_window_std(cmd: &mut std::process::Command) -> &mut std::process::Comm
     cmd
 }
 
+/// Runs `spawn`, retrying a few times on `ETXTBSY` ("Text file busy"). On Linux exec fails
+/// while any process holds the binary open for writing, which happens for a moment when a
+/// concurrent fork inherits the fd of a just-written executable (fake `claude` in tests).
+pub fn spawn_retrying<T>(mut spawn: impl FnMut() -> std::io::Result<T>) -> std::io::Result<T> {
+    let mut tries = 0;
+    loop {
+        match spawn() {
+            #[cfg(unix)]
+            Err(e) if e.raw_os_error() == Some(libc::ETXTBSY) && tries < 5 => {
+                tries += 1;
+                std::thread::sleep(Duration::from_millis(10 * tries));
+            }
+            other => return other,
+        }
+    }
+}
+
 fn is_executable(p: &Path) -> bool {
     #[cfg(unix)]
     {
@@ -156,9 +173,7 @@ pub async fn output_with_timeout(
     cmd.stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .kill_on_drop(true);
-    let child = cmd
-        .spawn()
-        .map_err(|e| format!("Couldn't run {what}: {e}"))?;
+    let child = spawn_retrying(|| cmd.spawn()).map_err(|e| format!("Couldn't run {what}: {e}"))?;
     match tokio::time::timeout(limit, child.wait_with_output()).await {
         Ok(Ok(out)) => Ok(out),
         Ok(Err(e)) => Err(format!("{what} failed: {e}")),

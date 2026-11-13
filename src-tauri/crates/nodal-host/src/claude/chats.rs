@@ -226,8 +226,7 @@ impl ChatProcesses {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .kill_on_drop(true);
-        let mut child = cmd
-            .spawn()
+        let mut child = claude_bin::spawn_retrying(|| cmd.spawn())
             .map_err(|e| format!("Couldn't start `claude`: {e}"))?;
         let (Some(stdin), Some(stdout), Some(stderr)) =
             (child.stdin.take(), child.stdout.take(), child.stderr.take())
