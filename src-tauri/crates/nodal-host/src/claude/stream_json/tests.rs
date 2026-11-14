@@ -114,6 +114,15 @@ fn usage_context_window_and_replayed_user() {
     assert!(
         matches!(&parse_line(echoed)[0], StreamEvent::Item { item: TranscriptItem::User { uuid: Some(u), .. } } if u == "4c1e")
     );
+    let with_image = r#"{"type":"user","uuid":"5d2f","message":{"role":"user","content":[{"type":"text","text":"Look"},{"type":"image","source":{"type":"base64","media_type":"image/png","data":"iVBORw=="}}]}}"#;
+    let ev = parse_line(with_image);
+    assert!(
+        matches!(&ev[..], [StreamEvent::Item { item: TranscriptItem::User { text, images, .. } }] if text == "Look" && images.len() == 1 && images[0].bytes == 4 && images[0].data.as_deref() == Some("iVBORw=="))
+    );
+    let only_image = r#"{"type":"user","uuid":"5d2f","message":{"role":"user","content":[{"type":"image","source":{"type":"base64","media_type":"image/png","data":"iVBORw=="}}]}}"#;
+    assert!(
+        matches!(&parse_line(only_image)[..], [StreamEvent::Item { item: TranscriptItem::User { text, images, uuid: Some(_), .. } }] if text.is_empty() && images.len() == 1)
+    );
 }
 
 #[test]

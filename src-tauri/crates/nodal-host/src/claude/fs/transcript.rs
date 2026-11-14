@@ -9,9 +9,9 @@ use serde_json::Value;
 
 use nodal_domain::diff::{DiffFileStatus, DiffHunk, DiffLine, DiffLineKind, FileDiff};
 use nodal_domain::model::claude::{
-    AgentStats, SubagentRef, ToolPatch, ToolResultInfo, Transcript, TranscriptItem,
+    AgentStats, SubagentRef, ToolPatch, ToolResultInfo, Transcript, TranscriptImage, TranscriptItem,
 };
-use nodal_domain::sessions::transcript::{clip, TEXT_MAX};
+use nodal_domain::sessions::transcript::{base64_len, clip, TEXT_MAX};
 
 use super::last_tool::tool_summary_n;
 use super::{lenient, truncate};
@@ -32,6 +32,9 @@ struct RawTranscriptLine {
     message: Option<Value>,
     #[serde(default, deserialize_with = "lenient")]
     uuid: Option<String>,
+    /// Lines Claude Code adds next to a message, e.g. where it saved a pasted image.
+    #[serde(default, rename = "isMeta", deserialize_with = "lenient")]
+    is_meta: Option<bool>,
 }
 
 /// Just what links a line to the conversation tree (`parentUuid` is null at a compaction
@@ -64,6 +67,8 @@ pub struct ParsedTranscript {
     pub prompt: Option<String>,
     /// Uuid of the line `prompt` starts at.
     pub prompt_uuid: Option<String>,
+    /// Images of the messages `prompt` is made of.
+    pub prompt_images: Vec<TranscriptImage>,
     pub items: Vec<TranscriptItem>,
     pub total: usize,
     /// `tool_use` blocks in what was read, including the ones dropped by `limit`.
@@ -108,6 +113,25 @@ pub(crate) fn tool_result_text(block: &Value) -> String {
             .join("\n"),
         _ => String::new(),
     }
+}
+
+/// Decoded size above which an image's data isn't sent to the UI with the transcript.
+/// shortcut: a fixed per-image cap, not a budget for the whole history; lower it or page images if long chats get heavy.
+const IMAGE_INLINE_MAX: usize = 2 * 1024 * 1024;
+
+/// A user message's `{"type":"image","source":{"type":"base64",...}}` block.
+pub(crate) fn image_block(b: &Value) -> Option<TranscriptImage> {
+    if b.get("type").and_then(Value::as_str) != Some("image") {
+        return None;
+    }
+    let src = b.get("source")?;
+    let data = src.get("data").and_then(Value::as_str)?;
+    let bytes = base64_len(data)?;
+    Some(TranscriptImage {
+        media_type: src.get("media_type").and_then(Value::as_str)?.to_string(),
+        data: (bytes <= IMAGE_INLINE_MAX).then(|| data.to_string()),
+        bytes,
+    })
 }
 
 /// A `tool_result` content block as `(tool_use_id, result)`. Session files and stream-json
@@ -351,6 +375,7 @@ pub(crate) fn tool_input_summary(input: &Value) -> Option<String> {
 pub fn parse_transcript(text: &str, limit: usize) -> ParsedTranscript {
     let mut prompts: Vec<String> = Vec::new();
     let mut prompt_uuid: Option<String> = None;
+    let mut prompt_images: Vec<TranscriptImage> = Vec::new();
     let mut items: Vec<TranscriptItem> = Vec::new();
     let mut seen_assistant = false;
     let mut last_text: Option<String> = None;
@@ -372,7 +397,7 @@ pub fn parse_transcript(text: &str, limit: usize) -> ParsedTranscript {
                 Some(Value::String(s)) => {
                     if seen_assistant {
                         let (text, truncated) = clip(s, TEXT_MAX);
-                        items.push(TranscriptItem::User { text, truncated, uuid: entry.uuid.clone() });
+                        items.push(TranscriptItem::User { text, truncated, uuid: entry.uuid.clone(), images: vec![] });
                     } else {
                         if prompts.is_empty() {
                             prompt_uuid = entry.uuid.clone();
@@ -387,6 +412,8 @@ pub fn parse_transcript(text: &str, limit: usize) -> ParsedTranscript {
                         .flatten()
                         .and_then(|r| r.tool_use_result);
                     let structured = single_result(blocks, tool_use_result.as_ref());
+                    let start = items.len();
+                    let images: Vec<TranscriptImage> = blocks.iter().filter_map(image_block).collect();
                     for b in blocks {
                         match b.get("type").and_then(Value::as_str) {
                             Some("tool_result") => {
@@ -408,9 +435,13 @@ pub fn parse_transcript(text: &str, limit: usize) -> ParsedTranscript {
                                 let Some(s) = b.get("text").and_then(Value::as_str) else {
                                     continue;
                                 };
+                                // Where Claude Code saved an image the message carries (observed in 2.1.325).
+                                if entry.is_meta == Some(true) && s.starts_with("[Image: source:") {
+                                    continue;
+                                }
                                 if seen_assistant {
                                     let (text, truncated) = clip(s, TEXT_MAX);
-                                    items.push(TranscriptItem::User { text, truncated, uuid: entry.uuid.clone() });
+                                    items.push(TranscriptItem::User { text, truncated, uuid: entry.uuid.clone(), images: vec![] });
                                 } else {
                                     if prompts.is_empty() {
                                         prompt_uuid = entry.uuid.clone();
@@ -420,6 +451,24 @@ pub fn parse_transcript(text: &str, limit: usize) -> ParsedTranscript {
                             }
                             _ => {}
                         }
+                    }
+                    if images.is_empty() {
+                    } else if seen_assistant {
+                        // With the message's text (its last item, if it pushed one), or alone.
+                        match items[start..].last_mut() {
+                            Some(TranscriptItem::User { images: slot, .. }) => slot.extend(images),
+                            _ => items.push(TranscriptItem::User {
+                                text: String::new(),
+                                truncated: false,
+                                uuid: entry.uuid.clone(),
+                                images,
+                            }),
+                        }
+                    } else {
+                        if prompts.is_empty() && prompt_images.is_empty() {
+                            prompt_uuid = entry.uuid.clone();
+                        }
+                        prompt_images.extend(images);
                     }
                 }
                 _ => {}
@@ -473,6 +522,7 @@ pub fn parse_transcript(text: &str, limit: usize) -> ParsedTranscript {
     ParsedTranscript {
         prompt,
         prompt_uuid,
+        prompt_images,
         items,
         total,
         tool_calls,
@@ -679,6 +729,7 @@ pub fn read_session_transcript(
         phase: None,
         prompt: parsed.prompt,
         prompt_uuid: parsed.prompt_uuid,
+        prompt_images: parsed.prompt_images,
         omitted: (parsed.total - parsed.items.len()) as u32,
         total_items: parsed.total as u32,
         tool_calls: parsed.tool_calls as u32,
@@ -765,6 +816,7 @@ pub fn read_subagent_transcript(
         phase: None,
         prompt: parsed.prompt,
         prompt_uuid: None,
+        prompt_images: vec![],
         omitted: (parsed.total - parsed.items.len()) as u32,
         total_items: parsed.total as u32,
         tool_calls: parsed.tool_calls as u32,

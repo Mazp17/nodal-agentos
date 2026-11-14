@@ -31,9 +31,10 @@ use serde_json::value::RawValue;
 use serde_json::{json, Value};
 
 use nodal_domain::model::chat::{ImageInput, PermissionRequest, StreamEvent};
+use nodal_domain::model::claude::TranscriptItem;
 use nodal_domain::sessions::transcript::user_item;
 
-use super::fs::transcript::{assistant_item, single_result, tool_input_summary, tool_result_info};
+use super::fs::transcript::{assistant_item, image_block, single_result, tool_input_summary, tool_result_info};
 
 /// Flags every chat process starts with, each one its own argument. `--output-format
 /// stream-json` with `-p` requires `--verbose`; `--permission-prompt-tool stdio` makes
@@ -376,7 +377,8 @@ fn parse_user(line: &str) -> Vec<StreamEvent> {
         Value::Array(blocks) => {
             let tool_use_result = v.tool_use_result.and_then(to_value);
             let structured = single_result(&blocks, tool_use_result.as_ref());
-            blocks
+            let images: Vec<_> = blocks.iter().filter_map(image_block).collect();
+            let mut out: Vec<StreamEvent> = blocks
                 .iter()
                 .filter_map(|b| match b.get("type").and_then(Value::as_str) {
                     Some("tool_result") => {
@@ -395,7 +397,16 @@ fn parse_user(line: &str) -> Vec<StreamEvent> {
                     }
                     _ => None,
                 })
-                .collect()
+                .collect();
+            // The images go with the message's text, or alone if it has none.
+            match out.last_mut() {
+                _ if images.is_empty() => {}
+                Some(StreamEvent::Item { item: TranscriptItem::User { images: slot, .. } }) => slot.extend(images),
+                _ => out.push(StreamEvent::Item {
+                    item: TranscriptItem::User { text: String::new(), truncated: false, uuid, images },
+                }),
+            }
+            out
         }
         _ => vec![],
     };

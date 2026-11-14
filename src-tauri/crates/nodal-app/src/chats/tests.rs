@@ -674,6 +674,7 @@ fn get_chat_transcript_reads_through_the_session_files_port_and_refreshes_the_ti
         phase: None,
         prompt: None,
         prompt_uuid: None,
+        prompt_images: vec![],
         items: vec![],
         total_items: 0,
         omitted: 0,

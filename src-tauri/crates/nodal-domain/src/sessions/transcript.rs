@@ -37,7 +37,7 @@ pub fn clip(s: &str, max: usize) -> (String, bool) {
 /// A user text as a transcript item, clipped like the rest.
 pub fn user_item(s: &str, uuid: Option<String>) -> TranscriptItem {
     let (text, truncated) = clip(s, TEXT_MAX);
-    TranscriptItem::User { text, truncated, uuid }
+    TranscriptItem::User { text, truncated, uuid, images: vec![] }
 }
 
 /// Decoded size of standard, padded base64; `None` if it isn't valid base64.
