@@ -15,7 +15,7 @@
 //! through the `ChatHooks` port instead of touching a database directly: this crate has no
 //! store dependency.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::future::Future;
 use std::path::PathBuf;
 use std::pin::{pin, Pin};
@@ -37,6 +37,7 @@ use nodal_domain::model::chat::{
     ChatEnvelope, ChatEvent, ChatLive, ChatSpec as Spec, HostEvent, PermissionRequest, RewindResult,
     RunState, StreamEvent,
 };
+use nodal_domain::model::claude::TranscriptItem;
 use nodal_domain::ports::{BoxFut, ChatHooks, ChatRuntime, ChatSink};
 use nodal_domain::sessions::transcript::{is_valid_message_uuid, is_valid_session_id};
 
@@ -95,8 +96,11 @@ struct Proc {
     stdin: mpsc::UnboundedSender<String>,
     /// Dropped with the `Proc`: that stops the process.
     _stop: oneshot::Sender<()>,
-    /// Messages sent whose turn hasn't ended (they queue while a turn runs).
+    /// Turns still to end: busy while > 0. Recounted from `unechoed` at each `result`, since
+    /// several queued messages can share one (see `TurnEnd` in `dispatch`).
     turns: u32,
+    /// Uuids of the messages written to stdin that `claude` hasn't echoed (read) yet.
+    unechoed: Vec<String>,
     pending: Vec<PermissionRequest>,
     last_active: Instant,
     interrupts: u64,
@@ -104,9 +108,6 @@ struct Proc {
     delta_last_flush: Instant,
     /// Control requests waiting for their `control_response`, by `request_id`.
     controls: HashMap<String, oneshot::Sender<Result<Value, String>>>,
-    /// Shells the process runs in the background (`task_id`s): it isn't reaped while any runs,
-    /// and only these can be stopped.
-    shells: HashSet<String>,
 }
 
 impl Proc {
@@ -194,16 +195,13 @@ impl ChatProcesses {
         self.emit(chat_id, ChatEvent::Host(HostEvent::State { state }));
     }
 
-    /// Stops the processes with no turn running, nothing to approve, no background shell and no activity for
+    /// Stops the processes with no turn running, nothing to approve and no activity for
     /// `max_idle`. Returns how many.
     fn reap(&self, max_idle: Duration, now: Instant) -> usize {
         let mut procs = self.procs();
         let before = procs.len();
         procs.retain(|_, p| {
-            p.turns > 0
-                || !p.pending.is_empty()
-                || !p.shells.is_empty()
-                || now.duration_since(p.last_active) < max_idle
+            p.turns > 0 || !p.pending.is_empty() || now.duration_since(p.last_active) < max_idle
         });
         before - procs.len()
     }
@@ -326,13 +324,13 @@ impl ChatProcesses {
             stdin: tx,
             _stop: stop_tx,
             turns: 0,
+            unechoed: vec![],
             pending: vec![],
             last_active: Instant::now(),
             interrupts: 0,
             delta: None,
             delta_last_flush: Instant::now(),
             controls: HashMap::new(),
-            shells: HashSet::new(),
         })
     }
 
@@ -416,15 +414,22 @@ impl ChatProcesses {
             p.last_active = Instant::now();
             match &ev {
                 StreamEvent::PermissionRequest(r) => p.pending.push(r.clone()),
-                StreamEvent::ShellStarted { task_id, background: true, .. } => {
-                    p.shells.insert(task_id.clone());
+                StreamEvent::Item { item: TranscriptItem::User { uuid: Some(u), .. } } => {
+                    p.unechoed.retain(|x| x != u);
                 }
-                StreamEvent::TaskEnded { task_id, .. } => {
-                    p.shells.remove(task_id);
-                }
+                // Messages sent mid-turn queue in `claude` (verified with 2.1.325): one sent
+                // during a tool call is echoed and read at the next tool boundary and answered
+                // in the same turn, so several messages can end with a single `result`; one
+                // sent when no tool call is left starts its own turn and `result`. After an
+                // interrupt, queued messages still run, as a new turn. So the turn is over only
+                // when every message sent has been echoed by this `result`. (`min` with the
+                // plain count keeps a `claude` that doesn't echo from staying busy forever.)
                 StreamEvent::TurnEnd { .. } => {
                     title_from = Some((p.spec.cwd.clone(), p.project_id.clone()));
-                    p.turns = p.turns.saturating_sub(1);
+                    p.turns = p.turns.saturating_sub(1).min(p.unechoed.len() as u32);
+                    if p.turns == 0 {
+                        p.unechoed.clear();
+                    }
                     idle = p.turns == 0;
                     if idle {
                         p.pending.clear();
@@ -537,7 +542,9 @@ impl ChatRuntime for ChatProcesses {
         let Some(p) = procs.get_mut(chat_id) else {
             return Err("The chat's Claude process didn't start.".into());
         };
-        p.write(stream_json::user_message(text, &stream_json::new_uuid()))?;
+        let uuid = stream_json::new_uuid();
+        p.write(stream_json::user_message(text, &uuid))?;
+        p.unechoed.push(uuid);
         p.turns += 1;
         p.last_active = Instant::now();
         drop(procs);
@@ -595,6 +602,7 @@ impl ChatRuntime for ChatProcesses {
 
     /// Stops the running turn; the process stays for the next message. Pending requests
     /// are dropped (the turn that asked is over). Nothing to do if no turn is running.
+    /// Messages queued in `claude` aren't dropped: it answers them next, as a new turn.
     fn interrupt(&self, chat_id: &str) -> Result<(), HostError> {
         let mut procs = self.procs();
         let Some(p) = procs.get_mut(chat_id).filter(|p| p.turns > 0) else {
@@ -617,17 +625,6 @@ impl ChatRuntime for ChatProcesses {
             );
         }
         Ok(())
-    }
-
-    /// Stops one of the chat's background shells through Claude Code (`stop_task`), which
-    /// kills that shell's process tree; the chat's process and turn keep going. Only a shell
-    /// this process reported as started is accepted, so nothing else can be signaled.
-    fn stop_shell(&self, chat_id: &str, task_id: &str) -> Result<(), HostError> {
-        let procs = self.procs();
-        let Some(p) = procs.get(chat_id).filter(|p| p.shells.contains(task_id)) else {
-            return Err("That shell isn't running.".into());
-        };
-        p.write(stream_json::stop_task_request(&format!("stop-{task_id}"), task_id))
     }
 
     fn rewind_files<'a>(
