@@ -775,3 +775,30 @@ fn with_db_runs_off_the_async_thread() {
     let err = block_on(with_db(&db, |_| -> Result<(), DbError> { Err(DbError::Invalid("nope".into())) })).unwrap_err();
     assert_eq!(String::from(err), "nope");
 }
+
+/// Migrations against real data, on a copy: `NODAL_MIGRATE_DB=<path to nodal.db> cargo test
+/// -p nodal-store migrates_a_real_database`. Skipped without the variable.
+#[test]
+fn migrates_a_real_database() {
+    let Some(src) = std::env::var_os("NODAL_MIGRATE_DB") else {
+        return;
+    };
+    let copy = std::env::temp_dir().join(format!("nodal-migrate-{}.db", std::process::id()));
+    let _ = std::fs::remove_file(&copy);
+    // VACUUM INTO takes a consistent snapshot (WAL included) and leaves the source untouched.
+    rusqlite::Connection::open_with_flags(&src, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
+        .unwrap()
+        .execute("VACUUM INTO ?1", [copy.to_str().unwrap()])
+        .unwrap();
+    let db = Db::open(&copy).unwrap();
+    let c = db.lock().unwrap();
+    assert_eq!(user_version(&c).unwrap(), MIGRATIONS.len() as i64);
+    let broken: i64 = c
+        .query_row("SELECT count(*) FROM pragma_foreign_key_check", [], |r| {
+            r.get(0)
+        })
+        .unwrap();
+    assert_eq!(broken, 0, "foreign keys broken after migrating");
+    drop(c);
+    let _ = std::fs::remove_file(&copy);
+}

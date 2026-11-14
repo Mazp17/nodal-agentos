@@ -2,7 +2,7 @@
 
 use std::path::PathBuf;
 
-use nodal_mcp_proto::paths::dev_sibling;
+use nodal_mcp_proto::paths::{data_dir_override, dev_sibling};
 
 /// Debug builds (`pnpm tauri dev`) keep their own database, worktrees and keychain entries,
 /// so they never touch the data of an installed Nodal.
@@ -10,6 +10,9 @@ pub const DEV: bool = cfg!(debug_assertions);
 
 pub fn data_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     use tauri::Manager;
+    if let Some(dir) = data_dir_override() {
+        return Ok(dir);
+    }
     let dir = app
         .path()
         .app_data_dir()

@@ -24,6 +24,13 @@ pub fn expand_home(path: &str) -> PathBuf {
 
 /// `~/.nodal` (`~/.nodal-dev` in debug builds): the tasks' worktrees.
 pub fn nodal_home() -> Result<PathBuf, String> {
+    // A preview (`NODAL_DATA_DIR`, see nodal-mcp-proto) keeps its worktrees inside its own
+    // data folder: its copied tasks share ids with the dev ones.
+    if nodal_domain::DEV {
+        if let Some(dir) = std::env::var_os("NODAL_DATA_DIR").filter(|x| !x.is_empty()) {
+            return Ok(PathBuf::from(dir).join("home"));
+        }
+    }
     let name = if nodal_domain::DEV { ".nodal-dev" } else { ".nodal" };
     home().map(|h| h.join(name)).ok_or_else(|| "$HOME is not set.".to_string())
 }
