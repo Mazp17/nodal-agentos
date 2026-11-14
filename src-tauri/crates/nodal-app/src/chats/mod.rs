@@ -129,6 +129,7 @@ pub mod ops {
             agent: agent(input.agent.as_deref())?,
             task_id: task_id.map(str::to_string),
             worktree,
+            archived_at: None,
             launch: options::normalize(&input.launch).map_err(|e| e.join("\n"))?,
             created_at: now,
             updated_at: now,
@@ -184,11 +185,67 @@ pub mod ops {
         if c.title.is_none() {
             c.title = title(Some(text));
         }
+        // Writing to an archived chat brings it back.
+        c.archived_at = None;
         c.updated_at = now;
         chats::update(conn, &c)?;
         let project = projects::get(conn, &c.project_id)?;
         let repos = repos::list(conn, Some(&c.project_id))?;
         Ok((c, project, repos))
+    }
+
+    /// Archives the chat (`Some(now)`) or brings it back (`None`).
+    pub fn set_archived(conn: &Connection, id: &str, at: Option<i64>) -> Result<Chat, String> {
+        let mut c = chats::get(conn, id)?;
+        c.archived_at = at;
+        chats::update(conn, &c)?;
+        Ok(c)
+    }
+
+    /// Links the chat to `task_id`, or unlinks it with `None`.
+    ///
+    /// A task has at most one chat (`chats::for_task`), in the task's project. Claude Code keys
+    /// a session by the folder it runs in, so a chat with a session can't move: linking or
+    /// unlinking is refused when the chat's `chat_cwd` (with `task_worktree`, i.e. the task's
+    /// worktree when it has one and the chat has a repo) would differ before and after. A chat
+    /// without a session yet can move freely. In practice: a chat already in a task's worktree
+    /// can't be unlinked, and a chat can only join a task with no worktree (or its own).
+    pub fn link_task(
+        conn: &Connection,
+        id: &str,
+        task_id: Option<&str>,
+        is_dir: impl Fn(&str) -> bool,
+    ) -> Result<Chat, String> {
+        let c = chats::get(conn, id)?;
+        if c.task_id.as_deref() == task_id {
+            return Ok(c);
+        }
+        if let Some(tid) = task_id {
+            if tasks::get(conn, tid)?.project_id != c.project_id {
+                return Err("That task belongs to another project.".into());
+            }
+            if chats::for_task(conn, tid)?.is_some() {
+                return Err("That task already has a chat.".into());
+            }
+        }
+        let next = Chat { task_id: task_id.map(str::to_string), ..c.clone() };
+        if c.session_id.is_some() {
+            let project = projects::get(conn, &c.project_id)?;
+            let repos = repos::list(conn, Some(&c.project_id))?;
+            let cwd = |chat: &Chat| -> Result<String, String> {
+                let wt = task_worktree(conn, chat, &is_dir)?;
+                Ok(chat_cwd(chat, &project, &repos, wt.as_deref())?.path().to_string())
+            };
+            let (from, to) = (cwd(&c)?, cwd(&next)?);
+            if from != to {
+                let what = if task_id.is_some() { "link it to that task" } else { "unlink it" };
+                return Err(format!(
+                    "This chat runs in {from}; to {what} it would have to move to {to}, and its Claude Code session can only be resumed where it started."
+                ));
+            }
+        }
+        chats::update(conn, &next)?;
+        Ok(next)
     }
 }
 
@@ -345,6 +402,39 @@ impl Chats {
             .await?;
         self.core.notifier.notify(ChangeKind::Chats, Some(&project_id));
         Ok(())
+    }
+
+    /// Archives the chat (stopping its process, as deleting does) or brings it back.
+    pub async fn set_chat_archived(&self, id: String, archived: bool) -> Result<Chat, AppError> {
+        check_id(&id, "chat")?;
+        if archived {
+            self.core.chats.stop(&id);
+        }
+        let at = archived.then(|| self.core.clock.now_ms());
+        let chat = self.db(move |c| ops::set_archived(c, &id, at)).await?;
+        self.core.notifier.notify(ChangeKind::Chats, Some(&chat.project_id));
+        Ok(chat)
+    }
+
+    /// Links the chat to a task, or unlinks it with `None` (rules in `ops::link_task`).
+    pub async fn link_chat_task(&self, id: String, task_id: Option<String>) -> Result<Chat, AppError> {
+        check_id(&id, "chat")?;
+        if let Some(t) = &task_id {
+            check_id(t, "task")?;
+        }
+        let fs = self.core.env.fs.clone();
+        let chat = self
+            .db(move |c| {
+                // One transaction: two chats racing for the same task can't both pass `for_task`.
+                let tx = c.transaction().map_err(|e| e.to_string())?;
+                let chat = ops::link_task(&tx, &id, task_id.as_deref(), |p| fs.is_dir(Path::new(p)))?;
+                tx.commit().map_err(|e| e.to_string())?;
+                Ok(chat)
+            })
+            .await?;
+        self.core.notifier.notify(ChangeKind::Chats, Some(&chat.project_id));
+        self.core.notifier.notify(ChangeKind::Tasks, Some(&chat.project_id));
+        Ok(chat)
     }
 
     /// Sends a message, starting (or resuming) the chat's process if it isn't running.

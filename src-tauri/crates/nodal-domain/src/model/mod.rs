@@ -119,6 +119,9 @@ pub struct Chat {
     /// A free chat's own worktree folder (one of its repo's); a task chat uses the task's.
     #[serde(default)]
     pub worktree: Option<String>,
+    /// When the chat was archived (hidden from the sidebar); `None` if it isn't.
+    #[serde(default)]
+    pub archived_at: Option<i64>,
     /// `model`, `effort` and `permissionMode` are flattened in the JSON.
     #[serde(flatten)]
     pub launch: LaunchOptions,

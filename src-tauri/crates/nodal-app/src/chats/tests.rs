@@ -177,6 +177,7 @@ fn spec_runs_in_the_chat_repo_or_the_first_one() {
         agent: None,
         task_id: None,
         worktree: None,
+        archived_at: None,
         session_id: None,
         launch: LaunchOptions {
             model: Some("haiku".into()),
@@ -249,6 +250,7 @@ fn a_repo_less_chat_runs_at_the_project_root_when_it_has_one() {
         agent: None,
         task_id: None,
         worktree: None,
+        archived_at: None,
         session_id: None,
         launch: LaunchOptions::default(),
         created_at: 1,
@@ -769,4 +771,77 @@ fn create_chat_in_a_worktree_runs_there_and_rejects_other_paths() {
     std::fs::remove_dir_all(&wt).unwrap();
     block_on(f.chats.send_chat_message(chat.id, "again".into())).unwrap();
     assert_eq!(f.runtime.sent.lock().unwrap()[1].3.cwd, f.repo_path);
+}
+
+#[test]
+fn archive_stops_the_chat_and_unarchive_or_a_message_brings_it_back() {
+    let f = fx("chats-archive");
+    let chat = block_on(f.chats.create_chat("p1".into(), NewChat::default())).unwrap();
+
+    let archived = block_on(f.chats.set_chat_archived(chat.id.clone(), true)).unwrap();
+    assert_eq!(archived.archived_at, Some(1_000));
+    assert_eq!(f.runtime.stopped.lock().unwrap().as_slice(), std::slice::from_ref(&chat.id));
+    let listed = block_on(f.chats.list_chats(Some("p1".into()))).unwrap();
+    assert_eq!(listed[0].archived_at, Some(1_000), "persisted, for the sidebar to filter");
+
+    let back = block_on(f.chats.set_chat_archived(chat.id.clone(), false)).unwrap();
+    assert_eq!(back.archived_at, None);
+    assert_eq!(chats::get(&f.db.lock().unwrap(), &chat.id).unwrap().archived_at, None);
+
+    block_on(f.chats.set_chat_archived(chat.id.clone(), true)).unwrap();
+    block_on(f.chats.send_chat_message(chat.id.clone(), "hi".into())).unwrap();
+    assert_eq!(chats::get(&f.db.lock().unwrap(), &chat.id).unwrap().archived_at, None);
+}
+
+#[test]
+fn link_chat_task_links_unlinks_and_keeps_one_chat_per_task() {
+    use nodal_store::rows::insert_task;
+
+    let f = fx("chats-link");
+    insert_task(&f.db.lock().unwrap(), &nodal_domain::testutil::task_of("t1")).unwrap();
+    let new = || block_on(f.chats.create_chat("p1".into(), NewChat { repo_id: Some("r1".into()), ..Default::default() })).unwrap();
+    let (a, b) = (new(), new());
+
+    let linked = block_on(f.chats.link_chat_task(a.id.clone(), Some("t1".into()))).unwrap();
+    assert_eq!(linked.task_id.as_deref(), Some("t1"));
+    assert!(f.notifier.kinds().ends_with(&[ChangeKind::Chats, ChangeKind::Tasks]));
+
+    let err = block_on(f.chats.link_chat_task(b.id.clone(), Some("t1".into()))).unwrap_err();
+    assert!(err.to_string().contains("already has a chat"), "{err}");
+
+    let unlinked = block_on(f.chats.link_chat_task(a.id.clone(), None)).unwrap();
+    assert_eq!(unlinked.task_id, None);
+    block_on(f.chats.link_chat_task(b.id, Some("t1".into()))).unwrap();
+}
+
+#[test]
+fn link_chat_task_refuses_to_move_a_started_chat_to_another_folder() {
+    use nodal_domain::model::WorktreeRef;
+    use nodal_store::rows::insert_task;
+
+    let f = fx("chats-link-cwd");
+    let wt = f._t.0.join("wt-task");
+    std::fs::create_dir_all(&wt).unwrap();
+    let mut task = nodal_domain::testutil::task_of("t1");
+    task.worktree = Some(WorktreeRef { path: wt.to_string_lossy().into(), branch: "b".into(), base: "main".into() });
+    insert_task(&f.db.lock().unwrap(), &task).unwrap();
+
+    let chat = block_on(f.chats.create_chat("p1".into(), NewChat { repo_id: Some("r1".into()), ..Default::default() })).unwrap();
+    chats::set_session(&f.db.lock().unwrap(), &chat.id, "00000000-0000-4000-8000-000000000001").unwrap();
+
+    // Started in the repo: joining the task would move it into the worktree.
+    let err = block_on(f.chats.link_chat_task(chat.id.clone(), Some("t1".into()))).unwrap_err();
+    assert!(err.to_string().contains("can only be resumed where it started"), "{err}");
+    assert_eq!(chats::get(&f.db.lock().unwrap(), &chat.id).unwrap().task_id, None);
+
+    // Without a session yet it can move; once started there, it can't be unlinked.
+    chats::clear_session(&f.db.lock().unwrap(), &chat.id).unwrap();
+    block_on(f.chats.link_chat_task(chat.id.clone(), Some("t1".into()))).unwrap();
+    chats::set_session(&f.db.lock().unwrap(), &chat.id, "00000000-0000-4000-8000-000000000001").unwrap();
+    let err = block_on(f.chats.link_chat_task(chat.id.clone(), None)).unwrap_err();
+    assert!(err.to_string().contains("unlink"), "{err}");
+
+    // The worktree is gone: the chat runs in the repo either way, so unlinking is allowed.
+    std::fs::remove_dir_all(&wt).unwrap();
+    block_on(f.chats.link_chat_task(chat.id, None)).unwrap();
 }

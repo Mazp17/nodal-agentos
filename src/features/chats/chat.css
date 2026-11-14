@@ -615,3 +615,11 @@
 .files-agent-type { flex: none; font-weight: var(--fw-medium); color: var(--text-2); }
 .files-agent-desc { flex: 1; min-width: 0; color: var(--text-muted); }
 .files-agent-meta { padding-left: 15px; font-size: var(--fs-2xs); color: var(--text-dim); }
+/* Without a task the bar shows the chat's title; its actions sit on the right either way. */
+.chat-task-name { cursor: default; }
+.chat-task-name:hover { color: var(--text-3); text-decoration: none; }
+.chat-task-rename { flex: 1; min-width: 0; height: 26px; padding: 0 var(--sp-2); border: 1px solid var(--border); border-radius: var(--r-md); background: var(--bg); color: var(--text); font: inherit; }
+.chat-task-actions { flex: none; display: flex; align-items: center; gap: var(--sp-2); margin-left: auto; }
+.chat-task-more { width: 26px; height: 26px; }
+.menu-item-danger { color: var(--red); }
+.tab-menu .menu-item-danger[data-highlighted] { background: var(--red-tint-10); color: var(--red); }

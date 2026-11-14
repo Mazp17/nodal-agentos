@@ -500,6 +500,11 @@ export const createChat = (projectId: string, input: NewChat = {}) => invoke<Cha
 /** New settings apply from the next message. */
 export const updateChat = (id: string, patch: ChatPatch) => invoke<Chat>("update_chat", { id, patch });
 export const deleteChat = (id: string) => invoke<void>("delete_chat", { id });
+/** Hides the chat from the sidebar (stopping its process); sending a message unarchives it too. */
+export const archiveChat = (id: string) => invoke<Chat>("archive_chat", { id });
+export const unarchiveChat = (id: string) => invoke<Chat>("unarchive_chat", { id });
+/** Links the chat to a task (`null` unlinks it); refused if the task has a chat or the chat's folder would change. */
+export const linkChatTask = (id: string, taskId: string | null) => invoke<Chat>("link_chat_task", { id, taskId });
 /** Starts or resumes the chat's `claude` process if needed; the answer streams as `nodal://chat`. */
 export const sendChatMessage = (id: string, text: string) => invoke<Chat>("send_chat_message", { id, text });
 /** `message` is what Claude reads on a denial. */
