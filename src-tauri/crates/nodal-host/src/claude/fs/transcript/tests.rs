@@ -243,3 +243,23 @@ fn rewind_point_is_the_assistant_before_the_message_on_the_active_branch() {
     assert!(rewind_point(&f, "a1").is_err(), "not a user message");
     assert!(rewind_point(&f, "nope").is_err());
 }
+
+#[test]
+fn last_turn_tools_returns_the_calls_after_the_last_prompt() {
+    let t = TempDir::new("last-turn-tools");
+    let f = t.0.join("s.jsonl");
+    let lines = [
+        r#"{"type":"user","message":{"content":"first"}}"#,
+        r#"{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Read","input":{"file_path":"/old"}}]}}"#,
+        r#"{"type":"user","message":{"content":[{"type":"text","text":"second"}]}}"#,
+        r#"{"type":"assistant","message":{"content":[{"type":"text","text":"ok"},{"type":"tool_use","name":"Bash","input":{"command":"ls"}},{"type":"tool_use","name":"Edit","input":{"file_path":"/a"}}]}}"#,
+        r#"{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"t","content":"x"}]}}"#,
+        r#"{"type":"user","isMeta":true,"message":{"content":"reminder"}}"#,
+        r#"{"type":"assistant","isSidechain":true,"message":{"content":[{"type":"tool_use","name":"Write","input":{}}]}}"#,
+        r#"{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Write","input":{"file_path":"/b"}}]}}"#,
+    ];
+    fs::write(&f, lines.join("\n")).unwrap();
+    let names: Vec<_> = last_turn_tools(&f).into_iter().map(|(n, _)| n).collect();
+    assert_eq!(names, ["Bash", "Edit", "Write"]);
+    assert!(last_turn_tools(&t.0.join("missing.jsonl")).is_empty());
+}

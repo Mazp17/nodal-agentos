@@ -10,6 +10,7 @@
 //! `nodal_host::claude::chats::ChatProcesses`, reached through `core.chats` (a `ChatRuntime`).
 
 pub mod context;
+mod follow;
 pub mod hooks;
 mod task;
 pub use task::TaskChatStart;
@@ -589,7 +590,7 @@ impl Chats {
                 _ => None,
             };
             let (session_cwd, session_branch) = located.unwrap_or_default();
-            let Some(cwd) = pick_cwd(session_cwd, launch, |p| env.fs.is_dir(Path::new(p))) else {
+            let Some(cwd) = pick_cwd(session_cwd, launch, wt.is_some(), |p| env.fs.is_dir(Path::new(p))) else {
                 return Ok(ChatWorkspace::default());
             };
             let dir = Path::new(&cwd);
@@ -617,9 +618,12 @@ impl Chats {
     }
 }
 
-/// The session's last known cwd if it still exists, else the launch folder if it does.
-fn pick_cwd(session: Option<String>, launch: Option<String>, is_dir: impl Fn(&str) -> bool) -> Option<String> {
-    session.filter(|p| is_dir(p)).or(launch.filter(|p| is_dir(p)))
+/// The session's last known cwd if it still exists, else the launch folder if it does. A
+/// worktree launch (`in_worktree`) wins over a session cwd outside it: the chat just moved
+/// there (`follow`) and the session still reports where its last turn ran.
+fn pick_cwd(session: Option<String>, launch: Option<String>, in_worktree: bool, is_dir: impl Fn(&str) -> bool) -> Option<String> {
+    let inside = |p: &String| !in_worktree || launch.as_ref().is_some_and(|l| Path::new(p).starts_with(l));
+    session.filter(|p| is_dir(p) && inside(p)).or(launch.clone().filter(|p| is_dir(p)))
 }
 
 #[cfg(test)]

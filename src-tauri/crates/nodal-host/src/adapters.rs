@@ -54,6 +54,10 @@ impl SessionFiles for HostSessionFiles {
         fs::transcript::session_title(path)
     }
 
+    fn last_turn_tools(&self, path: &Path) -> Vec<(String, serde_json::Value)> {
+        fs::transcript::last_turn_tools(path)
+    }
+
     fn rewind_point(&self, path: &Path, user_uuid: &str) -> Result<Option<String>, HostError> {
         Ok(fs::transcript::rewind_point(path, user_uuid)?)
     }
@@ -165,6 +169,11 @@ impl Git for HostGit {
 
     fn is_worktree(&self, dir: &Path) -> bool {
         git::stat::is_worktree(dir)
+    }
+
+    fn worktree_added_ms(&self, dir: &Path) -> Option<i64> {
+        let t = std::fs::metadata(dir.join(".git")).and_then(|m| m.modified()).ok()?;
+        Some(t.duration_since(std::time::UNIX_EPOCH).ok()?.as_millis() as i64)
     }
 
     fn changes(&self, dir: &Path) -> DiffStat {

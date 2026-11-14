@@ -52,6 +52,15 @@ pub fn update(conn: &Connection, c: &Chat) -> Result<(), DbError> {
     Ok(())
 }
 
+/// Moves a free chat into one of `repo_id`'s worktrees (`chats::follow`).
+pub fn set_worktree(conn: &Connection, id: &str, repo_id: &str, worktree: &str) -> Result<(), DbError> {
+    let n = conn.execute("UPDATE chats SET repo_id = ?2, worktree = ?3 WHERE id = ?1", [id, repo_id, worktree])?;
+    if n == 0 {
+        return Err(not_found("chat"));
+    }
+    Ok(())
+}
+
 /// Stores the session id Claude Code reported; `false` if it was already that one.
 pub fn set_session(conn: &Connection, id: &str, session_id: &str) -> Result<bool, DbError> {
     let n = conn.execute(

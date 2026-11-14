@@ -598,6 +598,39 @@ fn active_branch<'a>(lines: &[&'a str]) -> Option<Vec<&'a str>> {
     )
 }
 
+/// `(name, input)` of the main thread's tool calls after the last user prompt (a user line
+/// with text, not a tool result or a meta line), in file order. Empty if unreadable.
+pub fn last_turn_tools(path: &Path) -> Vec<(String, Value)> {
+    let Ok((text, _, _)) = read_transcript_text(path) else { return vec![] };
+    let mut calls = vec![];
+    for line in main_thread_lines(&text).into_iter().rev() {
+        let Ok(v) = serde_json::from_str::<Value>(line) else { continue };
+        let content = v.pointer("/message/content");
+        match v.get("type").and_then(Value::as_str) {
+            Some("assistant") => {
+                let blocks = content.and_then(Value::as_array).into_iter().flatten().rev();
+                for b in blocks.filter(|b| b.get("type").and_then(Value::as_str) == Some("tool_use")) {
+                    let name = b.get("name").and_then(Value::as_str).unwrap_or_default().to_string();
+                    calls.push((name, b.get("input").cloned().unwrap_or(Value::Null)));
+                }
+            }
+            Some("user") if v.get("isMeta").and_then(Value::as_bool) != Some(true) => {
+                let prompt = match content {
+                    Some(Value::String(_)) => true,
+                    Some(Value::Array(a)) => a.iter().any(|b| b.get("type").and_then(Value::as_str) == Some("text")),
+                    _ => false,
+                };
+                if prompt {
+                    break;
+                }
+            }
+            _ => {}
+        }
+    }
+    calls.reverse();
+    calls
+}
+
 /// The assistant message right before the user message `user_uuid` on the active branch (what
 /// `--resume-session-at` takes to rewind the conversation to just before it); `None` if that
 /// message is the first of the session.

@@ -152,6 +152,31 @@ impl ChatHooks for ChatHooksImpl {
         let Some(projects) = self.claude_dir.as_ref().map(|d| d.join("projects")) else {
             return;
         };
+        // A free chat whose turn made or worked in a worktree moves into it.
+        if let Some((git, _)) = self.tasks.clone() {
+            let (db, notifier, sessions, chat_id, project_id, projects, cwd) = (
+                self.db.clone(),
+                self.notifier.clone(),
+                self.sessions.clone(),
+                chat_id.to_string(),
+                project_id.clone(),
+                projects.clone(),
+                cwd.clone(),
+            );
+            self.rt.spawn_blocking(move || {
+                let sid = chats::get(&db.guard(), &chat_id).ok().and_then(|c| c.session_id).filter(|s| is_valid_session_id(s));
+                let Some(path) = sid.and_then(|sid| sessions.find_session_jsonl(&projects, &cwd.to_string_lossy(), &sid))
+                else {
+                    return;
+                };
+                let calls = sessions.last_turn_tools(&path);
+                match super::follow::follow_worktree(&db, git.as_ref(), &calls, &chat_id) {
+                    Ok(true) => notifier.notify(ChangeKind::Chats, Some(&project_id)),
+                    Ok(false) => {}
+                    Err(e) => eprintln!("chats: {e}"),
+                }
+            });
+        }
         let (db, notifier, sessions, gate, chat_id) = (
             self.db.clone(),
             self.notifier.clone(),
