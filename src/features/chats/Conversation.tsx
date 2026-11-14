@@ -105,7 +105,7 @@ function ToolRow({
     </>
   );
   return (
-    <div className="chat-tool">
+    <div className="chat-tool" data-tool-id={item.id ?? undefined}>
       <div className="chat-tool-line">
         {expandable ? (
           <Marker asChild className="chat-mk chat-mk-btn">

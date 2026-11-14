@@ -15,7 +15,7 @@
 //! through the `ChatHooks` port instead of touching a database directly: this crate has no
 //! store dependency.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::future::Future;
 use std::path::PathBuf;
 use std::pin::{pin, Pin};
@@ -104,6 +104,9 @@ struct Proc {
     delta_last_flush: Instant,
     /// Control requests waiting for their `control_response`, by `request_id`.
     controls: HashMap<String, oneshot::Sender<Result<Value, String>>>,
+    /// Shells the process runs in the background (`task_id`s): it isn't reaped while any runs,
+    /// and only these can be stopped.
+    shells: HashSet<String>,
 }
 
 impl Proc {
@@ -191,13 +194,16 @@ impl ChatProcesses {
         self.emit(chat_id, ChatEvent::Host(HostEvent::State { state }));
     }
 
-    /// Stops the processes with no turn running, nothing to approve and no activity for
+    /// Stops the processes with no turn running, nothing to approve, no background shell and no activity for
     /// `max_idle`. Returns how many.
     fn reap(&self, max_idle: Duration, now: Instant) -> usize {
         let mut procs = self.procs();
         let before = procs.len();
         procs.retain(|_, p| {
-            p.turns > 0 || !p.pending.is_empty() || now.duration_since(p.last_active) < max_idle
+            p.turns > 0
+                || !p.pending.is_empty()
+                || !p.shells.is_empty()
+                || now.duration_since(p.last_active) < max_idle
         });
         before - procs.len()
     }
@@ -326,6 +332,7 @@ impl ChatProcesses {
             delta: None,
             delta_last_flush: Instant::now(),
             controls: HashMap::new(),
+            shells: HashSet::new(),
         })
     }
 
@@ -409,6 +416,12 @@ impl ChatProcesses {
             p.last_active = Instant::now();
             match &ev {
                 StreamEvent::PermissionRequest(r) => p.pending.push(r.clone()),
+                StreamEvent::ShellStarted { task_id, background: true, .. } => {
+                    p.shells.insert(task_id.clone());
+                }
+                StreamEvent::TaskEnded { task_id, .. } => {
+                    p.shells.remove(task_id);
+                }
                 StreamEvent::TurnEnd { .. } => {
                     title_from = Some((p.spec.cwd.clone(), p.project_id.clone()));
                     p.turns = p.turns.saturating_sub(1);
@@ -604,6 +617,17 @@ impl ChatRuntime for ChatProcesses {
             );
         }
         Ok(())
+    }
+
+    /// Stops one of the chat's background shells through Claude Code (`stop_task`), which
+    /// kills that shell's process tree; the chat's process and turn keep going. Only a shell
+    /// this process reported as started is accepted, so nothing else can be signaled.
+    fn stop_shell(&self, chat_id: &str, task_id: &str) -> Result<(), HostError> {
+        let procs = self.procs();
+        let Some(p) = procs.get(chat_id).filter(|p| p.shells.contains(task_id)) else {
+            return Err("That shell isn't running.".into());
+        };
+        p.write(stream_json::stop_task_request(&format!("stop-{task_id}"), task_id))
     }
 
     fn rewind_files<'a>(

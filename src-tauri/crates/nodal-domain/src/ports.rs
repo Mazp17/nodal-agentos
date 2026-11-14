@@ -216,6 +216,11 @@ pub trait ChatRuntime: Send + Sync {
         answers: Option<&std::collections::BTreeMap<String, String>>,
     ) -> Result<(), HostError>;
     fn interrupt(&self, chat_id: &str) -> Result<(), HostError>;
+    /// Stops the chat's background shell `task_id`; the chat keeps running. Default: unsupported.
+    fn stop_shell(&self, chat_id: &str, task_id: &str) -> Result<(), HostError> {
+        let _ = (chat_id, task_id);
+        Err("Stopping a shell isn't supported here.".into())
+    }
     /// Restores the files Claude edited to their state before the user message `message_uuid`
     /// (only reports them on a `dry_run`), starting a process with `--resume` if none runs.
     /// Fails while a turn runs. Default: unsupported.

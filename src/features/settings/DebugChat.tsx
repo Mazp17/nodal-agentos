@@ -149,6 +149,7 @@ const STREAM: ChatStream = {
   contextWindow: null,
   notice: null,
   interrupting: false,
+  shells: {},
 };
 
 export function DebugChat() {

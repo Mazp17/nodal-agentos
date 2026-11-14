@@ -155,6 +155,13 @@ pub async fn interrupt_chat(state: State<'_, Arc<App>>, id: String) -> Result<()
     Ok(state.chats.interrupt_chat(id).await?)
 }
 
+/// Stops one of the chat's background shells; the chat keeps running.
+#[tauri::command]
+#[tracing::instrument(skip_all, level = "info")]
+pub async fn stop_chat_shell(state: State<'_, Arc<App>>, id: String, task_id: String) -> Result<(), CommandError> {
+    Ok(state.chats.stop_chat_shell(id, task_id).await?)
+}
+
 /// Rewinds the chat to just before its user message `message_uuid`: files and conversation
 /// (`dry_run` only reports the files it would change). Fails while a turn runs.
 #[tauri::command]

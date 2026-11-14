@@ -111,6 +111,16 @@ struct RawSystem<'a> {
     tool_use_id: Option<Cow<'a, str>>,
     #[serde(default, borrow)]
     message: Option<Cow<'a, str>>,
+    #[serde(default, borrow)]
+    task_id: Option<Cow<'a, str>>,
+    #[serde(default, borrow)]
+    task_type: Option<Cow<'a, str>>,
+    #[serde(default, borrow)]
+    description: Option<Cow<'a, str>>,
+    #[serde(default)]
+    is_backgrounded: bool,
+    #[serde(default, borrow)]
+    status: Option<Cow<'a, str>>,
 }
 
 #[derive(Deserialize)]
@@ -261,6 +271,31 @@ fn parse_system(line: &str) -> Vec<StreamEvent> {
             tool_use_id: v.tool_use_id.map(Cow::into_owned),
             message: v.message.map(Cow::into_owned),
         }],
+        // Background tasks, observed with 2.1.325 (a `Bash` with `run_in_background`):
+        // `{"subtype":"task_started","task_id":"b7c3166rg","tool_use_id":"toolu_…",
+        //   "description":"…","is_backgrounded":true,"task_type":"local_bash"}`, then on its end
+        // `{"subtype":"task_notification","task_id":"b7c3166rg","tool_use_id":"toolu_…",
+        //   "status":"stopped"|"completed"|…,"output_file":"…","summary":"…"}`.
+        // `task_updated` (`patch.status`) and `background_tasks_changed` (the full list) are
+        // also sent and skipped: these two are enough.
+        "task_started" if v.task_type.as_deref() == Some("local_bash") => v
+            .task_id
+            .map(|id| StreamEvent::ShellStarted {
+                task_id: id.into_owned(),
+                tool_use_id: v.tool_use_id.map(Cow::into_owned),
+                description: v.description.map(Cow::into_owned),
+                background: v.is_backgrounded,
+            })
+            .into_iter()
+            .collect(),
+        "task_notification" => v
+            .task_id
+            .map(|id| StreamEvent::TaskEnded {
+                task_id: id.into_owned(),
+                status: v.status.map(Cow::into_owned).unwrap_or_default(),
+            })
+            .into_iter()
+            .collect(),
         _ => vec![],
     }
 }
@@ -485,6 +520,13 @@ pub fn permission_response(request_id: &str, allow: Option<&Value>, deny_message
 /// Stops the current turn; the process stays alive for the next message.
 pub fn interrupt_request(request_id: &str) -> String {
     json!({"type": "control_request", "request_id": request_id, "request": {"subtype": "interrupt"}}).to_string()
+}
+
+/// Stops one background task of this process (kills a shell's process tree); the process
+/// and the turn, if any, keep running. Verified with 2.1.325: answered by an empty
+/// `control_response` success, then `task_notification` with `status: "stopped"`.
+pub fn stop_task_request(request_id: &str, task_id: &str) -> String {
+    json!({"type": "control_request", "request_id": request_id, "request": {"subtype": "stop_task", "task_id": task_id}}).to_string()
 }
 
 #[cfg(test)]

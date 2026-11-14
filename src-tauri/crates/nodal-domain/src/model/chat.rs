@@ -105,6 +105,20 @@ pub enum StreamEvent {
         tool_use_id: Option<String>,
         message: Option<String>,
     },
+    /// A shell started by the `Bash` call `tool_use_id`; `task_id` is what `stop_task` takes.
+    #[serde(rename_all = "camelCase")]
+    ShellStarted {
+        task_id: String,
+        tool_use_id: Option<String>,
+        description: Option<String>,
+        background: bool,
+    },
+    /// A task (shell or other) ended: `status` is `completed`, `failed`, `stopped`…
+    #[serde(rename_all = "camelCase")]
+    TaskEnded {
+        task_id: String,
+        status: String,
+    },
     /// Tokens in the context after the last model response: input + cache reads + cache writes.
     #[serde(rename_all = "camelCase")]
     Usage {
