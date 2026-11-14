@@ -147,6 +147,7 @@ const SIDE_DEFAULT = 248;
 export function Sidebar(p: Props) {
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(() => new Set(readJsonPref("collapsedProjects", [], isStrings)));
   const [showAll, setShowAll] = useState<ReadonlySet<string>>(new Set());
+  const [showArchived, setShowArchived] = useState(false);
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => writePref("collapsedProjects", JSON.stringify([...collapsed])), [collapsed]);
   useEffect(() => {
@@ -176,7 +177,10 @@ export function Sidebar(p: Props) {
   };
 
   const chatsOf = new Map<string, Chat[]>();
+  const archivedCount = p.chats.filter((c) => c.archivedAt).length;
   for (const c of p.chats) {
+    // Archived chats stay hidden unless asked for (the open one stays, so it's findable).
+    if (c.archivedAt && !showArchived && c.id !== p.activeChat) continue;
     const list = chatsOf.get(c.projectId);
     if (list) list.push(c);
     else chatsOf.set(c.projectId, [c]);
@@ -384,6 +388,11 @@ export function Sidebar(p: Props) {
             );
           })}
           {p.projects.length === 0 && <div className="side-empty">No projects yet.</div>}
+          {archivedCount > 0 && (
+            <button type="button" className="side-group-more" aria-pressed={showArchived} onClick={() => setShowArchived((v) => !v)}>
+              {showArchived ? "Hide archived" : `Show archived (${archivedCount})`}
+            </button>
+          )}
         </nav>
       ) : (
         <>
@@ -473,7 +482,7 @@ function ChatRow({ chat, repoId, projectKey, on, live, unread, now, onOpen, onDe
   const title = chatTitle(chat);
   const task = useTask(chat.taskId).data;
   return (
-    <div className={`side-chat ${on ? "on" : ""} ${unread ? "unread" : ""}`}>
+    <div className={`side-chat ${on ? "on" : ""} ${unread ? "unread" : ""} ${chat.archivedAt ? "archived" : ""}`}>
       <button
         type="button"
         className="side-chat-pick"

@@ -21,6 +21,7 @@ interface Props {
   /** Results for the query (tasks and chats). */
   search: (query: string) => PaletteItem[];
   onClose: () => void;
+  placeholder?: string;
 }
 
 const MAX_ITEMS = 18;
@@ -32,7 +33,7 @@ const GROUPS: { kind: PaletteItem["kind"]; title: string }[] = [
   { kind: "Action", title: "Actions" },
 ];
 
-export function CommandPalette({ actions, search, onClose }: Props) {
+export function CommandPalette({ actions, search, onClose, placeholder = "Search chats, files, tasks or actions…" }: Props) {
   const ref = useFocusTrap<HTMLDivElement>(onClose);
   const [query, setQuery] = useState("");
   const [index, setIndex] = useState(0);
@@ -75,8 +76,8 @@ export function CommandPalette({ actions, search, onClose }: Props) {
         <input
           data-autofocus
           className="palette-input"
-          placeholder="Search chats, files, tasks or actions…"
-          aria-label="Search chats, files, tasks or actions"
+          placeholder={placeholder}
+          aria-label={placeholder}
           value={query}
           onChange={(e) => {
             setQuery(e.target.value);
