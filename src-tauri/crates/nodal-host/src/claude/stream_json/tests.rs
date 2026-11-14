@@ -114,6 +114,15 @@ fn usage_context_window_and_replayed_user() {
     assert!(
         matches!(&parse_line(echoed)[0], StreamEvent::Item { item: TranscriptItem::User { uuid: Some(u), .. } } if u == "4c1e")
     );
+    let with_image = r#"{"type":"user","uuid":"5d2f","message":{"role":"user","content":[{"type":"text","text":"Look"},{"type":"image","source":{"type":"base64","media_type":"image/png","data":"iVBORw=="}}]}}"#;
+    let ev = parse_line(with_image);
+    assert!(
+        matches!(&ev[..], [StreamEvent::Item { item: TranscriptItem::User { text, images, .. } }] if text == "Look" && images.len() == 1 && images[0].bytes == 4 && images[0].data.as_deref() == Some("iVBORw=="))
+    );
+    let only_image = r#"{"type":"user","uuid":"5d2f","message":{"role":"user","content":[{"type":"image","source":{"type":"base64","media_type":"image/png","data":"iVBORw=="}}]}}"#;
+    assert!(
+        matches!(&parse_line(only_image)[..], [StreamEvent::Item { item: TranscriptItem::User { text, images, uuid: Some(_), .. } }] if text.is_empty() && images.len() == 1)
+    );
 }
 
 #[test]
@@ -293,11 +302,17 @@ fn multi_hunk_numbers_crlf_and_big_creates() {
 
 #[test]
 fn stdin_messages() {
-    let v: Value = serde_json::from_str(&user_message("-rf \"quoted\"\nline", "u-1")).unwrap();
+    // Text only: exactly the line sent before images existed.
     assert_eq!(
-        v,
-        json!({"type": "user", "uuid": "u-1", "message": {"role": "user", "content": "-rf \"quoted\"\nline"}})
+        user_message("-rf \"quoted\"\nline", &[], "u-1"),
+        r#"{"message":{"content":"-rf \"quoted\"\nline","role":"user"},"type":"user","uuid":"u-1"}"#
     );
+    let png = ImageInput { media_type: "image/png".into(), data_base64: "iVBORw==".into() };
+    let image = json!({"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": "iVBORw=="}});
+    let v: Value = serde_json::from_str(&user_message("what's this?", std::slice::from_ref(&png), "u-2")).unwrap();
+    assert_eq!(v["message"]["content"], json!([{"type": "text", "text": "what's this?"}, image]));
+    let v: Value = serde_json::from_str(&user_message("  ", &[png.clone(), png], "u-3")).unwrap();
+    assert_eq!(v["message"]["content"], json!([image, image]));
     let v: Value = serde_json::from_str(&rewind_files_request("r9", "u-1", true)).unwrap();
     assert_eq!(
         v,

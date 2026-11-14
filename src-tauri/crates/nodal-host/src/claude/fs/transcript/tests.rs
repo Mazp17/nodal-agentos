@@ -263,3 +263,26 @@ fn last_turn_tools_returns_the_calls_after_the_last_prompt() {
     assert_eq!(names, ["Bash", "Edit", "Write"]);
     assert!(last_turn_tools(&t.0.join("missing.jsonl")).is_empty());
 }
+
+#[test]
+fn user_images_are_kept_and_their_meta_line_skipped() {
+    let img = r#"{"type":"image","source":{"type":"base64","media_type":"image/png","data":"iVBORw=="}}"#;
+    let lines = [
+        format!(r#"{{"type":"user","uuid":"u1","message":{{"role":"user","content":[{img}]}}}}"#),
+        r#"{"type":"user","uuid":"m1","isMeta":true,"message":{"role":"user","content":[{"type":"text","text":"[Image: source: /tmp/1.png]"}]}}"#.into(),
+        r#"{"type":"assistant","uuid":"a1","message":{"content":[{"type":"text","text":"red"}]}}"#.into(),
+        format!(r#"{{"type":"user","uuid":"u2","message":{{"role":"user","content":[{{"type":"text","text":"and this?"}},{img},{img}]}}}}"#),
+        r#"{"type":"user","uuid":"m2","isMeta":true,"message":{"role":"user","content":[{"type":"text","text":"[Image: source: /tmp/2.png]"}]}}"#.into(),
+    ];
+    let p = parse_transcript(&lines.join("\n"), 100);
+    assert_eq!((p.prompt, p.prompt_uuid.as_deref(), p.prompt_images.len()), (None, Some("u1"), 1));
+    assert_eq!(p.items.len(), 2, "{:?}", p.items);
+    assert!(matches!(&p.items[1], TranscriptItem::User { text, images, uuid: Some(u), .. }
+        if text == "and this?" && images.len() == 2 && u == "u2" && images[0].media_type == "image/png"));
+
+    // Too big to inline: kept as its size only.
+    let big = "A".repeat(4 * (IMAGE_INLINE_MAX / 3 + 1));
+    let b = serde_json::json!({"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": big}});
+    let i = image_block(&b).unwrap();
+    assert!(i.data.is_none() && i.bytes > IMAGE_INLINE_MAX);
+}

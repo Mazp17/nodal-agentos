@@ -33,6 +33,7 @@ import {
 import type { ChatStream } from "./stream";
 import { Ban, Brain, Check, CircleAlert, CircleStop, ChevronDown, ChevronRight, Clock, CornerDownLeft, FileDiff, History, Minus, Pencil, RotateCcw, Shield, X } from "lucide-react";
 import { PendingPrompts } from "./PromptCards";
+import { ImageThumbs } from "./Images";
 
 // ---------- Tool block ----------
 
@@ -545,7 +546,8 @@ function UserMessage({ turn, stopped, busy, onRewind, onResend }: { turn: Extrac
 
   return (
     <div className={`chat-user ${can && !stopped ? "chat-user-actionable" : ""}`}>
-      <div className={`chat-bubble ${turn.pending ? "chat-bubble-pending" : ""} ${stopped ? "chat-bubble-stopped" : ""}`}>{text}</div>
+      {turn.images.length > 0 && <ImageThumbs images={turn.images} />}
+      {text && <div className={`chat-bubble ${turn.pending ? "chat-bubble-pending" : ""} ${stopped ? "chat-bubble-stopped" : ""}`}>{text}</div>}
       {stopped ? (
         <div className="chat-stopped">
           <span className="chat-stopped-label" role="status">

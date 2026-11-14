@@ -11,7 +11,7 @@ use tokio::runtime::Handle;
 
 use nodal_app::chats::{ChatPatch, NewChat};
 use nodal_app::App;
-use nodal_domain::model::chat::{ChatEnvelope, ChatLive, ClaudeDefaults, RewindResult};
+use nodal_domain::model::chat::{ChatEnvelope, ChatLive, ClaudeDefaults, ImageInput, RewindResult};
 use nodal_domain::model::claude::{SubagentRef, Transcript};
 use nodal_domain::model::Chat;
 use nodal_domain::ports::{ChangeNotifier, ChatHooks, ChatRuntime, SessionFiles};
@@ -137,8 +137,8 @@ pub async fn link_chat_task(state: State<'_, Arc<App>>, id: String, task_id: Opt
 /// Returns the chat, named after its first message.
 #[tauri::command]
 #[tracing::instrument(skip_all, level = "info")]
-pub async fn send_chat_message(state: State<'_, Arc<App>>, id: String, text: String) -> Result<Chat, CommandError> {
-    Ok(state.chats.send_chat_message(id, text).await?)
+pub async fn send_chat_message(state: State<'_, Arc<App>>, id: String, text: String, images: Vec<ImageInput>) -> Result<Chat, CommandError> {
+    Ok(state.chats.send_chat_message(id, text, images).await?)
 }
 
 /// Allows or denies a pending permission request. `message` is what Claude reads on a denial.

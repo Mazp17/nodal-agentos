@@ -34,7 +34,7 @@ use nodal_domain::error::HostError;
 use serde_json::Value;
 
 use nodal_domain::model::chat::{
-    ChatEnvelope, ChatEvent, ChatLive, ChatSpec as Spec, HostEvent, PermissionRequest, RewindResult,
+    ChatEnvelope, ChatEvent, ChatLive, ChatSpec as Spec, HostEvent, ImageInput, PermissionRequest, RewindResult,
     RunState, StreamEvent,
 };
 use nodal_domain::model::claude::TranscriptItem;
@@ -540,6 +540,7 @@ impl ChatRuntime for ChatProcesses {
         session_id: Option<&str>,
         spec: Spec,
         text: &str,
+        images: &[ImageInput],
     ) -> Result<(), HostError> {
         let mut procs = self.procs();
         if procs
@@ -556,7 +557,7 @@ impl ChatRuntime for ChatProcesses {
             return Err("The chat's Claude process didn't start.".into());
         };
         let uuid = stream_json::new_uuid();
-        p.write(stream_json::user_message(text, &uuid))?;
+        p.write(stream_json::user_message(text, images, &uuid))?;
         p.unechoed.push(uuid);
         p.turns += 1;
         p.last_active = Instant::now();

@@ -53,7 +53,7 @@ impl Chats {
     pub async fn start_task_chat(&self, task_id: String) -> Result<Chat, AppError> {
         let TaskChatStart { chat, prompt } = self.prepare_task_chat(task_id).await?;
         let Some(text) = prompt else { return Ok(chat) };
-        match self.send_chat_message(chat.id.clone(), text).await {
+        match self.send_chat_message(chat.id.clone(), text, vec![]).await {
             Ok(sent) => Ok(sent),
             Err(e) => {
                 // Nothing was said yet: drop the chat so a retry starts clean.

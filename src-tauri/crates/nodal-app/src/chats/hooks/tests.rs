@@ -170,7 +170,7 @@ fn is_item(e: &ChatEvent, pred: impl Fn(&TranscriptItem) -> bool) -> bool {
 fn streams_a_turn_saves_the_session_and_resumes_after_idle() {
     let f = Fixture::new("resume");
     block_on(async {
-        f.chats.send("c1", "p1", None, f.spec(&["--model", "haiku"]), "Hello").unwrap();
+        f.chats.send("c1", "p1", None, f.spec(&["--model", "haiku"]), "Hello", &[]).unwrap();
         assert_eq!(f.chats.live("c1").state, RunState::Busy);
         f.wait_turn_end(1).await;
         f.wait_for(1, "idle", |e| *e == ChatEvent::Host(HostEvent::State { state: RunState::Idle })).await;
@@ -198,7 +198,7 @@ fn streams_a_turn_saves_the_session_and_resumes_after_idle() {
         assert!(!f.events().iter().any(|e| matches!(e, ChatEvent::Host(HostEvent::Error { .. }))), "a stop is not an error");
 
         // The next message starts it again on the same session.
-        f.chats.send("c1", "p1", Some(SESSION), f.spec(&["--model", "haiku"]), "Again").unwrap();
+        f.chats.send("c1", "p1", Some(SESSION), f.spec(&["--model", "haiku"]), "Again", &[]).unwrap();
         f.wait_turn_end(2).await;
         let args = f.args();
         assert_eq!(args.len(), 2, "{args:?}");
@@ -214,7 +214,7 @@ fn streams_a_turn_saves_the_session_and_resumes_after_idle() {
 fn permission_requests_are_answered_from_the_host() {
     let f = Fixture::new("permission");
     block_on(async {
-        f.chats.send("c1", "p1", None, f.spec(&[]), "please write a.txt").unwrap();
+        f.chats.send("c1", "p1", None, f.spec(&[]), "please write a.txt", &[]).unwrap();
         f.wait_for(1, "permission request", |e| matches!(e, ChatEvent::Stream(StreamEvent::PermissionRequest(_)))).await;
         let live = f.chats.live("c1");
         assert_eq!(live.state, RunState::Busy);
@@ -231,7 +231,7 @@ fn permission_requests_are_answered_from_the_host() {
         assert!(ev.iter().any(|e| is_item(e, |i| matches!(i, TranscriptItem::ToolUse { name, .. } if name == "Write"))));
         assert!(f.chats.live("c1").pending.is_empty());
 
-        f.chats.send("c1", "p1", None, f.spec(&[]), "write it again").unwrap();
+        f.chats.send("c1", "p1", None, f.spec(&[]), "write it again", &[]).unwrap();
         f.wait_for(2, "permission request", |e| matches!(e, ChatEvent::Stream(StreamEvent::PermissionRequest(_)))).await;
         f.chats.respond("c1", "req-1", false, Some("Not that file."), None).unwrap();
         f.wait_turn_end(2).await;
@@ -246,7 +246,7 @@ fn permission_requests_are_answered_from_the_host() {
 fn questions_are_answered_with_the_chosen_labels() {
     let f = Fixture::new("question");
     block_on(async {
-        f.chats.send("c1", "p1", None, f.spec(&[]), "a question").unwrap();
+        f.chats.send("c1", "p1", None, f.spec(&[]), "a question", &[]).unwrap();
         f.wait_for(1, "question", |e| matches!(e, ChatEvent::Stream(StreamEvent::PermissionRequest(_)))).await;
         let answers = std::collections::BTreeMap::from([("Color?".to_string(), "Blue".to_string())]);
         f.chats.respond("c1", "req-q", true, None, Some(&answers)).unwrap();
@@ -265,7 +265,7 @@ fn questions_are_answered_with_the_chosen_labels() {
 fn answers_only_fill_questions() {
     let f = Fixture::new("answers-only-questions");
     block_on(async {
-        f.chats.send("c1", "p1", None, f.spec(&[]), "please write a.txt").unwrap();
+        f.chats.send("c1", "p1", None, f.spec(&[]), "please write a.txt", &[]).unwrap();
         f.wait_for(1, "permission request", |e| matches!(e, ChatEvent::Stream(StreamEvent::PermissionRequest(_)))).await;
         let answers = std::collections::BTreeMap::from([("x".to_string(), "y".to_string())]);
         let err = f.chats.respond("c1", "req-1", true, None, Some(&answers)).unwrap_err();
@@ -282,14 +282,14 @@ fn interrupt_ends_the_turn_and_keeps_the_process() {
     let f = Fixture::new("interrupt");
     block_on(async {
         f.chats.interrupt("c1").unwrap();
-        f.chats.send("c1", "p1", None, f.spec(&[]), "slow essay").unwrap();
+        f.chats.send("c1", "p1", None, f.spec(&[]), "slow essay", &[]).unwrap();
         f.wait_for(1, "replayed message", |e| matches!(e, ChatEvent::Stream(StreamEvent::Item { .. }))).await;
         f.chats.interrupt("c1").unwrap();
         f.wait_turn_end(1).await;
         assert!(f.events().iter().any(|e| matches!(e, ChatEvent::Stream(StreamEvent::TurnEnd { ok: false, .. }))));
         assert_eq!(f.chats.live("c1").state, RunState::Idle);
 
-        f.chats.send("c1", "p1", None, f.spec(&[]), "Hello").unwrap();
+        f.chats.send("c1", "p1", None, f.spec(&[]), "Hello", &[]).unwrap();
         f.wait_turn_end(2).await;
         assert_eq!(f.args().len(), 1);
     });
@@ -300,9 +300,9 @@ fn interrupt_ends_the_turn_and_keeps_the_process() {
 fn new_settings_restart_an_idle_process() {
     let f = Fixture::new("restart");
     block_on(async {
-        f.chats.send("c1", "p1", None, f.spec(&["--model", "haiku"]), "Hello").unwrap();
+        f.chats.send("c1", "p1", None, f.spec(&["--model", "haiku"]), "Hello", &[]).unwrap();
         f.wait_turn_end(1).await;
-        f.chats.send("c1", "p1", Some(SESSION), f.spec(&["--model", "opus"]), "Hello").unwrap();
+        f.chats.send("c1", "p1", Some(SESSION), f.spec(&["--model", "opus"]), "Hello", &[]).unwrap();
         f.wait_turn_end(2).await;
         let args = f.args();
         assert_eq!(args.len(), 2, "{args:?}");
@@ -323,7 +323,7 @@ fn new_settings_restart_an_idle_process() {
 fn a_crash_mid_turn_is_reported() {
     let f = Fixture::new("crash");
     block_on(async {
-        f.chats.send("c1", "p1", None, f.spec(&[]), "crash now").unwrap();
+        f.chats.send("c1", "p1", None, f.spec(&[]), "crash now", &[]).unwrap();
         f.wait_stopped(1).await;
         let err = f.events().into_iter().find_map(|e| match e {
             ChatEvent::Host(HostEvent::Error { message }) => Some(message),
@@ -338,8 +338,8 @@ fn a_crash_mid_turn_is_reported() {
 fn refuses_a_missing_folder_and_a_bad_session() {
     let f = Fixture::new("refuse");
     let missing = ChatSpec { cwd: std::path::Path::new("/Users/me/does-not-exist").into(), args: vec![] };
-    assert!(f.chats.send("c1", "p1", None, missing, "Hello").unwrap_err().to_string().contains("doesn't exist"));
-    let err = block_on(async { f.chats.send("c1", "p1", Some("../x"), f.spec(&[]), "Hello") });
+    assert!(f.chats.send("c1", "p1", None, missing, "Hello", &[]).unwrap_err().to_string().contains("doesn't exist"));
+    let err = block_on(async { f.chats.send("c1", "p1", Some("../x"), f.spec(&[]), "Hello", &[]) });
     assert!(err.unwrap_err().to_string().contains("Invalid session id"));
     assert_eq!(f.chats.live("c1").state, RunState::Stopped);
     assert!(f.events().is_empty());
@@ -369,7 +369,7 @@ fn real_chat_asks_then_resumes() {
     let dir = f.dir.canonicalize().unwrap();
     let spec = ChatSpec { cwd: dir.clone(), args: vec!["--model".into(), "haiku".into()] };
     block_on(async {
-        f.chats.send("c1", "p1", None, spec.clone(), "Use the Write tool to create note.txt containing 'x'. Then reply DONE.").unwrap();
+        f.chats.send("c1", "p1", None, spec.clone(), "Use the Write tool to create note.txt containing 'x'. Then reply DONE.", &[]).unwrap();
         let deadline = Instant::now() + Duration::from_secs(120);
         loop {
             if let Some(r) = f.chats.live("c1").pending.first().cloned() {
@@ -390,7 +390,7 @@ fn real_chat_asks_then_resumes() {
 
         f.chats.stop("c1");
         f.wait_stopped(1).await;
-        f.chats.send("c1", "p1", session.as_deref(), spec, "What file did you create? Reply with its name only.").unwrap();
+        f.chats.send("c1", "p1", session.as_deref(), spec, "What file did you create? Reply with its name only.", &[]).unwrap();
         f.wait_for(2, "second turn", |e| matches!(e, ChatEvent::Stream(StreamEvent::TurnEnd { .. })))
             .await;
         let last = f.events().into_iter().rev().find_map(|e| match e {

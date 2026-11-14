@@ -18,7 +18,7 @@ import {
   type PermissionRequest,
 } from "../../domain/api";
 import { readJsonPref, writePref } from "../../shell/storage";
-import type { TranscriptItem } from "./types";
+import type { TranscriptImage, TranscriptItem } from "./types";
 import { appFocused, notifyChat, preview } from "./alerts";
 import { chatTitle, toolLabel, type Outgoing } from "./model";
 
@@ -481,9 +481,9 @@ export function seedChat(chatId: string) {
 }
 
 /** Before sending: shows the message until Claude echoes it. `queued`: sent while Claude was working. */
-export function pushOutbox(chatId: string, text: string, queued = false) {
+export function pushOutbox(chatId: string, text: string, queued = false, images: TranscriptImage[] = []) {
   // A stop that got no answer (the turn had just ended) must not mark the next one as stopped.
-  set(chatId, (s) => ({ ...s, outbox: [...s.outbox, { text, queued }], notice: null, interrupting: queued && s.interrupting }));
+  set(chatId, (s) => ({ ...s, outbox: [...s.outbox, { text, queued, images }], notice: null, interrupting: queued && s.interrupting }));
 }
 
 export function dropOutbox(chatId: string, text: string) {

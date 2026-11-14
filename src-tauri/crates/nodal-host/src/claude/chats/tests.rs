@@ -87,7 +87,7 @@ impl Drop for Fixture {
 
 fn send(chats: &ChatProcesses, spec: ChatSpec) -> Result<(), HostError> {
     use nodal_domain::ports::ChatRuntime;
-    chats.send("c1", "p1", None, spec, "hi")
+    chats.send("c1", "p1", None, spec, "hi", &[])
 }
 
 /// A burst of `text_delta` lines (no delay between them, like `claude` printing tokens faster
@@ -229,9 +229,9 @@ fn a_panic_in_one_chats_reader_does_not_affect_another_chat() {
         use nodal_domain::ports::ChatRuntime;
         let spec = ChatSpec { cwd: dir.clone(), args: vec![] };
         // Its reader panics on the very first line (`system init`).
-        chats.send("boom", "p1", None, spec.clone(), "hi").unwrap();
+        chats.send("boom", "p1", None, spec.clone(), "hi", &[]).unwrap();
         // A second, unrelated chat on the same `ChatProcesses` must run to completion.
-        chats.send("ok", "p1", None, spec, "hi").unwrap();
+        chats.send("ok", "p1", None, spec, "hi", &[]).unwrap();
 
         let deadline = Instant::now() + Duration::from_secs(10);
         loop {
@@ -312,10 +312,10 @@ fn a_rewind_restores_files_and_the_next_spawn_resumes_at_the_message_once() {
 
         f.chats.rewind_conversation("c1", Some("bbbb-2")).unwrap();
         assert_eq!(f.chats.live("c1").state, RunState::Stopped);
-        f.chats.send("c1", "p1", Some(SID), f.spec(), "hi").unwrap();
+        f.chats.send("c1", "p1", Some(SID), f.spec(), "hi", &[]).unwrap();
         f.wait_for(1, "turn end", |e| matches!(e, ChatEvent::Stream(StreamEvent::TurnEnd { .. }))).await;
         f.chats.stop("c1");
-        f.chats.send("c1", "p1", Some(SID), f.spec(), "again").unwrap();
+        f.chats.send("c1", "p1", Some(SID), f.spec(), "again", &[]).unwrap();
         f.wait_for(2, "second turn end", |e| matches!(e, ChatEvent::Stream(StreamEvent::TurnEnd { .. }))).await;
 
         let l = launches();

@@ -10,7 +10,7 @@ use std::sync::Arc;
 use crate::diff::CommitInfo;
 use crate::error::HostError;
 use crate::execution::worktree::{MergeOutcome, WorktreeStatus};
-use crate::model::chat::{ChatEnvelope, ChatLive, ChatSpec, ClaudeDefaults, RewindResult};
+use crate::model::chat::{ChatEnvelope, ChatLive, ChatSpec, ClaudeDefaults, ImageInput, RewindResult};
 use crate::model::claude::{SubagentRef, Transcript};
 use crate::model::events::ChangeKind;
 use crate::model::executors::AgentDef;
@@ -205,6 +205,7 @@ pub trait ChatRuntime: Send + Sync {
         session_id: Option<&str>,
         spec: ChatSpec,
         text: &str,
+        images: &[ImageInput],
     ) -> Result<(), HostError>;
     /// `answers` (question text -> chosen labels) fill an `AskUserQuestion` request when allowing.
     fn respond(

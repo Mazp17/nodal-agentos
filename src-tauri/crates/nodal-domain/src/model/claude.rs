@@ -139,6 +139,16 @@ pub struct RunResult {
     pub raw: Option<String>,
 }
 
+/// An image block of a user message. `data` (base64) is `None` when the image is too big to
+/// send to the UI with the transcript; `bytes` is its decoded size either way.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TranscriptImage {
+    pub media_type: String,
+    pub data: Option<String>,
+    pub bytes: usize,
+}
+
 /// An entry in a subagent's conversation.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(tag = "kind", rename_all = "camelCase")]
@@ -156,6 +166,9 @@ pub enum TranscriptItem {
         truncated: bool,
         /// The message's id in the session file: what a rewind targets. `None` for subagents.
         uuid: Option<String>,
+        /// Images sent with the message.
+        #[serde(skip_serializing_if = "Vec::is_empty")]
+        images: Vec<TranscriptImage>,
     },
     #[serde(rename_all = "camelCase")]
     ToolUse {
@@ -237,6 +250,9 @@ pub struct Transcript {
     /// Uuid of the message `prompt` comes from (not sent to the UI: `with_first_message` uses it).
     #[serde(skip)]
     pub prompt_uuid: Option<String>,
+    /// Images of the `prompt` message (not sent to the UI: `with_first_message` uses them).
+    #[serde(skip)]
+    pub prompt_images: Vec<TranscriptImage>,
     pub items: Vec<TranscriptItem>,
     /// Total items in what was read; the first `omitted` aren't returned.
     pub total_items: u32,

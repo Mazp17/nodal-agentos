@@ -40,11 +40,18 @@ export interface ToolPatch {
   truncated: boolean;
 }
 
+/** An image sent with a user message; `data` (base64) is null when too big to show in the history. */
+export interface TranscriptImage {
+  mediaType: string;
+  data: string | null;
+  bytes: number;
+}
+
 export type TranscriptItem =
   | { kind: "text"; text: string; truncated: boolean }
   | { kind: "thinking"; text: string; truncated: boolean }
   /** `uuid`: the message's id in the Claude Code session (what a rewind targets); absent on old items. */
-  | { kind: "user"; text: string; truncated: boolean; uuid?: string | null }
+  | { kind: "user"; text: string; truncated: boolean; uuid?: string | null; images?: TranscriptImage[] }
   | {
       kind: "toolUse";
       id: string | null;
