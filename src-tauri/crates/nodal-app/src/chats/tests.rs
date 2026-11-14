@@ -694,11 +694,14 @@ fn a_started_chat_keeps_its_agent() {
 fn pick_cwd_prefers_the_session_then_the_launch_folder_when_they_exist() {
     let exists = |p: &str| p != "/gone";
     let s = |v: &str| Some(v.to_string());
-    assert_eq!(pick_cwd(s("/wt"), s("/repo"), exists), s("/wt"));
-    assert_eq!(pick_cwd(None, s("/repo"), exists), s("/repo"));
-    assert_eq!(pick_cwd(s("/gone"), s("/repo"), exists), s("/repo"));
-    assert_eq!(pick_cwd(s("/gone"), s("/gone"), exists), None);
-    assert_eq!(pick_cwd(None, None, exists), None);
+    assert_eq!(pick_cwd(s("/wt"), s("/repo"), false, exists), s("/wt"));
+    assert_eq!(pick_cwd(None, s("/repo"), false, exists), s("/repo"));
+    assert_eq!(pick_cwd(s("/gone"), s("/repo"), false, exists), s("/repo"));
+    assert_eq!(pick_cwd(s("/gone"), s("/gone"), false, exists), None);
+    assert_eq!(pick_cwd(None, None, false, exists), None);
+    // In a worktree: a session cwd outside it (the chat just moved) loses, one inside wins.
+    assert_eq!(pick_cwd(s("/repo"), s("/wt"), true, exists), s("/wt"));
+    assert_eq!(pick_cwd(s("/wt/sub"), s("/wt"), true, |_: &str| true), s("/wt/sub"));
 }
 
 #[test]
