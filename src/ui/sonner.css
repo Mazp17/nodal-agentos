@@ -66,3 +66,20 @@
   outline-offset: 1px;
   box-shadow: none;
 }
+
+/* The toast's action ("Open"), like `.btn-primary.btn-xs`. */
+.toaster[data-sonner-toaster][data-sonner-theme] [data-sonner-toast] [data-button] {
+  align-self: center;
+  height: var(--h-sm);
+  padding: 0 9px;
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-semibold);
+  border-radius: var(--r-md);
+  background: var(--accent);
+  color: var(--on-accent);
+}
+.toaster[data-sonner-toaster][data-sonner-theme] [data-sonner-toast] [data-button]:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+  box-shadow: none;
+}

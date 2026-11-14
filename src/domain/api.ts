@@ -648,6 +648,11 @@ export const onChanged = (cb: (e: ChangedEvent) => void): Promise<UnlistenFn> =>
 export const onCheckForUpdates = (cb: () => void): Promise<UnlistenFn> => listen("nodal://check-updates", () => cb());
 /** ⌘W from the app menu (the native menu takes the key before the page sees it). */
 export const onCloseTab = (cb: () => void): Promise<UnlistenFn> => listen("nodal://close-tab", () => cb());
+/** A chat's system notification was clicked (the window is already in front). */
+export const onOpenChat = (cb: (chatId: string) => void): Promise<UnlistenFn> =>
+  listen<{ chatId: string }>("nodal://open-chat", (ev) => cb(ev.payload.chatId));
+/** System notification for a chat that emits `nodal://open-chat` when clicked (macOS). */
+export const notifyChatSystem = (chatId: string, title: string, body: string) => invoke<void>("notify_chat", { chatId, title, body });
 
 export interface DirEntry { name: string; isDir: boolean }
 /** Current branch of a repo's checkout; `null` when detached or unknown. */
