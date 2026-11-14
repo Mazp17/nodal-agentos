@@ -285,6 +285,7 @@ fn migrates_v3_data_to_v4() {
         launch: LaunchOptions { model: Some("opus".into()), effort: Some("high".into()), permission_mode: Some("plan".into()) },
         created_at: 5,
         updated_at: 6,
+        pinned_at: None,
     };
     insert_chat(c, &chat).unwrap();
     assert_eq!(get_chat(c, "c1").unwrap(), Some(chat));
@@ -476,6 +477,7 @@ fn chats_follow_their_project_and_widen_when_their_repo_goes() {
         launch: LaunchOptions::default(),
         created_at: 1,
         updated_at: 1,
+        pinned_at: None,
     };
     insert_chat(&c, &chat("c1", Some("r1"))).unwrap();
     insert_chat(&c, &chat("c2", None)).unwrap();

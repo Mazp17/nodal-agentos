@@ -185,6 +185,7 @@ fn spec_runs_in_the_chat_repo_or_the_first_one() {
         },
         created_at: 1,
         updated_at: 1,
+        pinned_at: None,
     };
     let s = spec(&chat, &project, &repos, None, None, None).unwrap();
     assert_eq!(s.cwd, PathBuf::from("/Users/me/Code/acme-api"));
@@ -253,6 +254,7 @@ fn a_repo_less_chat_runs_at_the_project_root_when_it_has_one() {
         launch: LaunchOptions::default(),
         created_at: 1,
         updated_at: 1,
+        pinned_at: None,
     };
     let s = spec(&chat, &project, &repos, None, None, None).unwrap();
     assert_eq!(s.cwd, PathBuf::from("/Users/me/Code/acme"));

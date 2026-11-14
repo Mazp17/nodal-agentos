@@ -126,6 +126,7 @@ fn chats_crud_and_order() {
         launch: LaunchOptions::default(),
         created_at: 1,
         updated_at: updated,
+        pinned_at: None,
     };
     chats::insert(&c, &mk("c1", 10)).unwrap();
     chats::insert(&c, &mk("c2", 20)).unwrap();
@@ -149,6 +150,23 @@ fn chats_crud_and_order() {
     chats::update(&c, &c1).unwrap();
     assert_eq!(chats::get(&c, "c1").unwrap(), c1);
     assert_eq!(ids(chats::list(&c, "p1").unwrap()), ["c1", "c2"]);
+
+    // Pinned chats come first, oldest pin first; pinning doesn't touch `updated_at`.
+    chats::insert(&c, &mk("c5", 40)).unwrap();
+    assert_eq!(ids(chats::list(&c, "p1").unwrap()), ["c5", "c1", "c2"]);
+    chats::set_pinned(&c, "c2", true, 100).unwrap();
+    chats::set_pinned(&c, "c1", true, 200).unwrap();
+    chats::set_pinned(&c, "c2", true, 300).unwrap(); // re-pinning keeps the first pin time
+    assert_eq!(chats::get(&c, "c2").unwrap().pinned_at, Some(100));
+    assert_eq!(chats::get(&c, "c2").unwrap().updated_at, 20);
+    assert_eq!(ids(chats::list(&c, "p1").unwrap()), ["c2", "c1", "c5"]);
+    assert_eq!(ids(chats::list_all(&c).unwrap()), ["c2", "c1", "c5"]);
+    chats::set_pinned(&c, "c2", false, 400).unwrap();
+    assert_eq!(chats::get(&c, "c2").unwrap().pinned_at, None);
+    assert_eq!(ids(chats::list(&c, "p1").unwrap()), ["c1", "c5", "c2"]);
+    chats::set_pinned(&c, "c1", false, 400).unwrap();
+    chats::delete(&c, "c5").unwrap();
+    assert!(chats::set_pinned(&c, "nope", true, 1).is_err());
 
     assert!(chats::set_session(&c, "c1", "s-1").unwrap());
     assert!(!chats::set_session(&c, "c1", "s-1").unwrap(), "same id: no change");
@@ -235,6 +253,7 @@ fn chat_task_link_round_trips_and_unlinks_with_the_task() {
         launch: LaunchOptions::default(),
         created_at: 1,
         updated_at: 1,
+        pinned_at: None,
     };
     chats::insert(&c, &mk("c1", Some("t1"))).unwrap();
     chats::insert(&c, &mk("c2", None)).unwrap();

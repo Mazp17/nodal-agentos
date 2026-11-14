@@ -499,6 +499,8 @@ export const listChats = (projectId: string | null) => invoke<Chat[]>("list_chat
 export const createChat = (projectId: string, input: NewChat = {}) => invoke<Chat>("create_chat", { projectId, input });
 /** New settings apply from the next message. */
 export const updateChat = (id: string, patch: ChatPatch) => invoke<Chat>("update_chat", { id, patch });
+/** Pins the chat to the top of its project's list (pinned ones first, oldest pin first), or unpins it. */
+export const setChatPinned = (id: string, pinned: boolean) => invoke<Chat>("set_chat_pinned", { id, pinned });
 export const deleteChat = (id: string) => invoke<void>("delete_chat", { id });
 /** Starts or resumes the chat's `claude` process if needed; the answer streams as `nodal://chat`. */
 export const sendChatMessage = (id: string, text: string) => invoke<Chat>("send_chat_message", { id, text });

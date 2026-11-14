@@ -6,16 +6,16 @@ use crate::Conn as Connection;
 use crate::DbError;
 use nodal_domain::model::Chat;
 
-/// The project's chats, most recently used first.
+/// The project's chats: pinned ones first (oldest pin first), then most recently used.
 pub fn list(conn: &Connection, project_id: &str) -> Result<Vec<Chat>, DbError> {
-    let mut stmt = conn.prepare("SELECT * FROM chats WHERE project_id = ?1 ORDER BY updated_at DESC, id DESC")?;
+    let mut stmt = conn.prepare("SELECT * FROM chats WHERE project_id = ?1 ORDER BY pinned_at IS NULL, pinned_at, updated_at DESC, id DESC")?;
     let rows = stmt.query_map([project_id], chat_from_row)?;
     Ok(rows.collect::<rusqlite::Result<_>>()?)
 }
 
-/// Every project's chats, most recently used first (for the command palette).
+/// Every project's chats, in `list`'s order (for the command palette).
 pub fn list_all(conn: &Connection) -> Result<Vec<Chat>, DbError> {
-    let mut stmt = conn.prepare("SELECT * FROM chats ORDER BY updated_at DESC, id DESC")?;
+    let mut stmt = conn.prepare("SELECT * FROM chats ORDER BY pinned_at IS NULL, pinned_at, updated_at DESC, id DESC")?;
     let rows = stmt.query_map([], chat_from_row)?;
     Ok(rows.collect::<rusqlite::Result<_>>()?)
 }
@@ -74,6 +74,16 @@ pub fn set_session_title(conn: &Connection, id: &str, title: &str) -> Result<boo
         [id, title],
     )?;
     Ok(n > 0)
+}
+
+/// Pins (at `now`) or unpins the chat; re-pinning keeps its pin time. `updated_at` is untouched.
+pub fn set_pinned(conn: &Connection, id: &str, pinned: bool, now: i64) -> Result<(), DbError> {
+    let pinned_at = pinned.then_some(now);
+    let n = conn.execute("UPDATE chats SET pinned_at = CASE WHEN ?2 IS NULL THEN NULL ELSE coalesce(pinned_at, ?2) END WHERE id = ?1", rusqlite::params![id, pinned_at])?;
+    if n == 0 {
+        return Err(not_found("chat"));
+    }
+    Ok(())
 }
 
 pub fn delete(conn: &Connection, id: &str) -> Result<(), DbError> {
