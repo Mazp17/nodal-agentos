@@ -562,21 +562,20 @@ export interface UsageTotals {
   output: number;
   cacheRead: number;
   cacheWrite: number;
-  /** API responses. */
-  messages: number;
+  /** Sessions started in the period (subagents not counted). */
+  sessions: number;
 }
-/** Tokens of every Claude Code session on this machine, read from its transcripts. */
+/** Tokens of every Claude Code session on this machine, counted like Claude Code's `/stats`. */
 export interface UsageSummary {
   last24h: UsageTotals;
   last7d: UsageTotals;
   last30d: UsageTotals;
   allTime: UsageTotals;
-  /** Tokens per rolling day, oldest first: the last entry is the last 24 hours. */
+  /** Tokens per UTC day, oldest first: the last entry is today. */
   daily30d: number[];
   /** Last 30 days, most tokens first. */
   models30d: { model: string; totals: UsageTotals }[];
-  sessions: number;
-  /** Oldest message seen (epoch ms). */
+  /** First session (epoch ms). */
   since: number | null;
 }
 export const claudeUsage = () => invoke<UsageSummary>("claude_usage");

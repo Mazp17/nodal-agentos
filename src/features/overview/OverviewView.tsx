@@ -419,7 +419,7 @@ function UsageDetail({ u, totals, long, now }: { u: UsageSummary; totals: UsageT
     <div className="ov-usage">
       <div className="ov-usage-col">
         <div className="ov-sub-h">
-          {long} · {totals.messages.toLocaleString()} responses · {u.sessions} sessions on this Mac
+          {long} · {totals.sessions.toLocaleString()} sessions on this Mac
         </div>
         <div className="ov-split" role="img" aria-label={parts.map((p) => `${p.label} ${formatTokens(p.n)}`).join(", ")}>
           {parts.map((p) => (
