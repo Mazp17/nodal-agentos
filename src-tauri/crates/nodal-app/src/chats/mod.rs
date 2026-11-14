@@ -478,6 +478,15 @@ impl Chats {
         Ok(self.core.chats.interrupt(&id)?)
     }
 
+    /// Stops one of the chat's background shells (`task_id` from its `shellStarted` event).
+    pub async fn stop_chat_shell(&self, id: String, task_id: String) -> Result<(), AppError> {
+        check_id(&id, "chat")?;
+        if task_id.is_empty() || task_id.len() > 64 || !task_id.bytes().all(|b| b.is_ascii_alphanumeric()) {
+            return Err("Invalid shell id.".to_string().into());
+        }
+        Ok(self.core.chats.stop_shell(&id, &task_id)?)
+    }
+
     /// Rewinds the chat to just before its user message `message_uuid`: restores the files
     /// Claude edited since (a `dry_run` only reports them) and, unless it is a `dry_run`,
     /// forgets the conversation from that message on. Files that can't be restored come back
