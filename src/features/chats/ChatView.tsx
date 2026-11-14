@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { GitBranch } from "lucide-react";
 import { relUnder } from "../../domain/hooks/projects";
 import { cleanupWorktree, createChat, interruptChat, rewindChat, sendChatMessage, updateChat, updateTask, type ChatPatch } from "../../domain/api";
 import { useChatWorkspace } from "../../domain/hooks/branches";
@@ -8,6 +9,7 @@ import type { Chat, Project, Repo } from "../../domain/types";
 import { ExternalLink } from "../../ui/ExternalLink";
 import { useConfirm } from "../../ui/ConfirmDialog";
 import { EmptyState } from "../../ui/EmptyState";
+import { Tooltip, TooltipContent, TooltipTrigger } from "../../ui/Tooltip";
 import { useToast } from "../../ui/Toasts";
 import { isClosed, providerLabel, STATUS_META, taskTag } from "../tasks/status";
 import { PrBadge, StatusRing } from "../tasks/bits";
@@ -342,37 +344,49 @@ export function ChatView({ project, repos, chatId: tabChatId, onCreated, onShowC
             )}
           </div>
         )}
-        {((workspace && workspace.files > 0) || canLand) && (
-          <div className="chat-changes">
-            {workspace && workspace.files > 0 ? (
-              <button type="button" className="chat-changes-btn" title="Show the changes" onClick={onShowChanges}>
-                <span className="chat-changes-files">
-                  {workspace.files} {workspace.files === 1 ? "file" : "files"} changed
-                </span>
-                <span className="chat-changes-add num">+{workspace.additions}</span>
-                <span className="chat-changes-del num">−{workspace.deletions}</span>
-                {workspace.branch && (
-                  <span className="chat-changes-where ellipsis" title={workspace.cwd ?? undefined}>
-                    {workspace.isWorktree ? "worktree · " : "on "}
-                    {task && workspace.isWorktree ? taskKeyLabel : workspace.branch}
-                  </span>
-                )}
-              </button>
-            ) : (
-              <span className="chat-changes-where ellipsis" title={task?.worktree?.branch}>
-                worktree · {taskKeyLabel}
-              </span>
-            )}
-            {canLand && task?.worktree && (
-              <span className="chat-changes-actions">
-                <button type="button" className="btn btn-xs btn-ghost chat-discard" disabled={busy} onClick={() => void discard()}>
-                  Discard
-                </button>
-              </span>
-            )}
-          </div>
-        )}
         <Composer
+          tray={
+            (workspace && workspace.files > 0) || canLand ? (
+              <>
+                <GitBranch size={13} aria-hidden className="chat-changes-icon" />
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    {/* Focusable so the full name and path also show from the keyboard. */}
+                    <span className="chat-changes-where ellipsis" tabIndex={0}>
+                      {workspace?.branch
+                        ? `${workspace.isWorktree ? "worktree · " : "on branch · "}${task && workspace.isWorktree ? taskKeyLabel : workspace.branch}`
+                        : `worktree · ${taskKeyLabel}`}
+                    </span>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    <div>{workspace?.branch ?? task?.worktree?.branch}</div>
+                    {workspace?.cwd && <div className="mono">{workspace.cwd}</div>}
+                  </TooltipContent>
+                </Tooltip>
+                {workspace && workspace.files > 0 && (
+                  <>
+                    <span className="chat-changes-sep" aria-hidden />
+                    <span className="chat-changes-files">
+                      {workspace.files} {workspace.files === 1 ? "file" : "files"} changed
+                    </span>
+                    <span className="chat-changes-add num">+{workspace.additions}</span>
+                    <span className="chat-changes-del num">−{workspace.deletions}</span>
+                  </>
+                )}
+                <span className="spacer" />
+                {canLand && task?.worktree && (
+                  <button type="button" className="chat-tray-btn" disabled={busy} onClick={() => void discard()}>
+                    Discard
+                  </button>
+                )}
+                {workspace && workspace.files > 0 && (
+                  <button type="button" className="chat-tray-btn chat-tray-btn-strong" onClick={onShowChanges}>
+                    Review changes
+                  </button>
+                )}
+              </>
+            ) : undefined
+          }
           draft={draft}
           placeholder={`Ask anything about ${project.name}…`}
           settings={settings}

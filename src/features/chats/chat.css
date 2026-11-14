@@ -228,7 +228,7 @@
 .chat-composer {
   width: 100%;
   max-width: 760px;
-  border-radius: var(--r-3xl);
+  border-radius: 16px;
   border: 1px solid var(--border-3);
   background: var(--surface-1);
   box-shadow: var(--shadow-composer);
@@ -246,6 +246,13 @@
   line-height: 1.5;
   color: var(--text);
 }
+/* Rounded itself: the composer can't clip, its pill menus open above it. */
+.chat-composer-tray { border-radius: 15px 15px 0 0; display: flex; align-items: center; gap: var(--sp-3); height: 34px; padding: 0 var(--sp-3) 0 var(--sp-6); background: var(--fill-1); border-bottom: 1px solid var(--border); font-size: var(--fs-sm); color: var(--text-muted); }
+.chat-tray-btn { flex: none; height: 24px; padding: 0 var(--sp-3); border: 0; border-radius: var(--r-md); background: transparent; color: var(--text-muted); font: inherit; font-size: var(--fs-2xs); cursor: pointer; }
+.chat-tray-btn:hover:not(:disabled) { background: var(--fill-3); color: var(--text); }
+.chat-tray-btn:disabled { opacity: 0.5; cursor: default; }
+.chat-tray-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.chat-tray-btn-strong { padding: 0 var(--sp-4); border: 1px solid var(--border-3); border-radius: var(--r-lg); background: var(--fill-4); color: var(--text-2); }
 .chat-input::placeholder { color: var(--text-dim); }
 .chat-composer-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: var(--sp-2) var(--sp-3) var(--sp-3); }
 
@@ -391,24 +398,13 @@
 .files-icon { flex: none; color: var(--text-dim); }
 .files-note { padding-top: var(--sp-1); padding-bottom: var(--sp-1); font-size: var(--fs-xs); color: var(--text-dim); }
 
-/* Uncommitted changes where the chat works, right above the composer (same width). */
-.chat-changes {
-  flex: none;
-  width: calc(100% - 48px);
-  max-width: 760px;
-  align-self: center;
-  display: flex;
-  align-items: center;
-  gap: var(--sp-3);
-  margin-bottom: var(--sp-3);
-  padding: 0 var(--sp-3);
-  font-size: var(--fs-xs);
-  color: var(--text-muted);
-}
-.chat-changes-files { color: var(--text-3); }
-.chat-changes-add { color: var(--green); }
-.chat-changes-del { color: var(--red-text); }
-.chat-changes-where { margin-left: auto; min-width: 0; font-family: var(--font-mono); font-size: var(--fs-2xs); }
+/* Uncommitted changes, the composer's attached top tray. */
+.chat-changes-icon { flex: none; color: var(--text-dim); }
+.chat-changes-sep { flex: none; width: 1px; height: 14px; background: var(--border-3); }
+.chat-changes-files { flex: none; color: var(--text-3); }
+.chat-changes-add { color: var(--green); font-family: var(--font-mono); font-size: var(--fs-2xs); }
+.chat-changes-del { color: var(--red-text); font-family: var(--font-mono); font-size: var(--fs-2xs); }
+.chat-changes-where { min-width: 0; font-family: var(--font-mono); font-size: var(--fs-2xs); }
 
 /* Files panel rows: a chevron column so files line up with folders. */
 .files-chev { flex: none; width: 10px; height: 10px; color: var(--text-dim); transition: transform 120ms ease-out; }
@@ -465,13 +461,6 @@
 .tok-attr { color: var(--syn-attr); }
 .tok-punc { color: var(--text-5); }
 .tok-head { color: var(--text-strong); font-weight: var(--fw-semibold); }
-/* The changes bar is a button: opens the files panel on its git view. */
-.chat-changes { min-height: 26px; }
-.chat-changes-btn { flex: 1; min-width: 0; display: flex; align-items: center; gap: var(--sp-3); padding: 0 var(--sp-3); margin: 0 calc(-1 * var(--sp-3)); border: 0; border-radius: var(--r-lg); background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; height: 26px; }
-.chat-changes-btn:hover { background: var(--fill-3); color: var(--text); }
-.chat-changes-btn:hover .chat-changes-files { text-decoration: underline; text-underline-offset: 2px; }
-.chat-changes-actions { flex: none; display: flex; gap: var(--sp-2); }
-
 /* The task this chat works: id (opens the source), title (opens the task) and status. */
 .chat-task {
   flex: none;
@@ -487,12 +476,12 @@
   font-size: var(--fs-xs);
   color: var(--text-muted);
 }
-.chat-task-tag { flex: none; padding: 1px 6px; border-radius: var(--r-md); background: var(--fill-4); color: var(--text-3); }
+.chat-task-tag { flex: none; padding: 1px 6px; border-radius: var(--r-md); background: var(--fill-4); color: var(--text-3); font-size: var(--fs-2xs); }
 .chat-task-tag .ext-link, .chat-task-link { color: inherit; cursor: pointer; }
 .chat-task-link, .chat-task-title { border: 0; background: transparent; padding: 0; font: inherit; text-align: left; }
 .chat-task-title { flex: 1; min-width: 0; color: var(--text-3); cursor: pointer; }
 .chat-task-title:hover { color: var(--text); text-decoration: underline; text-underline-offset: 2px; }
-.chat-task-status { flex: none; display: inline-flex; align-items: center; gap: var(--sp-2); }
+.chat-task-status { flex: none; display: inline-flex; align-items: center; gap: var(--sp-2); padding: 1px var(--sp-3) 1px 6px; border-radius: 999px; background: var(--fill-3); color: var(--text-3); }
 
 /* ---- Editor: a transparent textarea over the highlighted text, both with identical metrics.
    The outer `.file-view-code` scrolls; the textarea grows with its content and never scrolls. */
