@@ -642,3 +642,49 @@ fn turn_end_moves_an_in_progress_task_to_review_only_with_changes() {
     // Already in review: left alone.
     assert!(!super::review_if_changed(&db, &git, 7, "c1").unwrap());
 }
+
+#[test]
+fn record_prs_stores_each_new_pr_url_once_on_the_chats_branch() {
+    use nodal_host::adapters::HostGit;
+    use nodal_host::testutil::{git_available, init_repo, TempDir};
+
+    if !git_available() {
+        return;
+    }
+    let t = TempDir::new("hooks-record-prs");
+    init_repo(&t.0);
+    let db = Db::open_in_memory().unwrap();
+    let mk_chat = |id: &str, repo_id: Option<&str>| Chat {
+        id: id.into(),
+        project_id: "p1".into(),
+        repo_id: repo_id.map(Into::into),
+        title: None,
+        session_title: None,
+        agent: None,
+        task_id: None,
+        worktree: None,
+        archived_at: None,
+        session_id: None,
+        launch: LaunchOptions::default(),
+        created_at: 1,
+        updated_at: 1,
+        pinned_at: None,
+    };
+    {
+        let c = db.lock().unwrap();
+        rows::insert_project(&c, &project_of("p1", "PAY")).unwrap();
+        rows::insert_repo(&c, &nodal_domain::testutil::repo_of("r1", "p1", t.0.to_str().unwrap())).unwrap();
+        rows::insert_chat(&c, &mk_chat("c1", Some("r1"))).unwrap();
+        rows::insert_chat(&c, &mk_chat("c2", None)).unwrap();
+    }
+    let urls = ["https://github.com/o/r/pull/3".to_string(), "not a pr".to_string()];
+    assert!(!super::record_prs(&db, &HostGit, 5, "c1", &t.0, &[]).unwrap());
+    assert!(super::record_prs(&db, &HostGit, 5, "c1", &t.0, &urls).unwrap());
+    assert!(!super::record_prs(&db, &HostGit, 6, "c1", &t.0, &urls).unwrap());
+    let prs = nodal_store::board::chat_prs::list(&db.lock().unwrap(), "c1").unwrap();
+    assert_eq!(prs.len(), 1);
+    assert_eq!((prs[0].number, prs[0].branch.as_deref(), prs[0].created_at), (3, Some("main"), 5));
+    // A chat with no repo records nothing; an unknown chat is an error.
+    assert!(!super::record_prs(&db, &HostGit, 5, "c2", &t.0, &urls).unwrap());
+    assert!(super::record_prs(&db, &HostGit, 5, "nope", &t.0, &urls).is_err());
+}

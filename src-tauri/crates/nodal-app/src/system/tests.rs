@@ -257,3 +257,152 @@ fn repo_open_pr_refuses_before_pushing() {
     git_in(&repo, &["worktree", "add", "-q", "--detach", wt.to_str().unwrap()]);
     assert!(pr(Some(&wt), "t").contains("HEAD is detached"));
 }
+
+#[cfg(unix)]
+mod pr_panel {
+    use nodal_domain::model::{Chat, LaunchOptions};
+    use nodal_domain::model::{BranchPr, ChatPr, PrState};
+    use nodal_host::testutil::{fake_gh_calls, fake_gh_fail, fake_gh_reply, install_fake_gh};
+    use nodal_store::board::{branch_prs, chat_prs};
+    use nodal_store::{rows, with_db};
+
+    use super::*;
+
+    const URL: &str = "https://github.com/o/r/pull/7";
+
+    fn pr_json(state: &str) -> String {
+        format!(r#"{{"headRefOid":"","isDraft":false,"number":7,"state":"{state}","url":"{URL}"}}"#)
+    }
+
+    /// A system on repo `r1` with branch `feat` checked out, chat `c1` and the fake `gh`.
+    fn setup(name: &str) -> Option<(TempDir, std::path::PathBuf, System)> {
+        let (root, repo, system) = system_with_repo(name)?;
+        install_fake_gh();
+        git_in(&repo, &["checkout", "-q", "-b", "feat"]);
+        let chat = Chat {
+            id: "c1".into(),
+            project_id: "p1".into(),
+            repo_id: Some("r1".into()),
+            title: None,
+            session_title: None,
+            agent: None,
+            task_id: None,
+            worktree: None,
+            archived_at: None,
+            session_id: None,
+            launch: LaunchOptions::default(),
+            created_at: 1,
+            updated_at: 1,
+            pinned_at: None,
+        };
+        rows::insert_chat(&system.core.db.lock().unwrap(), &chat).unwrap();
+        Some((root, repo, system))
+    }
+
+    fn stored(system: &System) -> Option<(BranchPr, i64)> {
+        block_on(with_db(&system.core.db, |c| branch_prs::get(c, "r1", "feat"))).unwrap()
+    }
+
+    #[test]
+    fn repo_pr_looks_up_once_then_reuses_the_fresh_row() {
+        let Some((_root, repo, system)) = setup("system-repo-pr") else { return };
+        let pr = || block_on(system.repo_pr("r1".into(), None, None)).unwrap();
+        fake_gh_reply(&repo, "pr_list", &format!("[{}]", pr_json("OPEN")));
+        let found = pr().unwrap();
+        assert_eq!((found.number, found.state, found.manual, found.branch.as_str()), (7, PrState::Open, false, "feat"));
+        assert_eq!(stored(&system).unwrap().0, found);
+        assert_eq!(fake_gh_calls(&repo), 1);
+        // Fresh: gh isn't asked again, even though it would now say something else.
+        fake_gh_reply(&repo, "pr_list", &format!("[{}]", pr_json("MERGED")));
+        assert_eq!(pr().unwrap().state, PrState::Open);
+        assert_eq!(fake_gh_calls(&repo), 1);
+        // `force` asks again and keeps the new answer.
+        let forced = block_on(system.repo_pr("r1".into(), None, Some(true))).unwrap().unwrap();
+        assert_eq!(forced.state, PrState::Merged);
+        assert_eq!(stored(&system).unwrap().0.state, PrState::Merged);
+    }
+
+    #[test]
+    fn repo_pr_drops_a_stale_auto_row_and_survives_gh_failing() {
+        let Some((_root, repo, system)) = setup("system-repo-pr-stale") else { return };
+        let old = BranchPr { url: URL.into(), number: 7, state: PrState::Open, head: None, manual: false, branch: "feat".into() };
+        let p = old.clone();
+        block_on(with_db(&system.core.db, move |c| branch_prs::upsert(c, "r1", &p, 1))).unwrap();
+        // gh is down: the stored (stale) PR comes back.
+        fake_gh_fail(&repo, "pr_list", "not logged in");
+        assert_eq!(block_on(system.repo_pr("r1".into(), None, None)).unwrap(), Some(old));
+        // gh says there is no PR any more: the auto row goes.
+        fake_gh_reply(&repo, "pr_list", "[]");
+        assert_eq!(block_on(system.repo_pr("r1".into(), None, None)).unwrap(), None);
+        assert!(stored(&system).is_none());
+    }
+
+    #[test]
+    fn repo_pr_has_nothing_to_show_on_the_default_branch() {
+        let Some((_root, repo, system)) = setup("system-repo-pr-main") else { return };
+        git_in(&repo, &["checkout", "-q", "main"]);
+        git_in(&repo, &["symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main"]);
+        assert_eq!(block_on(system.repo_pr("r1".into(), None, Some(true))).unwrap(), None);
+        assert_eq!(fake_gh_calls(&repo), 0);
+        let err = block_on(system.repo_link_pr("r1".into(), None, "7".into(), None)).unwrap_err();
+        assert_eq!(err.to_string(), "Check out a branch to link a PR.");
+        block_on(system.repo_unlink_pr("r1".into(), None)).unwrap();
+    }
+
+    #[test]
+    fn repo_link_pr_stores_a_manual_row_and_records_it_for_the_chat() {
+        let Some((_root, repo, system)) = setup("system-link-pr") else { return };
+        fake_gh_reply(&repo, "pr_view", &pr_json("OPEN"));
+        let err = block_on(system.repo_link_pr("r1".into(), None, "--web".into(), None)).unwrap_err();
+        assert!(err.to_string().contains("Enter a PR number"), "{err}");
+        let linked = block_on(system.repo_link_pr("r1".into(), None, " 7 ".into(), Some("c1".into()))).unwrap();
+        assert!(linked.manual && linked.number == 7 && linked.branch == "feat");
+        assert_eq!(stored(&system).unwrap().0, linked);
+        let listed = block_on(system.chat_prs("c1".into())).unwrap();
+        assert_eq!((listed.len(), listed[0].url.as_str(), listed[0].branch.as_deref()), (1, URL, Some("feat")));
+        // Linking again doesn't duplicate the chat's PR.
+        block_on(system.repo_link_pr("r1".into(), None, "7".into(), Some("c1".into()))).unwrap();
+        assert_eq!(block_on(system.chat_prs("c1".into())).unwrap().len(), 1);
+        // A chat that doesn't exist is logged, not fatal.
+        block_on(system.repo_link_pr("r1".into(), None, "7".into(), Some("nope".into()))).unwrap();
+        assert!(block_on(system.chat_prs("../x".into())).is_err());
+
+        // A manual row is never replaced by a branch lookup; forcing re-reads that very PR.
+        let calls = fake_gh_calls(&repo);
+        assert_eq!(block_on(system.repo_pr("r1".into(), None, None)).unwrap(), Some(linked.clone()));
+        assert_eq!(fake_gh_calls(&repo), calls);
+        fake_gh_reply(&repo, "pr_view", &pr_json("CLOSED"));
+        let forced = block_on(system.repo_pr("r1".into(), None, Some(true))).unwrap().unwrap();
+        assert!(forced.manual && forced.state == PrState::Closed);
+
+        block_on(system.repo_unlink_pr("r1".into(), None)).unwrap();
+        assert!(stored(&system).is_none());
+    }
+
+    #[test]
+    fn repo_merge_details_and_check_log_go_through_gh() {
+        let Some((_root, repo, system)) = setup("system-merge-pr") else { return };
+        fake_gh_reply(&repo, "pr_list", &format!("[{}]", pr_json("MERGED")));
+        fake_gh_reply(&repo, "pr_merge", "");
+        fake_gh_reply(&repo, "run_view", "boom\n");
+        block_on(system.repo_merge_pr("r1".into(), None, 7, "squash".into())).unwrap();
+        assert_eq!(stored(&system).unwrap().0.state, PrState::Merged, "the PR is re-read after merging");
+        let err = block_on(system.repo_merge_pr("r1".into(), None, 7, "yolo".into())).unwrap_err();
+        assert!(err.to_string().contains("Unknown merge method"), "{err}");
+        assert_eq!(block_on(system.repo_check_log("r1".into(), None, "12".into())).unwrap(), "boom");
+        assert!(block_on(system.repo_check_log("r1".into(), None, "x".into())).is_err());
+        assert!(block_on(system.repo_pr_details("r1".into(), None, 7)).is_err(), "gh has no reply for it yet");
+        fake_gh_reply(&repo, "pr_view", &pr_json("OPEN"));
+        assert_eq!(block_on(system.repo_pr_details("r1".into(), None, 7)).unwrap()["number"], 7);
+    }
+
+    #[test]
+    fn chat_prs_lists_what_was_recorded() {
+        let Some((_root, _repo, system)) = setup("system-chat-prs") else { return };
+        assert!(block_on(system.chat_prs("c1".into())).unwrap().is_empty());
+        let pr = ChatPr { repo_id: "r1".into(), url: URL.into(), number: 7, branch: None, created_at: 5 };
+        let p = pr.clone();
+        assert!(block_on(with_db(&system.core.db, move |c| chat_prs::insert_if_new(c, "c1", &p))).unwrap());
+        assert_eq!(block_on(system.chat_prs("c1".into())).unwrap(), [pr]);
+    }
+}

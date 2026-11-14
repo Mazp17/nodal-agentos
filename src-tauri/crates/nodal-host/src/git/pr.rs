@@ -286,4 +286,78 @@ mod tests {
         assert!(check_log(d, "1;x").is_err());
         assert!(check_log(d, "--web").is_err());
     }
+
+    #[cfg(unix)]
+    mod fake_gh {
+        use super::*;
+        use crate::testutil::{fake_gh_calls, fake_gh_fail, fake_gh_reply, install_fake_gh, TempDir};
+
+        const VIEW: &str = r#"{"headRefOid":"","isDraft":false,"number":7,"state":"OPEN","url":"https://github.com/o/r/pull/7"}"#;
+
+        #[test]
+        fn pr_view_accepts_numbers_and_urls_and_reports_gh_errors() {
+            install_fake_gh();
+            let t = TempDir::new("pr-view");
+            fake_gh_reply(&t.0, "pr_view", VIEW);
+            for arg in ["7", "https://github.com/o/r/pull/7"] {
+                let pr = pr_view(&t.0, arg).unwrap();
+                assert_eq!((pr.number, pr.state, pr.head), (7, PrState::Open, None));
+            }
+            fake_gh_fail(&t.0, "pr_view", "no pull requests found\n");
+            assert_eq!(pr_view(&t.0, "7").unwrap_err(), "no pull requests found");
+        }
+
+        #[test]
+        fn pr_for_branch_lists_the_newest_pr() {
+            install_fake_gh();
+            let t = TempDir::new("pr-list");
+            fake_gh_reply(&t.0, "pr_list", &format!("[{VIEW}]"));
+            assert_eq!(pr_for_branch(&t.0, "feat").unwrap().unwrap().number, 7);
+            fake_gh_reply(&t.0, "pr_list", "[]");
+            assert_eq!(pr_for_branch(&t.0, "feat").unwrap(), None);
+            fake_gh_fail(&t.0, "pr_list", "not logged in");
+            assert_eq!(pr_for_branch(&t.0, "feat").unwrap_err(), "not logged in");
+        }
+
+        #[test]
+        fn pr_details_adds_inline_comments_when_the_api_answers() {
+            install_fake_gh();
+            let t = TempDir::new("pr-details");
+            fake_gh_reply(&t.0, "pr_view", r#"{"number":7,"url":"https://github.com/o/r/pull/7","comments":[]}"#);
+            // `gh api` failing is best effort: an empty list.
+            let v = pr_details(&t.0, 7).unwrap();
+            assert_eq!((v["number"].as_i64(), &v["reviewComments"]), (Some(7), &serde_json::json!([])));
+            fake_gh_reply(&t.0, "api", r#"[{"body":"nit"}]"#);
+            assert_eq!(pr_details(&t.0, 7).unwrap()["reviewComments"][0]["body"], "nit");
+            fake_gh_reply(&t.0, "pr_view", "not json");
+            assert!(pr_details(&t.0, 7).unwrap_err().contains("Unexpected gh output"));
+            fake_gh_fail(&t.0, "pr_view", "boom");
+            assert_eq!(pr_details(&t.0, 7).unwrap_err(), "boom");
+        }
+
+        #[test]
+        fn merge_pr_passes_the_method_flag_and_surfaces_failures() {
+            install_fake_gh();
+            let t = TempDir::new("pr-merge");
+            fake_gh_reply(&t.0, "pr_merge", "");
+            merge_pr(&t.0, 7, "squash").unwrap();
+            let calls = std::fs::read_to_string(t.0.join(".git/fake-gh/calls")).unwrap();
+            assert_eq!(calls.trim(), "pr merge 7 --squash");
+            fake_gh_fail(&t.0, "pr_merge", "not mergeable\n");
+            assert_eq!(merge_pr(&t.0, 7, "rebase").unwrap_err(), "not mergeable");
+            assert_eq!(fake_gh_calls(&t.0), 2);
+        }
+
+        #[test]
+        fn check_log_keeps_the_last_200_lines() {
+            install_fake_gh();
+            let t = TempDir::new("check-log");
+            let log: String = (1..=250).map(|i| format!("line {i}\n")).collect();
+            fake_gh_reply(&t.0, "run_view", &log);
+            let out = check_log(&t.0, "123").unwrap();
+            assert_eq!((out.lines().count(), out.lines().next(), out.lines().last()), (200, Some("line 51"), Some("line 250")));
+            fake_gh_fail(&t.0, "run_view", "run not found");
+            assert_eq!(check_log(&t.0, "123").unwrap_err(), "run not found");
+        }
+    }
 }
