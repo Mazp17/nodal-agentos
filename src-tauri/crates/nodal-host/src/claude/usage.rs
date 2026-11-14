@@ -1,11 +1,15 @@
-//! Token usage of every Claude Code session on this machine, read from the transcripts in
-//! `<config>/projects/**/*.jsonl` (READ-ONLY). Each assistant line carries `message.usage`;
-//! one message spans several lines (one per content block), so it's counted once per
-//! `message.id` + `requestId`.
+//! Token usage of every Claude Code session on this machine, counted the way Claude Code's
+//! `/stats` counts it so the two match (READ-ONLY):
+//! - All time: `<config>/stats-cache.json` (aggregates through `lastComputedDate`, kept after
+//!   old transcripts are deleted) plus the transcripts dated after it.
+//! - 7 and 30 days: the transcripts in `<config>/projects`, by UTC date.
+//!
+//! Like `/stats`, every assistant line with `message.usage` counts, even when one response is
+//! split over several lines (one per content block), so totals run ~1.8× the API's.
 //!
 //! Files are cached by size and mtime: only new or grown transcripts are parsed again.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
@@ -23,8 +27,8 @@ pub struct UsageTotals {
     pub output: u64,
     pub cache_read: u64,
     pub cache_write: u64,
-    /// Assistant messages (API responses).
-    pub messages: u64,
+    /// Sessions started in the period (subagents not counted).
+    pub sessions: u64,
 }
 
 impl UsageTotals {
@@ -33,7 +37,6 @@ impl UsageTotals {
         self.output += e.output;
         self.cache_read += e.cache_read;
         self.cache_write += e.cache_write;
-        self.messages += 1;
     }
 }
 
@@ -51,12 +54,11 @@ pub struct UsageSummary {
     pub last_7d: UsageTotals,
     pub last_30d: UsageTotals,
     pub all_time: UsageTotals,
-    /// Tokens per rolling day, oldest first: `[29]` is the last 24 hours.
+    /// Tokens per UTC day, oldest first: `[29]` is today.
     pub daily_30d: Vec<u64>,
     /// Last 30 days by model, most tokens first.
     pub models_30d: Vec<ModelUsage>,
-    pub sessions: u64,
-    /// Oldest message seen (epoch ms).
+    /// First session (epoch ms).
     pub since: Option<i64>,
 }
 
@@ -70,115 +72,183 @@ struct Entry {
     cache_write: u64,
 }
 
+#[derive(Default)]
+struct Transcript {
+    /// First message of a main-session transcript; `None` for subagents and empty files.
+    started: Option<i64>,
+    entries: Vec<Entry>,
+}
+
 struct Cached {
     len: u64,
     modified: Option<SystemTime>,
-    entries: Vec<Entry>,
+    t: Transcript,
 }
 
 static CACHE: Mutex<Option<HashMap<PathBuf, Cached>>> = Mutex::new(None);
 
-/// Usage under `<claude config>/projects` as of `now_ms`.
+/// Usage under the Claude config dir as of `now_ms`.
 pub fn usage_summary(now_ms: i64) -> Result<UsageSummary, String> {
-    let dir = crate::claude::fs::paths::claude_config_dir().ok_or("$HOME is not set.")?.join("projects");
+    let dir = crate::claude::fs::paths::claude_config_dir().ok_or("$HOME is not set.")?;
     Ok(summary_of(&dir, now_ms))
 }
 
-fn summary_of(projects: &Path, now_ms: i64) -> UsageSummary {
-    let mut files = Vec::new();
-    collect_jsonl(projects, &mut files);
+fn summary_of(config: &Path, now_ms: i64) -> UsageSummary {
+    let files = transcripts(&config.join("projects"));
     let mut guard = CACHE.lock().unwrap_or_else(|e| e.into_inner());
     let cache = guard.get_or_insert_with(HashMap::new);
     cache.retain(|p, _| files.contains(p));
-
-    let mut out = UsageSummary { daily_30d: vec![0; 30], ..Default::default() };
-    let mut models: HashMap<&str, UsageTotals> = HashMap::new();
     for path in &files {
         let Ok(meta) = fs::metadata(path) else { continue };
         let (len, modified) = (meta.len(), meta.modified().ok());
-        let fresh = cache.get(path).is_some_and(|c| c.len == len && c.modified == modified);
-        if !fresh {
-            let entries = fs::read_to_string(path).map(|t| parse(&t)).unwrap_or_default();
-            cache.insert(path.clone(), Cached { len, modified, entries });
+        if !cache.get(path).is_some_and(|c| c.len == len && c.modified == modified) {
+            let sub = path.components().any(|p| p.as_os_str() == "subagents");
+            let t = fs::read_to_string(path).map(|s| parse(&s, sub)).unwrap_or_default();
+            cache.insert(path.clone(), Cached { len, modified, t });
         }
     }
-    for path in &files {
-        let Some(c) = cache.get(path) else { continue };
-        // Subagent transcripts live under their parent session's folder.
-        if !c.entries.is_empty() && !path.components().any(|p| p.as_os_str() == "subagents") {
-            out.sessions += 1;
+
+    let stats = fs::read_to_string(config.join("stats-cache.json")).ok().and_then(|s| StatsCache::parse(&s));
+    let today = now_ms.div_euclid(DAY_MS);
+    // `/stats` takes "N days" as from the UTC date of N-1 days ago.
+    let from = |n: i64| (now_ms - (n - 1) * DAY_MS).div_euclid(DAY_MS);
+    let (d7, d30) = (from(7), from(30));
+    let all_from = stats.as_ref().map_or(i64::MIN, |s| s.last_day + 1);
+
+    let mut out = UsageSummary { daily_30d: vec![0; 30], ..Default::default() };
+    let mut models: HashMap<&str, UsageTotals> = HashMap::new();
+    for c in cache.values() {
+        if let Some(at) = c.t.started {
+            let day = at.div_euclid(DAY_MS);
+            for (t, from) in [(&mut out.last_7d, d7), (&mut out.last_30d, d30), (&mut out.all_time, all_from)] {
+                t.sessions += u64::from(day >= from);
+            }
+            out.last_24h.sessions += u64::from(now_ms - at < DAY_MS);
+            out.since = Some(out.since.map_or(at, |s| s.min(at)));
         }
-        for e in &c.entries {
-            let age = now_ms - e.at;
-            out.all_time.add(e);
-            if age < 30 * DAY_MS {
+        for e in &c.t.entries {
+            let day = e.at.div_euclid(DAY_MS);
+            if day >= all_from {
+                out.all_time.add(e);
+            }
+            if day >= d30 {
                 out.last_30d.add(e);
                 models.entry(&e.model).or_default().add(e);
-                if age >= 0 {
-                    out.daily_30d[29 - (age / DAY_MS) as usize] += e.input + e.output + e.cache_read + e.cache_write;
+                if day <= today {
+                    out.daily_30d[(29 - (today - day)) as usize] += total(e);
                 }
             }
-            if age < 7 * DAY_MS {
+            if day >= d7 {
                 out.last_7d.add(e);
             }
-            if age < DAY_MS {
+            if now_ms - e.at < DAY_MS {
                 out.last_24h.add(e);
             }
-            out.since = Some(out.since.map_or(e.at, |s| s.min(e.at)));
         }
     }
+    if let Some(s) = stats {
+        let t = &mut out.all_time;
+        t.input += s.totals.input;
+        t.output += s.totals.output;
+        t.cache_read += s.totals.cache_read;
+        t.cache_write += s.totals.cache_write;
+        t.sessions += s.totals.sessions;
+        out.since = s.since.or(out.since);
+    }
     out.models_30d = models.into_iter().map(|(m, totals)| ModelUsage { model: m.to_string(), totals }).collect();
-    out.models_30d.sort_by_key(|m| std::cmp::Reverse(total(&m.totals)));
+    out.models_30d.sort_by_key(|m| std::cmp::Reverse(sum(&m.totals)));
     out
 }
 
-fn total(t: &UsageTotals) -> u64 {
+fn total(e: &Entry) -> u64 {
+    e.input + e.output + e.cache_read + e.cache_write
+}
+
+fn sum(t: &UsageTotals) -> u64 {
     t.input + t.output + t.cache_read + t.cache_write
 }
 
-fn collect_jsonl(dir: &Path, out: &mut Vec<PathBuf>) {
-    let Ok(rd) = fs::read_dir(dir) else { return };
-    for e in rd.flatten() {
-        let Ok(ft) = e.file_type() else { continue };
-        let p = e.path();
-        if ft.is_dir() {
-            collect_jsonl(&p, out);
-        } else if ft.is_file() && p.extension().is_some_and(|x| x == "jsonl") {
-            out.push(p);
+/// The aggregates Claude Code keeps in `stats-cache.json`.
+struct StatsCache {
+    /// `lastComputedDate` as a UTC day number.
+    last_day: i64,
+    totals: UsageTotals,
+    since: Option<i64>,
+}
+
+impl StatsCache {
+    fn parse(text: &str) -> Option<Self> {
+        let v: Value = serde_json::from_str(text).ok()?;
+        let last_day = parse_iso_ms(&format!("{}T00:00:00Z", v["lastComputedDate"].as_str()?))?.div_euclid(DAY_MS);
+        let mut totals = UsageTotals { sessions: v["totalSessions"].as_u64().unwrap_or(0), ..Default::default() };
+        for m in v["modelUsage"].as_object()?.values() {
+            let n = |k: &str| m[k].as_u64().unwrap_or(0);
+            totals.input += n("inputTokens");
+            totals.output += n("outputTokens");
+            totals.cache_read += n("cacheReadInputTokens");
+            totals.cache_write += n("cacheCreationInputTokens");
         }
+        Some(Self { last_day, totals, since: v["firstSessionDate"].as_str().and_then(parse_iso_ms) })
     }
 }
 
-/// Usage entries of one transcript, one per API response.
-fn parse(text: &str) -> Vec<Entry> {
-    let mut seen = HashSet::new();
+/// `projects/<project>/*.jsonl` and `projects/<project>/<session>/subagents/agent-*.jsonl`,
+/// the files `/stats` reads.
+fn transcripts(projects: &Path) -> Vec<PathBuf> {
+    let jsonl = |dir: &Path, prefix: &str| -> Vec<PathBuf> {
+        let Ok(rd) = fs::read_dir(dir) else { return Vec::new() };
+        rd.flatten()
+            .filter(|e| e.file_type().is_ok_and(|t| t.is_file()))
+            .map(|e| e.path())
+            .filter(|p| {
+                let name = p.file_name().and_then(|n| n.to_str()).unwrap_or("");
+                name.ends_with(".jsonl") && name.starts_with(prefix)
+            })
+            .collect()
+    };
+    let dirs = |dir: &Path| -> Vec<PathBuf> {
+        let Ok(rd) = fs::read_dir(dir) else { return Vec::new() };
+        rd.flatten().filter(|e| e.file_type().is_ok_and(|t| t.is_dir())).map(|e| e.path()).collect()
+    };
     let mut out = Vec::new();
+    for project in dirs(projects) {
+        out.extend(jsonl(&project, ""));
+        for session in dirs(&project) {
+            out.extend(jsonl(&session.join("subagents"), "agent-"));
+        }
+    }
+    out
+}
+
+/// One transcript: its start and every usage line. Main sessions skip sidechain lines.
+fn parse(text: &str, subagent: bool) -> Transcript {
+    let mut t = Transcript::default();
+    let mut first: Option<i64> = None;
     for line in text.lines() {
-        // Cheap filter before parsing: most lines are user turns and tool results.
-        if !line.contains("\"usage\"") || !line.contains("\"assistant\"") {
+        // Cheap filter before parsing: message lines all carry a timestamp.
+        if !line.contains("\"timestamp\"") {
             continue;
         }
         let Ok(v) = serde_json::from_str::<Value>(line) else { continue };
-        if v["type"] != "assistant" {
+        if !matches!(v["type"].as_str(), Some("user" | "assistant" | "attachment" | "system")) {
             continue;
         }
-        let msg = &v["message"];
-        let u = &msg["usage"];
-        if !u.is_object() {
-            continue;
-        }
-        let key = format!("{}:{}", msg["id"].as_str().unwrap_or(""), v["requestId"].as_str().unwrap_or(""));
-        if key != ":" && !seen.insert(key) {
+        if !subagent && v["isSidechain"] == true {
             continue;
         }
         let Some(at) = v["timestamp"].as_str().and_then(parse_iso_ms) else { continue };
+        first.get_or_insert(at);
+        let msg = &v["message"];
+        let u = &msg["usage"];
+        if v["type"] != "assistant" || !u.is_object() {
+            continue;
+        }
         let model = msg["model"].as_str().unwrap_or("unknown");
-        // Synthetic messages (errors, interruptions) carry zeroed usage.
         if model == "<synthetic>" {
             continue;
         }
         let n = |k: &str| u[k].as_u64().unwrap_or(0);
-        out.push(Entry {
+        t.entries.push(Entry {
             at,
             model: model.to_string(),
             input: n("input_tokens"),
@@ -187,7 +257,10 @@ fn parse(text: &str) -> Vec<Entry> {
             cache_write: n("cache_creation_input_tokens"),
         });
     }
-    out
+    if !subagent {
+        t.started = first;
+    }
+    t
 }
 
 /// `YYYY-MM-DDTHH:MM:SS[.fff]Z` (UTC, as Claude Code writes it) → epoch ms.
@@ -222,30 +295,42 @@ mod tests {
     }
 
     #[test]
-    fn counts_each_message_once() {
-        let line = |id: &str, ts: &str, out: u64| {
+    fn counts_like_stats() {
+        let line = |id: &str, ts: &str, out: u64, extra: &str| {
             format!(
-                r#"{{"type":"assistant","requestId":"r-{id}","timestamp":"{ts}","message":{{"id":"{id}","model":"m","usage":{{"input_tokens":2,"output_tokens":{out},"cache_read_input_tokens":10,"cache_creation_input_tokens":5}}}}}}"#
+                r#"{{"type":"assistant","requestId":"r-{id}","timestamp":"{ts}"{extra},"message":{{"id":"{id}","model":"m","usage":{{"input_tokens":2,"output_tokens":{out},"cache_read_input_tokens":10,"cache_creation_input_tokens":5}}}}}}"#
             )
         };
-        let text = [
-            line("a", "2026-11-12T00:00:00Z", 7),
-            line("a", "2026-11-12T00:00:01Z", 7),
-            r#"{"type":"user","message":{"role":"user","content":"hi"}}"#.to_string(),
-            line("b", "2026-11-01T00:00:00Z", 3),
+        let main = [
+            r#"{"type":"user","timestamp":"2026-11-01T00:00:00Z","message":{"role":"user","content":"hi"}}"#.to_string(),
+            line("b", "2026-11-01T00:00:01Z", 3, ""),
+            // One response over two lines: `/stats` counts both.
+            line("a", "2026-11-12T00:00:00Z", 7, ""),
+            line("a", "2026-11-12T00:00:01Z", 7, ""),
+            line("s", "2026-11-12T00:00:02Z", 100, r#","isSidechain":true"#),
         ]
         .join("\n");
         let dir = std::env::temp_dir().join(format!("nodal-usage-{}", std::process::id()));
-        fs::create_dir_all(dir.join("p")).unwrap();
-        fs::write(dir.join("p/s.jsonl"), text).unwrap();
+        fs::create_dir_all(dir.join("projects/p/s1/subagents")).unwrap();
+        fs::write(dir.join("projects/p/s1.jsonl"), main).unwrap();
+        fs::write(dir.join("projects/p/s1/subagents/agent-x.jsonl"), line("c", "2026-11-12T01:00:00Z", 1, "")).unwrap();
+        // Through Nov 5: 1000 tokens of each kind over 40 sessions.
+        fs::write(
+            dir.join("stats-cache.json"),
+            r#"{"lastComputedDate":"2026-11-05","totalSessions":40,"firstSessionDate":"2026-02-09T17:41:08.949Z",
+               "modelUsage":{"m":{"inputTokens":1000,"outputTokens":1000,"cacheReadInputTokens":1000,"cacheCreationInputTokens":1000}}}"#,
+        )
+        .unwrap();
         let now = parse_iso_ms("2026-11-12T12:00:00Z").unwrap();
         let s = summary_of(&dir, now);
         fs::remove_dir_all(&dir).ok();
-        assert_eq!(s.all_time, UsageTotals { input: 4, output: 10, cache_read: 20, cache_write: 10, messages: 2 });
-        assert_eq!(s.last_24h.messages, 1);
-        assert_eq!(s.last_7d.output, 7);
-        assert_eq!(s.sessions, 1);
-        assert_eq!(s.models_30d.len(), 1);
-        assert_eq!((s.daily_30d[29], s.daily_30d[18]), (24, 20));
+
+        // Nov 12: two lines of "a" plus the subagent; the sidechain line is skipped.
+        assert_eq!(s.last_7d, UsageTotals { input: 6, output: 15, cache_read: 30, cache_write: 15, sessions: 0 });
+        assert_eq!(s.last_30d, UsageTotals { input: 8, output: 18, cache_read: 40, cache_write: 20, sessions: 1 });
+        // The Nov 1 session is already in the stats cache.
+        assert_eq!(s.all_time, UsageTotals { input: 1006, output: 1015, cache_read: 1030, cache_write: 1015, sessions: 40 });
+        assert_eq!((s.daily_30d[29], s.daily_30d[18]), (66, 20));
+        assert_eq!(s.since, parse_iso_ms("2026-02-09T17:41:08.949Z"));
     }
 }
