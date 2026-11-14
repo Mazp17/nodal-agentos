@@ -119,6 +119,13 @@ pub async fn unarchive_chat(state: State<'_, Arc<App>>, id: String) -> Result<Ch
     Ok(state.chats.set_chat_archived(id, false).await?)
 }
 
+/// Links the chat to a task (`None` unlinks it); refused when its folder would change.
+#[tauri::command]
+#[tracing::instrument(skip_all, level = "info")]
+pub async fn link_chat_task(state: State<'_, Arc<App>>, id: String, task_id: Option<String>) -> Result<Chat, CommandError> {
+    Ok(state.chats.link_chat_task(id, task_id).await?)
+}
+
 /// Sends a message, starting (or resuming) the chat's process if it isn't running.
 /// Returns the chat, named after its first message.
 #[tauri::command]
