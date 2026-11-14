@@ -10,6 +10,7 @@
 //! `nodal_host::claude::chats::ChatProcesses`, reached through `core.chats` (a `ChatRuntime`).
 
 pub mod context;
+mod follow;
 pub mod hooks;
 mod task;
 pub use task::TaskChatStart;
