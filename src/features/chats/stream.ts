@@ -35,6 +35,8 @@ export interface ChatStream {
   /** Text of the answer being written (a later `item` carries it in full). */
   streaming: string;
   thinking: boolean;
+  /** Text of the thinking being written (a later `item` carries it in full). */
+  thinkingText: string;
   state: ChatRunState;
   /** Permission requests waiting for an answer, oldest first. */
   pending: PermissionRequest[];
@@ -57,6 +59,7 @@ const EMPTY: ChatStream = {
   outbox: [],
   streaming: "",
   thinking: false,
+  thinkingText: "",
   state: "stopped",
   pending: [],
   denied: {},
@@ -296,15 +299,15 @@ export function reduce(s: ChatStream, e: ChatEvent): ChatStream {
     case "init":
       return s;
     case "textDelta":
-      return { ...s, streaming: s.streaming + e.text, thinking: false };
+      return { ...s, streaming: s.streaming + e.text, thinking: false, thinkingText: "" };
     case "thinkingDelta":
-      return { ...s, thinking: true };
+      return { ...s, thinking: true, thinkingText: s.thinkingText + e.text };
     case "item": {
       const it = e.item;
       if (it.kind === "user") return { ...s, items: [...s.items, it], outbox: s.outbox.slice(1) };
       // Replayed after a reload of the history: keep the one already there.
       if (it.kind === "toolUse" && it.id && s.items.some((x) => x.kind === "toolUse" && x.id === it.id)) return s;
-      return { ...s, items: [...s.items, it], streaming: it.kind === "text" ? "" : s.streaming, thinking: false };
+      return { ...s, items: [...s.items, it], streaming: it.kind === "text" ? "" : s.streaming, thinking: false, thinkingText: "" };
     }
     case "toolResult":
       return { ...s, items: withResult(s.items, e.toolUseId, (t) => ({ ...t, result: e.result })) };
@@ -331,6 +334,7 @@ export function reduce(s: ChatStream, e: ChatEvent): ChatStream {
         items: stopped ? [...s.items, { kind: "user", text: INTERRUPTED, truncated: false }] : s.items,
         streaming: "",
         thinking: false,
+        thinkingText: "",
         interrupting: false,
         notice,
         contextWindow: e.contextWindow ?? s.contextWindow,
@@ -339,9 +343,9 @@ export function reduce(s: ChatStream, e: ChatEvent): ChatStream {
     case "state":
       return e.state === "busy"
         ? { ...s, state: e.state }
-        : { ...s, state: e.state, streaming: "", thinking: false, interrupting: false, ...(e.state === "stopped" ? { pending: [] } : {}) };
+        : { ...s, state: e.state, streaming: "", thinking: false, thinkingText: "", interrupting: false, ...(e.state === "stopped" ? { pending: [] } : {}) };
     case "error":
-      return { ...s, notice: e.message, outbox: [], streaming: "", thinking: false, interrupting: false };
+      return { ...s, notice: e.message, outbox: [], streaming: "", thinking: false, thinkingText: "", interrupting: false };
   }
 }
 
