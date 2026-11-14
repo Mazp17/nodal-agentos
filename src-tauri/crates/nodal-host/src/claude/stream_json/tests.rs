@@ -365,3 +365,14 @@ fn background_shell_events() {
         json!({"type": "control_request", "request_id": "s1", "request": {"subtype": "stop_task", "task_id": "b7c3166rg"}})
     );
 }
+
+#[test]
+fn synthetic_skill_body_is_not_a_user_message() {
+    // Shape captured from Claude Code 2.1.325 after a `Skill` call.
+    let body = r#"{"type":"user","message":{"role":"user","content":[{"type":"text","text":"Base directory for this skill: /x\n\n# Skill"}]},"parent_tool_use_id":null,"uuid":"s1","isSynthetic":true}"#;
+    assert!(parse_line(body).is_empty());
+    let as_string = r#"{"type":"user","message":{"role":"user","content":"Base directory for this skill: /x"},"isSynthetic":true}"#;
+    assert!(parse_line(as_string).is_empty());
+    let real = r#"{"type":"user","message":{"role":"user","content":[{"type":"text","text":"hi"}]},"uuid":"u1"}"#;
+    assert!(matches!(&parse_line(real)[..], [StreamEvent::Item { item: TranscriptItem::User { text, .. } }] if text == "hi"));
+}

@@ -184,6 +184,10 @@ struct RawUser<'a> {
     message: Option<RawUserMessage<'a>>,
     #[serde(default, borrow, rename = "tool_use_result")]
     tool_use_result: Option<&'a RawValue>,
+    /// Text Claude Code injects as the user, e.g. a skill body after a `Skill` call
+    /// (live stream marks it `isSynthetic`, the transcript `isMeta`; seen in 2.1.325).
+    #[serde(default, rename = "isSynthetic")]
+    is_synthetic: Option<bool>,
 }
 
 #[derive(Deserialize)]
@@ -370,8 +374,9 @@ fn parse_user(line: &str) -> Vec<StreamEvent> {
     };
     let parent = v.parent_tool_use_id.as_deref();
     let uuid = v.uuid.map(Cow::into_owned);
+    let synthetic = v.is_synthetic == Some(true);
     let out = match content {
-        Value::String(s) if !s.trim().is_empty() => {
+        Value::String(s) if !synthetic && !s.trim().is_empty() => {
             vec![StreamEvent::Item { item: user_item(&s, uuid) }]
         }
         Value::Array(blocks) => {
@@ -388,7 +393,7 @@ fn parse_user(line: &str) -> Vec<StreamEvent> {
                             result,
                         })
                     }
-                    Some("text") => {
+                    Some("text") if !synthetic => {
                         let s = b
                             .get("text")
                             .and_then(Value::as_str)
