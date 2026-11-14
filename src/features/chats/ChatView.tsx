@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { Archive, ArchiveRestore, GitBranch, Link, Pencil, Trash2, Unlink } from "lucide-react";
+import { Archive, ArchiveRestore, GitBranch, Link, Pencil, Pin, PinOff, Trash2, Unlink } from "lucide-react";
 import { DropdownMenu } from "radix-ui";
 import { relUnder } from "../../domain/hooks/projects";
 import {
@@ -10,6 +10,7 @@ import {
   linkChatTask,
   rewindChat,
   sendChatMessage,
+  setChatPinned,
   unarchiveChat,
   updateChat,
   updateTask,
@@ -373,6 +374,17 @@ export function ChatView({ project, repos, chatId: tabChatId, onCreated, onShowC
                       <Pencil size={14} aria-hidden />
                       Rename
                     </DropdownMenu.Item>
+                    {chat.pinnedAt != null ? (
+                      <DropdownMenu.Item className="menu-item" onSelect={() => void act("unpin the chat", () => setChatPinned(chat.id, false))}>
+                        <PinOff size={14} aria-hidden />
+                        Unpin
+                      </DropdownMenu.Item>
+                    ) : (
+                      <DropdownMenu.Item className="menu-item" onSelect={() => void act("pin the chat", () => setChatPinned(chat.id, true))}>
+                        <Pin size={14} aria-hidden />
+                        Pin
+                      </DropdownMenu.Item>
+                    )}
                     {chat.archivedAt ? (
                       <DropdownMenu.Item className="menu-item" onSelect={() => void act("unarchive the chat", () => unarchiveChat(chat.id))}>
                         <ArchiveRestore size={14} aria-hidden />
