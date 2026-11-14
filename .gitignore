@@ -33,3 +33,6 @@ src-tauri/binaries/
 # worktrees de agentes de Claude Code
 .claude/
 !src-tauri/src/runs/fixtures/workflows/repo/.claude/
+
+# scripts/preview.sh: per-worktree copy of the dev data
+.preview/
