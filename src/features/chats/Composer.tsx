@@ -143,7 +143,7 @@ export function Composer(p: ComposerProps) {
   }, [p.focusKey]);
 
   const lines = p.draft.split("\n").length;
-  const canSend = !!p.draft.trim() && !p.busy;
+  const canSend = !!p.draft.trim();
   const pill = (id: keyof ComposerSettings, options: PillOption[], align: "left" | "right", caption: string, icon: PillIcon) => ({
     id,
     caption,
@@ -202,16 +202,17 @@ export function Composer(p: ComposerProps) {
             <Pill {...pill("model", p.models, "right", "Model", "model")} joined="start" />
             <Pill {...pill("effort", p.efforts, "right", "Effort", "effort")} joined="end" />
           </span>
-          {p.busy ? (
+          {p.busy && (
             <button type="button" className="chat-send chat-stop" title="Stop" aria-label="Stop the answer" onClick={p.onStop}>
               <Square size={10} fill="currentColor" aria-hidden />
             </button>
-          ) : (
+          )}
+          {(!p.busy || canSend) && (
             <button
               type="button"
               className={`chat-send ${canSend ? "on" : ""}`}
-              title="Send (Enter)"
-              aria-label="Send"
+              title={p.busy ? "Queue (Enter)" : "Send (Enter)"}
+              aria-label={p.busy ? "Queue the message" : "Send"}
               disabled={!canSend}
               onClick={p.onSend}
             >

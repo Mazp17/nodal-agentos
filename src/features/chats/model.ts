@@ -89,7 +89,10 @@ export type Part =
   | { kind: "tools"; items: ToolUse[] }
   | { kind: "proposal"; item: ToolUse };
 
-export type Turn = { kind: "user"; text: string; pending: boolean; uuid: string | null } | { kind: "ai"; parts: Part[] };
+/** A message sent that Claude hasn't echoed yet; `queued` if sent while Claude was working. */
+export type Outgoing = { text: string; queued: boolean };
+
+export type Turn = { kind: "user"; text: string; pending: boolean; queued?: boolean; uuid: string | null } | { kind: "ai"; parts: Part[] };
 
 export const isProposal = (item: ToolUse) => item.name === PROPOSE_TASK_TOOL;
 
@@ -97,7 +100,7 @@ export const isProposal = (item: ToolUse) => item.name === PROPOSE_TASK_TOOL;
  * User messages become their own turn; everything between two of them is one answer, with
  * consecutive tool calls in one block. `outbox` are messages sent that Claude hasn't echoed yet.
  */
-export function toTurns(items: TranscriptItem[], outbox: string[] = []): Turn[] {
+export function toTurns(items: TranscriptItem[], outbox: Outgoing[] = []): Turn[] {
   const turns: Turn[] = [];
   const ai = (): Part[] => {
     const last = turns[turns.length - 1];
@@ -119,7 +122,7 @@ export function toTurns(items: TranscriptItem[], outbox: string[] = []): Turn[] 
       ai().push(it.kind === "thinking" ? { kind: "thinking", text: it.text, truncated: it.truncated } : { kind: "text", text: it.text });
     }
   }
-  for (const text of outbox) turns.push({ kind: "user", text, pending: true, uuid: null });
+  for (const { text, queued } of outbox) turns.push({ kind: "user", text, pending: true, queued, uuid: null });
   return turns;
 }
 

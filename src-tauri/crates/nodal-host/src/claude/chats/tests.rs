@@ -366,3 +366,48 @@ fn only_a_running_shell_of_the_chat_is_stopped_and_it_keeps_the_process_alive() 
         assert_eq!(f.chats.reap_idle(Duration::ZERO, Instant::now()), 1);
     });
 }
+
+/// Like `claude` 2.1.325 with queued messages: m2 and m3 arrive mid-turn and are echoed and
+/// answered in m1's turn (one `result` for three messages); m5 arrives during m4's turn but is
+/// only echoed after m4's `result`, and gets its own.
+const QUEUES: &str = r#"#!/bin/sh
+echo '{"type":"system","subtype":"init","session_id":"00000000-0000-4000-8000-000000000009","cwd":"/tmp"}'
+echo_user() { u=$(echo "$1" | sed 's/.*"uuid":"\([^"]*\)".*/\1/'); echo "{\"type\":\"user\",\"uuid\":\"$u\",\"isReplay\":true,\"message\":{\"role\":\"user\",\"content\":\"hi\"}}"; }
+result() { echo '{"type":"result","subtype":"success","is_error":false}'; }
+read l1; echo_user "$l1"
+read l2; read l3; echo_user "$l2"; echo_user "$l3"; result
+read l4; echo_user "$l4"
+read l5; result
+echo_user "$l5"; result
+sleep 5
+"#;
+
+#[test]
+#[cfg_attr(windows, ignore = "the fake claude is a sh script")]
+fn queued_messages_end_busy_once_all_are_echoed_and_answered() {
+    use nodal_domain::ports::ChatRuntime;
+    let f = Fixture::new("queue", QUEUES);
+    let echo = |e: &ChatEvent| matches!(e, ChatEvent::Stream(StreamEvent::Item { item: nodal_domain::model::claude::TranscriptItem::User { .. } }));
+    let turn_end = |e: &ChatEvent| matches!(e, ChatEvent::Stream(StreamEvent::TurnEnd { .. }));
+    let idles = || f.events().iter().filter(|e| matches!(e, ChatEvent::Host(HostEvent::State { state: RunState::Idle }))).count();
+    block_on(async {
+        send(&f.chats, f.spec()).unwrap();
+        f.wait_for(1, "m1 echo", echo).await;
+        send(&f.chats, f.spec()).unwrap();
+        send(&f.chats, f.spec()).unwrap();
+        f.wait_for(1, "merged turn end", turn_end).await;
+        assert_eq!(f.chats.live("c1").state, RunState::Idle, "one result answered all three");
+        assert_eq!(idles(), 1);
+
+        send(&f.chats, f.spec()).unwrap();
+        f.wait_for(4, "m4 echo", echo).await;
+        send(&f.chats, f.spec()).unwrap();
+        f.wait_for(3, "m5 turn end", turn_end).await;
+        assert_eq!(f.chats.live("c1").state, RunState::Idle);
+        assert_eq!(idles(), 2);
+        // m5 wasn't read when m4's turn ended: no idle between the 2nd and the 3rd `result`.
+        let ev = f.events();
+        let ends: Vec<usize> = ev.iter().enumerate().filter(|(_, e)| turn_end(e)).map(|(i, _)| i).collect();
+        assert!(!ev[ends[1]..ends[2]].iter().any(|e| matches!(e, ChatEvent::Host(HostEvent::State { state: RunState::Idle }))), "{ev:#?}");
+    });
+}

@@ -37,6 +37,7 @@ use nodal_domain::model::chat::{
     ChatEnvelope, ChatEvent, ChatLive, ChatSpec as Spec, HostEvent, PermissionRequest, RewindResult,
     RunState, StreamEvent,
 };
+use nodal_domain::model::claude::TranscriptItem;
 use nodal_domain::ports::{BoxFut, ChatHooks, ChatRuntime, ChatSink};
 use nodal_domain::sessions::transcript::{is_valid_message_uuid, is_valid_session_id};
 
@@ -95,8 +96,11 @@ struct Proc {
     stdin: mpsc::UnboundedSender<String>,
     /// Dropped with the `Proc`: that stops the process.
     _stop: oneshot::Sender<()>,
-    /// Messages sent whose turn hasn't ended (they queue while a turn runs).
+    /// Turns still to end: busy while > 0. Recounted from `unechoed` at each `result`, since
+    /// several queued messages can share one (see `TurnEnd` in `dispatch`).
     turns: u32,
+    /// Uuids of the messages written to stdin that `claude` hasn't echoed (read) yet.
+    unechoed: Vec<String>,
     pending: Vec<PermissionRequest>,
     last_active: Instant,
     interrupts: u64,
@@ -326,6 +330,7 @@ impl ChatProcesses {
             stdin: tx,
             _stop: stop_tx,
             turns: 0,
+            unechoed: vec![],
             pending: vec![],
             last_active: Instant::now(),
             interrupts: 0,
@@ -422,9 +427,22 @@ impl ChatProcesses {
                 StreamEvent::TaskEnded { task_id, .. } => {
                     p.shells.remove(task_id);
                 }
+                StreamEvent::Item { item: TranscriptItem::User { uuid: Some(u), .. } } => {
+                    p.unechoed.retain(|x| x != u);
+                }
+                // Messages sent mid-turn queue in `claude` (verified with 2.1.325): one sent
+                // during a tool call is echoed and read at the next tool boundary and answered
+                // in the same turn, so several messages can end with a single `result`; one
+                // sent when no tool call is left starts its own turn and `result`. After an
+                // interrupt, queued messages still run, as a new turn. So the turn is over only
+                // when every message sent has been echoed by this `result`. (`min` with the
+                // plain count keeps a `claude` that doesn't echo from staying busy forever.)
                 StreamEvent::TurnEnd { .. } => {
                     title_from = Some((p.spec.cwd.clone(), p.project_id.clone()));
-                    p.turns = p.turns.saturating_sub(1);
+                    p.turns = p.turns.saturating_sub(1).min(p.unechoed.len() as u32);
+                    if p.turns == 0 {
+                        p.unechoed.clear();
+                    }
                     idle = p.turns == 0;
                     if idle {
                         p.pending.clear();
@@ -537,7 +555,9 @@ impl ChatRuntime for ChatProcesses {
         let Some(p) = procs.get_mut(chat_id) else {
             return Err("The chat's Claude process didn't start.".into());
         };
-        p.write(stream_json::user_message(text, &stream_json::new_uuid()))?;
+        let uuid = stream_json::new_uuid();
+        p.write(stream_json::user_message(text, &uuid))?;
+        p.unechoed.push(uuid);
         p.turns += 1;
         p.last_active = Instant::now();
         drop(procs);
@@ -595,6 +615,7 @@ impl ChatRuntime for ChatProcesses {
 
     /// Stops the running turn; the process stays for the next message. Pending requests
     /// are dropped (the turn that asked is over). Nothing to do if no turn is running.
+    /// Messages queued in `claude` aren't dropped: it answers them next, as a new turn.
     fn interrupt(&self, chat_id: &str) -> Result<(), HostError> {
         let mut procs = self.procs();
         let Some(p) = procs.get_mut(chat_id).filter(|p| p.turns > 0) else {

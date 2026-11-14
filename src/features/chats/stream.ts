@@ -20,7 +20,7 @@ import {
 import { readJsonPref, writePref } from "../../shell/storage";
 import type { TranscriptItem } from "./types";
 import { appFocused, notifyChat, preview } from "./alerts";
-import { chatTitle, toolLabel } from "./model";
+import { chatTitle, toolLabel, type Outgoing } from "./model";
 
 export interface ChatStream {
   /** `false` while the history loads. */
@@ -31,7 +31,7 @@ export interface ChatStream {
   /** History, then every complete item streamed since. */
   items: TranscriptItem[];
   /** Messages sent that Claude hasn't echoed back yet. */
-  outbox: string[];
+  outbox: Outgoing[];
   /** Text of the answer being written (a later `item` carries it in full). */
   streaming: string;
   thinking: boolean;
@@ -337,7 +337,12 @@ export function reduce(s: ChatStream, e: ChatEvent): ChatStream {
       return { ...s, thinking: true, thinkingText: s.thinkingText + e.text };
     case "item": {
       const it = e.item;
-      if (it.kind === "user") return { ...s, items: [...s.items, it], outbox: s.outbox.slice(1) };
+      if (it.kind === "user") {
+        // Echoes come in order, but Claude Code may merge queued messages into one echo (after
+        // a stop) and adds user-side markers of its own: drop what this echo covers, by text.
+        const i = s.outbox.map((m) => it.text.includes(m.text)).lastIndexOf(true);
+        return { ...s, items: [...s.items, it], outbox: s.outbox.slice(i + 1) };
+      }
       // Replayed after a reload of the history: keep the one already there.
       if (it.kind === "toolUse" && it.id && s.items.some((x) => x.kind === "toolUse" && x.id === it.id)) return s;
       const shell = it.kind === "toolUse" ? shellOf(it) : null;
@@ -398,7 +403,8 @@ export function reduce(s: ChatStream, e: ChatEvent): ChatStream {
     case "state":
       return e.state === "busy"
         ? { ...s, state: e.state }
-        : { ...s, state: e.state, streaming: "", thinking: false, thinkingText: "", interrupting: false, ...(e.state === "stopped" ? { pending: [], shells: {} } : {}) };
+        : // Idle only comes once Claude has read every message sent, so nothing is left queued.
+          { ...s, state: e.state, outbox: [], streaming: "", thinking: false, thinkingText: "", interrupting: false, ...(e.state === "stopped" ? { pending: [], shells: {} } : {}) };
     case "error":
       return { ...s, notice: e.message, outbox: [], streaming: "", thinking: false, thinkingText: "", interrupting: false };
   }
@@ -474,15 +480,15 @@ export function seedChat(chatId: string) {
   if (!streams.has(chatId)) void load(chatId, true);
 }
 
-/** Before sending: shows the message until Claude echoes it. */
-export function pushOutbox(chatId: string, text: string) {
+/** Before sending: shows the message until Claude echoes it. `queued`: sent while Claude was working. */
+export function pushOutbox(chatId: string, text: string, queued = false) {
   // A stop that got no answer (the turn had just ended) must not mark the next one as stopped.
-  set(chatId, (s) => ({ ...s, outbox: [...s.outbox, text], notice: null, interrupting: false }));
+  set(chatId, (s) => ({ ...s, outbox: [...s.outbox, { text, queued }], notice: null, interrupting: queued && s.interrupting }));
 }
 
 export function dropOutbox(chatId: string, text: string) {
   set(chatId, (s) => {
-    const i = s.outbox.lastIndexOf(text);
+    const i = s.outbox.map((m) => m.text).lastIndexOf(text);
     return i < 0 ? s : { ...s, outbox: s.outbox.filter((_, j) => j !== i) };
   });
 }
