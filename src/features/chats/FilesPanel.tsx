@@ -5,7 +5,7 @@ import { rootKey, useRepoChanges, useRepoCommits, useRepoDir, useRepoWorktrees }
 import { agentRows, isAgentCall, shortAgo } from "./model";
 import { openSubagent } from "./SubagentSheet";
 import { OPEN_PR_PROMPT, sendToChat, useChatStream } from "./stream";
-import { useAllChats, useChatSubagents } from "../../domain/hooks/chats";
+import { useChatSubagents } from "../../domain/hooks/chats";
 import { formatDuration } from "../../lib/format";
 import type { FileDiff } from "../../domain/api";
 import { readJsonPref, writePref } from "../../shell/storage";
@@ -15,7 +15,9 @@ import { useConfirm } from "../../ui/ConfirmDialog";
 import { useToast } from "../../ui/Toasts";
 import { revertChanges } from "./FileView";
 import { refreshTaskPr, repoCommit, repoOpenPr } from "../../domain/api";
-import { invalidate, useTasks } from "../../domain/hooks/store";
+import { invalidate } from "../../domain/hooks/store";
+import { useWorktreeTask } from "./useWorktreeTask";
+import { PrPanel } from "./PrPanel";
 import { ExternalLink } from "../../ui/ExternalLink";
 import { PR_TONE } from "../tasks/bits";
 import { openUrl } from "@tauri-apps/plugin-opener";
@@ -50,7 +52,7 @@ interface Props {
   resizer: ReactNode;
 }
 
-export type FilesMode = "tree" | "changes" | "agents";
+export type FilesMode = "tree" | "changes" | "agents" | "pr";
 
 const STATUS_BADGE: Record<DiffFileStatus, { letter: string; cls: string; label: string }> = {
   added: { letter: "A", cls: "df-added", label: "Added" },
@@ -111,6 +113,14 @@ export function FilesPanel({ repo, activePath, onOpenFile, onOpenDiff, onOpenCom
               <path d="M7 4.5v2M7 6.5H3.5v3M7 6.5h3.5v3" />
             </svg>
           </button>
+          <button type="button" className={`files-mode ${mode === "pr" ? "on" : ""}`} aria-pressed={mode === "pr"} aria-label="Pull request" title="Pull request: checks and comments" onClick={() => setMode("pr")}>
+            <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" aria-hidden focusable="false">
+              <circle cx="4" cy="3.5" r="1.75" />
+              <circle cx="4" cy="12.5" r="1.75" />
+              <circle cx="12" cy="12.5" r="1.75" />
+              <path d="M4 5.25v5.5M12 10.75V7a2 2 0 0 0-2-2H7.5M9 3.5 7.5 5 9 6.5" />
+            </svg>
+          </button>
         </div>
         <button type="button" className="icon-btn files-close" aria-label="Close files" title="Close" onClick={onClose}>
           <svg width="9" height="9" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" aria-hidden focusable="false">
@@ -121,6 +131,8 @@ export function FilesPanel({ repo, activePath, onOpenFile, onOpenDiff, onOpenCom
       {worktrees && worktrees.length > 1 && <RootPicker repo={repo} worktrees={worktrees} value={worktree} onChange={onWorktree} />}
       {mode === "agents" ? (
         <Agents chatId={chatId} />
+      ) : mode === "pr" ? (
+        <PrPanel key={rootKey(repo.id, worktree)} repo={repo} worktree={worktree} chatId={chatId} onAskChatForPr={onAskChatForPr} />
       ) : mode === "tree" ? (
         <ul className="files-tree" role="tree" aria-label="Files">
           <Dir key={worktree ?? ""} repoId={repo.id} worktree={worktree} dir="" depth={0} open={open} onToggle={toggle} active={activePath} onOpen={onOpenFile} />
@@ -134,6 +146,7 @@ export function FilesPanel({ repo, activePath, onOpenFile, onOpenDiff, onOpenCom
             picked={picked.root === rootKey(repo.id, worktree) ? picked.paths : []}
             onCommitted={() => setPicked({ root: "", paths: [], anchor: null })}
             onAskChatForPr={onAskChatForPr}
+            chatId={chatId}
           />
           <Section id="changes" title="Changes">
             <Changes
@@ -526,9 +539,11 @@ function GitBox({
   picked,
   onCommitted,
   onAskChatForPr,
+  chatId,
 }: {
   repo: Repo;
   worktree: string | null;
+  chatId: string | null;
   /** Files picked in "Changes": commit only those; none → everything. */
   picked: string[];
   onCommitted: () => void;
@@ -541,10 +556,9 @@ function GitBox({
   const [busy, setBusy] = useState<"commit" | "pr" | null>(null);
   const [pr, setPr] = useState<{ title: string; body: string } | null>(null);
   // The task working in this worktree: once it has a PR (not closed), show it like the task panel does.
-  const task = useTasks(repo.projectId).data?.find((t) => worktree !== null && t.repoId === repo.id && t.worktree?.path.replace(/\/+$/, "") === worktree.replace(/\/+$/, ""));
+  const { task, chat: taskChat } = useWorktreeTask(repo, worktree);
   const linked = task?.pr && task.pr.state !== "closed" ? task.pr : null;
   // Same as the task panel's "Open PR": ask the task's chat (else the open one); without a chat, the GitHub CLI form.
-  const taskChat = useAllChats(!!task).data?.find((c) => c.taskId === task?.id);
   const askChat = taskChat
     ? () => void sendToChat(taskChat.id, OPEN_PR_PROMPT).catch((e: unknown) => toast("Couldn't ask the chat", String(e), "danger"))
     : onAskChatForPr;
@@ -572,7 +586,7 @@ function GitBox({
     if (!pr || !pr.title.trim()) return;
     setBusy("pr");
     try {
-      const url = await repoOpenPr(repo.id, worktree, pr.title.trim(), pr.body);
+      const url = await repoOpenPr(repo.id, worktree, pr.title.trim(), pr.body, chatId);
       setPr(null);
       toast("Pull request ready", url, "ok");
       openUrl(url).catch(() => {});
