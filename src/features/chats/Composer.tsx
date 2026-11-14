@@ -1,21 +1,10 @@
 import { useEffect, useRef, type ReactNode } from "react";
+import { ArrowUp, Check, ChevronDown, Folder, Gauge, Square, Star, User, Zap, type LucideIcon } from "lucide-react";
 import { formatTokens } from "../../lib/format";
 import { contextPercent, DEFAULT_CONTEXT_WINDOW, optionLabel, type PillOption } from "./model";
 
-/** Field glyphs, drawn on the same 14px grid and stroke as the app's other icons. */
 export type PillIcon = "mode" | "repo" | "agent" | "model" | "effort";
-const ICONS: Record<PillIcon, ReactNode> = {
-  mode: <path d="M7 1.6l4.6 1.8v3.3c0 2.9-2 4.9-4.6 5.7-2.6-.8-4.6-2.8-4.6-5.7V3.4z" />,
-  repo: <path d="M1.8 3.6a1 1 0 0 1 1-1h2.8l1.2 1.4h4.4a1 1 0 0 1 1 1v5.4a1 1 0 0 1-1 1H2.8a1 1 0 0 1-1-1z" />,
-  agent: (
-    <>
-      <circle cx="7" cy="7" r="2.2" />
-      <path d="M9.2 7v.9a1.6 1.6 0 0 0 3.2 0V7A5.4 5.4 0 1 0 10 11.5" />
-    </>
-  ),
-  model: <path d="M7 1.8l1.2 3.3 3.3 1.2-3.3 1.2L7 10.8 5.8 7.5 2.5 6.3l3.3-1.2zM11 9.6l.5 1.3 1.3.5-1.3.5-.5 1.3-.5-1.3-1.3-.5 1.3-.5z" />,
-  effort: <path d="M2.5 11.5V8.5M5.5 11.5V6.5M8.5 11.5V4.5M11.5 11.5V2.5" />,
-};
+const ICONS: Record<PillIcon, LucideIcon> = { mode: Zap, repo: Folder, agent: User, model: Star, effort: Gauge };
 
 export interface PillProps {
   id: string;
@@ -40,6 +29,7 @@ export interface PillProps {
 
 export function Pill(p: PillProps) {
   const menuId = `chat-pill-${p.id}`;
+  const Icon = p.icon && ICONS[p.icon];
   return (
     // The tooltip sits on the wrapper: a disabled button gets no hover events.
     <div className="chat-pill-wrap" title={p.title}>
@@ -54,16 +44,10 @@ export function Pill(p: PillProps) {
         disabled={p.disabled}
         onClick={() => p.onToggle(p.open ? null : p.id)}
       >
-        {p.icon && (
-          <svg className="chat-pill-icon" width="13" height="13" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" aria-hidden focusable="false">
-            {ICONS[p.icon]}
-          </svg>
-        )}
+        {Icon && <Icon className="chat-pill-icon" size={13} strokeWidth={1.75} aria-hidden />}
         <span className="ellipsis">{p.label}</span>
-        {!p.joined && (
-          <svg className="chat-pill-chev" width="9" height="9" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden focusable="false">
-            <path d="M2.5 4l2.5 2.5L7.5 4" />
-          </svg>
+        {!p.disabled && p.joined !== "start" && (
+          <ChevronDown className="chat-pill-chev" size={10} strokeWidth={2} aria-hidden />
         )}
       </button>
       {p.open && (
@@ -85,11 +69,7 @@ export function Pill(p: PillProps) {
                   }}
                 >
                   <span className="chat-menu-mark" aria-hidden>
-                    {on && (
-                      <svg width="11" height="11" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" focusable="false">
-                        <path d="M2.5 6.2l2.3 2.3 4.7-5" />
-                      </svg>
-                    )}
+                    {on && <Check size={12} strokeWidth={2} aria-hidden />}
                   </span>
                   <span className="chat-menu-text">
                     <span>{o.label}</span>
@@ -148,6 +128,8 @@ export interface ComposerProps {
   onSetting: (key: keyof ComposerSettings, value: string | null) => void;
   onSend: () => void;
   onStop: () => void;
+  /** Attached strip above the textarea (the changes bar). */
+  tray?: ReactNode;
 }
 
 export function Composer(p: ComposerProps) {
@@ -186,6 +168,7 @@ export function Composer(p: ComposerProps) {
           }
         }}
       >
+        {p.tray && <div className="chat-composer-tray">{p.tray}</div>}
         <textarea
           ref={ref}
           className="chat-input"
@@ -221,9 +204,7 @@ export function Composer(p: ComposerProps) {
           </span>
           {p.busy ? (
             <button type="button" className="chat-send chat-stop" title="Stop" aria-label="Stop the answer" onClick={p.onStop}>
-              <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden focusable="false">
-                <rect x="1" y="1" width="8" height="8" rx="1.5" fill="currentColor" />
-              </svg>
+              <Square size={10} fill="currentColor" aria-hidden />
             </button>
           ) : (
             <button
@@ -234,9 +215,7 @@ export function Composer(p: ComposerProps) {
               disabled={!canSend}
               onClick={p.onSend}
             >
-              <svg width="13" height="13" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden focusable="false">
-                <path d="M6 10V2M2.5 5.5L6 2l3.5 3.5" />
-              </svg>
+              <ArrowUp size={14} strokeWidth={2} aria-hidden />
             </button>
           )}
         </div>

@@ -40,7 +40,9 @@ use super::fs::transcript::{assistant_item, single_result, tool_input_summary, t
 /// permission prompts reach the host as `can_use_tool` requests (without it, and with the
 /// default `--permission-prompts host`, they are denied); `--replay-user-messages` echoes
 /// each stdin message back (with `isReplay`), so the UI gets it in order. Verified with 2.1.283.
-pub const CHAT_ARGS: [&str; 10] = [
+/// `--thinking-display summarized`: without it thinking blocks and deltas arrive empty (only a
+/// signature). Verified with 2.1.325.
+pub const CHAT_ARGS: [&str; 12] = [
     "-p",
     "--input-format",
     "stream-json",
@@ -51,6 +53,8 @@ pub const CHAT_ARGS: [&str; 10] = [
     "--permission-prompt-tool",
     "stdio",
     "--replay-user-messages",
+    "--thinking-display",
+    "summarized",
 ];
 
 /// Env var set on every chat process so its session is listed by the bare `claude --resume`

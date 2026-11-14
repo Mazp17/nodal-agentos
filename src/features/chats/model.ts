@@ -85,7 +85,7 @@ export const optionLabel = (options: PillOption[], value: string | null | undefi
 
 export type Part =
   | { kind: "text"; text: string }
-  | { kind: "thinking"; text: string }
+  | { kind: "thinking"; text: string; truncated: boolean }
   | { kind: "tools"; items: ToolUse[] }
   | { kind: "proposal"; item: ToolUse };
 
@@ -116,7 +116,7 @@ export function toTurns(items: TranscriptItem[], outbox: string[] = []): Turn[] 
       else if (last?.kind === "tools") last.items.push(it);
       else parts.push({ kind: "tools", items: [it] });
     } else {
-      ai().push({ kind: it.kind, text: it.text });
+      ai().push(it.kind === "thinking" ? { kind: "thinking", text: it.text, truncated: it.truncated } : { kind: "text", text: it.text });
     }
   }
   for (const text of outbox) turns.push({ kind: "user", text, pending: true, uuid: null });
@@ -268,29 +268,54 @@ export function shortArg(summary: string | null, repos: Repo[]): string {
   return summary;
 }
 
+export type PatchFile = NonNullable<NonNullable<ToolUse["result"]>["patch"]>["file"];
+export interface TurnChanges {
+  files: number;
+  additions: number;
+  deletions: number;
+  /** Per file, in first-edit order, with every edit's diff in order. */
+  byFile: { path: string; additions: number; deletions: number; edits: PatchFile[] }[];
+}
+
 /**
  * Files an answer changed, from the diffs of its edits; `null` when it changed none. Lines add
  * up per edit, so a line edited twice counts twice.
  */
-export function turnChanges(parts: Part[]): { files: number; additions: number; deletions: number } | null {
-  const files = new Map<string, { additions: number; deletions: number }>();
+export function turnChanges(parts: Part[]): TurnChanges | null {
+  const files = new Map<string, TurnChanges["byFile"][number]>();
   for (const p of parts) {
     if (p.kind !== "tools") continue;
     for (const it of p.items) {
       const f = it.result && !it.result.isError ? it.result.patch?.file : null;
       if (!f) continue;
-      const prev = files.get(f.path) ?? { additions: 0, deletions: 0 };
-      files.set(f.path, { additions: prev.additions + f.additions, deletions: prev.deletions + f.deletions });
+      const prev = files.get(f.path) ?? { path: f.path, additions: 0, deletions: 0, edits: [] };
+      files.set(f.path, { ...prev, additions: prev.additions + f.additions, deletions: prev.deletions + f.deletions, edits: [...prev.edits, f] });
     }
   }
   if (files.size === 0) return null;
-  let additions = 0;
-  let deletions = 0;
-  for (const f of files.values()) {
-    additions += f.additions;
-    deletions += f.deletions;
-  }
-  return { files: files.size, additions, deletions };
+  const byFile = [...files.values()];
+  return {
+    files: byFile.length,
+    additions: byFile.reduce((n, f) => n + f.additions, 0),
+    deletions: byFile.reduce((n, f) => n + f.deletions, 0),
+    byFile,
+  };
+}
+
+/**
+ * What the user answered to an `AskUserQuestion` call: Claude Code's result reads
+ * `User has answered your questions: "<question>"="<answer>", …`. Headers come from the input
+ * when it parses. `null` when the call has no usable result.
+ */
+export function readAnswered(it: ToolUse): { header: string | null; answer: string }[] | null {
+  if (it.name !== "AskUserQuestion" || !it.result || it.result.isError) return null;
+  const qs = parse(it.input)?.questions;
+  const header = (q: string) => {
+    const f = Array.isArray(qs) ? (qs as Record<string, unknown>[]).find((x) => x?.question === q) : null;
+    return str(f?.header);
+  };
+  const out = [...it.result.text.matchAll(/"([^"]+)"\s*=\s*"([^"]*)"/g)].map((m) => ({ header: header(m[1]), answer: m[2] }));
+  return out.length ? out : null;
 }
 
 /** Short note next to a finished tool call: its line count or its first line. */

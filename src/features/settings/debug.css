@@ -1,2 +1,3 @@
 /* Debug section (dev builds only). */
 .debug-actions { display: flex; flex-wrap: wrap; gap: var(--sp-3); }
+.debug-chat { padding: var(--sp-6) 0; display: flex; justify-content: center; }

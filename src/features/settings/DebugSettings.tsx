@@ -2,6 +2,7 @@
 
 import { useToast, type ToastTone } from "../../ui/Toasts";
 import { SectionHead } from "./SettingsView";
+import { DebugChat } from "./DebugChat";
 import "./debug.css";
 
 const TONES: ToastTone[] = ["info", "ok", "warn", "danger", "accent", "muted"];
@@ -38,6 +39,15 @@ export function DebugSettings() {
             </button>
           </div>
         </div>
+      </div>
+      <div className="panel settings-card">
+        <div className="settings-row settings-row-top">
+          <div className="settings-row-text">
+            <span className="settings-row-title">Chat elements</span>
+            <span className="settings-row-hint">A sample chat, mid-answer, with every element. From fixtures.</span>
+          </div>
+        </div>
+        <DebugChat />
       </div>
     </>
   );
