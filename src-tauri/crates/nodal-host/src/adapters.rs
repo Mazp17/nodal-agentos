@@ -54,6 +54,10 @@ impl SessionFiles for HostSessionFiles {
         fs::transcript::session_title(path)
     }
 
+    fn last_turn_tools(&self, path: &Path) -> Vec<(String, serde_json::Value)> {
+        fs::transcript::last_turn_tools(path)
+    }
+
     fn rewind_point(&self, path: &Path, user_uuid: &str) -> Result<Option<String>, HostError> {
         Ok(fs::transcript::rewind_point(path, user_uuid)?)
     }

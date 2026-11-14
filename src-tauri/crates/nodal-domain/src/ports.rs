@@ -49,6 +49,12 @@ pub trait SessionFiles: Send + Sync {
         let _ = (path, user_uuid);
         Err("Rewinding isn't supported here.".into())
     }
+    /// `(name, input)` of the main thread's tool calls since the last user prompt, in order.
+    /// Default: none.
+    fn last_turn_tools(&self, path: &Path) -> Vec<(String, serde_json::Value)> {
+        let _ = path;
+        vec![]
+    }
     /// Subagents of the session file, oldest first. Default: none.
     fn list_subagents(&self, session_path: &Path) -> Vec<SubagentRef> {
         let _ = session_path;
