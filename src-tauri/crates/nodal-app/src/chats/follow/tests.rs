@@ -94,6 +94,15 @@ fn pick_takes_writes_and_creation_but_not_mentions() {
     assert_eq!(pick_added(&[]), None);
 }
 
+/// Adds a worktree and returns its path as `git worktree list` reports it, which is what
+/// `follow_worktree` matches against (macOS temp dirs sit behind a symlink; `canonicalize`
+/// would give Windows a `\\?\` path git can't use).
+fn added_at(git: &HostGit, repo: &std::path::Path, dir: &std::path::Path, branch: &str) -> String {
+    git.ensure_worktree(repo, dir, branch, None).unwrap();
+    let listed = git.list_worktrees(repo).unwrap();
+    listed.into_iter().find(|w| w.branch.as_deref() == Some(branch)).unwrap().path
+}
+
 fn chat(id: &str, repo_id: Option<&str>, task_id: Option<&str>, worktree: Option<String>) -> Chat {
     Chat {
         id: id.into(),
@@ -115,16 +124,11 @@ fn chat(id: &str, repo_id: Option<&str>, task_id: Option<&str>, worktree: Option
 #[test]
 fn follow_worktree_moves_a_free_chat_into_the_worktree_it_worked_in() {
     let t = nodal_host::testutil::TempDir::new("follow-worktree");
-    // Canonical, as `git worktree list` reports it (macOS temp dirs sit behind a symlink).
-    let root = t.0.canonicalize().unwrap();
+    let root = t.0.clone();
     let repo_dir = root.join("repo");
     nodal_host::testutil::init_repo(&repo_dir);
     let git = HostGit;
-    let mk = |name: &str| {
-        git.ensure_worktree(&repo_dir, &root.join(name), name, None)
-            .unwrap()
-            .path
-    };
+    let mk = |name: &str| added_at(&git, &repo_dir, &root.join(name), name);
     let (mine, tasks_wt, other_chats) = (mk("mine"), mk("tasks-wt"), mk("other-chats"));
 
     let db = Db::open_in_memory().unwrap();
@@ -168,7 +172,7 @@ fn follow_worktree_moves_a_free_chat_into_the_worktree_it_worked_in() {
 #[test]
 fn follow_worktree_takes_the_one_added_during_the_turn_even_unnamed() {
     let t = nodal_host::testutil::TempDir::new("follow-added");
-    let root = t.0.canonicalize().unwrap();
+    let root = t.0.clone();
     let repo_dir = root.join("repo");
     nodal_host::testutil::init_repo(&repo_dir);
     let git = HostGit;
@@ -181,7 +185,7 @@ fn follow_worktree_takes_the_one_added_during_the_turn_even_unnamed() {
         chat.updated_at = 0; // the message was sent before the worktree below was added
         rows::insert_chat(&c, &chat).unwrap();
     }
-    let added = git.ensure_worktree(&repo_dir, &root.join("demo-204105"), "demo-204105", None).unwrap().path;
+    let added = added_at(&git, &repo_dir, &root.join("demo-204105"), "demo-204105");
     let bash = [call("Bash", json!({"command": "B=demo-$(date +%H%M%S); git worktree add -b $B ../${B##*/} main"}))];
     assert!(follow_worktree(&db, &git, &bash, "c1").unwrap());
     assert_eq!(chats::get(&db.lock().unwrap(), "c1").unwrap().worktree, Some(added));
