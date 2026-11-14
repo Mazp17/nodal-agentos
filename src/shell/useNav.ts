@@ -23,6 +23,8 @@ const NEEDS_PROJECT: ReadonlySet<Page> = new Set(["chat", "project-settings"]);
 // `tasks` is the old List page, now a view of the board; saved routes still carry it.
 const PAGES: ReadonlySet<string> = new Set(["board", "chat", "tasks", "project-settings", "settings", "overview"]);
 const HOME: Route = { projectId: null, page: "board" };
+/** Set by `scripts/preview.sh`: a preview always opens on this project's board. */
+const PREVIEW_PROJECT: string | undefined = import.meta.env.DEV ? import.meta.env.VITE_PREVIEW_PROJECT_ID : undefined;
 
 const isRoute = (v: unknown): v is Route => {
   if (!v || typeof v !== "object") return false;
@@ -54,7 +56,11 @@ export interface Nav {
 
 export function useNav(): Nav {
   // A saved `runs`/`run` page (removed) fails `isRoute` and falls back to HOME.
-  const [route, setRoute] = useState<Route>(() => normalize(readJsonPref<Route>("route", HOME, isRoute)));
+  const [route, setRoute] = useState<Route>(() =>
+    PREVIEW_PROJECT
+      ? { projectId: PREVIEW_PROJECT, page: "board" }
+      : normalize(readJsonPref<Route>("route", HOME, isRoute)),
+  );
   const [expanded, setExpandedState] = useState<ReadonlySet<string>>(
     () => new Set(readJsonPref<string[]>("expandedProjects", [], isStringArray)),
   );
