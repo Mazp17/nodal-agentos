@@ -1,6 +1,7 @@
 mod adapters;
 pub mod commands;
 mod menu;
+mod notify;
 mod paths;
 mod secrets;
 pub(crate) mod telemetry;
@@ -195,6 +196,7 @@ pub fn run() {
             commands::system::repo_commit,
             commands::system::repo_open_pr,
             commands::system::import_legacy_data,
+            notify::notify_chat,
             updates::updates_enabled,
             updates::restart_app,
             commands::mcp::mcp_status,
