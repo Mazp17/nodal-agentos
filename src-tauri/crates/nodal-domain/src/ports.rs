@@ -49,6 +49,12 @@ pub trait SessionFiles: Send + Sync {
         let _ = (path, user_uuid);
         Err("Rewinding isn't supported here.".into())
     }
+    /// `(name, input)` of the main thread's tool calls since the last user prompt, in order.
+    /// Default: none.
+    fn last_turn_tools(&self, path: &Path) -> Vec<(String, serde_json::Value)> {
+        let _ = path;
+        vec![]
+    }
     /// Subagents of the session file, oldest first. Default: none.
     fn list_subagents(&self, session_path: &Path) -> Vec<SubagentRef> {
         let _ = session_path;
@@ -116,6 +122,12 @@ pub trait Git: Send + Sync {
     fn revert_file(&self, root: &Path, rel: &str) -> Result<(), HostError>;
     /// Whether `dir` is inside a linked worktree (its `.git` is a file).
     fn is_worktree(&self, dir: &Path) -> bool;
+    /// When the linked worktree at `dir` was added (its `.git` file's mtime), in ms. Default:
+    /// unknown.
+    fn worktree_added_ms(&self, dir: &Path) -> Option<i64> {
+        let _ = dir;
+        None
+    }
     /// Uncommitted changes in `dir` vs HEAD, untracked non-ignored files included. Cheap (no
     /// full diff); zeros when `dir` isn't a git repo.
     fn changes(&self, dir: &Path) -> DiffStat;
@@ -204,6 +216,11 @@ pub trait ChatRuntime: Send + Sync {
         answers: Option<&std::collections::BTreeMap<String, String>>,
     ) -> Result<(), HostError>;
     fn interrupt(&self, chat_id: &str) -> Result<(), HostError>;
+    /// Stops the chat's background shell `task_id`; the chat keeps running. Default: unsupported.
+    fn stop_shell(&self, chat_id: &str, task_id: &str) -> Result<(), HostError> {
+        let _ = (chat_id, task_id);
+        Err("Stopping a shell isn't supported here.".into())
+    }
     /// Restores the files Claude edited to their state before the user message `message_uuid`
     /// (only reports them on a `dry_run`), starting a process with `--resume` if none runs.
     /// Fails while a turn runs. Default: unsupported.

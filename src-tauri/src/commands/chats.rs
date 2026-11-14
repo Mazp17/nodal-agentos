@@ -113,6 +113,26 @@ pub async fn delete_chat(state: State<'_, Arc<App>>, id: String) -> Result<(), C
     Ok(state.chats.delete_chat(id).await?)
 }
 
+/// Hides the chat from the sidebar, stopping its process first.
+#[tauri::command]
+#[tracing::instrument(skip_all, level = "info")]
+pub async fn archive_chat(state: State<'_, Arc<App>>, id: String) -> Result<Chat, CommandError> {
+    Ok(state.chats.set_chat_archived(id, true).await?)
+}
+
+#[tauri::command]
+#[tracing::instrument(skip_all, level = "info")]
+pub async fn unarchive_chat(state: State<'_, Arc<App>>, id: String) -> Result<Chat, CommandError> {
+    Ok(state.chats.set_chat_archived(id, false).await?)
+}
+
+/// Links the chat to a task (`None` unlinks it); refused when its folder would change.
+#[tauri::command]
+#[tracing::instrument(skip_all, level = "info")]
+pub async fn link_chat_task(state: State<'_, Arc<App>>, id: String, task_id: Option<String>) -> Result<Chat, CommandError> {
+    Ok(state.chats.link_chat_task(id, task_id).await?)
+}
+
 /// Sends a message, starting (or resuming) the chat's process if it isn't running.
 /// Returns the chat, named after its first message.
 #[tauri::command]
@@ -140,6 +160,13 @@ pub async fn respond_chat_permission(
 #[tracing::instrument(skip_all, level = "info")]
 pub async fn interrupt_chat(state: State<'_, Arc<App>>, id: String) -> Result<(), CommandError> {
     Ok(state.chats.interrupt_chat(id).await?)
+}
+
+/// Stops one of the chat's background shells; the chat keeps running.
+#[tauri::command]
+#[tracing::instrument(skip_all, level = "info")]
+pub async fn stop_chat_shell(state: State<'_, Arc<App>>, id: String, task_id: String) -> Result<(), CommandError> {
+    Ok(state.chats.stop_chat_shell(id, task_id).await?)
 }
 
 /// Rewinds the chat to just before its user message `message_uuid`: files and conversation

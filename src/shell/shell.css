@@ -346,3 +346,5 @@ body.resizing-col { cursor: col-resize; user-select: none; }
 .status-meter-track { width: 48px; height: 3px; border-radius: 2px; background: var(--border-3); overflow: hidden; }
 .status-meter-fill { display: block; height: 100%; background: var(--tone); }
 .status-meter.tone-ok .status-meter-fill { background: var(--text-muted); }
+/* Archived chats, listed only with "Show archived" (or while open). */
+.side-chat.archived { opacity: 0.6; }

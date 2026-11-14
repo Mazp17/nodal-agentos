@@ -1,21 +1,36 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { GitBranch } from "lucide-react";
+import { Archive, ArchiveRestore, GitBranch, Link, Pencil, Trash2, Unlink } from "lucide-react";
+import { DropdownMenu } from "radix-ui";
 import { relUnder } from "../../domain/hooks/projects";
-import { cleanupWorktree, createChat, interruptChat, rewindChat, sendChatMessage, updateChat, updateTask, type ChatPatch } from "../../domain/api";
+import {
+  archiveChat,
+  cleanupWorktree,
+  createChat,
+  interruptChat,
+  linkChatTask,
+  rewindChat,
+  sendChatMessage,
+  unarchiveChat,
+  updateChat,
+  updateTask,
+  type ChatPatch,
+} from "../../domain/api";
 import { useChatWorkspace } from "../../domain/hooks/branches";
 import { useChatAgents, useChats, useClaudeDefaults } from "../../domain/hooks/chats";
-import { hiddenSetOf, invalidate, isExecutorHidden, setData, useHiddenExecutors, useTask } from "../../domain/hooks/store";
+import { hiddenSetOf, invalidate, isExecutorHidden, setData, useHiddenExecutors, useTask, useTasks } from "../../domain/hooks/store";
 import type { Chat, Project, Repo } from "../../domain/types";
 import { ExternalLink } from "../../ui/ExternalLink";
 import { useConfirm } from "../../ui/ConfirmDialog";
 import { EmptyState } from "../../ui/EmptyState";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../../ui/Tooltip";
 import { useToast } from "../../ui/Toasts";
+import { CommandPalette } from "../../shell/palette/CommandPalette";
 import { isClosed, providerLabel, STATUS_META, taskTag } from "../tasks/status";
 import { PrBadge, StatusRing } from "../tasks/bits";
 import { Composer, type ComposerSettings } from "./Composer";
 import { getComposerDraft, setComposerDraft, useComposerDraft } from "./composerDrafts";
 import { Conversation } from "./Conversation";
+import { ShellStrip } from "./ShellStrip";
 import { closeSubagent, SubagentSheet, useSubagentTarget } from "./SubagentSheet";
 import { agentOptions, chatTitle, effortOptions, modelOptions, modeOptions, repoOptions, toTurns } from "./model";
 import {
@@ -43,6 +58,8 @@ export interface ChatViewProps {
   onOpenTask: (taskId: string) => void;
   /** Opens a file's changes: `worktree` is the checkout it lives in (`null`: the repo's own). */
   onOpenDiff: (repoId: string, path: string, worktree: string | null) => void;
+  /** Asks, then deletes the chat (the sidebar's own flow). */
+  onDeleteChat: (chat: Chat) => void;
 }
 
 const NEW_CHAT: ComposerSettings = { permissionMode: "auto", repoId: null, agent: null, model: null, effort: null };
@@ -56,7 +73,7 @@ const settingsOf = (c: Chat): ComposerSettings => ({
 });
 
 /** One chat tab: the conversation and the composer. */
-export function ChatView({ project, repos, chatId: tabChatId, onCreated, onShowChanges, onOpenTask, onOpenDiff }: ChatViewProps) {
+export function ChatView({ project, repos, chatId: tabChatId, onCreated, onShowChanges, onOpenTask, onOpenDiff, onDeleteChat }: ChatViewProps) {
   const toast = useToast();
   const ask = useConfirm();
   const chats = useChats(project.id);
@@ -187,6 +204,24 @@ export function ChatView({ project, repos, chatId: tabChatId, onCreated, onShowC
     }
   };
 
+  // ---- Header bar actions: rename, archive, link to a task, delete.
+  const [renaming, setRenaming] = useState(false);
+  const [picking, setPicking] = useState(false);
+  const projectTasks = useTasks(picking ? project.id : null).data;
+  const act = (what: string, run: () => Promise<unknown>) =>
+    run().then(
+      () => void invalidate("chats", "tasks"),
+      (e: unknown) => toast(`Couldn't ${what}`, String(e), "danger"),
+    );
+  const rename = (title: string) => {
+    setRenaming(false);
+    if (chat && title.trim() && title.trim() !== chatTitle(chat)) void act("rename the chat", () => updateChat(chat.id, { title: title.trim() }));
+  };
+  const linkable = useMemo(() => {
+    const taken = new Set((chats.data ?? []).map((c) => c.taskId));
+    return (projectTasks ?? []).filter((t) => !isClosed(t.status) && !taken.has(t.id));
+  }, [projectTasks, chats.data]);
+
   const taskKeyLabel = task ? taskTag(task, project.key) : "";
   // Discard acts on the task worktree, so it only makes sense while it exists and the task is open.
   const canLand = !!task?.worktree && !isClosed(task.status);
@@ -272,28 +307,122 @@ export function ChatView({ project, repos, chatId: tabChatId, onCreated, onShowC
   return (
     <div className="chat-page" data-screen-label="Chat">
       <section className="chat-main" aria-label={chat ? chatTitle(chat) : "New chat"}>
-        {task && (
+        {chat && (
           <div className="chat-task">
-            <span className="chat-task-tag mono">
-              {task.source ? (
-                <ExternalLink url={task.source.url} label={`Open ${taskKeyLabel} in ${providerLabel(task.source.provider)}`}>
-                  {taskKeyLabel} ↗
-                </ExternalLink>
-              ) : (
-                <button type="button" className="chat-task-link" onClick={() => onOpenTask(task.id)}>
-                  {taskKeyLabel}
+            {renaming ? (
+              <input
+                className="chat-task-rename"
+                aria-label="Chat title"
+                defaultValue={chatTitle(chat)}
+                autoFocus
+                onBlur={(e) => rename(e.currentTarget.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && !e.nativeEvent.isComposing) e.currentTarget.blur();
+                  else if (e.key === "Escape") {
+                    e.stopPropagation();
+                    setRenaming(false);
+                  }
+                }}
+              />
+            ) : task ? (
+              <>
+                <span className="chat-task-tag mono">
+                  {task.source ? (
+                    <ExternalLink url={task.source.url} label={`Open ${taskKeyLabel} in ${providerLabel(task.source.provider)}`}>
+                      {taskKeyLabel} ↗
+                    </ExternalLink>
+                  ) : (
+                    <button type="button" className="chat-task-link" onClick={() => onOpenTask(task.id)}>
+                      {taskKeyLabel}
+                    </button>
+                  )}
+                </span>
+                <button type="button" className="chat-task-title ellipsis" title="Open the task" onClick={() => onOpenTask(task.id)}>
+                  {task.title}
                 </button>
+                {task.pr && <PrBadge pr={task.pr} link />}
+                <span className="chat-task-status">
+                  <StatusRing status={task.status} size={12} />
+                  {STATUS_META[task.status].label}
+                </span>
+              </>
+            ) : (
+              <span className="chat-task-title chat-task-name ellipsis" title={chatTitle(chat)}>
+                {chatTitle(chat)}
+              </span>
+            )}
+            <span className="chat-task-actions">
+              {chat.archivedAt ? (
+                <button type="button" className="btn btn-xs btn-ghost" onClick={() => void act("unarchive the chat", () => unarchiveChat(chat.id))}>
+                  Archived · Unarchive
+                </button>
+              ) : (
+                !chat.taskId && (
+                  <button type="button" className="btn btn-xs btn-ghost" onClick={() => setPicking(true)}>
+                    Link to task
+                  </button>
+                )
               )}
-            </span>
-            <button type="button" className="chat-task-title ellipsis" title="Open the task" onClick={() => onOpenTask(task.id)}>
-              {task.title}
-            </button>
-            {task.pr && <PrBadge pr={task.pr} link />}
-            <span className="chat-task-status">
-              <StatusRing status={task.status} size={12} />
-              {STATUS_META[task.status].label}
+              <DropdownMenu.Root>
+                <DropdownMenu.Trigger className="icon-btn chat-task-more" aria-label="Chat actions" title="Chat actions">
+                  ⋯
+                </DropdownMenu.Trigger>
+                <DropdownMenu.Portal>
+                  <DropdownMenu.Content className="menu tab-menu" align="end" sideOffset={4} collisionPadding={8}>
+                    <DropdownMenu.Item className="menu-item" onSelect={() => setRenaming(true)}>
+                      <Pencil size={14} aria-hidden />
+                      Rename
+                    </DropdownMenu.Item>
+                    {chat.archivedAt ? (
+                      <DropdownMenu.Item className="menu-item" onSelect={() => void act("unarchive the chat", () => unarchiveChat(chat.id))}>
+                        <ArchiveRestore size={14} aria-hidden />
+                        Unarchive
+                      </DropdownMenu.Item>
+                    ) : (
+                      <DropdownMenu.Item className="menu-item" onSelect={() => void act("archive the chat", () => archiveChat(chat.id))}>
+                        <Archive size={14} aria-hidden />
+                        Archive
+                      </DropdownMenu.Item>
+                    )}
+                    {chat.taskId ? (
+                      <DropdownMenu.Item className="menu-item" onSelect={() => void act("unlink the chat", () => linkChatTask(chat.id, null))}>
+                        <Unlink size={14} aria-hidden />
+                        Unlink from task
+                      </DropdownMenu.Item>
+                    ) : (
+                      <DropdownMenu.Item className="menu-item" onSelect={() => setPicking(true)}>
+                        <Link size={14} aria-hidden />
+                        Link to task…
+                      </DropdownMenu.Item>
+                    )}
+                    <DropdownMenu.Separator className="menu-sep" />
+                    <DropdownMenu.Item className="menu-item menu-item-danger" onSelect={() => onDeleteChat(chat)}>
+                      <Trash2 size={14} aria-hidden />
+                      Delete
+                    </DropdownMenu.Item>
+                  </DropdownMenu.Content>
+                </DropdownMenu.Portal>
+              </DropdownMenu.Root>
             </span>
           </div>
+        )}
+        {picking && chat && (
+          <CommandPalette
+            actions={[]}
+            placeholder="Link this chat to a task…"
+            onClose={() => setPicking(false)}
+            search={(q) =>
+              linkable
+                .filter((t) => !q || `${taskTag(t, project.key)} ${t.title}`.toLowerCase().includes(q))
+                .map((t) => ({
+                  id: t.id,
+                  kind: "Task" as const,
+                  label: `${taskTag(t, project.key)} ${t.title}`,
+                  sub: STATUS_META[t.status].label,
+                  run: () => void act("link the chat", () => linkChatTask(chat.id, t.id)),
+                }))
+            }
+          />
         )}
         {!hasMessages ? (
           chat && stream && !stream.loaded ? (
@@ -344,6 +473,7 @@ export function ChatView({ project, repos, chatId: tabChatId, onCreated, onShowC
             )}
           </div>
         )}
+        {chatId && stream && <ShellStrip chatId={chatId} shells={stream.shells} onStopTurn={stop} />}
         <Composer
           tray={
             (workspace && workspace.files > 0) || canLand ? (

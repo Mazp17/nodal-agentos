@@ -332,3 +332,37 @@ fn rewind_files_that_cannot_be_restored_are_reported_not_failed() {
     assert_eq!((r.files_changed.len(), r.files_error.as_deref()), (0, Some("No file checkpoint found")));
     assert_eq!(super::rewind_result(Err("boom".into())).files_error.as_deref(), Some("boom"));
 }
+
+/// Starts a background shell `b1`, then logs stdin and ends `b1` on a `stop_task` for it.
+const SHELL: &str = r#"#!/bin/sh
+read line
+echo '{"type":"system","subtype":"task_started","task_id":"b1","tool_use_id":"toolu_1","description":"sleep","is_backgrounded":true,"task_type":"local_bash"}'
+echo '{"type":"result","subtype":"success","is_error":false}'
+while read line; do
+  echo "$line" >> stdin.log
+  case "$line" in *'"task_id":"b1"'*) echo '{"type":"system","subtype":"task_notification","task_id":"b1","status":"stopped"}';; esac
+done
+"#;
+
+#[test]
+#[cfg_attr(windows, ignore = "the fake claude is a sh script")]
+fn only_a_running_shell_of_the_chat_is_stopped_and_it_keeps_the_process_alive() {
+    use nodal_domain::ports::ChatRuntime;
+    let f = Fixture::new("shell", SHELL);
+    block_on(async {
+        send(&f.chats, f.spec()).unwrap();
+        f.wait_for(1, "turn end", |e| matches!(e, ChatEvent::Stream(StreamEvent::TurnEnd { .. }))).await;
+
+        assert_eq!(f.chats.reap_idle(Duration::ZERO, Instant::now()), 0, "a running shell keeps the process");
+        assert!(f.chats.stop_shell("c1", "other").is_err(), "a task the process didn't start");
+        assert!(f.chats.stop_shell("c2", "b1").is_err(), "another chat's shell");
+        f.chats.stop_shell("c1", "b1").unwrap();
+        f.wait_for(1, "task end", |e| matches!(e, ChatEvent::Stream(StreamEvent::TaskEnded { .. }))).await;
+
+        let log = std::fs::read_to_string(f.dir.join("stdin.log")).unwrap();
+        assert_eq!(log.lines().count(), 1, "{log}");
+        assert!(log.contains(r#""subtype":"stop_task""#) && log.contains(r#""task_id":"b1""#), "{log}");
+        assert!(f.chats.stop_shell("c1", "b1").is_err(), "already ended");
+        assert_eq!(f.chats.reap_idle(Duration::ZERO, Instant::now()), 1);
+    });
+}

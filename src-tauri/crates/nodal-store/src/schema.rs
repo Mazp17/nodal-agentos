@@ -298,15 +298,20 @@ ALTER TABLE tasks ADD COLUMN pr_head TEXT;
 ALTER TABLE tasks ADD COLUMN pr_checked_at INTEGER;
 "#;
 
-/// v12: `chats.pinned_at`, when the chat was pinned to the top of its project; NULL = not pinned.
+/// v12: `chats.archived_at`, when the chat was archived (hidden from the sidebar).
 const V12: &str = r#"
+ALTER TABLE chats ADD COLUMN archived_at INTEGER;
+"#;
+
+/// v13: `chats.pinned_at`, when the chat was pinned to the top of its project; NULL = not pinned.
+const V13: &str = r#"
 ALTER TABLE chats ADD COLUMN pinned_at INTEGER;
 "#;
 
 // Unused since v9 (run-era config; kept, never read or written): projects.default_executor_json,
 // projects.reviewer, repos.default_executor_json / default_isolation / default_finish /
 // default_review / reviewer, tasks.assignee_json / isolation / finish / review.
-pub const MIGRATIONS: &[&str] = &[V1, V2, V3, V4, V5, V6, V7, V8, V9, V10, V11, V12];
+pub const MIGRATIONS: &[&str] = &[V1, V2, V3, V4, V5, V6, V7, V8, V9, V10, V11, V12, V13];
 
 pub fn user_version(conn: &Conn) -> Result<i64, DbError> {
     Ok(conn.query_row("PRAGMA user_version", [], |r| r.get(0))?)

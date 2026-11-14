@@ -322,3 +322,31 @@ fn stdin_messages() {
     );
     assert_eq!(resume_args("abc"), ["--resume", "abc"]);
 }
+
+#[test]
+fn background_shell_events() {
+    // Lines as printed by 2.1.325, trimmed.
+    let started = r#"{"type":"system","subtype":"task_started","task_id":"b7c3166rg","run_id":"0mw","tool_use_id":"toolu_017","description":"Run sleep 300 in background","is_backgrounded":true,"task_type":"local_bash","uuid":"b56d","session_id":"22cf"}"#;
+    assert_eq!(
+        parse_line(started),
+        [StreamEvent::ShellStarted {
+            task_id: "b7c3166rg".into(),
+            tool_use_id: Some("toolu_017".into()),
+            description: Some("Run sleep 300 in background".into()),
+            background: true,
+        }]
+    );
+    let agent = started.replace("local_bash", "local_agent");
+    assert!(parse_line(&agent).is_empty());
+    let ended = r#"{"type":"system","subtype":"task_notification","task_id":"b7c3166rg","tool_use_id":"toolu_017","status":"stopped","output_file":"/tmp/x.output","summary":"Run sleep 300 in background"}"#;
+    assert_eq!(
+        parse_line(ended),
+        [StreamEvent::TaskEnded { task_id: "b7c3166rg".into(), status: "stopped".into() }]
+    );
+    assert!(parse_line(r#"{"type":"system","subtype":"background_tasks_changed","tasks":[]}"#).is_empty());
+    let v: Value = serde_json::from_str(&stop_task_request("s1", "b7c3166rg")).unwrap();
+    assert_eq!(
+        v,
+        json!({"type": "control_request", "request_id": "s1", "request": {"subtype": "stop_task", "task_id": "b7c3166rg"}})
+    );
+}

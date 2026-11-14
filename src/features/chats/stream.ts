@@ -49,6 +49,19 @@ export interface ChatStream {
   /** Why the last turn failed, until the next message. */
   notice: string | null;
   interrupting: boolean;
+  /** Shells running since the chat loaded, by the id of the `Bash` call that started them. */
+  shells: Record<string, Shell>;
+}
+
+/** A `Bash` call still running: a foreground one until its result, a background one until it ends. */
+export interface Shell {
+  toolUseId: string;
+  /** Set once Claude Code reports it as a task (background shells): what stopping it takes. */
+  taskId: string | null;
+  command: string;
+  description: string | null;
+  background: boolean;
+  startedAt: number;
 }
 
 const EMPTY: ChatStream = {
@@ -68,6 +81,7 @@ const EMPTY: ChatStream = {
   contextWindow: null,
   notice: null,
   interrupting: false,
+  shells: {},
 };
 
 const streams = new Map<string, ChatStream>();
@@ -293,6 +307,25 @@ export function useUnreadChats(): ReadonlyMap<string, string> {
 
 const INTERRUPTED = "[Request interrupted by user]";
 
+/** A streamed `Bash` call as a running shell (its input is the call's pretty-printed JSON). */
+function shellOf(it: Extract<TranscriptItem, { kind: "toolUse" }>): Shell | null {
+  if (it.name !== "Bash" || !it.id || it.result) return null;
+  let input: { command?: unknown; description?: unknown; run_in_background?: unknown } = {};
+  try {
+    input = JSON.parse(it.input ?? "{}");
+  } catch {
+    // Truncated input: fall back to the summary.
+  }
+  const command = typeof input.command === "string" ? input.command : (it.summary ?? "");
+  const description = typeof input.description === "string" ? input.description : null;
+  return { toolUseId: it.id, taskId: null, command, description, background: input.run_in_background === true, startedAt: Date.now() };
+}
+
+const without = (shells: Record<string, Shell>, keep: (sh: Shell) => boolean) => {
+  const next = Object.fromEntries(Object.entries(shells).filter(([, sh]) => keep(sh)));
+  return Object.keys(next).length === Object.keys(shells).length ? shells : next;
+};
+
 /** Applies one streamed event (exported for tests of the reducer). */
 export function reduce(s: ChatStream, e: ChatEvent): ChatStream {
   switch (e.type) {
@@ -307,10 +340,30 @@ export function reduce(s: ChatStream, e: ChatEvent): ChatStream {
       if (it.kind === "user") return { ...s, items: [...s.items, it], outbox: s.outbox.slice(1) };
       // Replayed after a reload of the history: keep the one already there.
       if (it.kind === "toolUse" && it.id && s.items.some((x) => x.kind === "toolUse" && x.id === it.id)) return s;
-      return { ...s, items: [...s.items, it], streaming: it.kind === "text" ? "" : s.streaming, thinking: false, thinkingText: "" };
+      const shell = it.kind === "toolUse" ? shellOf(it) : null;
+      return {
+        ...s,
+        items: [...s.items, it],
+        streaming: it.kind === "text" ? "" : s.streaming,
+        thinking: false,
+        thinkingText: "",
+        shells: shell ? { ...s.shells, [shell.toolUseId]: shell } : s.shells,
+      };
     }
     case "toolResult":
-      return { ...s, items: withResult(s.items, e.toolUseId, (t) => ({ ...t, result: e.result })) };
+      return {
+        ...s,
+        items: withResult(s.items, e.toolUseId, (t) => ({ ...t, result: e.result })),
+        // A background shell's result only says it started: it runs until `taskEnded`.
+        shells: without(s.shells, (sh) => sh.toolUseId !== e.toolUseId || sh.background || sh.taskId != null),
+      };
+    case "shellStarted": {
+      const sh = e.toolUseId ? s.shells[e.toolUseId] : undefined;
+      if (!sh) return s;
+      return { ...s, shells: { ...s.shells, [sh.toolUseId]: { ...sh, taskId: e.taskId, background: sh.background || e.background, description: sh.description ?? e.description } } };
+    }
+    case "taskEnded":
+      return { ...s, shells: without(s.shells, (sh) => sh.taskId !== e.taskId) };
     case "subagent":
       return { ...s, subagents: reduceSubagent(s.subagents, e.parentToolUseId, e.event) };
     case "permissionRequest": {
@@ -336,6 +389,8 @@ export function reduce(s: ChatStream, e: ChatEvent): ChatStream {
         thinking: false,
         thinkingText: "",
         interrupting: false,
+        // A foreground call left without a result was cut off with the turn.
+        shells: without(s.shells, (sh) => sh.background || sh.taskId != null),
         notice,
         contextWindow: e.contextWindow ?? s.contextWindow,
       };
@@ -343,7 +398,7 @@ export function reduce(s: ChatStream, e: ChatEvent): ChatStream {
     case "state":
       return e.state === "busy"
         ? { ...s, state: e.state }
-        : { ...s, state: e.state, streaming: "", thinking: false, thinkingText: "", interrupting: false, ...(e.state === "stopped" ? { pending: [] } : {}) };
+        : { ...s, state: e.state, streaming: "", thinking: false, thinkingText: "", interrupting: false, ...(e.state === "stopped" ? { pending: [], shells: {} } : {}) };
     case "error":
       return { ...s, notice: e.message, outbox: [], streaming: "", thinking: false, thinkingText: "", interrupting: false };
   }

@@ -39,13 +39,23 @@ pub fn insert(conn: &Connection, c: &Chat) -> Result<(), DbError> {
 pub fn update(conn: &Connection, c: &Chat) -> Result<(), DbError> {
     let n = conn.execute(
         "UPDATE chats SET repo_id = :repo, title = :title, agent = :agent, model = :model, effort = :effort,
-                          permission_mode = :perm, updated_at = :updated
+                          permission_mode = :perm, task_id = :task, archived_at = :archived, updated_at = :updated
          WHERE id = :id",
         named_params! {
             ":id": c.id, ":repo": c.repo_id, ":title": c.title, ":agent": c.agent, ":model": c.launch.model,
-            ":effort": c.launch.effort, ":perm": c.launch.permission_mode, ":updated": c.updated_at,
+            ":effort": c.launch.effort, ":perm": c.launch.permission_mode, ":task": c.task_id,
+            ":archived": c.archived_at, ":updated": c.updated_at,
         },
     )?;
+    if n == 0 {
+        return Err(not_found("chat"));
+    }
+    Ok(())
+}
+
+/// Moves a free chat into one of `repo_id`'s worktrees (`chats::follow`).
+pub fn set_worktree(conn: &Connection, id: &str, repo_id: &str, worktree: &str) -> Result<(), DbError> {
+    let n = conn.execute("UPDATE chats SET repo_id = ?2, worktree = ?3 WHERE id = ?1", [id, repo_id, worktree])?;
     if n == 0 {
         return Err(not_found("chat"));
     }

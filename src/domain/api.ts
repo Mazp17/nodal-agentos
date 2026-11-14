@@ -445,6 +445,10 @@ export type ChatEvent =
   | ({ type: "permissionRequest" } & PermissionRequest)
   /** Denied without asking (the permission mode or a rule decided). */
   | { type: "permissionDenied"; toolName: string; toolUseId: string | null; message: string | null }
+  /** A shell started by the `Bash` call `toolUseId`; `taskId` is what `stopChatShell` takes. */
+  | { type: "shellStarted"; taskId: string; toolUseId: string | null; description: string | null; background: boolean }
+  /** A task (shell or other) ended: `status` is `completed`, `failed`, `stopped`… */
+  | { type: "taskEnded"; taskId: string; status: string }
   /** Tokens in the context after the last response. */
   | { type: "usage"; contextTokens: number }
   /** `ok` is false for errors and interrupts. */
@@ -502,6 +506,11 @@ export const updateChat = (id: string, patch: ChatPatch) => invoke<Chat>("update
 /** Pins the chat to the top of its project's list (pinned ones first, oldest pin first), or unpins it. */
 export const setChatPinned = (id: string, pinned: boolean) => invoke<Chat>("set_chat_pinned", { id, pinned });
 export const deleteChat = (id: string) => invoke<void>("delete_chat", { id });
+/** Hides the chat from the sidebar (stopping its process); sending a message unarchives it too. */
+export const archiveChat = (id: string) => invoke<Chat>("archive_chat", { id });
+export const unarchiveChat = (id: string) => invoke<Chat>("unarchive_chat", { id });
+/** Links the chat to a task (`null` unlinks it); refused if the task has a chat or the chat's folder would change. */
+export const linkChatTask = (id: string, taskId: string | null) => invoke<Chat>("link_chat_task", { id, taskId });
 /** Starts or resumes the chat's `claude` process if needed; the answer streams as `nodal://chat`. */
 export const sendChatMessage = (id: string, text: string) => invoke<Chat>("send_chat_message", { id, text });
 /** `message` is what Claude reads on a denial. */
@@ -514,6 +523,8 @@ export const respondChatPermission = (
   answers: Record<string, string> | null = null,
 ) => invoke<void>("respond_chat_permission", { id, requestId, allow, message, answers });
 export const interruptChat = (id: string) => invoke<void>("interrupt_chat", { id });
+/** Stops one of the chat's background shells (`taskId` from its `shellStarted` event); the chat keeps running. */
+export const stopChatShell = (id: string, taskId: string) => invoke<void>("stop_chat_shell", { id, taskId });
 
 /** What rewinding a chat to a message does (or would do, on a dry run) to the files Claude edited. */
 export interface RewindResult {

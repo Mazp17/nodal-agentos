@@ -57,6 +57,8 @@ export interface Chat extends LaunchOptions {
   taskId: string | null;
   /** A worktree a free chat was opened in (its path); `null` → the repo's checkout. */
   worktree: string | null;
+  /** When the chat was archived (hidden from the sidebar); `null` if it isn't. */
+  archivedAt: number | null;
   createdAt: number;
   /** Last message sent: the sessions list is ordered by it. */
   updatedAt: number;

@@ -132,6 +132,7 @@ pub fn chat_from_row(row: &Row) -> rusqlite::Result<Chat> {
         agent: row.get("agent")?,
         task_id: row.get("task_id")?,
         worktree: row.get("worktree")?,
+        archived_at: row.get("archived_at")?,
         launch: LaunchOptions {
             model: row.get("model")?,
             effort: row.get("effort")?,
@@ -145,12 +146,12 @@ pub fn chat_from_row(row: &Row) -> rusqlite::Result<Chat> {
 
 pub fn insert_chat(conn: &Connection, c: &Chat) -> Result<(), DbError> {
     conn.execute(
-        "INSERT INTO chats (id, project_id, repo_id, title, session_title, session_id, agent, task_id, worktree, model,
+        "INSERT INTO chats (id, project_id, repo_id, title, session_title, session_id, agent, task_id, worktree, archived_at, model,
                             effort, permission_mode, created_at, updated_at, pinned_at)
-         VALUES (:id, :project, :repo, :title, :stitle, :session, :agent, :task, :worktree, :model, :effort, :perm, :created, :updated, :pinned)",
+         VALUES (:id, :project, :repo, :title, :stitle, :session, :agent, :task, :worktree, :archived, :model, :effort, :perm, :created, :updated, :pinned)",
         named_params! {
             ":id": c.id, ":project": c.project_id, ":repo": c.repo_id, ":title": c.title, ":stitle": c.session_title,
-            ":session": c.session_id, ":agent": c.agent, ":task": c.task_id, ":worktree": c.worktree, ":model": c.launch.model, ":effort": c.launch.effort,
+            ":session": c.session_id, ":agent": c.agent, ":task": c.task_id, ":worktree": c.worktree, ":archived": c.archived_at, ":model": c.launch.model, ":effort": c.launch.effort,
             ":perm": c.launch.permission_mode, ":created": c.created_at, ":updated": c.updated_at,
             ":pinned": c.pinned_at,
         },

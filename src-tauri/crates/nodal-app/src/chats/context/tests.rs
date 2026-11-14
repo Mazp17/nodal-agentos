@@ -17,6 +17,7 @@ fn chat(repo_id: Option<&str>) -> Chat {
         agent: None,
         task_id: None,
         worktree: None,
+        archived_at: None,
         session_id: None,
         launch: LaunchOptions::default(),
         created_at: 1,

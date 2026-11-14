@@ -623,6 +623,7 @@ export function AppShell() {
                 }}
                 onOpenTask={openTask}
                 onOpenDiff={(repoId, path, worktree) => tabs.openChat(fileTab(repoId, path, true, worktree))}
+                onDeleteChat={(c) => void removeChat(c)}
               />
             );
           }
