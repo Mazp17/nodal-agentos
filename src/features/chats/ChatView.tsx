@@ -114,8 +114,12 @@ export function ChatView({ project, repos, chatId: tabChatId, onCreated, onShowC
   const workspace = useChatWorkspace(chatId).data ?? null;
   // An answer may have edited files or moved into a worktree: re-read when it ends.
   const wasBusy = useRef(false);
+  // The running process keeps the settings it started the answer with (it isn't restarted mid-turn).
+  const settingsKey = JSON.stringify([settings.repoId, settings.agent, settings.model, settings.effort, settings.permissionMode]);
+  const busySettings = useRef(settingsKey);
   useEffect(() => {
     if (wasBusy.current && !busy) void invalidate("chats");
+    if (!wasBusy.current && busy) busySettings.current = settingsKey;
     wasBusy.current = busy;
   }, [busy]);
   const turns = useMemo(() => (stream ? toTurns(stream.items, stream.outbox) : []), [stream]);
@@ -162,7 +166,7 @@ export function ChatView({ project, repos, chatId: tabChatId, onCreated, onShowC
 
   const send = async (raw?: string) => {
     const text = (raw ?? draft).trim();
-    if (!text || busy) return;
+    if (!text) return;
     let target = chat;
     if (!target) {
       try {
@@ -187,7 +191,7 @@ export function ChatView({ project, repos, chatId: tabChatId, onCreated, onShowC
       onCreated(target.id);
     }
     const id = target.id;
-    pushOutbox(id, text);
+    pushOutbox(id, text, busy);
     // By id, not `setDraft`: a new chat's tab is re-keyed to `id` (and remounted) meanwhile.
     setComposerDraft(id, "");
     atBottom.current = true;
@@ -518,7 +522,13 @@ export function ChatView({ project, repos, chatId: tabChatId, onCreated, onShowC
             ) : undefined
           }
           draft={draft}
-          placeholder={`Ask anything about ${project.name}…`}
+          placeholder={
+            !busy
+              ? `Ask anything about ${project.name}…`
+              : settingsKey !== busySettings.current
+                ? "Claude is working, your message will be queued. Setting changes apply from the next message after Claude finishes"
+                : "Claude is working, your message will be queued"
+          }
           settings={settings}
           modes={modeOptions(settings.permissionMode)}
           repoOptions={repoOptions(repos)}

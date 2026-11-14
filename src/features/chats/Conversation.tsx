@@ -31,7 +31,7 @@ import {
   type Turn,
 } from "./model";
 import type { ChatStream } from "./stream";
-import { Ban, Brain, Check, CircleAlert, CircleStop, ChevronDown, ChevronRight, CornerDownLeft, FileDiff, History, Minus, Pencil, RotateCcw, Shield, X } from "lucide-react";
+import { Ban, Brain, Check, CircleAlert, CircleStop, ChevronDown, ChevronRight, Clock, CornerDownLeft, FileDiff, History, Minus, Pencil, RotateCcw, Shield, X } from "lucide-react";
 import { PendingPrompts } from "./PromptCards";
 
 // ---------- Tool block ----------
@@ -553,6 +553,13 @@ function UserMessage({ turn, stopped, busy, onRewind, onResend }: { turn: Extrac
             Stopped by you
           </span>
           {actions}
+        </div>
+      ) : turn.queued ? (
+        <div className="chat-stopped">
+          <span className="chat-stopped-label" role="status" title="Claude reads it at its next step, or once it finishes the current answer">
+            <Clock {...icon} />
+            Queued
+          </span>
         </div>
       ) : (
         actions && <div className="chat-stopped chat-user-tools">{actions}</div>
