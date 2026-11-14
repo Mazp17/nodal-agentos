@@ -623,3 +623,15 @@
 .chat-task-more { width: 26px; height: 26px; }
 .menu-item-danger { color: var(--red); }
 .tab-menu .menu-item-danger[data-highlighted] { background: var(--red-tint-10); color: var(--red); }
+
+/* Running shells, above the composer: one compact row each. */
+.chat-shells { flex: none; width: calc(100% - 48px); max-width: 760px; align-self: center; display: flex; flex-direction: column; gap: 2px; margin: 0 0 var(--sp-2); padding: 0; list-style: none; font-size: var(--fs-xs); }
+.chat-shell { display: flex; align-items: center; gap: var(--sp-2); padding: 2px var(--sp-2) 2px 0; border-radius: 6px; background: var(--fill-4); }
+.chat-shell-main { flex: 1; min-width: 0; display: flex; align-items: center; gap: var(--sp-2); padding: 4px var(--sp-3); border: 0; background: transparent; color: var(--text-muted); text-align: left; cursor: pointer; }
+.chat-shell-main:hover .chat-shell-cmd { color: var(--text-strong); }
+.chat-shell-cmd { min-width: 0; flex: 0 1 auto; font-family: var(--font-mono); color: var(--text); }
+.chat-shell-desc { min-width: 0; flex: 1; color: var(--text-dim); }
+.chat-shell-time { flex: none; margin-left: auto; color: var(--text-dim); }
+.chat-shell-dot { flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--green); animation: chat-shell-pulse 1.6s ease-in-out infinite; }
+@keyframes chat-shell-pulse { 50% { opacity: 0.35; } }
+@media (prefers-reduced-motion: reduce) { .chat-shell-dot { animation: none; } }

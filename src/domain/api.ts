@@ -445,6 +445,10 @@ export type ChatEvent =
   | ({ type: "permissionRequest" } & PermissionRequest)
   /** Denied without asking (the permission mode or a rule decided). */
   | { type: "permissionDenied"; toolName: string; toolUseId: string | null; message: string | null }
+  /** A shell started by the `Bash` call `toolUseId`; `taskId` is what `stopChatShell` takes. */
+  | { type: "shellStarted"; taskId: string; toolUseId: string | null; description: string | null; background: boolean }
+  /** A task (shell or other) ended: `status` is `completed`, `failed`, `stopped`… */
+  | { type: "taskEnded"; taskId: string; status: string }
   /** Tokens in the context after the last response. */
   | { type: "usage"; contextTokens: number }
   /** `ok` is false for errors and interrupts. */
@@ -517,6 +521,8 @@ export const respondChatPermission = (
   answers: Record<string, string> | null = null,
 ) => invoke<void>("respond_chat_permission", { id, requestId, allow, message, answers });
 export const interruptChat = (id: string) => invoke<void>("interrupt_chat", { id });
+/** Stops one of the chat's background shells (`taskId` from its `shellStarted` event); the chat keeps running. */
+export const stopChatShell = (id: string, taskId: string) => invoke<void>("stop_chat_shell", { id, taskId });
 
 /** What rewinding a chat to a message does (or would do, on a dry run) to the files Claude edited. */
 export interface RewindResult {
