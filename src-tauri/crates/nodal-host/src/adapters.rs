@@ -171,6 +171,11 @@ impl Git for HostGit {
         git::stat::is_worktree(dir)
     }
 
+    fn worktree_added_ms(&self, dir: &Path) -> Option<i64> {
+        let t = std::fs::metadata(dir.join(".git")).and_then(|m| m.modified()).ok()?;
+        Some(t.duration_since(std::time::UNIX_EPOCH).ok()?.as_millis() as i64)
+    }
+
     fn changes(&self, dir: &Path) -> DiffStat {
         git::stat::changes(dir)
     }

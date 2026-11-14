@@ -122,6 +122,12 @@ pub trait Git: Send + Sync {
     fn revert_file(&self, root: &Path, rel: &str) -> Result<(), HostError>;
     /// Whether `dir` is inside a linked worktree (its `.git` is a file).
     fn is_worktree(&self, dir: &Path) -> bool;
+    /// When the linked worktree at `dir` was added (its `.git` file's mtime), in ms. Default:
+    /// unknown.
+    fn worktree_added_ms(&self, dir: &Path) -> Option<i64> {
+        let _ = dir;
+        None
+    }
     /// Uncommitted changes in `dir` vs HEAD, untracked non-ignored files included. Cheap (no
     /// full diff); zeros when `dir` isn't a git repo.
     fn changes(&self, dir: &Path) -> DiffStat;
