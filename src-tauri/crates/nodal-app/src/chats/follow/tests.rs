@@ -119,6 +119,7 @@ fn chat(id: &str, repo_id: Option<&str>, task_id: Option<&str>, worktree: Option
         created_at: 1,
         // After every worktree here: only the touch rule applies (see the "added" test).
         updated_at: i64::MAX,
+        pinned_at: None,
     }
 }
 

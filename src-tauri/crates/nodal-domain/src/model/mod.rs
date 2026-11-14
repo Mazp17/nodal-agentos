@@ -128,6 +128,9 @@ pub struct Chat {
     pub created_at: i64,
     /// Last message sent: the sessions list is ordered by it.
     pub updated_at: i64,
+    /// When it was pinned to the top of its project's list; `None` = not pinned.
+    #[serde(default)]
+    pub pinned_at: Option<i64>,
 }
 
 // ---------- Executors and options ----------

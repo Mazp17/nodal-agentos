@@ -14,7 +14,7 @@ import type { ProjectSection } from "./useNav";
 import { projectColor } from "../features/projects/create";
 
 export type SideMode = "chat" | "tasks";
-type IconName = "update" | "overview" | "chat" | "board" | "settings" | "plus" | "chevron" | "branch" | "trash";
+type IconName = "update" | "overview" | "chat" | "board" | "settings" | "plus" | "chevron" | "branch" | "trash" | "pin";
 
 const GEAR =
   "M5.9 1.5h2.2l.35 1.55c.4.15.77.36 1.1.62l1.52-.48 1.1 1.9-1.17 1.08a4 4 0 0 1 0 1.26l1.17 1.08-1.1 1.9-1.52-.48c-.33.26-.7.47-1.1.62L8.1 12.5H5.9l-.35-1.55a4 4 0 0 1-1.1-.62l-1.52.48-1.1-1.9 1.17-1.08a4 4 0 0 1 0-1.26L1.83 5.49l1.1-1.9 1.52.48c.33-.26.7-.47 1.1-.62z";
@@ -75,6 +75,7 @@ function SideIcon({ name, size = 14 }: { name: IconName; size?: number }) {
           <path d="M4 4.4v5.2M10 5.9c0 2.4-6 1.8-6 3.4" />
         </>
       )}
+      {name === "pin" && <path d="M5 1.5h4M5.5 1.5v4L3.5 8h7l-2-2.5v-4M7 8v4.5" />}
       {name === "trash" && <path d="M2.5 4h9M5.5 4V2.5h3V4M3.8 4l.6 7.5h5.2l.6-7.5" />}
     </svg>
   );
@@ -131,6 +132,7 @@ interface Props {
   onMode: (mode: SideMode) => void;
   onOpenChat: (chat: Chat) => void;
   onNewChat: (projectId: string) => void;
+  onPinChat: (chat: Chat) => void;
   onDeleteChat: (chat: Chat) => void;
   onOpenBoard: (projectId: string | null) => void;
   onNewTask: () => void;
@@ -369,6 +371,7 @@ export function Sidebar(p: Props) {
                         unread={p.unreadChats.has(c.id)}
                         now={now}
                         onOpen={() => p.onOpenChat(c)}
+                        onPin={() => p.onPinChat(c)}
                         onDelete={() => p.onDeleteChat(c)}
                       />
                     ))}
@@ -465,10 +468,11 @@ interface ChatRowProps {
   unread: boolean;
   now: number;
   onOpen: () => void;
+  onPin: () => void;
   onDelete: () => void;
 }
 
-function ChatRow({ chat, repoId, projectKey, on, live, unread, now, onOpen, onDelete }: ChatRowProps) {
+function ChatRow({ chat, repoId, projectKey, on, live, unread, now, onOpen, onPin, onDelete }: ChatRowProps) {
   // Where the chat works now (it may have moved into a worktree); the repo's branch until known.
   const ws = useChatWorkspace(chat.id).data;
   const repoBranch = useRepoBranch(ws ? null : repoId).data ?? null;
@@ -481,6 +485,7 @@ function ChatRow({ chat, repoId, projectKey, on, live, unread, now, onOpen, onDe
     ) : null;
   const title = chatTitle(chat);
   const task = useTask(chat.taskId).data;
+  const pinned = chat.pinnedAt != null;
   return (
     <div className={`side-chat ${on ? "on" : ""} ${unread ? "unread" : ""} ${chat.archivedAt ? "archived" : ""}`}>
       <button
@@ -493,6 +498,12 @@ function ChatRow({ chat, repoId, projectKey, on, live, unread, now, onOpen, onDe
         <span className={`side-chat-dot ${live ? "live pulse" : unread ? "unread" : ""}`} aria-hidden />
         <span className="side-chat-text">
           <span className="side-chat-title ellipsis">
+            {pinned && (
+              <span className="side-chat-pinned" title="Pinned">
+                <SideIcon name="pin" size={11} />
+                <span className="sr-only">Pinned, </span>
+              </span>
+            )}
             {task && <span className="side-chat-task mono">{taskTag(task, projectKey)}</span>}
             {title}
           </span>
@@ -513,6 +524,16 @@ function ChatRow({ chat, repoId, projectKey, on, live, unread, now, onOpen, onDe
             {shortAgo(chat.updatedAt, now)}
           </span>
         )}
+      </button>
+      <button
+        type="button"
+        className="icon-btn side-chat-pin"
+        aria-label={`${pinned ? "Unpin" : "Pin"} ${title}`}
+        aria-pressed={pinned}
+        title={pinned ? "Unpin chat" : "Pin chat"}
+        onClick={onPin}
+      >
+        <SideIcon name="pin" size={12} />
       </button>
       <button type="button" className="icon-btn side-chat-del" aria-label={`Delete ${title}`} title="Delete chat" onClick={onDelete}>
         <SideIcon name="trash" size={12} />

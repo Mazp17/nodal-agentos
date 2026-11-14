@@ -108,6 +108,7 @@ impl Fixture {
                 launch: LaunchOptions::default(),
                 created_at: 1,
                 updated_at: 1,
+                pinned_at: None,
             };
             rows::insert_chat(&c, &chat).unwrap();
         }
@@ -460,6 +461,7 @@ fn seeded_db(session_id: Option<&str>) -> Db {
             launch: LaunchOptions::default(),
             created_at: 1,
             updated_at: 1,
+            pinned_at: None,
         },
     )
     .unwrap();
@@ -550,6 +552,7 @@ fn turn_ended_does_not_rescan_an_established_title_right_away() {
                 launch: LaunchOptions::default(),
                 created_at: 1,
                 updated_at: 1,
+                pinned_at: None,
             },
         )
         .unwrap();
@@ -622,6 +625,7 @@ fn turn_end_moves_an_in_progress_task_to_review_only_with_changes() {
             launch: Default::default(),
             created_at: 1,
             updated_at: 1,
+            pinned_at: None,
         };
         rows::insert_chat(&c, &chat).unwrap();
     }

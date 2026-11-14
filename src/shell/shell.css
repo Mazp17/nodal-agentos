@@ -205,9 +205,12 @@
 .side-chat-branch { display: flex; align-items: center; gap: 5px; min-width: 0; font-family: var(--font-mono); font-size: var(--fs-2xs); color: var(--text-muted); }
 .side-chat-meta { flex: none; font-size: var(--fs-2xs); color: var(--text-dim); white-space: nowrap; }
 .side-chat-meta.live { color: var(--accent); }
-.side-chat-del { position: absolute; right: 4px; opacity: 0; background: var(--surface-selected); color: var(--text-muted); }
-.side-chat:hover .side-chat-del,
-.side-chat-del:focus-visible { opacity: 1; }
+.side-chat-del,
+.side-chat-pin { position: absolute; right: 4px; opacity: 0; background: var(--surface-selected); color: var(--text-muted); }
+.side-chat-pin { right: calc(4px + var(--h-md)); }
+.side-chat:hover :is(.side-chat-del, .side-chat-pin),
+.side-chat :is(.side-chat-del, .side-chat-pin):focus-visible { opacity: 1; }
+.side-chat-pinned { display: inline-flex; vertical-align: -1px; margin-right: 4px; color: var(--text-muted); }
 .side-chat:hover .side-chat-meta { visibility: hidden; }
 
 .side-need { flex: none; font-size: var(--fs-2xs); color: var(--amber); }

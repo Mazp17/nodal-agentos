@@ -22,6 +22,7 @@ fn chat(repo_id: Option<&str>) -> Chat {
         launch: LaunchOptions::default(),
         created_at: 1,
         updated_at: 1,
+        pinned_at: None,
     }
 }
 

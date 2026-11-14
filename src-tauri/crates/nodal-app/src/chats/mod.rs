@@ -133,6 +133,7 @@ pub mod ops {
             launch: options::normalize(&input.launch).map_err(|e| e.join("\n"))?,
             created_at: now,
             updated_at: now,
+            pinned_at: None,
         };
         chats::insert(conn, &chat)?;
         Ok(chat)
@@ -334,7 +335,7 @@ pub fn spec(
     Ok(ChatSpec { cwd: PathBuf::from(cwd.path()), args })
 }
 
-/// Chats context: 11 Tauri commands plus `stop_project`, a cross-context hook called when the
+/// Chats context: 12 Tauri commands plus `stop_project`, a cross-context hook called when the
 /// project is deleted (`App::delete_project`, `flows.rs`).
 pub struct Chats {
     core: Arc<Core>,
@@ -385,6 +386,20 @@ impl Chats {
     pub async fn update_chat(&self, id: String, patch: ChatPatch) -> Result<Chat, AppError> {
         check_id(&id, "chat")?;
         let chat = self.db(move |c| ops::update(c, &id, &patch)).await?;
+        self.core.notifier.notify(ChangeKind::Chats, Some(&chat.project_id));
+        Ok(chat)
+    }
+
+    /// Pins the chat to the top of its project's list, or unpins it. Doesn't bump `updated_at`.
+    pub async fn set_chat_pinned(&self, id: String, pinned: bool) -> Result<Chat, AppError> {
+        check_id(&id, "chat")?;
+        let now = self.core.clock.now_ms();
+        let chat = self
+            .db(move |c| {
+                chats::set_pinned(c, &id, pinned, now)?;
+                Ok(chats::get(c, &id)?)
+            })
+            .await?;
         self.core.notifier.notify(ChangeKind::Chats, Some(&chat.project_id));
         Ok(chat)
     }

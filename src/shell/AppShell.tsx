@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { deleteChat, listRepoFiles, onCloseTab, onOpenChat } from "../domain/api";
+import { deleteChat, listRepoFiles, onCloseTab, onOpenChat, setChatPinned } from "../domain/api";
 import { useChatWorkspace, useRepoWorktrees } from "../domain/hooks/branches";
 import { useAllChats } from "../domain/hooks/chats";
 import { useProjects } from "../domain/hooks/projects";
@@ -285,6 +285,15 @@ export function AppShell() {
     const pid = chatProjectOf(next);
     if (pid && route.page === "chat") go("chat", pid);
   };
+  const pinChat = async (c: Chat) => {
+    try {
+      await setChatPinned(c.id, c.pinnedAt == null);
+      void invalidate("chats");
+    } catch (e) {
+      toast(c.pinnedAt == null ? "Couldn't pin the chat" : "Couldn't unpin the chat", String(e), "danger");
+    }
+  };
+
   const removeChat = async (c: Chat) => {
     const ok = await ask({
       title: `Delete “${chatTitle(c)}”?`,
@@ -841,6 +850,7 @@ export function AppShell() {
         onMode={goMode}
         onOpenChat={openChatTab}
         onNewChat={newChat}
+        onPinChat={(c) => void pinChat(c)}
         onDeleteChat={(c) => void removeChat(c)}
         onOpenBoard={openBoard}
         onNewTask={openNewTask}

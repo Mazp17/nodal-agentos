@@ -99,6 +99,13 @@ pub async fn update_chat(state: State<'_, Arc<App>>, id: String, patch: ChatPatc
     Ok(state.chats.update_chat(id, patch).await?)
 }
 
+/// Pins the chat to the top of its project's list, or unpins it.
+#[tauri::command]
+#[tracing::instrument(skip_all, level = "info")]
+pub async fn set_chat_pinned(state: State<'_, Arc<App>>, id: String, pinned: bool) -> Result<Chat, CommandError> {
+    Ok(state.chats.set_chat_pinned(id, pinned).await?)
+}
+
 /// Stops its process and forgets the chat. The Claude Code session stays on disk.
 #[tauri::command]
 #[tracing::instrument(skip_all, level = "info")]

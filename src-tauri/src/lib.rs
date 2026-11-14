@@ -208,6 +208,7 @@ pub fn run() {
             commands::chats::list_chat_agents,
             commands::chats::create_chat,
             commands::chats::update_chat,
+            commands::chats::set_chat_pinned,
             commands::chats::delete_chat,
             commands::chats::archive_chat,
             commands::chats::unarchive_chat,

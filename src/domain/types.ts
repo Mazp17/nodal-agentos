@@ -62,6 +62,8 @@ export interface Chat extends LaunchOptions {
   createdAt: number;
   /** Last message sent: the sessions list is ordered by it. */
   updatedAt: number;
+  /** When it was pinned to the top of its project's list; `null` = not pinned. */
+  pinnedAt: number | null;
 }
 
 // ---------- Executors and options ----------
