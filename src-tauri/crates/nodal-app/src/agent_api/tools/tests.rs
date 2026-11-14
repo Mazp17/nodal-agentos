@@ -346,11 +346,25 @@ fn only_chats_list_propose_task() {
             .collect::<Vec<_>>()
     };
     let chat = names(chat_definitions());
-    assert_eq!(chat.last().map(String::as_str), Some(PROPOSE_TASK));
-    assert_eq!(chat[..chat.len() - 1], names(definitions())[..]);
-    assert!(!names(definitions()).iter().any(|n| n == PROPOSE_TASK));
-    let schema = &chat_definitions()[chat.len() - 1]["inputSchema"];
-    assert_eq!(schema["required"], json!(["repo", "title", "plan"]));
+    assert_eq!(chat[chat.len() - 2..], [PROPOSE_TASK, LINK_PRS]);
+    assert_eq!(chat[..chat.len() - 2], names(definitions())[..]);
+    assert!(!names(definitions()).iter().any(|n| n == PROPOSE_TASK || n == LINK_PRS));
+    let defs = chat_definitions();
+    assert_eq!(defs[chat.len() - 2]["inputSchema"]["required"], json!(["repo", "title", "plan"]));
+    let schema = &defs[chat.len() - 1]["inputSchema"];
+    assert_eq!(schema["required"], json!(["prs"]));
+    assert_eq!(schema["properties"]["prs"]["maxItems"], 20);
+}
+
+#[test]
+fn link_prs_validates_before_running_gh() {
+    let f = fx("mcp-link-prs");
+    let db = Db::open_in_memory().unwrap();
+    let err = |args: Value| link_prs(&db, &f.env, args, 1).unwrap_err();
+    assert!(err(json!({"chat": "../x", "prs": ["1"]})).contains("Invalid chat id"));
+    assert!(err(json!({"chat": "c1", "prs": []})).contains("between 1 and 20"));
+    assert!(err(json!({"chat": "c1", "prs": vec!["1"; 21]})).contains("between 1 and 20"));
+    assert!(err(json!({"chat": "c1", "prs": ["1"]})).to_lowercase().contains("chat"));
 }
 
 #[test]

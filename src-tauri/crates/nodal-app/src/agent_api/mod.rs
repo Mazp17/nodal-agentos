@@ -63,6 +63,14 @@ impl AgentApi {
         if tool == "start_task_chat" {
             return self.start_task_chat(args);
         }
+        if tool == tools::LINK_PRS {
+            let now = self.core.clock.now_ms();
+            let (value, project) = tools::link_prs(&self.core.db, &self.core.env, args, now)?;
+            if let Some(p) = project {
+                self.core.notifier.notify(ChangeKind::Chats, Some(&p));
+            }
+            return Ok(value);
+        }
         // The lock is released before notifying, as before.
         let outcome = {
             let mut conn = self.core.db.guard();

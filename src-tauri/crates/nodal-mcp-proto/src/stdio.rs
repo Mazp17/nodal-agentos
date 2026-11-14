@@ -1,7 +1,7 @@
 //! The `nodal-mcp` side: MCP over stdio (newline-delimited JSON-RPC 2.0). It answers the
 //! handshake and `tools/list` itself, so it registers even while the app is closed, and
 //! forwards each `tools/call` to the app's socket. `nodal-mcp --chat` (how Nodal's chats
-//! launch it) also lists `propose_task`.
+//! launch it) also lists `propose_task` and `link_prs`.
 
 use std::io::{self, BufRead, BufReader, ErrorKind, Read, Write};
 #[cfg(unix)]
@@ -31,6 +31,22 @@ const INVALID_PARAMS: i64 = -32602;
 /// Makes `nodal-mcp` serve the chat's tools (`tools::chat_definitions`).
 pub const CHAT_FLAG: &str = "--chat";
 
+/// Env var `nodal --chat` servers get from the chat's `--mcp-config`: the chat they serve.
+pub const CHAT_ID_ENV: &str = "NODAL_CHAT_ID";
+
+/// `link_prs` acts on the calling chat: its id comes from the environment, never from the model.
+pub fn with_chat(tool: &str, mut args: Value, chat_id: Option<&str>) -> Result<Value, String> {
+    if tool != tools::LINK_PRS {
+        return Ok(args);
+    }
+    let id = chat_id.ok_or("link_prs only works inside a Nodal chat.")?;
+    if !args.is_object() {
+        args = json!({});
+    }
+    args["chat"] = json!(id);
+    Ok(args)
+}
+
 /// Entry point of the `nodal-mcp` binary. `version` is package `nodal`'s `CARGO_PKG_VERSION`.
 pub fn main(version: &'static str) -> ExitCode {
     let defs = if std::env::args().skip(1).any(|a| a == CHAT_FLAG) {
@@ -40,7 +56,10 @@ pub fn main(version: &'static str) -> ExitCode {
     };
     let socket = paths::data_dir_standalone().map(|d| paths::mcp_socket(&d));
     let call = |tool: &str, args: Value| match &socket {
-        Ok(s) => forward(s, tool, args),
+        Ok(s) => {
+            let chat = std::env::var(CHAT_ID_ENV).ok();
+            forward(s, tool, with_chat(tool, args, chat.as_deref())?)
+        }
         Err(e) => Err(e.clone()),
     };
     match serve(

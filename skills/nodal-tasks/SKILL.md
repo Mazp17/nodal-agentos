@@ -96,6 +96,9 @@ returns the task as it would be created (`newTask`), with `created: false`. In a
 `create_task` unless the user asks you to create the task yourself. Outside a chat the tool is not
 listed.
 
+Chats also have `link_prs`: pass `prs` (PR URLs or numbers, up to 20) and optionally `repo` to
+link them to the chat's PR panel. It returns the linked PRs and a per-PR error list.
+
 ## Reading tasks
 
 `list_tasks` lists a project's tasks by status; `get_task` returns one task with its plan text.

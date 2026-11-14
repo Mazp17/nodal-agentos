@@ -139,3 +139,14 @@ fn a_closed_app_means_open_nodal_first() {
         );
     }
 }
+
+#[test]
+fn link_prs_gets_the_chat_id_from_the_environment() {
+    let args = json!({"prs": ["1"], "chat": "evil"});
+    assert_eq!(
+        with_chat("link_prs", args.clone(), Some("c1")).unwrap(),
+        json!({"prs": ["1"], "chat": "c1"})
+    );
+    assert!(with_chat("link_prs", args.clone(), None).unwrap_err().contains("inside a Nodal chat"));
+    assert_eq!(with_chat("get_task", args.clone(), None).unwrap(), args);
+}
