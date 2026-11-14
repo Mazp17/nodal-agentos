@@ -176,7 +176,7 @@ function Agents({ chatId }: { chatId: string | null }) {
     );
   }
   if (!subs.data || !stream) return <p className="files-note files-changes-note">Loading…</p>;
-  const rows = agentRows(subs.data, stream.items, stream.state === "busy");
+  const rows = agentRows(subs.data, stream.items, stream.state === "busy", stream.state !== "stopped");
   if (rows.length === 0) return <p className="files-note files-changes-note">No subagents yet</p>;
   const now = Date.now();
   return (
