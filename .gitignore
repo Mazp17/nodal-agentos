@@ -36,3 +36,7 @@ src-tauri/binaries/
 
 # scripts/preview.sh: per-worktree copy of the dev data
 .preview/
+
+# impeccable design hook: per-machine ignores and cache
+.impeccable/config.local.json
+.impeccable/hook.cache.json
