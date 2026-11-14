@@ -242,7 +242,7 @@ fn repo_commit_rejects_an_empty_message_and_a_clean_tree() {
 fn repo_open_pr_refuses_before_pushing() {
     let Some((root, repo, system)) = system_with_repo("system-open-pr") else { return };
     let pr = |wt: Option<&std::path::Path>, title: &str| {
-        block_on(system.repo_open_pr("r1".into(), wt.map(|p| p.display().to_string()), title.into(), "".into()))
+        block_on(system.repo_open_pr("r1".into(), wt.map(|p| p.display().to_string()), title.into(), "".into(), None))
             .unwrap_err()
             .to_string()
     };

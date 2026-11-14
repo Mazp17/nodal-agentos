@@ -15,7 +15,7 @@ use crate::core::{blocking, AppError};
 use super::Board;
 
 /// A non-forced refresh within this long of the last lookup skips `gh`.
-const CHECK_INTERVAL_MS: i64 = 30_000;
+pub(crate) const CHECK_INTERVAL_MS: i64 = 30_000;
 
 /// Stores `pr` (`None`: just stamps the lookup) and moves the task after it. `true` when the PR
 /// or the status changed. Run it inside a transaction.

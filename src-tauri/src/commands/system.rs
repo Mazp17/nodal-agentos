@@ -105,8 +105,9 @@ pub async fn repo_open_pr(
     worktree: Option<String>,
     title: String,
     body: String,
+    chat_id: Option<String>,
 ) -> Result<String, CommandError> {
-    app.system.repo_open_pr(repo_id, worktree, title, body).await.map_err(CommandError::from)
+    app.system.repo_open_pr(repo_id, worktree, title, body, chat_id).await.map_err(CommandError::from)
 }
 
 #[tauri::command]
@@ -146,4 +147,73 @@ pub async fn revert_repo_file(
     worktree: Option<String>,
 ) -> Result<(), CommandError> {
     app.system.revert_repo_file(repo_id, path, worktree).await.map_err(CommandError::from)
+}
+
+#[tauri::command]
+#[tracing::instrument(skip_all, level = "info")]
+pub async fn repo_pr(
+    app: State<'_, Arc<App>>,
+    repo_id: String,
+    worktree: Option<String>,
+    force: Option<bool>,
+) -> Result<Option<nodal_domain::model::BranchPr>, CommandError> {
+    app.system.repo_pr(repo_id, worktree, force).await.map_err(CommandError::from)
+}
+
+#[tauri::command]
+#[tracing::instrument(skip_all, level = "info")]
+pub async fn repo_link_pr(
+    app: State<'_, Arc<App>>,
+    repo_id: String,
+    worktree: Option<String>,
+    pr: String,
+    chat_id: Option<String>,
+) -> Result<nodal_domain::model::BranchPr, CommandError> {
+    app.system.repo_link_pr(repo_id, worktree, pr, chat_id).await.map_err(CommandError::from)
+}
+
+#[tauri::command]
+#[tracing::instrument(skip_all, level = "info")]
+pub async fn repo_unlink_pr(app: State<'_, Arc<App>>, repo_id: String, worktree: Option<String>) -> Result<(), CommandError> {
+    app.system.repo_unlink_pr(repo_id, worktree).await.map_err(CommandError::from)
+}
+
+#[tauri::command]
+#[tracing::instrument(skip_all, level = "info")]
+pub async fn repo_pr_details(
+    app: State<'_, Arc<App>>,
+    repo_id: String,
+    worktree: Option<String>,
+    number: i64,
+) -> Result<serde_json::Value, CommandError> {
+    app.system.repo_pr_details(repo_id, worktree, number).await.map_err(CommandError::from)
+}
+
+#[tauri::command]
+#[tracing::instrument(skip_all, level = "info")]
+pub async fn repo_check_log(
+    app: State<'_, Arc<App>>,
+    repo_id: String,
+    worktree: Option<String>,
+    run_id: String,
+) -> Result<String, CommandError> {
+    app.system.repo_check_log(repo_id, worktree, run_id).await.map_err(CommandError::from)
+}
+
+#[tauri::command]
+#[tracing::instrument(skip_all, level = "info")]
+pub async fn repo_merge_pr(
+    app: State<'_, Arc<App>>,
+    repo_id: String,
+    worktree: Option<String>,
+    number: i64,
+    method: String,
+) -> Result<(), CommandError> {
+    app.system.repo_merge_pr(repo_id, worktree, number, method).await.map_err(CommandError::from)
+}
+
+#[tauri::command]
+#[tracing::instrument(skip_all, level = "info")]
+pub async fn chat_prs(app: State<'_, Arc<App>>, chat_id: String) -> Result<Vec<nodal_domain::model::ChatPr>, CommandError> {
+    app.system.chat_prs(chat_id).await.map_err(CommandError::from)
 }

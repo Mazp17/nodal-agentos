@@ -55,6 +55,11 @@ pub trait SessionFiles: Send + Sync {
         let _ = path;
         vec![]
     }
+    /// GitHub PR URLs printed by the last turn's `gh pr create` calls, in order. Default: none.
+    fn last_turn_pr_urls(&self, path: &Path) -> Vec<String> {
+        let _ = path;
+        vec![]
+    }
     /// Subagents of the session file, oldest first. Default: none.
     fn list_subagents(&self, session_path: &Path) -> Vec<SubagentRef> {
         let _ = session_path;
@@ -151,6 +156,14 @@ pub trait Git: Send + Sync {
     /// The newest PR whose head is `branch` (GitHub CLI). `Err` when `gh` can't tell (missing,
     /// not logged in, not a GitHub repo).
     fn pr_for_branch(&self, dir: &Path, branch: &str) -> Result<Option<TaskPr>, HostError>;
+    /// One PR by number or URL (`gh pr view`).
+    fn pr_view(&self, dir: &Path, pr: &str) -> Result<TaskPr, HostError>;
+    /// A PR's comments, reviews and checks, as `gh` reports them.
+    fn pr_details(&self, dir: &Path, number: i64) -> Result<serde_json::Value, HostError>;
+    /// The last 200 lines of a GitHub Actions run's failed-step log.
+    fn check_log(&self, dir: &Path, run_id: &str) -> Result<String, HostError>;
+    /// Merges PR `number` on GitHub with `method` ("squash", "merge" or "rebase"); the branch is kept.
+    fn merge_pr(&self, dir: &Path, number: i64, method: &str) -> Result<(), HostError>;
 }
 
 /// Files Nodal owns (plans, stopped patches) + plan files inside repos. Blocking.

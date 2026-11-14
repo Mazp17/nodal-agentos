@@ -58,6 +58,10 @@ impl SessionFiles for HostSessionFiles {
         fs::transcript::last_turn_tools(path)
     }
 
+    fn last_turn_pr_urls(&self, path: &Path) -> Vec<String> {
+        fs::transcript::last_turn_pr_urls(path)
+    }
+
     fn rewind_point(&self, path: &Path, user_uuid: &str) -> Result<Option<String>, HostError> {
         Ok(fs::transcript::rewind_point(path, user_uuid)?)
     }
@@ -202,6 +206,22 @@ impl Git for HostGit {
 
     fn pr_for_branch(&self, dir: &Path, branch: &str) -> Result<Option<TaskPr>, HostError> {
         Ok(git::pr::pr_for_branch(dir, branch)?)
+    }
+
+    fn pr_view(&self, dir: &Path, pr: &str) -> Result<TaskPr, HostError> {
+        Ok(git::pr::pr_view(dir, pr)?)
+    }
+
+    fn pr_details(&self, dir: &Path, number: i64) -> Result<serde_json::Value, HostError> {
+        Ok(git::pr::pr_details(dir, number)?)
+    }
+
+    fn check_log(&self, dir: &Path, run_id: &str) -> Result<String, HostError> {
+        Ok(git::pr::check_log(dir, run_id)?)
+    }
+
+    fn merge_pr(&self, dir: &Path, number: i64, method: &str) -> Result<(), HostError> {
+        Ok(git::pr::merge_pr(dir, number, method)?)
     }
 }
 
