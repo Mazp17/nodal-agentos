@@ -106,6 +106,19 @@ pub async fn delete_chat(state: State<'_, Arc<App>>, id: String) -> Result<(), C
     Ok(state.chats.delete_chat(id).await?)
 }
 
+/// Hides the chat from the sidebar, stopping its process first.
+#[tauri::command]
+#[tracing::instrument(skip_all, level = "info")]
+pub async fn archive_chat(state: State<'_, Arc<App>>, id: String) -> Result<Chat, CommandError> {
+    Ok(state.chats.set_chat_archived(id, true).await?)
+}
+
+#[tauri::command]
+#[tracing::instrument(skip_all, level = "info")]
+pub async fn unarchive_chat(state: State<'_, Arc<App>>, id: String) -> Result<Chat, CommandError> {
+    Ok(state.chats.set_chat_archived(id, false).await?)
+}
+
 /// Sends a message, starting (or resuming) the chat's process if it isn't running.
 /// Returns the chat, named after its first message.
 #[tauri::command]

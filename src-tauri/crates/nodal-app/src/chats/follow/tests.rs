@@ -114,6 +114,7 @@ fn chat(id: &str, repo_id: Option<&str>, task_id: Option<&str>, worktree: Option
         agent: None,
         task_id: task_id.map(String::from),
         worktree,
+        archived_at: None,
         launch: Default::default(),
         created_at: 1,
         // After every worktree here: only the touch rule applies (see the "added" test).

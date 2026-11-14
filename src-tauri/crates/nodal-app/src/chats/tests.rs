@@ -177,6 +177,7 @@ fn spec_runs_in_the_chat_repo_or_the_first_one() {
         agent: None,
         task_id: None,
         worktree: None,
+        archived_at: None,
         session_id: None,
         launch: LaunchOptions {
             model: Some("haiku".into()),
@@ -249,6 +250,7 @@ fn a_repo_less_chat_runs_at_the_project_root_when_it_has_one() {
         agent: None,
         task_id: None,
         worktree: None,
+        archived_at: None,
         session_id: None,
         launch: LaunchOptions::default(),
         created_at: 1,
@@ -769,4 +771,24 @@ fn create_chat_in_a_worktree_runs_there_and_rejects_other_paths() {
     std::fs::remove_dir_all(&wt).unwrap();
     block_on(f.chats.send_chat_message(chat.id, "again".into())).unwrap();
     assert_eq!(f.runtime.sent.lock().unwrap()[1].3.cwd, f.repo_path);
+}
+
+#[test]
+fn archive_stops_the_chat_and_unarchive_or_a_message_brings_it_back() {
+    let f = fx("chats-archive");
+    let chat = block_on(f.chats.create_chat("p1".into(), NewChat::default())).unwrap();
+
+    let archived = block_on(f.chats.set_chat_archived(chat.id.clone(), true)).unwrap();
+    assert_eq!(archived.archived_at, Some(1_000));
+    assert_eq!(f.runtime.stopped.lock().unwrap().as_slice(), std::slice::from_ref(&chat.id));
+    let listed = block_on(f.chats.list_chats(Some("p1".into()))).unwrap();
+    assert_eq!(listed[0].archived_at, Some(1_000), "persisted, for the sidebar to filter");
+
+    let back = block_on(f.chats.set_chat_archived(chat.id.clone(), false)).unwrap();
+    assert_eq!(back.archived_at, None);
+    assert_eq!(chats::get(&f.db.lock().unwrap(), &chat.id).unwrap().archived_at, None);
+
+    block_on(f.chats.set_chat_archived(chat.id.clone(), true)).unwrap();
+    block_on(f.chats.send_chat_message(chat.id.clone(), "hi".into())).unwrap();
+    assert_eq!(chats::get(&f.db.lock().unwrap(), &chat.id).unwrap().archived_at, None);
 }

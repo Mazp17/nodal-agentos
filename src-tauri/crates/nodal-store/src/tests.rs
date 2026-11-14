@@ -281,6 +281,7 @@ fn migrates_v3_data_to_v4() {
         agent: None,
         task_id: None,
         worktree: None,
+        archived_at: None,
         session_id: Some("00000000-0000-4000-8000-000000000001".into()),
         launch: LaunchOptions { model: Some("opus".into()), effort: Some("high".into()), permission_mode: Some("plan".into()) },
         created_at: 5,
@@ -406,6 +407,25 @@ fn migrates_v10_tasks_to_v11_without_a_pr_then_links_one() {
 }
 
 #[test]
+fn migrates_v11_chats_to_v12_unarchived() {
+    let mut raw = rusqlite::Connection::open_in_memory().unwrap();
+    raw.pragma_update(None, "foreign_keys", "ON").unwrap();
+    for sql in &MIGRATIONS[..11] {
+        raw.execute_batch(sql).unwrap();
+    }
+    raw.pragma_update(None, "user_version", 11).unwrap();
+    raw.execute_batch(
+        r#"INSERT INTO projects (id, name, key, color, created_at) VALUES ('p1', 'Pay', 'PAY', '#fff', 1);
+         INSERT INTO chats (id, project_id, created_at, updated_at) VALUES ('c1', 'p1', 1, 1);"#,
+    )
+    .unwrap();
+    let c = Conn::wrap_mut(&mut raw);
+    migrate(c).unwrap();
+    assert_eq!(user_version(c).unwrap(), MIGRATIONS.len() as i64);
+    assert_eq!(get_chat(c, "c1").unwrap().unwrap().archived_at, None);
+}
+
+#[test]
 fn migrates_v7_data_to_v8() {
     let mut raw = rusqlite::Connection::open_in_memory().unwrap();
     raw.pragma_update(None, "foreign_keys", "ON").unwrap();
@@ -472,6 +492,7 @@ fn chats_follow_their_project_and_widen_when_their_repo_goes() {
         agent: None,
         task_id: None,
         worktree: None,
+        archived_at: None,
         session_id: None,
         launch: LaunchOptions::default(),
         created_at: 1,

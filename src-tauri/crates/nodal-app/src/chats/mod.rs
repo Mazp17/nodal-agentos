@@ -129,6 +129,7 @@ pub mod ops {
             agent: agent(input.agent.as_deref())?,
             task_id: task_id.map(str::to_string),
             worktree,
+            archived_at: None,
             launch: options::normalize(&input.launch).map_err(|e| e.join("\n"))?,
             created_at: now,
             updated_at: now,
@@ -184,12 +185,23 @@ pub mod ops {
         if c.title.is_none() {
             c.title = title(Some(text));
         }
+        // Writing to an archived chat brings it back.
+        c.archived_at = None;
         c.updated_at = now;
         chats::update(conn, &c)?;
         let project = projects::get(conn, &c.project_id)?;
         let repos = repos::list(conn, Some(&c.project_id))?;
         Ok((c, project, repos))
     }
+
+    /// Archives the chat (`Some(now)`) or brings it back (`None`).
+    pub fn set_archived(conn: &Connection, id: &str, at: Option<i64>) -> Result<Chat, String> {
+        let mut c = chats::get(conn, id)?;
+        c.archived_at = at;
+        chats::update(conn, &c)?;
+        Ok(c)
+    }
+
 }
 
 /// The worktree the chat runs in: its task's, else its own. `None` if it has none or the
@@ -345,6 +357,18 @@ impl Chats {
             .await?;
         self.core.notifier.notify(ChangeKind::Chats, Some(&project_id));
         Ok(())
+    }
+
+    /// Archives the chat (stopping its process, as deleting does) or brings it back.
+    pub async fn set_chat_archived(&self, id: String, archived: bool) -> Result<Chat, AppError> {
+        check_id(&id, "chat")?;
+        if archived {
+            self.core.chats.stop(&id);
+        }
+        let at = archived.then(|| self.core.clock.now_ms());
+        let chat = self.db(move |c| ops::set_archived(c, &id, at)).await?;
+        self.core.notifier.notify(ChangeKind::Chats, Some(&chat.project_id));
+        Ok(chat)
     }
 
     /// Sends a message, starting (or resuming) the chat's process if it isn't running.
