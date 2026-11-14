@@ -1,9 +1,8 @@
-import { useEffect, useState, type ReactNode } from "react";
-import { createTask, respondChatPermission, type PermissionRequest } from "../../domain/api";
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { createTask } from "../../domain/api";
 import { invalidate } from "../../domain/hooks/store";
 import { taskKey, type Repo } from "../../domain/types";
 import { readJsonPref, writePref } from "../../shell/storage";
-import { BrandMark } from "../../ui/BrandMark";
 import { Marker, MarkerContent, MarkerIcon } from "@/ui/marker";
 import { SafeMarkdown } from "../../ui/Markdown";
 import { useToast } from "../../ui/Toasts";
@@ -21,40 +20,34 @@ import {
   isAgentCall,
   latestToolUse,
   readProposal,
-  readQuestions,
+  readAnswered,
   resultMeta,
   shortArg,
-  toolLabel,
   toolVerb,
   turnChanges,
+  type TurnChanges,
   type Proposal,
-  type Question,
   type ToolUse,
   type Turn,
 } from "./model";
 import type { ChatStream } from "./stream";
-import { CircleStop, FileDiff, History, Pencil, RotateCcw } from "lucide-react";
+import { Ban, Brain, Check, CircleAlert, CircleStop, ChevronDown, ChevronRight, CornerDownLeft, FileDiff, History, Minus, Pencil, RotateCcw, Shield, X } from "lucide-react";
+import { PendingPrompts } from "./PromptCards";
 
 // ---------- Tool block ----------
 
 /** Diffs up to this many lines start open; longer ones wait for a click. */
 const DIFF_OPEN_MAX = 20;
 
-type ToolState = "running" | "asking" | "ok" | "error" | "stopped";
+type ToolState = "running" | "asking" | "ok" | "error" | "stopped" | "denied";
 
 /** The badge before a tool row: a check once done, a pulsing dot while it runs. */
 function ToolIcon({ state }: { state: ToolState }) {
+  // A node on the answer's trail: a dot when done or running, a bare glyph when something needs attention.
+  const Glyph = state === "error" ? X : state === "asking" ? Shield : state === "denied" ? Ban : state === "stopped" ? Minus : null;
   return (
-    // A node on the answer's trail: the state is its ring and glyph.
     <MarkerIcon className={`chat-mk-icon chat-mk-${state}`}>
-      {state !== "running" && (
-        <svg width="8" height="8" viewBox="0 0 8 8" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden focusable="false">
-          {state === "ok" && <path d="M1.6 4.2l1.6 1.6 3.2-3.6" />}
-          {state === "error" && <path d="M2 2l4 4M6 2L2 6" />}
-          {state === "asking" && <path d="M4 1.6v2.6M4 6.2v.1" />}
-          {state === "stopped" && <path d="M2 4h4" />}
-        </svg>
-      )}
+      {Glyph && <Glyph size={14} strokeWidth={2} aria-hidden focusable="false" />}
     </MarkerIcon>
   );
 }
@@ -80,11 +73,11 @@ function ToolRow({
   const lines = patch ? patch.file.hunks.reduce((n, h) => n + h.lines.length, 0) : 0;
   const open = toggled ?? (patch != null && lines <= DIFF_OPEN_MAX);
   // A call without a result after the turn ended was interrupted.
-  const state: ToolState = denied || r?.isError ? "error" : asking ? "asking" : r ? "ok" : live ? "running" : "stopped";
+  const state: ToolState = denied ? "denied" : r?.isError ? "error" : asking ? "asking" : r ? "ok" : live ? "running" : "stopped";
   const meta: ReactNode = denied ? (
-    "Denied"
+    "You denied it"
   ) : asking ? (
-    "Needs approval"
+    "Waiting for you"
   ) : patch ? (
     <>
       <span className="diff-add">+{patch.file.additions}</span> <span className="diff-del">−{patch.file.deletions}</span>
@@ -101,11 +94,11 @@ function ToolRow({
       <ToolIcon state={state} />
       <MarkerContent className={`chat-mk-text ${state === "running" ? "shimmer" : ""}`}>
         <span className="chat-mk-verb">{toolVerb(item.name, state === "running")}</span>
-        {arg && <span className="chat-mk-arg">{arg}</span>}
+        {arg && <span className={`chat-mk-arg ${state === "denied" ? "chat-mk-struck" : ""}`}>{arg}</span>}
         {meta && <span className={`chat-mk-meta ${state === "error" ? "chat-mk-meta-err" : ""}`}>{meta}</span>}
         {expandable && (
           <span className="chat-mk-chev" aria-hidden>
-            {open ? "▾" : "▸"}
+            {open ? <ChevronDown size={14} aria-hidden focusable="false" /> : <ChevronRight size={14} aria-hidden focusable="false" />}
           </span>
         )}
       </MarkerContent>
@@ -206,7 +199,7 @@ function SubagentCard({ chatId, item, stream, repos, live }: { chatId: string; i
         <span className="chat-agent-type">{type}</span>
         <span className="chat-agent-desc ellipsis">{description}</span>
         {ms != null && <span className="chat-agent-time num">{formatDuration(ms)}</span>}
-        <span className="chat-agent-view">View</span>
+        <ChevronRight className="chat-agent-view" size={14} aria-hidden focusable="false" />
       </span>
       {detail && <span className={`chat-agent-detail ellipsis ${running ? "shimmer" : ""}`}>{detail}</span>}
     </button>
@@ -233,8 +226,15 @@ export function ToolBlock({
   const asking = new Set(stream.pending.map((p) => p.toolUseId).filter(Boolean));
   return (
     <div className="chat-tools" role="group" aria-label="Tool calls">
-      {items.map((it, i) =>
-        isAgentCall(it) ? (
+      {items.map((it, i) => {
+        const answered = readAnswered(it);
+        return answered ? (
+          <div key={it.id ?? i} className="chat-answered">
+            <Check size={15} aria-hidden focusable="false" />
+            <span>You answered</span>
+            <span className="chat-answered-text">{answered.map((a) => (a.header ? `${a.header}: ${a.answer}` : a.answer)).join(" · ")}</span>
+          </div>
+        ) : isAgentCall(it) ? (
           <SubagentCard key={it.id ?? i} chatId={chatId} item={it} stream={stream} repos={repos} live={live} />
         ) : (
           <ToolRow
@@ -246,169 +246,9 @@ export function ToolBlock({
             live={live}
             onOpenDiff={onOpenDiff}
           />
-        ),
-      )}
-    </div>
-  );
-}
-
-// ---------- Approval card ----------
-
-export function ApprovalCard({ chatId, req }: { chatId: string; req: PermissionRequest }) {
-  const toast = useToast();
-  const [note, setNote] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [showInput, setShowInput] = useState(false);
-  const input = req.input == null ? null : JSON.stringify(req.input, null, 2);
-
-  const answer = (allow: boolean) => {
-    setBusy(true);
-    respondChatPermission(chatId, req.requestId, allow, allow ? null : note.trim() || null).then(
-      // The card goes away with `permissionResolved`.
-      () => {},
-      (e: unknown) => {
-        setBusy(false);
-        toast("Couldn't answer the prompt", String(e), "danger");
-      },
-    );
-  };
-
-  return (
-    <div className="chat-approval" role="group" aria-label={`Permission request: ${toolLabel(req.toolName)}`}>
-      <div className="chat-approval-head">
-        <span className="dot dot-sm tone-warn" aria-hidden />
-        <span>
-          Claude wants to use <strong>{toolLabel(req.toolName)}</strong>
-        </span>
-      </div>
-      {req.description && <div className="chat-approval-desc">{req.description}</div>}
-      {req.summary && <code className="chat-approval-arg">{req.summary}</code>}
-      {input && (
-        <button type="button" className="chat-link-btn" aria-expanded={showInput} onClick={() => setShowInput(!showInput)}>
-          {showInput ? "Hide details" : "Show details"}
-        </button>
-      )}
-      {showInput && input && <pre className="tr-pre chat-approval-input">{input}</pre>}
-      <div className="chat-approval-actions">
-        <input
-          className="input chat-approval-note"
-          value={note}
-          placeholder="Tell Claude why, if you deny (optional)"
-          aria-label="Reason for denying"
-          disabled={busy}
-          onChange={(e) => setNote(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && !e.nativeEvent.isComposing) {
-              e.preventDefault();
-              answer(false);
-            }
-          }}
-        />
-        <button type="button" className="btn btn-sm" disabled={busy} onClick={() => answer(false)}>
-          Deny
-        </button>
-        <button type="button" className="btn btn-sm btn-amber" disabled={busy} onClick={() => answer(true)}>
-          Allow
-        </button>
-      </div>
-    </div>
-  );
-}
-
-// ---------- Question card ----------
-
-const OTHER = "\u0000other";
-
-/** Claude's `AskUserQuestion`: pick an option (or write one) per question, then send. */
-function QuestionCard({ chatId, req, questions }: { chatId: string; req: PermissionRequest; questions: Question[] }) {
-  const toast = useToast();
-  const [picked, setPicked] = useState<string[][]>(() => questions.map(() => []));
-  const [other, setOther] = useState<string[]>(() => questions.map(() => ""));
-  const [busy, setBusy] = useState(false);
-
-  const answerOf = (i: number) =>
-    picked[i]
-      .map((l) => (l === OTHER ? other[i].trim() : l))
-      .filter(Boolean)
-      .join(", ");
-  const ready = questions.every((_, i) => answerOf(i) !== "");
-
-  const toggle = (i: number, label: string, multi: boolean) =>
-    setPicked((all) =>
-      all.map((p, j) => (j !== i ? p : !multi ? [label] : p.includes(label) ? p.filter((l) => l !== label) : [...p, label])),
-    );
-
-  const send = (allow: boolean) => {
-    setBusy(true);
-    const answers = allow ? Object.fromEntries(questions.map((q, i) => [q.question, answerOf(i)])) : null;
-    respondChatPermission(chatId, req.requestId, allow, allow ? null : "The user chose not to answer.", answers).then(
-      // The card goes away with `permissionResolved`.
-      () => {},
-      (e: unknown) => {
-        setBusy(false);
-        toast("Couldn't send the answer", String(e), "danger");
-      },
-    );
-  };
-
-  return (
-    <form
-      className="chat-approval chat-question"
-      aria-label="Claude has a question"
-      onSubmit={(e) => {
-        e.preventDefault();
-        if (ready && !busy) send(true);
-      }}
-    >
-      {questions.map((q, i) => {
-        const type = q.multiSelect ? "checkbox" : "radio";
-        const name = `${req.requestId}-${i}`;
-        return (
-          <fieldset key={i} className="chat-question-set" disabled={busy}>
-            <legend className="chat-approval-head">
-              <span className="dot dot-sm tone-warn" aria-hidden />
-              <span>
-                {q.header && <strong>{q.header}: </strong>}
-                {q.question}
-              </span>
-            </legend>
-            {[...q.options, { label: OTHER, description: "" }].map((o) => (
-              <label key={o.label} className="chat-question-opt">
-                <input
-                  type={type}
-                  name={name}
-                  checked={picked[i].includes(o.label)}
-                  onChange={() => toggle(i, o.label, q.multiSelect)}
-                />
-                {o.label === OTHER ? (
-                  <input
-                    className="input chat-approval-note"
-                    value={other[i]}
-                    placeholder="Other…"
-                    aria-label={`Other answer to: ${q.question}`}
-                    onFocus={() => !picked[i].includes(OTHER) && toggle(i, OTHER, q.multiSelect)}
-                    onChange={(e) => setOther((all) => all.map((v, j) => (j === i ? e.target.value : v)))}
-                  />
-                ) : (
-                  <span>
-                    <span className="chat-question-label">{o.label}</span>
-                    {o.description && <span className="chat-approval-desc"> {o.description}</span>}
-                  </span>
-                )}
-              </label>
-            ))}
-          </fieldset>
         );
       })}
-      <div className="chat-approval-actions">
-        <button type="button" className="btn btn-sm" disabled={busy} onClick={() => send(false)}>
-          Don't answer
-        </button>
-        <button type="submit" className="btn btn-sm btn-amber" disabled={busy || !ready}>
-          Send
-        </button>
-      </div>
-    </form>
+    </div>
   );
 }
 
@@ -491,8 +331,9 @@ function ProposalCard({
   return (
     <div className="chat-proposal" role="group" aria-label={`Proposed task: ${t.title}`}>
       <div className="chat-proposal-body">
+        <h3 className="chat-proposal-title">{t.title}</h3>
         <div className="chat-proposal-meta">
-          <span className="chat-proposal-kicker">Proposed task</span>
+          <span>Task proposal</span>
           {priority !== "none" && (
             <span className="chat-proposal-prio">
               <PriorityBars priority={priority} />
@@ -501,11 +342,15 @@ function ProposalCard({
           )}
           {p.repoName && <span className="mono">{p.repoName}</span>}
         </div>
-        <div className="chat-proposal-title">{t.title}</div>
         {t.plan.kind === "text" && <SafeMarkdown className="chat-proposal-plan" text={t.plan.text} />}
         {(t.acceptance?.length ?? 0) > 0 && (
           <ul className="chat-proposal-crit" aria-label="Acceptance criteria">
-            {t.acceptance?.map((a, i) => <li key={i}>{a}</li>)}
+            {t.acceptance?.map((a, i) => (
+              <li key={i}>
+                <Check size={13} aria-hidden focusable="false" />
+                <span>Done when {a}</span>
+              </li>
+            ))}
           </ul>
         )}
       </div>
@@ -513,7 +358,7 @@ function ProposalCard({
         {created ? (
           <>
             <span className="chat-proposal-done">
-              ✓ <span className="mono">{created.key}</span> created
+              <Check size={14} aria-hidden focusable="false" /> <span className="mono">{created.key}</span> created
             </span>
             <button type="button" className="chat-proposal-open" onClick={() => onOpenTask(created.taskId)}>
               Open task
@@ -553,30 +398,53 @@ export interface ConversationProps {
 }
 
 function AiTurn({ children }: { children: ReactNode }) {
-  return (
-    <div className="chat-ai">
-      <span className="chat-avatar">
-        <BrandMark size={22} />
-      </span>
-      <div className="chat-ai-body">{children}</div>
-    </div>
-  );
+  return <div className="chat-ai">{children}</div>;
 }
 
-/** The files an answer changed, under its tool calls. */
-function ChangesMarker({ changes }: { changes: NonNullable<ReturnType<typeof turnChanges>> }) {
+/** The files an answer changed: a button that opens the diffs of that answer's edits only. */
+function ChangesMarker({ changes, repos, onOpenDiff }: { changes: TurnChanges; repos: Repo[]; onOpenDiff?: (path: string) => void }) {
+  const [open, setOpen] = useState(false);
+  const noun = changes.files === 1 ? "file" : "files";
+  // A summary box, not a message: it reads as the turn's footer and opens into that turn's diffs.
   return (
-    <Marker variant="border" className="chat-mk chat-mk-changes">
-      <MarkerIcon className="chat-mk-icon chat-mk-changed">
+    <div className="chat-turn-changes">
+      <button type="button" className="chat-turn-changes-head" aria-expanded={open} onClick={() => setOpen(!open)}>
         <FileDiff size={14} strokeWidth={1.75} aria-hidden focusable="false" />
-      </MarkerIcon>
-      <MarkerContent className="chat-mk-text">
-        {changes.files} {changes.files === 1 ? "file" : "files"} changed
-        <span className="chat-mk-meta">
-          <span className="diff-add">+{changes.additions}</span> <span className="diff-del">−{changes.deletions}</span>
+        <span className="chat-turn-changes-label">
+          Changed {changes.files} {noun}
         </span>
-      </MarkerContent>
-    </Marker>
+        <span className="diff-add num">+{changes.additions}</span>
+        <span className="diff-del num">−{changes.deletions}</span>
+        <span className="spacer" />
+        <span>{open ? "Hide changes" : "Show changes"}</span>
+        {open ? <ChevronDown size={14} aria-hidden focusable="false" /> : <ChevronRight size={14} aria-hidden focusable="false" />}
+      </button>
+      {open &&
+        changes.byFile.map((f) => {
+          const rel = shortArg(f.path, repos) || f.path;
+          return (
+            <div key={f.path} className="chat-turn-changes-file">
+              <div className="chat-tool-panel-head">
+                <span className="chat-tool-panel-path ellipsis" title={f.path}>
+                  <span className="chat-tool-panel-name">{rel}</span>
+                </span>
+                <span className="chat-tool-panel-stat num">
+                  <span className="diff-add">+{f.additions}</span>
+                  <span className="diff-del">−{f.deletions}</span>
+                </span>
+                {onOpenDiff && (
+                  <button type="button" className="chat-tool-panel-open" onClick={() => onOpenDiff(f.path)}>
+                    Open diff
+                  </button>
+                )}
+              </div>
+              {f.edits.map((e, i) => (
+                <DiffLines key={i} file={e} compact />
+              ))}
+            </div>
+          );
+        })}
+    </div>
   );
 }
 
@@ -591,11 +459,11 @@ function AgentReport({ chatId, agentId, stream }: { chatId: string; agentId: str
       title="View the subagent's transcript"
       onClick={() => openSubagent({ chatId, toolUseId: call?.id ?? null, agentId, title: description ?? type })}
     >
-      <span aria-hidden>↩</span>
+      <CornerDownLeft size={13} aria-hidden focusable="false" />
       <span className="chat-agent-type">{type}</span>
       <span>reported back</span>
       {description && <span className="chat-agent-desc ellipsis">· {description}</span>}
-      <span className="chat-agent-view">View</span>
+      <ChevronRight className="chat-agent-view" size={14} aria-hidden focusable="false" />
     </button>
   );
 }
@@ -693,6 +561,49 @@ function UserMessage({ turn, stopped, busy, onRewind, onResend }: { turn: Extrac
   );
 }
 
+/** Claude's thinking, open by default: capped at a few lines unless expanded, following the tail while live. */
+function Thought({ text, truncated = false, live = false }: { text: string; truncated?: boolean; live?: boolean }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [long, setLong] = useState(false);
+  const [more, setMore] = useState(false);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el || more) return;
+    setLong(el.scrollHeight > el.clientHeight + 1);
+    if (live) el.scrollTop = el.scrollHeight;
+  }, [text, more, live]);
+  if (!text.trim()) return null;
+  return (
+    <details open className="chat-thought">
+      <Marker asChild className="chat-mk chat-mk-btn">
+        <summary>
+          <MarkerIcon className="chat-mk-icon chat-mk-changed">
+            <Brain size={14} strokeWidth={1.75} aria-hidden focusable="false" />
+          </MarkerIcon>
+          <MarkerContent className={`chat-mk-text ${live ? "shimmer" : ""}`}>
+            <span className="chat-mk-verb">Thinking</span>
+          </MarkerContent>
+        </summary>
+      </Marker>
+      <div className="chat-thought-body">
+        <div ref={ref} className={more ? undefined : "chat-thought-capped"}>
+          <SafeMarkdown className="chat-thought-text" text={text} breaks />
+        </div>
+        {(truncated || long) && (
+          <div className="chat-thought-foot">
+            {truncated && <span className="chat-thought-note">Cut short: the rest is in the session file.</span>}
+            {long && (
+              <button type="button" className="chat-thought-more" onClick={() => setMore(!more)}>
+                {more ? "Show less" : "Show more"}
+              </button>
+            )}
+          </div>
+        )}
+      </div>
+    </details>
+  );
+}
+
 export function Conversation({ chatId, turns, stream, projectId, projectKey, repos, onOpenTask, onOpenDiff, onRewind, onResend }: ConversationProps) {
   const busy = stream.state === "busy" || stream.outbox.length > 0;
   // Messages the user typed (not ones Claude Code injects), by turn index.
@@ -716,7 +627,9 @@ export function Conversation({ chatId, turns, stream, projectId, projectKey, rep
   // A running tool call shows itself (its row shimmers); this line covers the rest of the turn.
   const working =
     stream.pending.length > 0
-      ? "Waiting for your approval"
+      ? stream.pending.length > 1
+        ? `Waiting for you · 1 of ${stream.pending.length}`
+        : "Waiting for you"
       : stream.thinking
         ? "Thinking…"
         : stream.streaming
@@ -757,19 +670,7 @@ export function Conversation({ chatId, turns, stream, projectId, projectKey, rep
                 case "text":
                   return <SafeMarkdown key={j} className="chat-text" text={p.text} breaks />;
                 case "thinking":
-                  return (
-                    <details key={j} className="chat-thought">
-                      <Marker asChild className="chat-mk chat-mk-btn">
-                        <summary>
-                          <MarkerIcon className="chat-mk-icon chat-mk-stopped">…</MarkerIcon>
-                          <MarkerContent className="chat-mk-text">
-                            <span className="chat-mk-verb">Thought</span>
-                          </MarkerContent>
-                        </summary>
-                      </Marker>
-                      <div className="chat-thought-text">{p.text}</div>
-                    </details>
-                  );
+                  return <Thought key={j} text={p.text} truncated={p.truncated} />;
                 case "tools":
                   return <ToolBlock key={j} chatId={chatId} items={p.items} stream={stream} repos={repos} live={current && stream.state === "busy"} onOpenDiff={onOpenDiff} />;
                 case "proposal":
@@ -785,32 +686,25 @@ export function Conversation({ chatId, turns, stream, projectId, projectKey, rep
                   );
               }
             })}
-            {changes && <ChangesMarker changes={changes} />}
+            {changes && <ChangesMarker changes={changes} repos={repos} onOpenDiff={onOpenDiff} />}
+            {current && <Thought text={stream.thinkingText} live />}
             {current && stream.streaming && <div className="chat-text chat-streaming">{stream.streaming}</div>}
           </AiTurn>
         );
       })}
-      {!lastIsAi && stream.streaming && (
+      {!lastIsAi && (stream.streaming || stream.thinkingText) && (
         <AiTurn>
-          <div className="chat-text chat-streaming">{stream.streaming}</div>
+          <Thought text={stream.thinkingText} live />
+          {stream.streaming && <div className="chat-text chat-streaming">{stream.streaming}</div>}
         </AiTurn>
       )}
-      {stream.pending.map((req) => {
-        const questions = readQuestions(req);
-        return questions ? (
-          <QuestionCard key={req.requestId} chatId={chatId} req={req} questions={questions} />
-        ) : (
-          <ApprovalCard key={req.requestId} chatId={chatId} req={req} />
-        );
-      })}
+      <PendingPrompts chatId={chatId} pending={stream.pending} />
       <span className="sr-only" role="status">
         {announced}
       </span>
       {busy && running.length === 0 && (
         <div className="chat-working" aria-hidden>
-          <span className="chat-avatar chat-avatar-pulse">
-            <BrandMark size={22} />
-          </span>
+          <span className={`chat-working-dot ${stream.pending.length > 0 ? "chat-working-dot-wait" : ""}`} />
           <Marker className="chat-mk chat-mk-working">
             <MarkerContent className={stream.pending.length > 0 ? "" : "shimmer"}>{working}</MarkerContent>
           </Marker>
@@ -818,7 +712,8 @@ export function Conversation({ chatId, turns, stream, projectId, projectKey, rep
       )}
       {stream.notice && !busy && (
         <div className="chat-notice" role="status">
-          {stream.notice}
+          <CircleAlert size={15} aria-hidden focusable="false" />
+          <span>{stream.notice}</span>
         </div>
       )}
     </div>
