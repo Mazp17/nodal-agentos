@@ -6,11 +6,16 @@
 //! waiting for the click on a thread of their own; a click focuses the window and emits
 //! `OPEN_CHAT_EVENT`. Elsewhere they still go through the plugin, without the click.
 
+#[cfg(target_os = "macos")]
 use serde::Serialize;
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::AppHandle;
+#[cfg(target_os = "macos")]
+use tauri::{Emitter, Manager};
 
+#[cfg(target_os = "macos")]
 pub const OPEN_CHAT_EVENT: &str = "nodal://open-chat";
 
+#[cfg(target_os = "macos")]
 #[derive(Serialize, Clone, Debug, PartialEq)]
 #[serde(rename_all = "camelCase")]
 struct OpenChat {
@@ -18,6 +23,7 @@ struct OpenChat {
 }
 
 /// Shows the main window in front and asks the page to open `chat_id`.
+#[cfg(target_os = "macos")]
 fn open_chat(app: &AppHandle, chat_id: String) {
     if let Some(w) = app.get_webview_window("main") {
         let _ = w.unminimize();
@@ -65,7 +71,7 @@ pub fn notify_chat(app: AppHandle, chat_id: String, title: String, body: String)
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, target_os = "macos"))]
 mod tests {
     use super::*;
 
