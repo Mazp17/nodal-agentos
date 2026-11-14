@@ -155,17 +155,45 @@ export function harnessMessage(
 
 export type AgentState = "running" | "ok" | "error" | "stopped";
 
+/** How background subagents ended: their `Agent` call's tool use id or agent id → final status. */
+export type AgentEnds = ReadonlyMap<string, string>;
+
+/**
+ * Reads the end of each background subagent from the turns Claude Code injects when one
+ * finishes: `<task-notification>` (with `<tool-use-id>` and `<status>`) or an `<agent-message>` report.
+ */
+export function agentEnds(items: TranscriptItem[]): AgentEnds {
+  const ends = new Map<string, string>();
+  for (const it of items) {
+    if (it.kind !== "user") continue;
+    const h = harnessMessage(it.text);
+    if (h?.kind === "report") ends.set(h.agentId, "completed");
+    if (h?.kind !== "notification") continue;
+    const id = /<tool-use-id>([^<]+)<\/tool-use-id>/.exec(it.text)?.[1] ?? /<task-id>([^<]+)<\/task-id>/.exec(it.text)?.[1];
+    if (id) ends.set(id.trim(), /<status>([^<]*)<\/status>/.exec(it.text)?.[1].trim() ?? "completed");
+  }
+  return ends;
+}
+
+const stateOf = (status: string): AgentState =>
+  /fail|error/.test(status) ? "error" : /kill|stop|cancel|abort/.test(status) ? "stopped" : "ok";
+
 /**
  * Where a subagent call stands. `live`: the answer is still being written. A call that
- * returned at once with a launch status (a background agent) keeps running while `live`.
+ * returned at once with a launch status is a background agent: it outlives the turn, so it
+ * runs until its end shows up in `bg.ends`, or until the chat's process (`bg.alive`) is gone.
  */
-export function agentState(it: ToolUse, live: boolean): AgentState {
+export function agentState(it: ToolUse, live: boolean, bg: { ends: AgentEnds; alive: boolean }): AgentState {
   const r = it.result;
   if (!r) return live ? "running" : "stopped";
   const status = (r.agent?.status ?? "").toLowerCase();
   if (r.isError || /fail|error/.test(status)) return "error";
   if (/kill|stop|cancel|abort/.test(status)) return "stopped";
-  if (/async|running|launched/.test(status)) return live ? "running" : "ok";
+  if (/async|running|launched/.test(status)) {
+    const end = (it.id && bg.ends.get(it.id)) || (r.agent?.agentId && bg.ends.get(r.agent.agentId));
+    if (end) return stateOf(end.toLowerCase());
+    return bg.alive ? "running" : "stopped";
+  }
   return "ok";
 }
 
@@ -203,7 +231,8 @@ export interface AgentRow {
  * `Agent` calls by tool use id, newest first. Calls the session file doesn't list yet (just
  * launched) come first, since they're the latest.
  */
-export function agentRows(refs: SubagentRef[], items: TranscriptItem[], live: boolean): AgentRow[] {
+export function agentRows(refs: SubagentRef[], items: TranscriptItem[], live: boolean, alive: boolean): AgentRow[] {
+  const bg = { ends: agentEnds(items), alive };
   const calls = new Map<string, ToolUse>();
   for (const it of items) if (it.kind === "toolUse" && isAgentCall(it) && it.id) calls.set(it.id, it);
   const known = new Set(refs.map((r) => r.toolUseId));
@@ -215,7 +244,7 @@ export function agentRows(refs: SubagentRef[], items: TranscriptItem[], live: bo
       agentId: r.agentId,
       type: r.agentType ?? a?.agentType ?? "agent",
       description: r.description ?? (call ? agentMeta(call).description : null),
-      state: call ? agentState(call, live) : r.stoppedByUser ? "stopped" : "ok",
+      state: call ? agentState(call, live, bg) : r.stoppedByUser ? "stopped" : "ok",
       durationMs: a?.durationMs ?? null,
       stats: agentStats(a),
       startedAt: r.startedAt,
@@ -229,7 +258,7 @@ export function agentRows(refs: SubagentRef[], items: TranscriptItem[], live: bo
       agentId: c.result?.agent?.agentId ?? null,
       type: agentMeta(c).type,
       description: agentMeta(c).description,
-      state: agentState(c, live),
+      state: agentState(c, live, bg),
       durationMs: c.result?.agent?.durationMs ?? null,
       stats: agentStats(c.result?.agent),
       startedAt: null,

@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { createTask } from "../../domain/api";
 import { invalidate } from "../../domain/hooks/store";
 import { taskKey, type Repo } from "../../domain/types";
@@ -14,6 +14,7 @@ import { formatDuration } from "../../lib/format";
 import { openSubagent } from "./SubagentSheet";
 import {
   agentMeta,
+  agentEnds,
   agentState,
   agentStats,
   harnessMessage,
@@ -171,7 +172,8 @@ function ToolRow({
 /** A subagent call: who it is, what it does right now, and how it went. Click opens its transcript. */
 function SubagentCard({ chatId, item, stream, repos, live }: { chatId: string; item: ToolUse; stream: ChatStream; repos: Repo[]; live: boolean }) {
   const { type, description } = agentMeta(item);
-  const state = agentState(item, live);
+  const ends = useMemo(() => agentEnds(stream.items), [stream.items]);
+  const state = agentState(item, live, { ends, alive: stream.state !== "stopped" });
   const running = state === "running";
   // The card shows up when the call arrives, so its mount is when the agent started.
   const [start] = useState(() => Date.now());

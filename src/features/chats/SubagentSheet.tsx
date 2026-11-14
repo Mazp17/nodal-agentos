@@ -3,7 +3,7 @@ import { getChatSubagentTranscript } from "../../domain/api";
 import { useChatSubagents } from "../../domain/hooks/chats";
 import { formatDuration } from "../../lib/format";
 import { useFocusTrap } from "../../ui/useFocusTrap";
-import { agentState, agentStats, toolVerb, type ToolUse } from "./model";
+import { agentEnds, agentState, agentStats, toolVerb, type ToolUse } from "./model";
 import type { ChatStream } from "./stream";
 import type { Transcript, TranscriptItem } from "./types";
 
@@ -115,7 +115,7 @@ export function SubagentSheet({ target: t, stream, live, onClose }: { target: Su
   const agentId = t.agentId ?? call?.result?.agent?.agentId ?? meta?.agentId ?? null;
   const liveItems = t.toolUseId ? stream.subagents[t.toolUseId] : undefined;
   // A busy chat alone doesn't make an old unfinished call live: it must have streamed in this session.
-  const state = call ? agentState(call, live && !!liveItems) : meta?.stoppedByUser ? "stopped" : "ok";
+  const state = call ? agentState(call, live && !!liveItems, { ends: agentEnds(stream.items), alive: stream.state !== "stopped" }) : meta?.stoppedByUser ? "stopped" : "ok";
   // Items streamed now beat the file while the agent runs; once it's done the file is complete.
   const useLive = state === "running" && !!liveItems;
 
