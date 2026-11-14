@@ -22,13 +22,13 @@ use std::sync::Arc;
 use serde::Deserialize;
 
 use nodal_domain::execution::options;
-use nodal_domain::model::chat::{ChatLive, ChatSpec, ClaudeDefaults, RewindResult, RunState};
+use nodal_domain::model::chat::{ChatLive, ChatSpec, ClaudeDefaults, ImageInput, RewindResult, RunState};
 use nodal_domain::model::claude::{SubagentRef, Transcript};
 use nodal_domain::model::events::ChangeKind;
 use nodal_domain::model::executors::{is_valid_agent_name, ExecutorInfo};
 use nodal_domain::model::{Chat, ChatWorkspace, LaunchOptions, Project, Repo};
 use nodal_domain::serde_util::double_option;
-use nodal_domain::sessions::transcript::{is_valid_message_uuid, is_valid_session_id, TRANSCRIPT_DEFAULT_LIMIT, TRANSCRIPT_MAX_LIMIT};
+use nodal_domain::sessions::transcript::{base64_len, is_valid_message_uuid, is_valid_session_id, TRANSCRIPT_DEFAULT_LIMIT, TRANSCRIPT_MAX_LIMIT};
 use nodal_domain::util::{check_id, clip_chars, new_id};
 use nodal_store::{board::projects, board::repos, board::tasks, chats, rows, Conn as Connection, StoreError};
 
@@ -37,6 +37,11 @@ use crate::core::{blocking, AppError, Core};
 const TITLE_MAX: usize = 80;
 /// A message goes to stdin as one JSON line: a generous cap keeps a paste from being huge.
 pub const MESSAGE_MAX: usize = 100_000;
+/// Media types a message can carry as an image (what the Anthropic API accepts).
+pub const IMAGE_TYPES: [&str; 4] = ["image/png", "image/jpeg", "image/gif", "image/webp"];
+/// Decoded size per image.
+pub const IMAGE_MAX_BYTES: usize = 5 * 1024 * 1024;
+pub const IMAGES_MAX: usize = 10;
 
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -175,16 +180,17 @@ pub mod ops {
 
     /// Checks the message, marks the chat as used now (naming it after its first message)
     /// and returns what launching it needs.
-    pub fn prepare_send(conn: &Connection, id: &str, text: &str, now: i64) -> Result<(Chat, Project, Vec<Repo>), String> {
-        if text.trim().is_empty() {
+    pub fn prepare_send(conn: &Connection, id: &str, text: &str, images: &[ImageInput], now: i64) -> Result<(Chat, Project, Vec<Repo>), String> {
+        if text.trim().is_empty() && images.is_empty() {
             return Err("The message is empty.".into());
         }
         if text.chars().count() > MESSAGE_MAX {
             return Err(format!("The message is too long (over {MESSAGE_MAX} characters)."));
         }
+        check_images(images)?;
         let mut c = chats::get(conn, id)?;
         if c.title.is_none() {
-            c.title = title(Some(text));
+            c.title = title(Some(text)).or_else(|| Some("Image".into()));
         }
         // Writing to an archived chat brings it back.
         c.archived_at = None;
@@ -248,6 +254,28 @@ pub mod ops {
         chats::update(conn, &next)?;
         Ok(next)
     }
+}
+
+/// A message's images: at most `IMAGES_MAX`, each a supported type, valid base64 and at most
+/// `IMAGE_MAX_BYTES` decoded.
+fn check_images(images: &[ImageInput]) -> Result<(), String> {
+    if images.len() > IMAGES_MAX {
+        return Err(format!("Too many images: at most {IMAGES_MAX} per message."));
+    }
+    for (i, img) in images.iter().enumerate() {
+        let n = i + 1;
+        if !IMAGE_TYPES.contains(&img.media_type.as_str()) {
+            return Err(format!("Image {n} isn't a PNG, JPEG, GIF or WebP."));
+        }
+        match base64_len(&img.data_base64) {
+            None | Some(0) => return Err(format!("Image {n} couldn't be read.")),
+            Some(len) if len > IMAGE_MAX_BYTES => {
+                return Err(format!("Image {n} is too big (over {} MB).", IMAGE_MAX_BYTES / (1024 * 1024)))
+            }
+            Some(_) => {}
+        }
+    }
+    Ok(())
 }
 
 /// The worktree the chat runs in: its task's, else its own. `None` if it has none or the
@@ -454,14 +482,14 @@ impl Chats {
 
     /// Sends a message, starting (or resuming) the chat's process if it isn't running.
     /// Returns the chat, named after its first message.
-    pub async fn send_chat_message(&self, id: String, text: String) -> Result<Chat, AppError> {
+    pub async fn send_chat_message(&self, id: String, text: String, images: Vec<ImageInput>) -> Result<Chat, AppError> {
         check_id(&id, "chat")?;
         let now = self.core.clock.now_ms();
-        let body = text.clone();
+        let (body, imgs) = (text.clone(), images.clone());
         let fs = self.core.env.fs.clone();
         let (chat, project, repos, wt, intro) = self
             .db(move |c| {
-                let (chat, project, repos) = ops::prepare_send(c, &id, &body, now)?;
+                let (chat, project, repos) = ops::prepare_send(c, &id, &body, &imgs, now)?;
                 let wt = task_worktree(c, &chat, |p| fs.is_dir(Path::new(p)))?;
                 let intro = rows::load_settings(c).map_err(|e| e.to_string())?.chat_system_prompt;
                 Ok((chat, project, repos, wt, intro))
@@ -469,7 +497,7 @@ impl Chats {
             .await?;
         let mcp = self.core.env.fs.nodal_mcp_bin();
         let spec = spec(&chat, &project, &repos, wt.as_deref(), mcp.as_deref(), intro.as_deref())?;
-        self.core.chats.send(&chat.id, &chat.project_id, chat.session_id.as_deref(), spec, &text)?;
+        self.core.chats.send(&chat.id, &chat.project_id, chat.session_id.as_deref(), spec, &text, &images)?;
         self.core.notifier.notify(ChangeKind::Chats, Some(&chat.project_id));
         Ok(chat)
     }

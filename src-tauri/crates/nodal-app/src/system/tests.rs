@@ -27,6 +27,7 @@ impl ChatRuntime for UnusedChats {
         _session_id: Option<&str>,
         _spec: ChatSpec,
         _text: &str,
+        _images: &[nodal_domain::model::chat::ImageInput],
     ) -> Result<(), HostError> {
         unreachable!("system doesn't use chats")
     }

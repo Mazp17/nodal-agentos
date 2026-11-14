@@ -30,7 +30,7 @@ use serde::Deserialize;
 use serde_json::value::RawValue;
 use serde_json::{json, Value};
 
-use nodal_domain::model::chat::{PermissionRequest, StreamEvent};
+use nodal_domain::model::chat::{ImageInput, PermissionRequest, StreamEvent};
 use nodal_domain::sessions::transcript::user_item;
 
 use super::fs::transcript::{assistant_item, single_result, tool_input_summary, tool_result_info};
@@ -466,8 +466,19 @@ pub fn parse_line(line: &str) -> Vec<StreamEvent> {
 
 /// A user message for stdin (one line, without the newline). Claude Code keeps its `uuid` in
 /// the session file and echoes it back, which is how a message is found to rewind to.
-pub fn user_message(text: &str, uuid: &str) -> String {
-    json!({"type": "user", "uuid": uuid, "message": {"role": "user", "content": text}}).to_string()
+/// With `images`, the content is an array: a text block (if there's text), then one base64
+/// image block per image (verified with 2.1.325). Without, it stays a plain string.
+pub fn user_message(text: &str, images: &[ImageInput], uuid: &str) -> String {
+    let content = if images.is_empty() {
+        json!(text)
+    } else {
+        let text_block = (!text.trim().is_empty()).then(|| json!({"type": "text", "text": text}));
+        let image_blocks = images.iter().map(|i| {
+            json!({"type": "image", "source": {"type": "base64", "media_type": i.media_type, "data": i.data_base64}})
+        });
+        Value::Array(text_block.into_iter().chain(image_blocks).collect())
+    };
+    json!({"type": "user", "uuid": uuid, "message": {"role": "user", "content": content}}).to_string()
 }
 
 /// A random (v4) uuid, from std's per-process random hasher seeds (no `uuid` dependency).

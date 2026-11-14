@@ -3,13 +3,21 @@
 
 use std::path::PathBuf;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::model::claude::{ToolResultInfo, TranscriptItem};
 
 /// Event with every chat's output: `{chatId, event}` (mirror of `ChatEventEnvelope` in `api.ts`).
 pub const CHAT_EVENT: &str = "nodal://chat";
+
+/// An image attached to a chat message, as the UI sends it.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImageInput {
+    pub media_type: String,
+    pub data_base64: String,
+}
 
 /// How a chat's process is launched. A running process whose spec no longer matches is
 /// restarted on the next message.

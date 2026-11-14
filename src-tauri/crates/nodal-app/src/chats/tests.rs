@@ -134,17 +134,17 @@ fn prepare_send_names_and_touches_the_chat() {
     seed(&c);
     let chat = ops::create(&c, "p1", &NewChat::default(), 1).unwrap();
     assert_eq!(
-        ops::prepare_send(&c, &chat.id, "  \n ", 2).unwrap_err(),
+        ops::prepare_send(&c, &chat.id, "  \n ", &[], 2).unwrap_err(),
         "The message is empty."
     );
     assert!(
-        ops::prepare_send(&c, &chat.id, &"x".repeat(MESSAGE_MAX + 1), 2)
+        ops::prepare_send(&c, &chat.id, &"x".repeat(MESSAGE_MAX + 1), &[], 2)
             .unwrap_err()
             .contains("too long")
     );
 
     let long = format!("Turn the checkout flow\ninto tasks {}", "a".repeat(200));
-    let (sent, project, repos) = ops::prepare_send(&c, &chat.id, &long, 5).unwrap();
+    let (sent, project, repos) = ops::prepare_send(&c, &chat.id, &long, &[], 5).unwrap();
     assert_eq!(sent.updated_at, 5);
     let t = sent.title.clone().unwrap();
     assert!(
@@ -157,9 +157,33 @@ fn prepare_send_names_and_touches_the_chat() {
         ["r1", "r2"]
     );
 
-    let (again, _, _) = ops::prepare_send(&c, &chat.id, "Second message", 6).unwrap();
+    let (again, _, _) = ops::prepare_send(&c, &chat.id, "Second message", &[], 6).unwrap();
     assert_eq!(again.title, sent.title, "the title is kept");
     assert_eq!(chats::get(&c, &chat.id).unwrap().updated_at, 6);
+}
+
+fn img(media_type: &str, data_base64: String) -> ImageInput {
+    ImageInput { media_type: media_type.into(), data_base64 }
+}
+
+#[test]
+fn prepare_send_checks_the_images() {
+    let db = Db::open_in_memory().unwrap();
+    let c = db.lock().unwrap();
+    seed(&c);
+    let chat = ops::create(&c, "p1", &NewChat::default(), 1).unwrap();
+    let png = img("image/png", "iVBORw==".into());
+    let err = |images: &[ImageInput]| ops::prepare_send(&c, &chat.id, "hi", images, 2).unwrap_err();
+    assert!(err(&[img("application/pdf", "iVBORw==".into())]).contains("isn't a PNG"));
+    assert!(err(&[png.clone(), img("image/png", "not base64!".into())]).contains("Image 2 couldn't be read"));
+    assert!(err(&vec![png.clone(); IMAGES_MAX + 1]).contains("Too many images"));
+    let over = "A".repeat(4 * (IMAGE_MAX_BYTES / 3 + 1));
+    assert!(err(&[img("image/jpeg", over)]).contains("too big"));
+    assert_eq!(chats::get(&c, &chat.id).unwrap().title, None, "a refused message doesn't name the chat");
+
+    let fits = "A".repeat(IMAGE_MAX_BYTES / 3 * 4);
+    let (sent, _, _) = ops::prepare_send(&c, &chat.id, " ", &[png, img("image/webp", fits)], 3).unwrap();
+    assert_eq!(sent.title.as_deref(), Some("Image"), "an image-only message names the chat");
 }
 
 #[test]
@@ -360,7 +384,7 @@ fn first_message_goes_back_into_the_items() {
 use std::sync::{Arc, Mutex};
 
 use nodal_domain::error::HostError;
-use nodal_domain::model::chat::RunState;
+use nodal_domain::model::chat::{ImageInput, RunState};
 use nodal_domain::model::claude::Transcript;
 use nodal_domain::model::events::ChangeKind;
 use nodal_domain::ports::{ChangeNotifier, ChatRuntime, Clock, SessionFiles};
@@ -408,7 +432,7 @@ struct FakeChatRuntime {
 }
 
 impl ChatRuntime for FakeChatRuntime {
-    fn send(&self, chat_id: &str, project_id: &str, session_id: Option<&str>, spec: ChatSpec, text: &str) -> Result<(), HostError> {
+    fn send(&self, chat_id: &str, project_id: &str, session_id: Option<&str>, spec: ChatSpec, text: &str, _images: &[ImageInput]) -> Result<(), HostError> {
         self.sent
             .lock()
             .unwrap()
@@ -543,19 +567,24 @@ fn create_chat_rejects_an_invalid_project_id() {
 fn send_chat_message_rejects_an_empty_or_too_long_message() {
     let f = fx("chats-message-bounds");
     let chat = block_on(f.chats.create_chat("p1".into(), NewChat::default())).unwrap();
-    let err = block_on(f.chats.send_chat_message(chat.id.clone(), "   ".into())).unwrap_err();
+    let err = block_on(f.chats.send_chat_message(chat.id.clone(), "   ".into(), vec![])).unwrap_err();
     assert_eq!(err.to_string(), "The message is empty.");
 
     let too_long = "x".repeat(super::MESSAGE_MAX + 1);
-    let err = block_on(f.chats.send_chat_message(chat.id, too_long)).unwrap_err();
+    let err = block_on(f.chats.send_chat_message(chat.id.clone(), too_long, vec![])).unwrap_err();
     assert!(err.to_string().contains("too long"));
+
+    let gif = ImageInput { media_type: "image/gif".into(), data_base64: "R0lGOA==".into() };
+    let err = block_on(f.chats.send_chat_message(chat.id, "hi".into(), vec![gif; 11])).unwrap_err();
+    assert!(err.to_string().contains("Too many images"));
+    assert!(f.runtime.sent.lock().unwrap().is_empty(), "nothing is sent");
 }
 
 #[test]
 fn send_chat_message_builds_the_spec_and_names_the_chat() {
     let f = fx("chats-send");
     let chat = block_on(f.chats.create_chat("p1".into(), NewChat::default())).unwrap();
-    let sent = block_on(f.chats.send_chat_message(chat.id.clone(), "Turn the checkout flow into tasks please".into())).unwrap();
+    let sent = block_on(f.chats.send_chat_message(chat.id.clone(), "Turn the checkout flow into tasks please".into(), vec![])).unwrap();
     assert!(sent.title.as_deref().unwrap().starts_with("Turn the checkout flow"));
     assert_eq!(f.notifier.kinds(), vec![ChangeKind::Chats, ChangeKind::Chats]);
 
@@ -764,14 +793,14 @@ fn create_chat_in_a_worktree_runs_there_and_rejects_other_paths() {
 
     let chat = block_on(f.chats.create_chat("p1".into(), new(&wt, Some("r1")))).unwrap();
     assert_eq!(chat.worktree.as_deref(), Some(wt.to_string_lossy().as_ref()));
-    block_on(f.chats.send_chat_message(chat.id.clone(), "hi".into())).unwrap();
+    block_on(f.chats.send_chat_message(chat.id.clone(), "hi".into(), vec![])).unwrap();
     assert_eq!(f.runtime.sent.lock().unwrap()[0].3.cwd, wt);
     let ws = block_on(f.chats.chat_workspace(chat.id.clone())).unwrap();
     assert!(ws.is_worktree);
 
     // The folder is gone: the chat falls back to the repo.
     std::fs::remove_dir_all(&wt).unwrap();
-    block_on(f.chats.send_chat_message(chat.id, "again".into())).unwrap();
+    block_on(f.chats.send_chat_message(chat.id, "again".into(), vec![])).unwrap();
     assert_eq!(f.runtime.sent.lock().unwrap()[1].3.cwd, f.repo_path);
 }
 
@@ -791,7 +820,7 @@ fn archive_stops_the_chat_and_unarchive_or_a_message_brings_it_back() {
     assert_eq!(chats::get(&f.db.lock().unwrap(), &chat.id).unwrap().archived_at, None);
 
     block_on(f.chats.set_chat_archived(chat.id.clone(), true)).unwrap();
-    block_on(f.chats.send_chat_message(chat.id.clone(), "hi".into())).unwrap();
+    block_on(f.chats.send_chat_message(chat.id.clone(), "hi".into(), vec![])).unwrap();
     assert_eq!(chats::get(&f.db.lock().unwrap(), &chat.id).unwrap().archived_at, None);
 }
 

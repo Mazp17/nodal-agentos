@@ -55,6 +55,7 @@ impl ChatRuntime for NoopChatRuntime {
         _session_id: Option<&str>,
         _spec: ChatSpec,
         _text: &str,
+        _images: &[nodal_domain::model::chat::ImageInput],
     ) -> Result<(), HostError> {
         unimplemented!("not exercised by the agent_api tests")
     }

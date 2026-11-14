@@ -40,6 +40,17 @@ pub fn user_item(s: &str, uuid: Option<String>) -> TranscriptItem {
     TranscriptItem::User { text, truncated, uuid }
 }
 
+/// Decoded size of standard, padded base64; `None` if it isn't valid base64.
+pub fn base64_len(s: &str) -> Option<usize> {
+    let b = s.as_bytes();
+    if !b.len().is_multiple_of(4) {
+        return None;
+    }
+    let pad = b.iter().rev().take_while(|&&c| c == b'=').count();
+    let ok = pad <= 2 && b[..b.len() - pad].iter().all(|c| c.is_ascii_alphanumeric() || *c == b'+' || *c == b'/');
+    ok.then(|| b.len() / 4 * 3 - pad)
+}
+
 /// A message uuid reaches a CLI argument (`--resume-session-at`, `rewind_files`): only hex and dashes.
 pub fn is_valid_message_uuid(id: &str) -> bool {
     !id.is_empty() && id.len() <= 64 && id.chars().all(|c| c.is_ascii_hexdigit() || c == '-')
