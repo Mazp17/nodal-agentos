@@ -394,6 +394,8 @@ pub fn parse_transcript(text: &str, limit: usize) -> ParsedTranscript {
         let content = entry.message.as_ref().and_then(|m| m.get("content"));
         match entry.kind.as_deref() {
             Some("user") => match content {
+                // Injected by Claude Code (skill bodies, image paths, reminders), not typed by the user.
+                Some(Value::String(_)) if entry.is_meta == Some(true) => {}
                 Some(Value::String(s)) => {
                     if seen_assistant {
                         let (text, truncated) = clip(s, TEXT_MAX);
@@ -431,14 +433,10 @@ pub fn parse_transcript(text: &str, limit: usize) -> ParsedTranscript {
                                     *slot = Some(info);
                                 }
                             }
-                            Some("text") => {
+                            Some("text") if entry.is_meta != Some(true) => {
                                 let Some(s) = b.get("text").and_then(Value::as_str) else {
                                     continue;
                                 };
-                                // Where Claude Code saved an image the message carries (observed in 2.1.325).
-                                if entry.is_meta == Some(true) && s.starts_with("[Image: source:") {
-                                    continue;
-                                }
                                 if seen_assistant {
                                     let (text, truncated) = clip(s, TEXT_MAX);
                                     items.push(TranscriptItem::User { text, truncated, uuid: entry.uuid.clone(), images: vec![] });

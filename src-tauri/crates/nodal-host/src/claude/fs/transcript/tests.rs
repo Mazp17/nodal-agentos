@@ -286,3 +286,18 @@ fn user_images_are_kept_and_their_meta_line_skipped() {
     let i = image_block(&b).unwrap();
     assert!(i.data.is_none() && i.bytes > IMAGE_INLINE_MAX);
 }
+
+#[test]
+fn meta_skill_body_is_not_a_user_message() {
+    let lines = [
+        r#"{"type":"user","uuid":"u1","message":{"role":"user","content":"use the skill"}}"#,
+        r#"{"type":"assistant","uuid":"a1","message":{"content":[{"type":"tool_use","id":"t1","name":"Skill","input":{"skill":"run"}}]}}"#,
+        r#"{"type":"user","uuid":"r1","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":"Launching skill: run"}]}}"#,
+        r#"{"type":"user","uuid":"m1","isMeta":true,"sourceToolUseID":"t1","message":{"role":"user","content":[{"type":"text","text":"Base directory for this skill: /x\n\n# Run"}]}}"#,
+        r#"{"type":"user","uuid":"m2","isMeta":true,"message":{"role":"user","content":"Base directory for this skill: /y"}}"#,
+        r#"{"type":"assistant","uuid":"a2","message":{"content":[{"type":"text","text":"done"}]}}"#,
+    ];
+    let p = parse_transcript(&lines.join("\n"), 100);
+    assert_eq!((p.prompt.as_deref(), p.prompt_uuid.as_deref()), (Some("use the skill"), Some("u1")));
+    assert!(!p.items.iter().any(|i| matches!(i, TranscriptItem::User { .. })), "{:?}", p.items);
+}
