@@ -5,7 +5,7 @@ import { relUnder } from "../../domain/hooks/projects";
 import { PROPOSE_TASK_TOOL, type ExecutorInfo, type NewTask, type PermissionRequest } from "../../domain/api";
 import type { Chat, Priority, Repo, TaskStatus } from "../../domain/types";
 import { formatTokens } from "../../lib/format";
-import type { AgentResultInfo, SubagentRef, TranscriptItem } from "./types";
+import type { AgentResultInfo, SubagentRef, TranscriptImage, TranscriptItem } from "./types";
 
 export type ToolUse = Extract<TranscriptItem, { kind: "toolUse" }>;
 
@@ -90,9 +90,11 @@ export type Part =
   | { kind: "proposal"; item: ToolUse };
 
 /** A message sent that Claude hasn't echoed yet; `queued` if sent while Claude was working. */
-export type Outgoing = { text: string; queued: boolean };
+export type Outgoing = { text: string; queued: boolean; images: TranscriptImage[] };
 
-export type Turn = { kind: "user"; text: string; pending: boolean; queued?: boolean; uuid: string | null } | { kind: "ai"; parts: Part[] };
+export type Turn =
+  | { kind: "user"; text: string; images: TranscriptImage[]; pending: boolean; queued?: boolean; uuid: string | null }
+  | { kind: "ai"; parts: Part[] };
 
 export const isProposal = (item: ToolUse) => item.name === PROPOSE_TASK_TOOL;
 
@@ -111,7 +113,7 @@ export function toTurns(items: TranscriptItem[], outbox: Outgoing[] = []): Turn[
   };
   for (const it of items) {
     if (it.kind === "user") {
-      turns.push({ kind: "user", text: it.text, pending: false, uuid: it.uuid ?? null });
+      turns.push({ kind: "user", text: it.text, images: it.images ?? [], pending: false, uuid: it.uuid ?? null });
     } else if (it.kind === "toolUse") {
       const parts = ai();
       const last = parts[parts.length - 1];
@@ -122,7 +124,7 @@ export function toTurns(items: TranscriptItem[], outbox: Outgoing[] = []): Turn[
       ai().push(it.kind === "thinking" ? { kind: "thinking", text: it.text, truncated: it.truncated } : { kind: "text", text: it.text });
     }
   }
-  for (const { text, queued } of outbox) turns.push({ kind: "user", text, pending: true, queued, uuid: null });
+  for (const { text, queued, images } of outbox) turns.push({ kind: "user", text, images, pending: true, queued, uuid: null });
   return turns;
 }
 

@@ -29,7 +29,8 @@ import { CommandPalette } from "../../shell/palette/CommandPalette";
 import { isClosed, providerLabel, STATUS_META, taskTag } from "../tasks/status";
 import { PrBadge, StatusRing } from "../tasks/bits";
 import { Composer, type ComposerSettings } from "./Composer";
-import { getComposerDraft, setComposerDraft, useComposerDraft } from "./composerDrafts";
+import { getComposerDraft, getComposerImages, setComposerDraft, setComposerImages, useComposerDraft, useComposerImages } from "./composerDrafts";
+import { readImages, toTranscriptImage } from "./Images";
 import { Conversation } from "./Conversation";
 import { ShellStrip } from "./ShellStrip";
 import { closeSubagent, SubagentSheet, useSubagentTarget } from "./SubagentSheet";
@@ -81,6 +82,13 @@ export function ChatView({ project, repos, chatId: tabChatId, onCreated, onShowC
   const draftKey = tabChatId ?? `new:${project.id}`;
   const draft = useComposerDraft(draftKey);
   const setDraft = (text: string) => setComposerDraft(draftKey, text);
+  const images = useComposerImages(draftKey);
+  const addImages = async (files: File[]) => {
+    const key = draftKey;
+    const read = await readImages(files, getComposerImages(key).length);
+    if (read.images.length) setComposerImages(key, [...getComposerImages(key), ...read.images]);
+    if (read.errors.length) toast("Couldn't attach", read.errors.join("\n"), "danger");
+  };
   const [menu, setMenu] = useState<string | null>(null);
   const [draftSettings, setDraftSettings] = useState<ComposerSettings>(NEW_CHAT);
 
@@ -167,7 +175,9 @@ export function ChatView({ project, repos, chatId: tabChatId, onCreated, onShowC
 
   const send = async (raw?: string) => {
     const text = (raw ?? draft).trim();
-    if (!text) return;
+    // A suggestion, retry or edit sends text only: a past message's images aren't resent.
+    const imgs = raw === undefined ? images : [];
+    if (!text && !imgs.length) return;
     let target = chat;
     if (!target) {
       try {
@@ -189,22 +199,25 @@ export function ChatView({ project, repos, chatId: tabChatId, onCreated, onShowC
       void invalidate("chats");
       // The text goes to the new chat: the next new chat starts empty.
       setComposerDraft(draftKey, "");
+      setComposerImages(draftKey, []);
       onCreated(target.id);
     }
     const id = target.id;
-    pushOutbox(id, text, busy);
+    pushOutbox(id, text, busy, imgs.map(toTranscriptImage));
     // By id, not `setDraft`: a new chat's tab is re-keyed to `id` (and remounted) meanwhile.
     setComposerDraft(id, "");
+    if (imgs.length) setComposerImages(id, []);
     atBottom.current = true;
     try {
       // Its channel must be attached before the process can start (and stream): `seedChat`/
       // `useChatStream` already kicked this off, cached and idempotent, so this just awaits it.
       await ensureChatAttached(id);
-      await sendChatMessage(id, text);
+      await sendChatMessage(id, text, imgs);
       void invalidate("chats");
     } catch (e) {
       dropOutbox(id, text);
       setComposerDraft(id, getComposerDraft(id) || text);
+      if (imgs.length && !getComposerImages(id).length) setComposerImages(id, imgs);
       toast("Couldn't send the message", String(e), "danger");
     }
   };
@@ -534,6 +547,9 @@ export function ChatView({ project, repos, chatId: tabChatId, onCreated, onShowC
             ) : undefined
           }
           draft={draft}
+          images={images}
+          onAddImages={(files) => void addImages(files)}
+          onRemoveImage={(i) => setComposerImages(draftKey, images.filter((_, j) => j !== i))}
           placeholder={
             !busy
               ? `Ask anything about ${project.name}…`

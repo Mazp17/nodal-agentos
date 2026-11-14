@@ -1,5 +1,7 @@
-import { useEffect, useRef, type ReactNode } from "react";
-import { ArrowUp, Check, ChevronDown, Folder, Gauge, Square, Star, User, Zap, type LucideIcon } from "lucide-react";
+import { useEffect, useRef, useState, type DragEvent, type ReactNode } from "react";
+import { ArrowUp, Check, ChevronDown, Folder, Gauge, Paperclip, Square, Star, User, Zap, type LucideIcon } from "lucide-react";
+import type { ImageInput } from "../../domain/api";
+import { IMAGE_TYPES, ImageThumbs, toTranscriptImage } from "./Images";
 import { formatTokens } from "../../lib/format";
 import { contextPercent, DEFAULT_CONTEXT_WINDOW, optionLabel, type PillOption } from "./model";
 
@@ -109,6 +111,10 @@ export interface ComposerSettings {
 
 export interface ComposerProps {
   draft: string;
+  /** Images attached to the draft. */
+  images: ImageInput[];
+  onAddImages: (files: File[]) => void;
+  onRemoveImage: (i: number) => void;
   placeholder: string;
   settings: ComposerSettings;
   modes: PillOption[];
@@ -134,6 +140,8 @@ export interface ComposerProps {
 
 export function Composer(p: ComposerProps) {
   const ref = useRef<HTMLTextAreaElement>(null);
+  const picker = useRef<HTMLInputElement>(null);
+  const [dropping, setDropping] = useState(false);
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
@@ -143,7 +151,8 @@ export function Composer(p: ComposerProps) {
   }, [p.focusKey]);
 
   const lines = p.draft.split("\n").length;
-  const canSend = !!p.draft.trim();
+  const canSend = !!p.draft.trim() || p.images.length > 0;
+  const hasFiles = (e: DragEvent) => e.dataTransfer.types.includes("Files");
   const pill = (id: keyof ComposerSettings, options: PillOption[], align: "left" | "right", caption: string, icon: PillIcon) => ({
     id,
     caption,
@@ -160,7 +169,21 @@ export function Composer(p: ComposerProps) {
   return (
     <div className="chat-composer-wrap">
       <div
-        className="chat-composer"
+        className={`chat-composer ${dropping ? "chat-composer-drop" : ""}`}
+        onDragOver={(e) => {
+          if (!hasFiles(e)) return;
+          e.preventDefault();
+          setDropping(true);
+        }}
+        onDragLeave={(e) => {
+          if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDropping(false);
+        }}
+        onDrop={(e) => {
+          if (!hasFiles(e)) return;
+          e.preventDefault();
+          setDropping(false);
+          p.onAddImages([...e.dataTransfer.files]);
+        }}
         onKeyDown={(e) => {
           if (e.key === "Escape" && p.menu) {
             e.stopPropagation();
@@ -169,6 +192,7 @@ export function Composer(p: ComposerProps) {
         }}
       >
         {p.tray && <div className="chat-composer-tray">{p.tray}</div>}
+        {p.images.length > 0 && <ImageThumbs images={p.images.map(toTranscriptImage)} onRemove={p.onRemoveImage} />}
         <textarea
           ref={ref}
           className="chat-input"
@@ -177,6 +201,12 @@ export function Composer(p: ComposerProps) {
           aria-label="Message"
           style={{ height: Math.min(200, Math.max(64, lines * 19 + 30)) }}
           onChange={(e) => p.onDraft(e.target.value)}
+          onPaste={(e) => {
+            const files = [...e.clipboardData.files].filter((f) => f.type.startsWith("image/"));
+            if (!files.length) return;
+            e.preventDefault();
+            p.onAddImages(files);
+          }}
           onKeyDown={(e) => {
             if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
               e.preventDefault();
@@ -185,6 +215,20 @@ export function Composer(p: ComposerProps) {
           }}
         />
         <div className="chat-composer-bar">
+          <button type="button" className="chat-attach" title="Attach images" aria-label="Attach images" onClick={() => picker.current?.click()}>
+            <Paperclip size={14} strokeWidth={1.75} aria-hidden />
+          </button>
+          <input
+            ref={picker}
+            type="file"
+            accept={IMAGE_TYPES.join(",")}
+            multiple
+            hidden
+            onChange={(e) => {
+              p.onAddImages([...(e.target.files ?? [])]);
+              e.target.value = "";
+            }}
+          />
           <Pill
             {...pill("agent", p.agents, "left", "Agent", "agent")}
             disabled={p.agentLocked}

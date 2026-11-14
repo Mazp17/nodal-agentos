@@ -512,7 +512,13 @@ export const unarchiveChat = (id: string) => invoke<Chat>("unarchive_chat", { id
 /** Links the chat to a task (`null` unlinks it); refused if the task has a chat or the chat's folder would change. */
 export const linkChatTask = (id: string, taskId: string | null) => invoke<Chat>("link_chat_task", { id, taskId });
 /** Starts or resumes the chat's `claude` process if needed; the answer streams as `nodal://chat`. */
-export const sendChatMessage = (id: string, text: string) => invoke<Chat>("send_chat_message", { id, text });
+/** An image attached to a message: base64 without the `data:` prefix. */
+export interface ImageInput {
+  mediaType: string;
+  dataBase64: string;
+}
+export const sendChatMessage = (id: string, text: string, images: ImageInput[] = []) =>
+  invoke<Chat>("send_chat_message", { id, text, images: images.map(({ mediaType, dataBase64 }) => ({ mediaType, dataBase64 })) });
 /** `message` is what Claude reads on a denial. */
 /** `answers` (question text -> chosen labels) answer an `AskUserQuestion` request. */
 export const respondChatPermission = (
