@@ -3,7 +3,8 @@
 // macOS files the notification away without a banner. What's unread is tracked in `stream.ts`.
 
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { isPermissionGranted, requestPermission, sendNotification } from "@tauri-apps/plugin-notification";
+import { isPermissionGranted, requestPermission } from "@tauri-apps/plugin-notification";
+import { notifyChatSystem } from "../../domain/api";
 
 /** Checked once per launch (on desktop the plugin always reports it granted). */
 let allowed: Promise<boolean> | null = null;
@@ -32,7 +33,7 @@ export const appFocused = (): Promise<boolean> =>
     .isFocused()
     .catch(() => document.hasFocus());
 
-type InApp = (title: string, body: string) => void;
+type InApp = (chatId: string, title: string, body: string) => void;
 let inApp: InApp | null = null;
 
 /** Where notices go while Nodal is in front (the app's toasts); `null` to stop. */
@@ -40,12 +41,12 @@ export function setInAppNotice(show: InApp | null) {
   inApp = show;
 }
 
-/** Posts a notice titled with the chat's name. */
-export async function notifyChat(title: string, body: string, focused: boolean) {
+/** Posts a notice titled with the chat's name; clicking it opens `chatId` (`nodal://open-chat`). */
+export async function notifyChat(chatId: string, title: string, body: string, focused: boolean) {
   if (inApp && focused) {
-    inApp(title, body);
+    inApp(chatId, title, body);
     return;
   }
-  // Failures surface as the plugin's own unhandled rejection: it doesn't return a promise.
-  if (await permitted()) sendNotification({ title, body });
+  // Sent from Rust (`notify.rs`): the plugin can't report the click on desktop.
+  if (await permitted()) notifyChatSystem(chatId, title, body).catch((e: unknown) => console.error("notify chat", e));
 }

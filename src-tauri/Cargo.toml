@@ -61,6 +61,10 @@ nodal-app = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 
+[target.'cfg(target_os = "macos")'.dependencies]
+# Chat notifications that report their click (`notify.rs`); same version `notify-rust` pulls in.
+mac-notification-sys = "0.6.15"
+
 [dev-dependencies]
 nodal-domain = { workspace = true, features = ["test-support"] }
 nodal-store = { workspace = true, features = ["test-support"] }

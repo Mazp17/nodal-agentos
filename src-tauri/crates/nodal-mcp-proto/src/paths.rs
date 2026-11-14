@@ -19,8 +19,22 @@ pub const APP_IDENTIFIER: &str = "io.github.mazp17.nodal";
 /// `data_dir` without a running Tauri app, for `nodal-mcp`. Same folder Tauri's
 /// `app_data_dir()` resolves on each OS.
 pub fn data_dir_standalone() -> Result<PathBuf, String> {
+    if let Some(dir) = data_dir_override() {
+        return Ok(dir);
+    }
     let dir = data_base()?.join(APP_IDENTIFIER);
     Ok(if DEV { dev_sibling(&dir) } else { dir })
+}
+
+/// Debug builds only: `NODAL_DATA_DIR` points the app and `nodal-mcp` (which inherits the env)
+/// at another data folder, so `scripts/preview.sh` runs a branch on a copy of the dev data.
+pub fn data_dir_override() -> Option<PathBuf> {
+    if !DEV {
+        return None;
+    }
+    std::env::var_os("NODAL_DATA_DIR")
+        .filter(|x| !x.is_empty())
+        .map(PathBuf::from)
 }
 
 #[cfg(target_os = "macos")]

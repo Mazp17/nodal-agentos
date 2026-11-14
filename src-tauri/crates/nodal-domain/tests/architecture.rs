@@ -67,6 +67,7 @@ const WHITELIST: &[(&str, &[&str], &[&str])] = &[
             "tauri-plugin-dialog",
             "tauri-plugin-updater",
             "tauri-plugin-notification",
+            "mac-notification-sys",
             "serde",
             "serde_json",
             "tokio",

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { deleteChat, listRepoFiles, setChatPinned, onCloseTab } from "../domain/api";
+import { deleteChat, listRepoFiles, onCloseTab, onOpenChat, setChatPinned } from "../domain/api";
 import { useChatWorkspace, useRepoWorktrees } from "../domain/hooks/branches";
 import { useAllChats } from "../domain/hooks/chats";
 import { useProjects } from "../domain/hooks/projects";
@@ -137,9 +137,15 @@ export function AppShell() {
   useEffect(() => {
     if (ctx.loaded && !ctx.error) pruneUnread(new Set(ctx.projectById.keys()));
   }, [ctx.loaded, ctx.error, ctx.projectById]);
+  // Toast "Open" and a clicked system notification open the chat; a chat deleted since does nothing.
+  const openChatIdRef = useRef<(id: string) => void>(() => {});
   useEffect(() => {
-    setInAppNotice((title, body) => toast(title, body, "info"));
-    return () => setInAppNotice(null);
+    setInAppNotice((chatId, title, body) => toast(title, body, "info", { label: "Open", onClick: () => openChatIdRef.current(chatId) }));
+    const off = onOpenChat((id) => openChatIdRef.current(id));
+    return () => {
+      setInAppNotice(null);
+      void off.then((f) => f());
+    };
   }, [toast]);
 
   // Project deleted (from here or elsewhere): go back to "All projects".
@@ -238,6 +244,10 @@ export function AppShell() {
   const openChatTab = (c: Chat) => {
     tabs.openChat(c.id);
     go("chat", c.projectId);
+  };
+  openChatIdRef.current = (id) => {
+    const c = chatById.get(id);
+    if (c) openChatTab(c);
   };
   const newChat = (pid: string) => {
     tabs.openChat(draftTab(pid));

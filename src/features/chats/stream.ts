@@ -230,7 +230,7 @@ async function flag(chatId: string, body: string) {
   if (chat && viewed !== chatId) setUnread(chatId, chat.projectId);
   const focused = await appFocused();
   // On screen: Nodal in front with this chat open.
-  if (!(focused && viewed === chatId)) void notifyChat(chat ? chatTitle(chat) : "Chat", body, focused);
+  if (!(focused && viewed === chatId)) void notifyChat(chatId, chat ? chatTitle(chat) : "Chat", body, focused);
 }
 
 /** Answer text for a notification: the turn's result, else the last text streamed. */
