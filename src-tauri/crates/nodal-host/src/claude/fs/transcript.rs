@@ -679,6 +679,63 @@ pub fn last_turn_tools(path: &Path) -> Vec<(String, Value)> {
     calls
 }
 
+/// `https://github.com/<o>/<r>/pull/<n>` URLs in `text`, in order.
+fn pr_urls(text: &str) -> Vec<String> {
+    const HOST: &str = "https://github.com/";
+    let mut urls = vec![];
+    for (i, _) in text.match_indices(HOST) {
+        let rest = &text[i + HOST.len()..];
+        let end = rest.find(|c: char| !(c.is_ascii_alphanumeric() || "/-_.".contains(c))).unwrap_or(rest.len());
+        let parts: Vec<_> = rest[..end].split('/').collect();
+        if let [o, r, "pull", n, ..] = parts[..] {
+            if !o.is_empty() && !r.is_empty() && n.parse::<u64>().is_ok() {
+                urls.push(format!("{HOST}{o}/{r}/pull/{n}"));
+            }
+        }
+    }
+    urls
+}
+
+/// PR URLs in the results of the main thread's `gh pr create` Bash calls after the last user
+/// prompt, in file order. Empty if unreadable.
+pub fn last_turn_pr_urls(path: &Path) -> Vec<String> {
+    let Ok((text, _, _)) = read_transcript_text(path) else { return vec![] };
+    let (mut ids, mut urls) = (std::collections::HashSet::new(), vec![]);
+    for line in main_thread_lines(&text) {
+        let Ok(v) = serde_json::from_str::<Value>(line) else { continue };
+        let blocks = v.pointer("/message/content").and_then(Value::as_array).into_iter().flatten();
+        match v.get("type").and_then(Value::as_str) {
+            Some("assistant") => {
+                for b in blocks.filter(|b| b.get("name").and_then(Value::as_str) == Some("Bash")) {
+                    let cmd = b.pointer("/input/command").and_then(Value::as_str).unwrap_or_default();
+                    if let (true, Some(id)) = (cmd.contains("gh pr create"), b.get("id").and_then(Value::as_str)) {
+                        ids.insert(id.to_string());
+                    }
+                }
+            }
+            Some("user") if v.get("isMeta").and_then(Value::as_bool) != Some(true) => {
+                let (mut prompt, mut results) = (matches!(v.pointer("/message/content"), Some(Value::String(_))), vec![]);
+                for b in blocks {
+                    match b.get("type").and_then(Value::as_str) {
+                        Some("text") => prompt = true,
+                        Some("tool_result") if b.get("tool_use_id").and_then(Value::as_str).is_some_and(|id| ids.contains(id)) => {
+                            results.push(b.get("content").map(Value::to_string).unwrap_or_default())
+                        }
+                        _ => {}
+                    }
+                }
+                if prompt {
+                    ids.clear();
+                    urls.clear();
+                }
+                urls.extend(results.iter().flat_map(|r| pr_urls(r)));
+            }
+            _ => {}
+        }
+    }
+    urls
+}
+
 /// The assistant message right before the user message `user_uuid` on the active branch (what
 /// `--resume-session-at` takes to rewind the conversation to just before it); `None` if that
 /// message is the first of the session.

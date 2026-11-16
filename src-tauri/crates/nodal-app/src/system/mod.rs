@@ -9,10 +9,10 @@ use std::path::Path;
 
 use nodal_domain::diff::{CommitInfo, FileDiff};
 use nodal_domain::model::events::ChangeKind;
-use nodal_domain::model::{DirEntry, PrState, Repo, RepoFile, RepoWorktree, TaskPr};
+use nodal_domain::model::{BranchPr, ChatPr, DirEntry, PrState, Repo, RepoFile, RepoWorktree, TaskPr};
 use nodal_domain::ports::Git;
 use nodal_domain::util::check_id;
-use nodal_store::board::tasks;
+use nodal_store::board::{branch_prs, chat_prs, tasks};
 use nodal_store::{rows, with_db};
 
 use crate::core::{blocking, AppError, Core};
@@ -116,7 +116,14 @@ impl System {
 
     /// Pushes the checkout's branch and opens a PR against its base (see `with_base`; the repo's
     /// own checkout uses the remote's default branch). Returns the PR URL.
-    pub async fn repo_open_pr(&self, repo_id: String, worktree: Option<String>, title: String, body: String) -> Result<String, AppError> {
+    pub async fn repo_open_pr(
+        &self,
+        repo_id: String,
+        worktree: Option<String>,
+        title: String,
+        body: String,
+        chat_id: Option<String>,
+    ) -> Result<String, AppError> {
         let title = title.trim().to_string();
         if title.is_empty() {
             return Err("Write a title for the pull request.".into());
@@ -137,17 +144,49 @@ impl System {
             git.open_pr(root, &base, &branch, &title, &body).map_err(|e| e.0)
         })
         .await?;
-        if let Some(wt) = wt {
-            if let Err(e) = self.link_task_pr(rid, wt, url.clone()).await {
-                eprintln!("tasks: couldn't link the PR {url}: {e}");
+        if let Some(number) = crate::board::pr::pr_number(&url) {
+            self.record_chat_pr(chat_id, rid.clone(), wt.clone(), number, url.clone()).await;
+            if let Some(wt) = wt {
+                let pr = TaskPr { url: url.clone(), number, state: PrState::Open, head: None };
+                if let Err(e) = self.link_task_pr(rid, wt, pr).await {
+                    eprintln!("tasks: couldn't link the PR {url}: {e}");
+                }
             }
         }
         Ok(url)
     }
 
+    /// Records a PR opened or linked from chat `chat_id` (if any); failures are logged only.
+    async fn record_chat_pr(&self, chat_id: Option<String>, repo_id: String, worktree: Option<String>, number: i64, url: String) {
+        let Some(chat_id) = chat_id else { return };
+        let res: Result<(), AppError> = async {
+            check_id(&chat_id, "chat")?;
+            let branch = self.with_root(repo_id.clone(), worktree, |git, root| Ok(git.current_branch(root))).await?;
+            let pr = ChatPr { repo_id, url, number, branch, created_at: self.core.clock.now_ms() };
+            let project = with_db(&self.core.db, move |c| {
+                let chat = nodal_store::chats::get(c, &chat_id)?;
+                Ok(chat_prs::insert_if_new(c, &chat_id, &pr)?.then_some(chat.project_id))
+            })
+            .await?;
+            if let Some(p) = project {
+                self.core.notifier.notify(ChangeKind::Chats, Some(&p));
+            }
+            Ok(())
+        }
+        .await;
+        if let Err(e) = res {
+            eprintln!("chats: couldn't record the PR: {e}");
+        }
+    }
+
+    /// The PRs a chat opened or linked, newest first.
+    pub async fn chat_prs(&self, chat_id: String) -> Result<Vec<ChatPr>, AppError> {
+        check_id(&chat_id, "chat")?;
+        Ok(with_db(&self.core.db, move |c| chat_prs::list(c, &chat_id)).await?)
+    }
+
     /// Links a PR just opened from `worktree` to the task working there, if any.
-    async fn link_task_pr(&self, repo_id: String, worktree: String, url: String) -> Result<(), AppError> {
-        let Some(number) = crate::board::pr::pr_number(&url) else { return Ok(()) };
+    async fn link_task_pr(&self, repo_id: String, worktree: String, pr: TaskPr) -> Result<(), AppError> {
         let (env, now) = (self.core.env.clone(), self.core.clock.now_ms());
         let project = with_db(&self.core.db, move |c| {
             let repo = rows::get_repo(c, &repo_id)?.ok_or_else(|| nodal_store::StoreError::Invalid("Repo not found.".into()))?;
@@ -158,7 +197,6 @@ impl System {
                 .find(|t| t.repo_id == repo.id && t.worktree.as_ref().is_some_and(|w| here.is_some() && canon(&w.path) == here));
             let Some(task) = task else { return Ok(None) };
             let tx = c.transaction()?;
-            let pr = TaskPr { url, number, state: PrState::Open, head: None };
             crate::board::pr::link_pr(&tx, &task, Some(pr), now).map_err(nodal_store::StoreError::Invalid)?;
             tx.commit()?;
             Ok(Some(task.project_id))
@@ -166,6 +204,110 @@ impl System {
         .await?;
         if let Some(p) = project {
             self.core.notifier.notify(ChangeKind::Tasks, Some(&p));
+        }
+        Ok(())
+    }
+
+    /// The checkout's branch, unless HEAD is detached or it is the default or base branch (no PR
+    /// of its own).
+    async fn pr_branch(&self, repo_id: String, worktree: Option<String>) -> Result<Option<String>, AppError> {
+        self.with_base(repo_id, worktree, false, |git, root, base| {
+            let branch = git.current_branch(root);
+            Ok(branch.filter(|b| git.default_branch(root).as_ref() != Some(b) && base.as_ref() != Some(b)))
+        })
+        .await
+    }
+
+    /// The checkout's PR: found by branch with `gh`, or linked by hand. Looks `gh` up when `force`
+    /// or the stored one is over `CHECK_INTERVAL_MS` old; `gh` failing (missing, logged out) is
+    /// logged and the stored PR is returned.
+    pub async fn repo_pr(&self, repo_id: String, worktree: Option<String>, force: Option<bool>) -> Result<Option<BranchPr>, AppError> {
+        let Some(branch) = self.pr_branch(repo_id.clone(), worktree.clone()).await? else { return Ok(None) };
+        let (now, force) = (self.core.clock.now_ms(), force.unwrap_or(false));
+        let (rid, b) = (repo_id.clone(), branch.clone());
+        let stored = with_db(&self.core.db, move |c| branch_prs::get(c, &rid, &b)).await?;
+        let manual = stored.as_ref().is_some_and(|(p, _)| p.manual);
+        let fresh = stored.as_ref().is_some_and(|(_, at)| now - at < crate::board::pr::CHECK_INTERVAL_MS);
+        if !force && (manual || fresh) {
+            return Ok(stored.map(|s| s.0));
+        }
+        let (b, url) = (branch.clone(), stored.as_ref().filter(|_| manual).map(|(p, _)| p.url.clone()));
+        let found = self
+            .with_root(repo_id.clone(), worktree, move |git, root| {
+                Ok(match url {
+                    Some(url) => git.pr_view(root, &url).map(Some),
+                    None => git.pr_for_branch(root, &b),
+                }
+                .map_err(|e| e.0))
+            })
+            .await?;
+        let (rid, b) = (repo_id, branch.clone());
+        match found {
+            Ok(Some(t)) => {
+                let pr = BranchPr { url: t.url, number: t.number, state: t.state, head: t.head, manual, branch };
+                let saved = pr.clone();
+                with_db(&self.core.db, move |c| branch_prs::upsert(c, &rid, &saved, now)).await?;
+                Ok(Some(pr))
+            }
+            Ok(None) => {
+                with_db(&self.core.db, move |c| branch_prs::delete(c, &rid, &b)).await?;
+                Ok(None)
+            }
+            Err(e) => {
+                eprintln!("pr: couldn't look up the PR of {branch}: {e}");
+                Ok(stored.map(|s| s.0))
+            }
+        }
+    }
+
+    /// Links PR `pr` (number or URL) to the checkout's branch, and to the task working there.
+    pub async fn repo_link_pr(
+        &self,
+        repo_id: String,
+        worktree: Option<String>,
+        pr: String,
+        chat_id: Option<String>,
+    ) -> Result<BranchPr, AppError> {
+        let Some(branch) = self.pr_branch(repo_id.clone(), worktree.clone()).await? else {
+            return Err("Check out a branch to link a PR.".into());
+        };
+        let pr = pr.trim().to_string();
+        let t = self.with_root(repo_id.clone(), worktree.clone(), move |git, root| git.pr_view(root, &pr).map_err(|e| e.0)).await?;
+        let linked = BranchPr { url: t.url, number: t.number, state: t.state, head: t.head, manual: true, branch };
+        let (rid, saved, now) = (repo_id.clone(), linked.clone(), self.core.clock.now_ms());
+        with_db(&self.core.db, move |c| branch_prs::upsert(c, &rid, &saved, now)).await?;
+        self.record_chat_pr(chat_id, repo_id.clone(), worktree.clone(), linked.number, linked.url.clone()).await;
+        if let Some(wt) = worktree {
+            let pr = TaskPr { url: linked.url.clone(), number: linked.number, state: linked.state, head: linked.head.clone() };
+            if let Err(e) = self.link_task_pr(repo_id, wt, pr).await {
+                eprintln!("tasks: couldn't link the PR {}: {e}", linked.url);
+            }
+        }
+        Ok(linked)
+    }
+
+    /// Forgets the PR stored for the checkout's branch (an auto-found one is found again).
+    pub async fn repo_unlink_pr(&self, repo_id: String, worktree: Option<String>) -> Result<(), AppError> {
+        let Some(branch) = self.pr_branch(repo_id.clone(), worktree).await? else { return Ok(()) };
+        Ok(with_db(&self.core.db, move |c| branch_prs::delete(c, &repo_id, &branch)).await?)
+    }
+
+    /// A PR's comments, reviews and checks, as `gh` reports them.
+    pub async fn repo_pr_details(&self, repo_id: String, worktree: Option<String>, number: i64) -> Result<serde_json::Value, AppError> {
+        self.with_root(repo_id, worktree, move |git, root| git.pr_details(root, number).map_err(|e| e.0)).await
+    }
+
+    /// The last 200 lines of a GitHub Actions run's failed-step log.
+    pub async fn repo_check_log(&self, repo_id: String, worktree: Option<String>, run_id: String) -> Result<String, AppError> {
+        self.with_root(repo_id, worktree, move |git, root| git.check_log(root, &run_id).map_err(|e| e.0)).await
+    }
+
+    /// Merges PR `number` on GitHub, then re-reads the checkout's PR so a task working there
+    /// follows it (merged → Done) on its next refresh.
+    pub async fn repo_merge_pr(&self, repo_id: String, worktree: Option<String>, number: i64, method: String) -> Result<(), AppError> {
+        self.with_root(repo_id.clone(), worktree.clone(), move |git, root| git.merge_pr(root, number, &method).map_err(|e| e.0)).await?;
+        if let Err(e) = self.repo_pr(repo_id, worktree, Some(true)).await {
+            eprintln!("pr: couldn't re-read the PR after merging #{number}: {e}");
         }
         Ok(())
     }

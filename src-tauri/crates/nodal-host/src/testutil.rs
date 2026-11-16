@@ -83,3 +83,54 @@ pub fn init_repo(dir: &Path) {
     run(&["add", "."]);
     run(&["commit", "-q", "-m", "init"]);
 }
+
+/// Puts a fake `gh` first on `PATH`, once per process (unix only). It answers from files in
+/// `<cwd>/.git/fake-gh/`, keyed by its first two arguments (`pr_view`, `run_view`, ...; just
+/// `api` for `gh api`): the file `<key>` is printed, `<key>.err` goes to stderr and fails, no
+/// file fails; every call is appended to `calls`. Fill them with [`fake_gh_reply`] /
+/// [`fake_gh_fail`].
+#[cfg(unix)]
+pub fn install_fake_gh() {
+    use std::os::unix::fs::PermissionsExt;
+    static DIR: OnceLock<PathBuf> = OnceLock::new();
+    DIR.get_or_init(|| {
+        let dir = std::env::temp_dir().join(format!("nodal-fake-gh-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let script = dir.join("gh");
+        let body = "#!/bin/sh\nd=.git/fake-gh\nmkdir -p $d\necho \"$@\" >> $d/calls\nk=\"$1_$2\"\n\
+            [ \"$1\" = api ] && k=api\n\
+            if [ -f \"$d/$k.err\" ]; then cat \"$d/$k.err\" >&2; exit 1; fi\n\
+            if [ -f \"$d/$k\" ]; then cat \"$d/$k\"; exit 0; fi\n\
+            echo \"no fake reply for $k\" >&2; exit 1\n";
+        std::fs::write(&script, body).unwrap();
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let mut paths = vec![dir.clone()];
+        paths.extend(std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default()));
+        std::env::set_var("PATH", std::env::join_paths(paths).unwrap());
+        dir
+    });
+}
+
+/// Makes the fake `gh` print `stdout` for `key` (e.g. `"pr_view"`) when run in `repo`.
+#[cfg(unix)]
+pub fn fake_gh_reply(repo: &Path, key: &str, stdout: &str) {
+    let d = repo.join(".git/fake-gh");
+    std::fs::create_dir_all(&d).unwrap();
+    let _ = std::fs::remove_file(d.join(format!("{key}.err")));
+    std::fs::write(d.join(key), stdout).unwrap();
+}
+
+/// Makes the fake `gh` fail with `stderr` for `key` when run in `repo`.
+#[cfg(unix)]
+pub fn fake_gh_fail(repo: &Path, key: &str, stderr: &str) {
+    let d = repo.join(".git/fake-gh");
+    std::fs::create_dir_all(&d).unwrap();
+    let _ = std::fs::remove_file(d.join(key));
+    std::fs::write(d.join(format!("{key}.err")), stderr).unwrap();
+}
+
+/// How many times the fake `gh` ran in `repo`.
+#[cfg(unix)]
+pub fn fake_gh_calls(repo: &Path) -> usize {
+    spawn_count(&repo.join(".git/fake-gh/calls"))
+}

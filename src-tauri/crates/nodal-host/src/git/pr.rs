@@ -121,20 +121,99 @@ pub fn pr_for_branch(dir: &Path, branch: &str) -> Result<Option<TaskPr>, String>
     Ok(pr)
 }
 
-fn parse_pr_list(json: &str) -> Result<Option<TaskPr>, String> {
-    #[derive(serde::Deserialize)]
-    #[serde(rename_all = "camelCase")]
-    struct Item {
-        number: i64,
-        url: String,
-        state: String,
-        #[serde(default)]
-        is_draft: bool,
-        #[serde(default)]
-        head_ref_oid: String,
+/// `pr` (a number or a GitHub PR URL) as `gh pr view` reports it.
+pub fn pr_view(dir: &Path, pr: &str) -> Result<TaskPr, String> {
+    let url_ok = pr.strip_prefix("https://github.com/").is_some_and(|r| r.contains("/pull/") && !r.contains(char::is_whitespace));
+    if !(url_ok || !pr.is_empty() && pr.bytes().all(|b| b.is_ascii_digit())) {
+        return Err("Enter a PR number or a github.com pull request URL.".into());
     }
+    let out = gh(dir, &["pr", "view", pr, "--json", "number,url,state,isDraft,headRefOid"])?;
+    if !out.ok {
+        return Err(clip(&out.stderr));
+    }
+    parse_pr_item(&out.stdout)
+}
+
+/// The PR's comments, reviews and checks as `gh` reports them.
+pub fn pr_details(dir: &Path, number: i64) -> Result<serde_json::Value, String> {
+    let n = number.to_string();
+    let fields = "number,title,url,state,isDraft,headRefName,reviewDecision,mergeable,author,comments,reviews,statusCheckRollup";
+    let out = gh(dir, &["pr", "view", &n, "--json", fields])?;
+    if !out.ok {
+        return Err(clip(&out.stderr));
+    }
+    let mut v: serde_json::Value = serde_json::from_str(&out.stdout).map_err(|e| format!("Unexpected gh output: {e}"))?;
+    // Inline (file/line) review comments aren't in `gh pr view`; best effort, `[]` when it fails.
+    let inline = v["url"].as_str().and_then(repo_of_pr_url).and_then(|repo| {
+        let path = format!("repos/{repo}/pulls/{n}/comments?per_page=100");
+        let jq = "map({author: {login: .user.login}, body, path, line: (.line // .original_line), createdAt: .created_at, url: .html_url})";
+        let out = gh(dir, &["api", &path, "--jq", jq]).ok().filter(|o| o.ok)?;
+        serde_json::from_str::<serde_json::Value>(&out.stdout).ok()
+    });
+    v["reviewComments"] = inline.unwrap_or_else(|| serde_json::json!([]));
+    Ok(v)
+}
+
+/// `gh pr merge` with `method` (squash, merge or rebase). The branch stays: a worktree may use it.
+pub fn merge_pr(dir: &Path, number: i64, method: &str) -> Result<(), String> {
+    let flag = match method {
+        "squash" => "--squash",
+        "merge" => "--merge",
+        "rebase" => "--rebase",
+        _ => return Err(format!("Unknown merge method {method}.")),
+    };
+    let out = gh(dir, &["pr", "merge", &number.to_string(), flag])?;
+    if out.ok {
+        return Ok(());
+    }
+    let msg = if out.stderr.trim().is_empty() { &out.stdout } else { &out.stderr };
+    Err(clip(msg))
+}
+
+/// `https://github.com/o/r/pull/12` → `o/r`; `None` for anything else.
+fn repo_of_pr_url(url: &str) -> Option<String> {
+    let rest = url.strip_prefix("https://github.com/")?;
+    let mut parts = rest.split('/');
+    let (owner, repo) = (parts.next()?, parts.next()?);
+    let ok = |s: &str| !s.is_empty() && s.bytes().all(|b| b.is_ascii_alphanumeric() || b"-_.".contains(&b));
+    (ok(owner) && ok(repo) && parts.next() == Some("pull")).then(|| format!("{owner}/{repo}"))
+}
+
+/// The last 200 lines of a run's failed-step log.
+pub fn check_log(dir: &Path, run_id: &str) -> Result<String, String> {
+    if run_id.is_empty() || !run_id.bytes().all(|b| b.is_ascii_digit()) {
+        return Err("Invalid run id.".into());
+    }
+    let out = gh(dir, &["run", "view", run_id, "--log-failed"])?;
+    if !out.ok {
+        return Err(clip(&out.stderr));
+    }
+    let lines: Vec<&str> = out.stdout.lines().collect();
+    Ok(lines[lines.len().saturating_sub(200)..].join("\n"))
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct Item {
+    number: i64,
+    url: String,
+    state: String,
+    #[serde(default)]
+    is_draft: bool,
+    #[serde(default)]
+    head_ref_oid: String,
+}
+
+fn parse_pr_list(json: &str) -> Result<Option<TaskPr>, String> {
     let items: Vec<Item> = serde_json::from_str(json).map_err(|e| format!("Unexpected gh output: {e}"))?;
-    let Some(i) = items.into_iter().next() else { return Ok(None) };
+    items.into_iter().next().map(to_pr).transpose()
+}
+
+fn parse_pr_item(json: &str) -> Result<TaskPr, String> {
+    to_pr(serde_json::from_str(json).map_err(|e| format!("Unexpected gh output: {e}"))?)
+}
+
+fn to_pr(i: Item) -> Result<TaskPr, String> {
     let state = match i.state.as_str() {
         "OPEN" if i.is_draft => PrState::Draft,
         "OPEN" => PrState::Open,
@@ -144,7 +223,7 @@ fn parse_pr_list(json: &str) -> Result<Option<TaskPr>, String> {
     };
     let oid = i.head_ref_oid;
     let head = (oid.len() == 40 && oid.bytes().all(|b| b.is_ascii_hexdigit())).then_some(oid);
-    Ok(Some(TaskPr { url: i.url, number: i.number, state, head }))
+    Ok(TaskPr { url: i.url, number: i.number, state, head })
 }
 
 #[cfg(test)]
@@ -173,7 +252,112 @@ mod tests {
     }
 
     #[test]
+    fn rejects_unknown_merge_methods() {
+        assert!(merge_pr(Path::new("."), 1, "--admin").unwrap_err().contains("Unknown merge method"));
+    }
+
+    #[test]
+    fn reads_the_repo_of_a_pr_url() {
+        assert_eq!(repo_of_pr_url("https://github.com/o/r-1/pull/12").as_deref(), Some("o/r-1"));
+        assert_eq!(repo_of_pr_url("https://github.com/o/r/issues/12"), None);
+        assert_eq!(repo_of_pr_url("https://github.com/o/r?x/pull/1"), None);
+        assert_eq!(repo_of_pr_url("https://evil.com/o/r/pull/1"), None);
+    }
+
+    #[test]
     fn rejects_option_like_branches() {
         assert!(pr_for_branch(Path::new("."), "--web").is_err());
+    }
+
+    #[test]
+    fn parses_gh_pr_view() {
+        let json = format!(r#"{{"headRefOid":"{OID}","isDraft":true,"number":7,"state":"OPEN","url":"https://github.com/o/r/pull/7"}}"#);
+        let pr = parse_pr_item(&json).unwrap();
+        assert_eq!((pr.number, pr.state, pr.head.as_deref()), (7, PrState::Draft, Some(OID)));
+        assert!(parse_pr_item("[]").is_err());
+    }
+
+    #[test]
+    fn rejects_option_like_pr_and_run_args() {
+        let d = Path::new(".");
+        assert!(pr_view(d, "--web").is_err());
+        assert!(pr_view(d, "-1").is_err());
+        assert!(pr_view(d, "").is_err());
+        assert!(check_log(d, "1;x").is_err());
+        assert!(check_log(d, "--web").is_err());
+    }
+
+    #[cfg(unix)]
+    mod fake_gh {
+        use super::*;
+        use crate::testutil::{fake_gh_calls, fake_gh_fail, fake_gh_reply, install_fake_gh, TempDir};
+
+        const VIEW: &str = r#"{"headRefOid":"","isDraft":false,"number":7,"state":"OPEN","url":"https://github.com/o/r/pull/7"}"#;
+
+        #[test]
+        fn pr_view_accepts_numbers_and_urls_and_reports_gh_errors() {
+            install_fake_gh();
+            let t = TempDir::new("pr-view");
+            fake_gh_reply(&t.0, "pr_view", VIEW);
+            for arg in ["7", "https://github.com/o/r/pull/7"] {
+                let pr = pr_view(&t.0, arg).unwrap();
+                assert_eq!((pr.number, pr.state, pr.head), (7, PrState::Open, None));
+            }
+            fake_gh_fail(&t.0, "pr_view", "no pull requests found\n");
+            assert_eq!(pr_view(&t.0, "7").unwrap_err(), "no pull requests found");
+        }
+
+        #[test]
+        fn pr_for_branch_lists_the_newest_pr() {
+            install_fake_gh();
+            let t = TempDir::new("pr-list");
+            fake_gh_reply(&t.0, "pr_list", &format!("[{VIEW}]"));
+            assert_eq!(pr_for_branch(&t.0, "feat").unwrap().unwrap().number, 7);
+            fake_gh_reply(&t.0, "pr_list", "[]");
+            assert_eq!(pr_for_branch(&t.0, "feat").unwrap(), None);
+            fake_gh_fail(&t.0, "pr_list", "not logged in");
+            assert_eq!(pr_for_branch(&t.0, "feat").unwrap_err(), "not logged in");
+        }
+
+        #[test]
+        fn pr_details_adds_inline_comments_when_the_api_answers() {
+            install_fake_gh();
+            let t = TempDir::new("pr-details");
+            fake_gh_reply(&t.0, "pr_view", r#"{"number":7,"url":"https://github.com/o/r/pull/7","comments":[]}"#);
+            // `gh api` failing is best effort: an empty list.
+            let v = pr_details(&t.0, 7).unwrap();
+            assert_eq!((v["number"].as_i64(), &v["reviewComments"]), (Some(7), &serde_json::json!([])));
+            fake_gh_reply(&t.0, "api", r#"[{"body":"nit"}]"#);
+            assert_eq!(pr_details(&t.0, 7).unwrap()["reviewComments"][0]["body"], "nit");
+            fake_gh_reply(&t.0, "pr_view", "not json");
+            assert!(pr_details(&t.0, 7).unwrap_err().contains("Unexpected gh output"));
+            fake_gh_fail(&t.0, "pr_view", "boom");
+            assert_eq!(pr_details(&t.0, 7).unwrap_err(), "boom");
+        }
+
+        #[test]
+        fn merge_pr_passes_the_method_flag_and_surfaces_failures() {
+            install_fake_gh();
+            let t = TempDir::new("pr-merge");
+            fake_gh_reply(&t.0, "pr_merge", "");
+            merge_pr(&t.0, 7, "squash").unwrap();
+            let calls = std::fs::read_to_string(t.0.join(".git/fake-gh/calls")).unwrap();
+            assert_eq!(calls.trim(), "pr merge 7 --squash");
+            fake_gh_fail(&t.0, "pr_merge", "not mergeable\n");
+            assert_eq!(merge_pr(&t.0, 7, "rebase").unwrap_err(), "not mergeable");
+            assert_eq!(fake_gh_calls(&t.0), 2);
+        }
+
+        #[test]
+        fn check_log_keeps_the_last_200_lines() {
+            install_fake_gh();
+            let t = TempDir::new("check-log");
+            let log: String = (1..=250).map(|i| format!("line {i}\n")).collect();
+            fake_gh_reply(&t.0, "run_view", &log);
+            let out = check_log(&t.0, "123").unwrap();
+            assert_eq!((out.lines().count(), out.lines().next(), out.lines().last()), (200, Some("line 51"), Some("line 250")));
+            fake_gh_fail(&t.0, "run_view", "run not found");
+            assert_eq!(check_log(&t.0, "123").unwrap_err(), "run not found");
+        }
     }
 }

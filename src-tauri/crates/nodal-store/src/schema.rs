@@ -308,10 +308,38 @@ const V13: &str = r#"
 ALTER TABLE chats ADD COLUMN pinned_at INTEGER;
 "#;
 
+/// v14: the PR of a (repo, branch), found by `gh` or linked by hand; plain chats have no task.
+const V14: &str = r#"
+CREATE TABLE branch_prs (
+    repo_id    TEXT NOT NULL REFERENCES repos(id) ON DELETE CASCADE,
+    branch     TEXT NOT NULL,
+    url        TEXT NOT NULL,
+    number     INTEGER NOT NULL,
+    state      TEXT NOT NULL CHECK (state IN ('open', 'draft', 'merged', 'closed')),
+    head       TEXT,
+    manual     INTEGER NOT NULL DEFAULT 0,
+    checked_at INTEGER NOT NULL,
+    PRIMARY KEY (repo_id, branch)
+);
+"#;
+
+/// v15: the PRs a chat opened or linked.
+const V15: &str = r#"
+CREATE TABLE chat_prs (
+    chat_id    TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
+    repo_id    TEXT NOT NULL REFERENCES repos(id) ON DELETE CASCADE,
+    number     INTEGER NOT NULL,
+    url        TEXT NOT NULL,
+    branch     TEXT,
+    created_at INTEGER NOT NULL,
+    PRIMARY KEY (chat_id, url)
+);
+"#;
+
 // Unused since v9 (run-era config; kept, never read or written): projects.default_executor_json,
 // projects.reviewer, repos.default_executor_json / default_isolation / default_finish /
 // default_review / reviewer, tasks.assignee_json / isolation / finish / review.
-pub const MIGRATIONS: &[&str] = &[V1, V2, V3, V4, V5, V6, V7, V8, V9, V10, V11, V12, V13];
+pub const MIGRATIONS: &[&str] = &[V1, V2, V3, V4, V5, V6, V7, V8, V9, V10, V11, V12, V13, V14, V15];
 
 pub fn user_version(conn: &Conn) -> Result<i64, DbError> {
     Ok(conn.query_row("PRAGMA user_version", [], |r| r.get(0))?)

@@ -4,6 +4,8 @@ use serde_json::{json, Value};
 
 /// Chat-only tool: a task the chat shows as a card for the user to create. Nothing is written.
 pub const PROPOSE_TASK: &str = "propose_task";
+/// Chat-only tool: links PRs to the calling chat. `nodal-mcp` injects the chat id.
+pub const LINK_PRS: &str = "link_prs";
 
 /// Public (not per the frozen surface) so the old crate's test file, which stays in place until
 /// the dispatch code moves too, can keep using them via a bridge import.
@@ -100,6 +102,14 @@ pub fn chat_definitions() -> Value {
                 "labels": {"type": "array", "items": {"type": "string"}},
                 "status": {"type": "string", "enum": STATUSES, "description": "Defaults to todo."}
             }, "required": ["repo", "title", "plan"]}
+        }));
+        list.push(json!({
+            "name": LINK_PRS,
+            "description": "Link one or more GitHub pull requests to this chat so they show in its PR panel (checks, comments). Use it when the user asks to link PRs.",
+            "inputSchema": {"type": "object", "properties": {
+                "prs": {"type": "array", "items": {"type": "string"}, "minItems": 1, "maxItems": 20, "description": "PR URLs or numbers."},
+                "repo": {"type": "string", "description": "Repo id, name or path. Defaults to the chat's repo."}
+            }, "required": ["prs"]}
         }));
     }
     defs

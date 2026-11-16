@@ -11,10 +11,10 @@ use std::time::{Duration, Instant};
 use tokio::runtime::Handle;
 
 use nodal_domain::model::events::ChangeKind;
-use nodal_domain::model::TaskStatus;
+use nodal_domain::model::{ChatPr, TaskStatus};
 use nodal_domain::ports::{ChangeNotifier, ChatHooks, Clock, Git, SessionFiles};
 use nodal_domain::sessions::transcript::is_valid_session_id;
-use nodal_store::board::{repos, tasks};
+use nodal_store::board::{chat_prs, repos, tasks};
 use nodal_store::{chats, Db};
 
 /// P11: once a chat already has a title, `session_title` (which streams the whole `.jsonl`,
@@ -103,6 +103,29 @@ fn review_if_changed(db: &Db, git: &dyn Git, now: i64, chat_id: &str) -> Result<
     Ok(moved)
 }
 
+/// Records the PRs the turn opened (`urls`) for the chat, on the branch of its checkout. `true`
+/// if any was new. A chat with no repo (project root) records nothing.
+fn record_prs(db: &Db, git: &dyn Git, now: i64, chat_id: &str, cwd: &std::path::Path, urls: &[String]) -> Result<bool, String> {
+    if urls.is_empty() {
+        return Ok(false);
+    }
+    let chat = chats::get(&db.guard(), chat_id).map_err(|e| e.to_string())?;
+    let repo_id = match &chat.task_id {
+        Some(t) => Some(tasks::get(&db.guard(), t).map_err(|e| e.to_string())?.repo_id),
+        None => chat.repo_id.clone(),
+    };
+    let Some(repo_id) = repo_id else { return Ok(false) };
+    let branch = git.current_branch(chat.worktree.as_deref().map_or(cwd, std::path::Path::new));
+    let conn = db.guard();
+    let mut any = false;
+    for url in urls {
+        let Some(number) = crate::board::pr::pr_number(url) else { continue };
+        let pr = ChatPr { repo_id: repo_id.clone(), url: url.clone(), number, branch: branch.clone(), created_at: now };
+        any |= chat_prs::insert_if_new(&conn, chat_id, &pr).map_err(|e| e.to_string())?;
+    }
+    Ok(any)
+}
+
 fn task_of(db: &Db, chat_id: &str) -> Option<String> {
     chats::get(&db.guard(), chat_id).ok()?.task_id
 }
@@ -153,7 +176,7 @@ impl ChatHooks for ChatHooksImpl {
             return;
         };
         // A free chat whose turn made or worked in a worktree moves into it.
-        if let Some((git, _)) = self.tasks.clone() {
+        if let Some((git, clock)) = self.tasks.clone() {
             let (db, notifier, sessions, chat_id, project_id, projects, cwd) = (
                 self.db.clone(),
                 self.notifier.clone(),
@@ -170,10 +193,17 @@ impl ChatHooks for ChatHooksImpl {
                     return;
                 };
                 let calls = sessions.last_turn_tools(&path);
-                match super::follow::follow_worktree(&db, git.as_ref(), &calls, &chat_id) {
-                    Ok(true) => notifier.notify(ChangeKind::Chats, Some(&project_id)),
-                    Ok(false) => {}
-                    Err(e) => eprintln!("chats: {e}"),
+                let followed = super::follow::follow_worktree(&db, git.as_ref(), &calls, &chat_id).unwrap_or_else(|e| {
+                    eprintln!("chats: {e}");
+                    false
+                });
+                let urls = sessions.last_turn_pr_urls(&path);
+                let recorded = record_prs(&db, git.as_ref(), clock.now_ms(), &chat_id, &cwd, &urls).unwrap_or_else(|e| {
+                    eprintln!("chats: {e}");
+                    false
+                });
+                if followed || recorded {
+                    notifier.notify(ChangeKind::Chats, Some(&project_id));
                 }
             });
         }

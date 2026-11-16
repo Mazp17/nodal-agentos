@@ -71,7 +71,7 @@ export function AppShell() {
   // The files panel comes back as it was left: open or not, which view and which checkout.
   const [filesOpen, setFilesOpen] = useState(() => readJsonPref("filesPanel", false, (v): v is boolean => typeof v === "boolean"));
   const [filesMode, setFilesMode] = useState<FilesMode>(() =>
-    readJsonPref<FilesMode>("filesMode", "tree", (v): v is FilesMode => v === "tree" || v === "changes" || v === "agents"),
+    readJsonPref<FilesMode>("filesMode", "tree", (v): v is FilesMode => v === "tree" || v === "changes" || v === "agents" || v === "pr"),
   );
   /** Checkouts picked by hand in the files panel, per tab (`null`: the repo's own). */
   const [wtPicked, setWtPicked] = useState<Readonly<Record<string, string | null>>>({});

@@ -263,6 +263,29 @@ pub struct TaskPr {
     pub head: Option<String>,
 }
 
+/// The PR of a checkout's branch: found with `gh` or linked by hand (`manual`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BranchPr {
+    pub url: String,
+    pub number: i64,
+    pub state: PrState,
+    pub head: Option<String>,
+    pub manual: bool,
+    pub branch: String,
+}
+
+/// A PR a chat opened or linked (a chat can open several, from different branches).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChatPr {
+    pub repo_id: String,
+    pub url: String,
+    pub number: i64,
+    pub branch: Option<String>,
+    pub created_at: i64,
+}
+
 /// Normalized type of an external state, for the mapping heuristic.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

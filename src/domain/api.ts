@@ -698,8 +698,45 @@ export interface RepoWorktree { path: string; branch: string | null; isMain: boo
 export const repoCommit = (repoId: string, worktree: string | null, message: string, paths: string[] = []) =>
   invoke<CommitInfo>("repo_commit", { repoId, worktree, message, paths });
 /** Pushes the checkout's branch and opens a PR with the GitHub CLI (or returns the open one's URL). */
-export const repoOpenPr = (repoId: string, worktree: string | null, title: string, body: string) =>
-  invoke<string>("repo_open_pr", { repoId, worktree, title, body });
+export const repoOpenPr = (repoId: string, worktree: string | null, title: string, body: string, chatId: string | null = null) =>
+  invoke<string>("repo_open_pr", { repoId, worktree, title, body, chatId });
+export interface ChatPr { repoId: string; url: string; number: number; branch: string | null; createdAt: number }
+/** PRs a chat opened or linked, newest first. */
+export const chatPrs = (chatId: string) => invoke<ChatPr[]>("chat_prs", { chatId });
+export interface BranchPr { url: string; number: number; state: "open" | "draft" | "merged" | "closed"; head: string | null; manual: boolean; branch: string }
+/** The checkout's PR: linked by hand, else found by its branch with gh. `null`: none (or the default branch). */
+export const repoPr = (repoId: string, worktree: string | null, force = false) => invoke<BranchPr | null>("repo_pr", { repoId, worktree, force });
+/** Links a PR (URL or number) to the checkout's branch. */
+export const repoLinkPr = (repoId: string, worktree: string | null, pr: string, chatId: string | null = null) =>
+  invoke<BranchPr>("repo_link_pr", { repoId, worktree, pr, chatId });
+export const repoUnlinkPr = (repoId: string, worktree: string | null) => invoke<void>("repo_unlink_pr", { repoId, worktree });
+export type PrCheck =
+  | { __typename: "CheckRun"; name: string; workflowName?: string; status: string; conclusion: string | null; detailsUrl: string; startedAt?: string; completedAt?: string }
+  | { __typename: "StatusContext"; context: string; state: string; targetUrl: string };
+/** `gh pr view --json …` passed through as-is. */
+export interface PrDetails {
+  number: number;
+  title: string;
+  url: string;
+  state: string;
+  isDraft: boolean;
+  headRefName: string;
+  reviewDecision: string;
+  mergeable: string;
+  author: { login: string };
+  comments: { author: { login: string }; body: string; createdAt: string; url: string }[];
+  reviews: { author: { login: string }; body: string; state: string; submittedAt: string }[];
+  statusCheckRollup: PrCheck[];
+  /** Inline review comments on a file and line (from the REST API; `[]` when unavailable). */
+  reviewComments: { author: { login: string }; body: string; path: string; line: number | null; createdAt: string; url: string }[];
+}
+export const repoPrDetails = (repoId: string, worktree: string | null, number: number) => invoke<PrDetails>("repo_pr_details", { repoId, worktree, number });
+export type MergeMethod = "squash" | "merge" | "rebase";
+/** Merges the PR on GitHub (`gh pr merge`); its branch is kept. */
+export const repoMergePr = (repoId: string, worktree: string | null, number: number, method: MergeMethod) =>
+  invoke<void>("repo_merge_pr", { repoId, worktree, number, method });
+/** Last 200 lines of `gh run view <runId> --log-failed`. */
+export const repoCheckLog = (repoId: string, worktree: string | null, runId: string) => invoke<string>("repo_check_log", { repoId, worktree, runId });
 /** Every file of a checkout (relative paths, ignored ones left out) for the quick-open search. */
 export const listRepoFiles = (repoId: string, worktree: string | null = null) =>
   invoke<string[]>("list_repo_files", { repoId, worktree });

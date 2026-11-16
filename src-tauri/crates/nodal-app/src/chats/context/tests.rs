@@ -65,7 +65,7 @@ fn a_project_chat_gets_nodal_mcp_every_other_repo_and_the_project() {
         serde_json::from_str(value_of(&args, "--mcp-config")[0]).unwrap();
     assert_eq!(
         config,
-        json!({"mcpServers": {"nodal": {"command": "/Applications/Nodal.app/Contents/MacOS/nodal-mcp", "args": ["--chat"]}}})
+        json!({"mcpServers": {"nodal": {"command": "/Applications/Nodal.app/Contents/MacOS/nodal-mcp", "args": ["--chat"], "env": {"NODAL_CHAT_ID": "c1"}}}})
     );
     assert_eq!(
         value_of(&args, "--allowedTools"),

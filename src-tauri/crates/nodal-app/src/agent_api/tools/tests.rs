@@ -346,11 +346,69 @@ fn only_chats_list_propose_task() {
             .collect::<Vec<_>>()
     };
     let chat = names(chat_definitions());
-    assert_eq!(chat.last().map(String::as_str), Some(PROPOSE_TASK));
-    assert_eq!(chat[..chat.len() - 1], names(definitions())[..]);
-    assert!(!names(definitions()).iter().any(|n| n == PROPOSE_TASK));
-    let schema = &chat_definitions()[chat.len() - 1]["inputSchema"];
-    assert_eq!(schema["required"], json!(["repo", "title", "plan"]));
+    assert_eq!(chat[chat.len() - 2..], [PROPOSE_TASK, LINK_PRS]);
+    assert_eq!(chat[..chat.len() - 2], names(definitions())[..]);
+    assert!(!names(definitions()).iter().any(|n| n == PROPOSE_TASK || n == LINK_PRS));
+    let defs = chat_definitions();
+    assert_eq!(defs[chat.len() - 2]["inputSchema"]["required"], json!(["repo", "title", "plan"]));
+    let schema = &defs[chat.len() - 1]["inputSchema"];
+    assert_eq!(schema["required"], json!(["prs"]));
+    assert_eq!(schema["properties"]["prs"]["maxItems"], 20);
+}
+
+#[test]
+fn link_prs_validates_before_running_gh() {
+    let f = fx("mcp-link-prs");
+    let db = Db::open_in_memory().unwrap();
+    let err = |args: Value| link_prs(&db, &f.env, args, 1).unwrap_err();
+    assert!(err(json!({"chat": "../x", "prs": ["1"]})).contains("Invalid chat id"));
+    assert!(err(json!({"chat": "c1", "prs": []})).contains("between 1 and 20"));
+    assert!(err(json!({"chat": "c1", "prs": vec!["1"; 21]})).contains("between 1 and 20"));
+    assert!(err(json!({"chat": "c1", "prs": ["1"]})).to_lowercase().contains("chat"));
+}
+
+#[cfg(unix)]
+#[test]
+fn link_prs_records_good_prs_and_reports_the_bad_ones() {
+    use nodal_host::testutil::{fake_gh_fail, fake_gh_reply, install_fake_gh};
+
+    install_fake_gh();
+    let f = fx("mcp-link-prs-ok");
+    let db = Db::open_in_memory().unwrap();
+    let (p, web, _) = seed(&db.guard(), &f);
+    let chat = nodal_domain::model::Chat {
+        id: "c1".into(),
+        project_id: p.id.clone(),
+        repo_id: Some(web.id.clone()),
+        title: None,
+        session_title: None,
+        agent: None,
+        task_id: None,
+        worktree: None,
+        archived_at: None,
+        session_id: None,
+        launch: Default::default(),
+        created_at: 1,
+        updated_at: 1,
+        pinned_at: None,
+    };
+    nodal_store::rows::insert_chat(&db.guard(), &chat).unwrap();
+    let repo = std::path::Path::new(&web.path);
+    fake_gh_reply(repo, "pr_view", r#"{"headRefOid":"","isDraft":false,"number":7,"state":"OPEN","url":"https://github.com/o/r/pull/7"}"#);
+
+    let (out, project) = link_prs(&db, &f.env, json!({"chat": "c1", "prs": ["7", "--web"]}), 9).unwrap();
+    assert_eq!(project.as_deref(), Some(p.id.as_str()));
+    assert_eq!(out["linked"], json!([{"number": 7, "url": "https://github.com/o/r/pull/7", "state": "open"}]));
+    assert_eq!(out["errors"][0]["pr"], "--web");
+    let stored = nodal_store::board::chat_prs::list(&db.guard(), "c1").unwrap();
+    assert_eq!((stored.len(), stored[0].number, stored[0].created_at), (1, 7, 9));
+
+    // Already recorded: nothing new to notify. A failing gh lands in `errors`.
+    let (_, project) = link_prs(&db, &f.env, json!({"chat": "c1", "prs": ["7"]}), 10).unwrap();
+    assert_eq!(project, None);
+    fake_gh_fail(repo, "pr_view", "not found");
+    let (out, _) = link_prs(&db, &f.env, json!({"chat": "c1", "prs": ["8"]}), 11).unwrap();
+    assert_eq!((out["linked"].as_array().unwrap().len(), &out["errors"][0]["error"]), (0, &json!("not found")));
 }
 
 #[test]

@@ -265,6 +265,23 @@ fn last_turn_tools_returns_the_calls_after_the_last_prompt() {
 }
 
 #[test]
+fn last_turn_pr_urls_takes_the_urls_gh_pr_create_printed() {
+    let t = TempDir::new("pr-urls");
+    let f = t.0.join("s.jsonl");
+    let lines = [
+        r#"{"type":"user","message":{"content":"first"}}"#,
+        r#"{"type":"assistant","message":{"content":[{"type":"tool_use","id":"o","name":"Bash","input":{"command":"gh pr create"}}]}}"#,
+        r#"{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"o","content":"https://github.com/a/b/pull/1\n"}]}}"#,
+        r#"{"type":"user","message":{"content":[{"type":"text","text":"second"}]}}"#,
+        r#"{"type":"assistant","message":{"content":[{"type":"tool_use","id":"x","name":"Bash","input":{"command":"gh pr view 9"}},{"type":"tool_use","id":"n","name":"Bash","input":{"command":"git push && gh pr create --fill"}}]}}"#,
+        r#"{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"x","content":"https://github.com/a/b/pull/9"},{"type":"tool_result","tool_use_id":"n","content":[{"type":"text","text":"Creating...\nhttps://github.com/o-1/r.x/pull/42\n"}]}]}}"#,
+    ];
+    fs::write(&f, lines.join("\n")).unwrap();
+    assert_eq!(last_turn_pr_urls(&f), ["https://github.com/o-1/r.x/pull/42"]);
+    assert!(last_turn_pr_urls(&t.0.join("missing.jsonl")).is_empty());
+}
+
+#[test]
 fn user_images_are_kept_and_their_meta_line_skipped() {
     let img = r#"{"type":"image","source":{"type":"base64","media_type":"image/png","data":"iVBORw=="}}"#;
     let lines = [

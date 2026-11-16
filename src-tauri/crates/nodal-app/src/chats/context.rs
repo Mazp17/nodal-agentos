@@ -15,8 +15,8 @@ use serde_json::json;
 
 use nodal_domain::model::{Chat, Project, Repo};
 use nodal_domain::util::clip_chars;
-use nodal_mcp_proto::stdio::CHAT_FLAG;
-use nodal_mcp_proto::tools::PROPOSE_TASK;
+use nodal_mcp_proto::stdio::{CHAT_FLAG, CHAT_ID_ENV};
+use nodal_mcp_proto::tools::{LINK_PRS, PROPOSE_TASK};
 
 use super::ChatCwd;
 
@@ -48,7 +48,7 @@ pub fn args(
 ) -> Vec<String> {
     let mut out = Vec::new();
     if let Some(bin) = mcp {
-        let config = json!({"mcpServers": {MCP_SERVER: {"command": bin.to_string_lossy(), "args": [CHAT_FLAG]}}});
+        let config = json!({"mcpServers": {MCP_SERVER: {"command": bin.to_string_lossy(), "args": [CHAT_FLAG], "env": {CHAT_ID_ENV: chat.id}}}});
         out.push("--mcp-config".into());
         out.push(config.to_string());
         out.push("--allowedTools".into());
@@ -126,6 +126,7 @@ pub fn system_prompt(
         s.push_str(&format!(
             "The `{MCP_SERVER}` MCP tools read and change this project's board; pass project \"{}\" where a tool takes one.\n\
              - list_tasks, get_task: read tasks.\n\
+             - {LINK_PRS}: when the user asks to link pull requests to this chat, call it with their numbers or URLs.\n\
              - {PROPOSE_TASK}: when the conversation lands on work to do, propose it as a task. The user sees a task \
              card in this chat and creates it with one click; the tool itself creates nothing. One task per step \
              that can be run and reviewed on its own, and one repo per task. Check list_tasks first so you don't \

@@ -21,7 +21,7 @@ use crate::core::Env;
 /// and by `chats::context`, but `definitions`/`chat_definitions`'s only production caller,
 /// `mcp::stdio`, moved with them, so they (and `STATUSES`/`PRIORITIES`) are only reachable from
 /// the tests below now; `#[cfg(test)]` keeps that bridge from warning as unused otherwise.
-pub use nodal_mcp_proto::tools::PROPOSE_TASK;
+pub use nodal_mcp_proto::tools::{LINK_PRS, PROPOSE_TASK};
 #[cfg(test)]
 use nodal_mcp_proto::tools::{chat_definitions, definitions, PRIORITIES, STATUSES};
 
@@ -310,6 +310,51 @@ struct ProposeTask {
 
 /// Validates like `create_task` and returns the `NewTask` the card creates on accept
 /// (mirror of `TaskProposal` in `api.ts`), without touching the board.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct LinkPrs {
+    chat: String,
+    prs: Vec<String>,
+    repo: Option<String>,
+}
+
+/// Records each PR in the chat's PR panel. The DB lock is not held while `gh` runs. Returns the
+/// result and the chat's project when something new was recorded (to notify `Chats`).
+/// One failing PR doesn't stop the others.
+pub(super) fn link_prs(db: &nodal_store::Db, env: &Env, args: Value, now: i64) -> Result<(Value, Option<String>), String> {
+    let a: LinkPrs = parse(args)?;
+    if !is_valid_id(&a.chat) {
+        return Err("Invalid chat id.".into());
+    }
+    if a.prs.is_empty() || a.prs.len() > 20 {
+        return Err("Pass between 1 and 20 PRs.".into());
+    }
+    let (chat, repo) = {
+        let c = db.guard();
+        let chat = nodal_store::chats::get(&c, &a.chat)?;
+        let repo = match (a.repo.as_deref(), &chat.repo_id, &chat.task_id) {
+            (Some(r), ..) => resolve_repo(&c, env, r, Some(&projects::get(&c, &chat.project_id)?))?,
+            (None, Some(id), _) => repos::get(&c, id)?,
+            (None, None, Some(t)) => repos::get(&c, &tasks::get(&c, t)?.repo_id)?,
+            _ => return Err("This chat has no repo: pass `repo`.".into()),
+        };
+        (chat, repo)
+    };
+    let (mut linked, mut errors, mut added) = (vec![], vec![], false);
+    for pr in &a.prs {
+        let res = env.git.pr_view(Path::new(&repo.path), pr.trim()).map_err(|e| e.0).and_then(|t| {
+            let cp = ChatPr { repo_id: repo.id.clone(), url: t.url.clone(), number: t.number, branch: None, created_at: now };
+            added |= nodal_store::board::chat_prs::insert_if_new(&db.guard(), &chat.id, &cp)?;
+            Ok(json!({"number": t.number, "url": t.url, "state": t.state}))
+        });
+        match res {
+            Ok(v) => linked.push(v),
+            Err(e) => errors.push(json!({"pr": pr, "error": e})),
+        }
+    }
+    Ok((json!({"linked": linked, "errors": errors}), added.then_some(chat.project_id)))
+}
+
 fn propose_task(conn: &Connection, env: &Env, a: ProposeTask) -> Result<Value, String> {
     let project = a
         .project
